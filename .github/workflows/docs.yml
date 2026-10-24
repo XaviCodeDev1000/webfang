@@ -44,7 +44,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # rust-toolchain.toml pins 1.88.0; install it FIRST so cargo-based steps
+      # rust-toolchain.toml pins 1.91.1; install it FIRST so cargo-based steps
       # (rustdoc) never race toolchain bootstrap with the runner's sccache
       # rustc-wrapper. mdbook-linkcheck comes from a prebuilt release binary.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
@@ -127,7 +127,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # rust-toolchain.toml pins 1.88.0; install it FIRST so cargo-based steps
+      # rust-toolchain.toml pins 1.91.1; install it FIRST so cargo-based steps
       # (rustdoc) never race toolchain bootstrap with the runner's sccache
       # rustc-wrapper. mdbook-linkcheck comes from a prebuilt release binary.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87

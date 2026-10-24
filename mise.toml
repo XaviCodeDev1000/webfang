@@ -1,6 +1,9 @@
 [tools]
 # === Core ===
-rust = "1.88"                          # MSRV — keep in sync with Cargo.toml rust-version
+# MSRV toolchain. Exact patch, equal to rust-toolchain.toml's channel: mise
+# resolves a bare "1.91" to the latest patch and would drift from the pinned
+# rustfmt (with 1.88 this could not happen — it only ever had one patch).
+rust = "1.91.1"
 
 # === Build acceleration ===
 # mold is deliberately NOT installed: there is no way to scope it to
@@ -16,7 +19,7 @@ cargo-binstall = "latest"              # bootstraps cargo tools from prebuilt bi
 typos = "1.42.3"                       # spell checker (aqua shorthand, pinned for MSRV compat)
 
 # === Dev tools (cargo backend — prebuilt via binstall when available) ===
-"cargo:cargo-nextest" = "0.9.114"      # test runner (pinned — latest requires Rust >1.88)
+"cargo:cargo-nextest" = "0.9.131"      # test runner (pinned — 0.9.131 brings flaky-result; its MSRV is 1.91)
 "cargo:cargo-deny" = "latest"          # license/advisory/ban audit
 "cargo:cargo-audit" = "latest"         # security advisory check
 "cargo:cargo-machete" = "latest"       # unused dependency detection

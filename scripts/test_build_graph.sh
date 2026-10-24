@@ -19,7 +19,7 @@
 #     `libgit2-sys` into the graph, and it only fed `version_string()`, a
 #     function with zero call sites (#1797).
 #   * NO `once_cell` in the manifests. std carries `LazyLock`/`OnceLock` since
-#     1.80 and the MSRV is 1.88. `once_cell` STAYS in Cargo.lock (ahash,
+#     1.80 and the MSRV is 1.91. `once_cell` STAYS in Cargo.lock (ahash,
 #     indicatif, criterion, dashmap, sysinfo, insta, tempfile all pull it) —
 #     that asymmetry is the point, and it is asserted below.
 #   * NO implicit browser in the default workspace graph. The benchmark

@@ -182,7 +182,7 @@ Notes:
 **No artifact exists for Intel macOS, and that is deliberate** — it is a
 decision, not a release gap, so do not go looking for a fourth `.tar.gz`.
 
-Building from source works on the normal developer path (Rust 1.88 toolchain,
+Building from source works on the normal developer path (Rust 1.91 toolchain,
 cmake for BoringSSL — see [from source](#from-source-developers)). The old
 ONNX excuse no longer applies (ADR-0004 paso 6 removed the `ai` feature and
 the local engine), so a source build has **no semantic holes**: `--clean-ai`
@@ -290,7 +290,7 @@ in the default build with no ONNX/ort/hf-hub dependency and no model cache.
 > Not an installation route for end users — this is the contributor path. It
 > downloads and compiles every dependency, BoringSSL included.
 
-**Prerequisites: Rust 1.88 (`rust-toolchain.toml` pins it), a C/C++ compiler,
+**Prerequisites: Rust 1.91 (`rust-toolchain.toml` pins it), a C/C++ compiler,
 `git`, and `cmake`.** `cmake` is mandatory: the HTTP client `wreq` → `btls`
 → `btls-sys` (formerly `boring2`/`boring-sys2`) compiles BoringSSL from C++ source on first build, and
 without `cmake` the failure surfaces deep inside a build script with an error

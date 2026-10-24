@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/XaviCodeDev1000/webfang/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCodeDev1000/webfang/actions)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.88+-orange)](https://rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.91+-orange)](https://rust-lang.org)
 [![Tests](https://img.shields.io/badge/tests-1%2C337+-green)](#testing)
 [![Miri](https://img.shields.io/badge/Miri-domain%2Bcore-passing-blue)](#memory-safety)
 
@@ -56,7 +56,7 @@ and every on-disk root an install leaves behind:
 <details>
 <summary>Install from source (contributors, not an end-user route)</summary>
 
-Requires Rust 1.88, a C/C++ compiler, and **`cmake`** — `wreq` → `btls` →
+Requires Rust 1.91, a C/C++ compiler, and **`cmake`** — `wreq` → `btls` →
 `btls-sys` (formerly `boring2`/`boring-sys2`) compiles BoringSSL from C++ on first build, and without
 `cmake` the failure surfaces deep in a build script with an error that says
 nothing about the real cause.
@@ -431,7 +431,7 @@ codedb index .
 - **Error types:** DomainError, InfraError → ScraperError (dual wrapping)
 - **User-facing errors:** Spanish. Internal logs: English.
 
-**Stack:** Rust 1.88 · Tokio · wreq (TLS fingerprint) · scraper 0.27 · lol_html
+**Stack:** Rust 1.91 · Tokio · wreq (TLS fingerprint) · scraper 0.27 · lol_html
 
 ---
 

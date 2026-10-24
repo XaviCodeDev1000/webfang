@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Ratchet gate for code duplication (issue #516).
 # Uses kucherenko/jscpd v5 5.4.0 (pinned) — see issue #1867.
-# Tool MSRV 1.96 > workspace 1.88: install as binary via
+# Tool MSRV 1.96 > workspace 1.91: install as binary via
 #   cargo install jscpd --version 5.4.0 --locked
 # (do NOT add to workspace Cargo.toml; binary-only forever). Binary is `jscpd`.
 # NOTE: both jscpd-rs and kucherenko/jscpd install a binary named `jscpd`:
@@ -129,7 +129,7 @@ JSCPD="jscpd"
 JSCPD_EXPECTED_VERSION="jscpd 5.4.0"
 JSCPD_VERSION="$($JSCPD --version 2>/dev/null | head -1 || true)"
 if [ "$JSCPD_VERSION" != "$JSCPD_EXPECTED_VERSION" ]; then
-  echo "::error::jscpd es '$JSCPD_VERSION', se esperaba '$JSCPD_EXPECTED_VERSION' (kucherenko/jscpd v5). Instala con: cargo +stable install jscpd --version 5.4.0 --locked (toolchain >= 1.96; el workspace sigue en 1.88, binario solamente)"
+  echo "::error::jscpd es '$JSCPD_VERSION', se esperaba '$JSCPD_EXPECTED_VERSION' (kucherenko/jscpd v5). Instala con: cargo +stable install jscpd --version 5.4.0 --locked (toolchain >= 1.96; el workspace sigue en 1.91, binario solamente)"
   exit 1
 fi
 

@@ -1,6 +1,6 @@
 # Overview
 
-**WebFang** is a production-ready web scraper built in Rust (1.88), with
+**WebFang** is a production-ready web scraper built in Rust (1.91), with
 Clean Architecture, a TLS-fingerprinting HTTP client, optional AI semantic
 cleaning (remote embeddings — see the migration guide,
 [ONNX removal](ai-onnx-migration.md)), and sitemap-based crawling.

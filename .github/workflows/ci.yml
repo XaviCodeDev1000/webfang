@@ -252,7 +252,7 @@ jobs:
       # carry ONE source of RAM (`sysinfo`, never `sys-info`, whose unit was
       # undocumented), NO `built`/`git2`/`libgit2-sys` (they fed a function with
       # zero call sites), NO `once_cell` in the manifests (std carries
-      # `LazyLock` since 1.80 and the MSRV is 1.88), and NO browser in the
+      # `LazyLock` since 1.80 and the MSRV is 1.91), and NO browser in the
       # DEFAULT workspace graph (the benchmark declares its own forwarding
       # `chromium` feature instead of forcing it onto `webfang_core`).
       #
@@ -1058,12 +1058,13 @@ jobs:
       # SC-11: the `tool:` input is pinned. This action's DEFAULT tool set is
       # resolved per-pinned-ref and meant "latest", so omitting it floated an
       # executable inside a SHA-pinned pipeline — the supply-chain property the
-      # action pin exists to provide, undone one layer down. 0.9.114 is this
-      # repository's declared MSRV-safe pin (mise.toml: "pinned — latest requires
-      # Rust >1.88"); the toolchain file pins 1.88, and 0.9.146 needs a newer rustc.
+      # action pin exists to provide, undone one layer down. 0.9.131 is this
+      # repository's pin (mise.toml): the first version with `flaky-result`
+      # (#2306). Building it needs Rust >= 1.91 (its MSRV since 0.9.129),
+      # exactly what rust-toolchain.toml pins.
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
         with:
-          tool: nextest@0.9.114
+          tool: nextest@0.9.131
       - name: Pre-build test binary
         run: cargo build -p webfang_cli --bin webfang
       # ONE invocation for the whole default-feature surface: the lib unit
@@ -1108,12 +1109,13 @@ jobs:
       # SC-11: the `tool:` input is pinned. This action's DEFAULT tool set is
       # resolved per-pinned-ref and meant "latest", so omitting it floated an
       # executable inside a SHA-pinned pipeline — the supply-chain property the
-      # action pin exists to provide, undone one layer down. 0.9.114 is this
-      # repository's declared MSRV-safe pin (mise.toml: "pinned — latest requires
-      # Rust >1.88"); the toolchain file pins 1.88, and 0.9.146 needs a newer rustc.
+      # action pin exists to provide, undone one layer down. 0.9.131 is this
+      # repository's pin (mise.toml): the first version with `flaky-result`
+      # (#2306). Building it needs Rust >= 1.91 (its MSRV since 0.9.129),
+      # exactly what rust-toolchain.toml pins.
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
         with:
-          tool: nextest@0.9.114
+          tool: nextest@0.9.131
       # NOTE: no model download here. test-full runs zero AI inference (all
       # --features compile + test, no --ignored); no job in this workflow
       # consumes --ignored tests, so no model cache entry is needed here.
@@ -1179,12 +1181,13 @@ jobs:
       # SC-11: the `tool:` input is pinned. This action's DEFAULT tool set is
       # resolved per-pinned-ref and meant "latest", so omitting it floated an
       # executable inside a SHA-pinned pipeline — the supply-chain property the
-      # action pin exists to provide, undone one layer down. 0.9.114 is this
-      # repository's declared MSRV-safe pin (mise.toml: "pinned — latest requires
-      # Rust >1.88"); the toolchain file pins 1.88, and 0.9.146 needs a newer rustc.
+      # action pin exists to provide, undone one layer down. 0.9.131 is this
+      # repository's pin (mise.toml): the first version with `flaky-result`
+      # (#2306). Building it needs Rust >= 1.91 (its MSRV since 0.9.129),
+      # exactly what rust-toolchain.toml pins.
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
         with:
-          tool: nextest@0.9.114
+          tool: nextest@0.9.131
       - name: Pre-build test binary
         run: cargo build -p webfang_cli --bin webfang
       # ONE invocation for the whole default-feature surface: the lib unit
@@ -1264,12 +1267,13 @@ jobs:
       # SC-11: the `tool:` input is pinned. This action's DEFAULT tool set is
       # resolved per-pinned-ref and meant "latest", so omitting it floated an
       # executable inside a SHA-pinned pipeline — the supply-chain property the
-      # action pin exists to provide, undone one layer down. 0.9.114 is this
-      # repository's declared MSRV-safe pin (mise.toml: "pinned — latest requires
-      # Rust >1.88"); the toolchain file pins 1.88, and 0.9.146 needs a newer rustc.
+      # action pin exists to provide, undone one layer down. 0.9.131 is this
+      # repository's pin (mise.toml): the first version with `flaky-result`
+      # (#2306). Building it needs Rust >= 1.91 (its MSRV since 0.9.129),
+      # exactly what rust-toolchain.toml pins.
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
         with:
-          tool: nextest@0.9.114
+          tool: nextest@0.9.131
       - name: Compile proof (webfang_cli with console under unstable cfg)
         run: cargo check -p webfang_cli --features console
       - name: Console smoke test (delta ceiling + baseline recovery)
@@ -1542,7 +1546,7 @@ jobs:
           # SC-11: both entries pinned. `tool:` accepts a comma-separated
           # `name@version` list, so a single install step still covers both
           # executables the harness needs.
-          tool: cargo-hack@0.6.45,nextest@0.9.114
+          tool: cargo-hack@0.6.45,nextest@0.9.131
       - name: Feature matrix check
         run: cargo hack check --each-feature --workspace --no-dev-deps
       # `cargo hack check` never compiles test targets (and `--no-dev-deps` drops
@@ -1717,7 +1721,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # rust-toolchain.toml pins 1.88.0 and would override the nightly toolchain
+      # rust-toolchain.toml pins 1.91.0 and would override the nightly toolchain
       # for `cargo miri` (miri is nightly-only). RUSTUP_TOOLCHAIN (env var) has
       # the HIGHEST rustup precedence — above rust-toolchain.toml and above
       # rustup directory overrides (`override: true` on dtolnay/rust-toolchain
@@ -1993,7 +1997,7 @@ jobs:
           save-if: false # nightly-only, always cold; never evicts the PR/main cache pool
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
         with:
-          tool: nextest@0.9.114
+          tool: nextest@0.9.131
       - name: Full suite with zero retries (known flakes excluded)
         run: |
           cargo nextest run --all-features --profile flake-nightly \
