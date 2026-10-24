@@ -15,6 +15,12 @@ threads-required = 1
 # Retries con backoff para tests flaky (red, I/O)
 retries = { backoff = "exponential", count = 2, delay = "1s" }
 
+# Enforcement de flakiness (#2306, paso 3 de #2305): un test que sólo pasa al
+# reintento FALLA el run, en local y en CI (ci hereda de acá). La señal pasiva
+# ("flaky" en el resumen final) ya no alcanza. El rollback del enforcement es
+# revertir esta línea; los flakes conocidos los caza la lane nocturna (#2286).
+flaky-result = "fail"
+
 # Global timeout: Previene cuelgues (30min desarrollo)
 global-timeout = "30m"
 
@@ -64,26 +70,18 @@ filter = 'test(=illegal_page_transitions_fail_to_compile)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
 [profile.ci]
-# Configuración agresiva para CI (más paralelismo)
+# Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
+# compartida — retries con backoff, default-filter, flaky-result y el override
+# del trybuild — vive UNA vez en default. Este perfil declara sólo las
+# diferencias intencionales de CI: más paralelismo, techos más largos y
+# output sobrio para el log.
+inherits = "default"
 test-threads = 8
-threads-required = 1
-# Alineado con [profile.default] (#2305, paso 1). En 0.9.114 los perfiles NO
-# heredan (`inherits` llega en 0.9.115, que sube el MSRV a Rust 1.89 — fuera de
-# alcance), así que cada clave de política compartida se copia a mano. Adoptar
-# este perfil sin la alineación habría: eliminado los reintentos (`retries = 0`),
-# corrido los tests `ai_integration` en CI (sin default-filter) y matado al
-# trybuild contra el techo de slow-timeout (120s x 2 = 240s vs 467s medidos).
-retries = { backoff = "exponential", count = 2, delay = "1s" }
-fail-fast = false
 failure-output = "immediate-final"
 
 # Timeouts más largos para CI
 slow-timeout = { period = "120s", terminate-after = 2, grace-period = "30s" }
 global-timeout = "1h"
-
-# Filtros: excluir tests pesados por defecto (copia de `default`, misma razón
-# de no-herencia que `retries`)
-default-filter = "not test(ai_integration)"
 
 # Output para CI (#2305, paso 2): el log de CI no necesita el stdout de los
 # tests que pasan ni el estado de cada skip; sí necesita los fallos en el
@@ -94,38 +92,21 @@ success-output = "never"
 status-level = "fail"
 final-status-level = "slow"
 
-# Override del trybuild copiado de `default` (misma razón de no-herencia; la
-# medición y el criterio del techo de 600s están documentados ahí).
-[[profile.ci.overrides]]
-filter = 'test(=illegal_page_transitions_fail_to_compile)'
-slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
-
 # Lane nocturna de detección de flakes (#2286; adopción en #2305 paso 4): la
 # misma suite que test-full pero con reintentos a cero, para que cada flake
 # genuino ponga el job en rojo (report-only vía continue-on-error en ci.yml).
-# Copia deliberada de [profile.ci] porque 0.9.114 no hereda perfiles: la
-# única diferencia es retries = 0. Si tocás ci, tocá esta también, hasta que
-# un bump que habilite inherits (0.9.115+) las colapse en una sola.
+# Hereda de `ci` (#2306): la única diferencia con las lanes de PR es la
+# política de reintentos. Con retries = 0 el flaky-result heredado nunca
+# dispara (no hay reintento que convierta un fallo en flaky).
 [profile.flake-nightly]
-test-threads = 8
-threads-required = 1
+inherits = "ci"
 retries = 0
-fail-fast = false
-failure-output = "immediate-final"
-slow-timeout = { period = "120s", terminate-after = 2, grace-period = "30s" }
-global-timeout = "1h"
-default-filter = "not test(ai_integration)"
-success-output = "never"
-status-level = "fail"
-final-status-level = "slow"
-
-[[profile.flake-nightly.overrides]]
-filter = 'test(=illegal_page_transitions_fail_to_compile)'
-slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
 [profile.dev]
 # Perfil para desarrollo iterativo (ultra-rápido)
 # Ejecuta solo lo afectado → 8-25 segundos típico
+# Hereda de `default` (0.9.115+): default-filter, flaky-result, el override
+# del trybuild (que su techo de 30s x 2 mataba latente) y el resto no listado.
 test-threads = 4
 threads-required = 1
 fail-fast = false
@@ -142,6 +123,9 @@ status-level = "skip"
 
 [profile.agent]
 # Perfil específico para agentes de código (paralelismo moderado, más timeout)
+# Hereda de `default` (0.9.115+): además de default-filter y el override del
+# trybuild, GANA los retries de default (antes corría sin reintentos) y su
+# flaky-result: un flaky en la corrida de un agente es rojo, no ruido.
 test-threads = 4
 threads-required = 1
 global-timeout = "15m"
@@ -161,6 +145,9 @@ slow-timeout = { period = "45s", terminate-after = 2, grace-period = "5s" }
 # 82s medidos) — 600s = 10 min por test con terminate-after 1 (sin reintentos
 # de tests de medición, que no son flaky sino largos). global-timeout 45m
 # cubre la corrida filtrada completa; el job tiene timeout-minutes: 60.
+# Hereda de `default` (0.9.115+): default-filter (los ai_integration quedan
+# fuera del sweep) y flaky-result=fail — acá un flaky ES un finding, la lane
+# existe para reportarlos.
 test-threads = 2
 threads-required = 1
 retries = { backoff = "exponential", count = 2, delay = "1s" }
