@@ -2,7 +2,7 @@ error[E0599]: no method named `queue` found for struct `Stateful<Rec, webfang_co
   --> tests/compile_fail/page_state/backward_exported_to_queued.rs:52:15
    |
 52 |     let _ = s.queue();
-   |               ^^^^^ method not found in `Stateful<Rec, Exported>`
+   |               ^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Exported>`
    |
 note: there's an earlier shadowed binding `s` of type `Stateful<Rec, webfang_core::domain::page_state::Discovered>` that has method `queue` available
   --> tests/compile_fail/page_state/backward_exported_to_queued.rs:49:9

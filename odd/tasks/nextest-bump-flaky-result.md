@@ -50,3 +50,18 @@ Issue: #2306 (`status:approved`), completa el paso 3 de #2305. Worktree:
   no el MSRV: no se dispara. Menciones narrativas de "Rust 1.88" a
   actualizar: README ×3, docs/src/installation.md ×2, docs/src/overview.md
   ×1 (docs/book/ es generado: no se toca).
+- L5: Drift de patch detectado y corregido: mise resolvió rust="1.91" a
+  1.91.1 mientras el channel decía 1.91.0 — el pin va exacto e idéntico en
+  ambos (con 1.88 era imposible: un solo patch).
+- L6: PR #2310 creado (Closes #2306 + #2305). Primer run de CI: 4 jobs
+  rojos con dos causas. (a) trybuild: 4 snapshots .stderr desactualizados
+  bajo rustc 1.91.1 (el label de E0599 ahora qualifica el path y el
+  unused_imports agrega su grupo) — regenerados extrayendo los bloques
+  ACTUAL OUTPUT del log de CI con calibración byte-exacta contra los
+  commiteados. (b) flake destapado por el enforcement:
+  crawl_site_with_options_span_records_outcome_and_summary_duration_ms
+  TRY 1 FAIL → TRY 2 PASS en 2/4 lanes; cuarentena vía override per-test
+  flaky-result="pass" + issue #2313 (el try-1 output no se imprime para
+  tests que acaban pasando: la causa se investiga allá).
+- L7: actionlint reporta shellcheck preexistente en release/sanitizers
+  idéntico en main (diff verificado): no son míos ni bloquean CI real.

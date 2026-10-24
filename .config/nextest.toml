@@ -69,6 +69,18 @@ default-filter = "not test(ai_integration)"
 filter = 'test(=illegal_page_transitions_fail_to_compile)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# Cuarentena por flake destapado por el propio enforcement (PR #2310, issue
+# #2313): el test falló el intento 1 y pasó al reintento en 2 de 4 lanes del
+# primer run con flaky-result=fail. nextest no imprime el output del intento
+# fallido de un test que acaba pasando, así que la causa exacta se investiga
+# en la issue. Con este override el test sigue corriendo y reintentando
+# igual; sólo su flakiness deja de romper las lanes hasta que #2313 lo
+# cierre. La lane nocturna (retries 0) lo sigue cazando como FAIL cuando
+# dispara.
+[[profile.default.overrides]]
+filter = 'test(=crawl_site_with_options_span_records_outcome_and_summary_duration_ms)'
+flaky-result = "pass"
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
