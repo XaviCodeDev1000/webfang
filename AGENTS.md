@@ -300,9 +300,10 @@ metrics backend: neither OpenTelemetry nor any other collector is introduced.
 
 ## 🔬 Intelligence Stack
 
-Two complementary tools. Pick by mission, not by habit. **They are not skills: they are
-CLIs** (`codedb 0.2.5849`, `codegraph 1.6.2`) — invoke them as commands, not by loading a
-skill.
+Two complementary tools that are **mandatory** for all source-level work — pick the right one by
+mission, but never reach for classical tools first. They replace `grep`/`rg`, `find`/`fd`,
+`cat`/`head`/`tail`, and `Read` for source code. **They are not skills: they are CLIs**
+(`codedb 0.2.5849`, `codegraph 1.6.2`) — invoke them as commands, not by loading a skill.
 
 | Moment | Tool | Why |
 |---|---|---|
@@ -319,6 +320,10 @@ understand* (returns source, call paths and blast radius).
 
 ### Non-negotiable gates
 
+- **Mandatory instead of classical tools:** agents **MUST** query `codedb` (`word`,
+  `symbol`, `callers`, `find`, `glob`) or `codegraph explore` for any source definition,
+  usage, or flow. `grep`/`rg`, `find`/`fd`, `cat`/`head`/`tail`, and `Read` are **prohibited**
+  on source code.
 - Before editing a symbol → `CodeGraph explore` (callers + impact). **Never** edit blind.
 - Before renaming → check **all** usages (`codedb callers` / `CodeGraph explore`).
 - Before committing → `cargo check` + `cargo clippy` + `cargo fmt --all -- --check`, and
@@ -740,6 +745,14 @@ acknowledgement, commit / push / PR / release stay under ordinary repository pol
   `branch-pr`, `work-unit-commits`, `chained-pr`, `rdd-defect-workflow`,
   `cognitive-doc-design` (user scope) and `codebase-refactoring`, `dry-refactoring`, `jscpd`,
   `webfang-architecture` (repo scope).
+- **Loading the right rules is mandatory:** before any Rust code change, resolve the applicable
+  Rust skill by the task's code context (file extensions and what the task asks for) via the
+  skill registry: `rust-skills` (265 rules across 26 categories, granular coverage for
+  writing/refactoring) and `rust-best-practices` (the distilled 5-source checklist) cover the
+  same ground at different granularity; `rust-review` for a cited, prioritized review report;
+  load the matching `SKILL.md`
+  (or its installed `<id>` via the skill tool) **before** editing, forwarding the exact rule
+  set into any delegated writer.
 - **Every delegation to a subagent must include:** the skill paths to read, the intelligence
   mandate (explore impact before editing; `cargo check` before returning), the exact
   verification commands, and the absolute worktree path.
