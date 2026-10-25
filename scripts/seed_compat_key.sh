@@ -12,7 +12,7 @@ set -euo pipefail
 # otherwise the seed is one-per-worktree and the whole mechanism buys nothing.
 #
 # IN the key:
-#   rustc        the compiler, semantically ("1.88.0 (6b00bc38 2025-06-23)").
+#   rustc        the compiler, semantically ("1.91.1 (ed61e7d7e 2025-11-07)").
 #                `rustc -V` already carries the commit hash, so this is exact
 #                without depending on Cargo's internal hash layout.
 #   target       host triple, or the explicit --target when cross-building.

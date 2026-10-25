@@ -94,9 +94,9 @@ fi
 # only manufacture a compatibility claim out of a gap in what we can reason about.
 #
 # build-dir is STABLE, not nightly-only: it shipped in Rust 1.91 and its layout is
-# still internal and subject to change. WebFang is on 1.88, so on our toolchain
-# the flag is inert today — which is precisely why refusing it is a policy
-# decision rather than a workaround for a broken build. A build-dir shared across
+# still internal and subject to change. WebFang is on 1.91, where the flag
+# already exists — refusing it stays a policy decision (the layout is internal),
+# not a workaround for a broken build. A build-dir shared across
 # worktrees is also a known Cargo footgun (rust-lang/cargo#17312: cargo can
 # conclude nothing needs rebuilding), the same contamination class this whole
 # mechanism exists to prevent.

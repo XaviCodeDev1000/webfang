@@ -2,7 +2,7 @@ error[E0599]: no method named `queue` found for struct `Stateful<Rec, webfang_co
   --> tests/compile_fail/page_state/committed_is_terminal.rs:58:27
    |
 58 |         let _ = committed.queue();
-   |                           ^^^^^ method not found in `Stateful<Rec, Committed>`
+   |                           ^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Committed>`
    |
    = note: the method was found for
            - `Stateful<R, webfang_core::domain::page_state::Discovered>`
@@ -11,7 +11,7 @@ error[E0599]: no method named `start_fetch` found for struct `Stateful<Rec, webf
   --> tests/compile_fail/page_state/committed_is_terminal.rs:59:27
    |
 59 |         let _ = committed.start_fetch();
-   |                           ^^^^^^^^^^^ method not found in `Stateful<Rec, Committed>`
+   |                           ^^^^^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Committed>`
    |
    = note: the method was found for
            - `Stateful<R, webfang_core::domain::page_state::Queued>`
@@ -20,7 +20,7 @@ error[E0599]: no method named `reopen_for_reexport` found for struct `Stateful<R
   --> tests/compile_fail/page_state/committed_is_terminal.rs:60:27
    |
 60 |         let _ = committed.reopen_for_reexport();
-   |                           ^^^^^^^^^^^^^^^^^^^ method not found in `Stateful<Rec, Committed>`
+   |                           ^^^^^^^^^^^^^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Committed>`
    |
    = note: the method was found for
            - `Stateful<R, webfang_core::domain::page_state::Exported>`

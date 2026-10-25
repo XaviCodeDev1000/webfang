@@ -34,7 +34,13 @@ jobs:
         with:
           # No PR trigger (schedule/dispatch on main); only main saves (#1171)
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # SC-11: the `tool:` input is pinned, same rationale as every other
+      # install-action in this repo (see ci.yml): an unpinned `tool:` floats
+      # an executable inside a SHA-pinned pipeline. This job runs nextest, so
+      # nextest is what gets pinned (#2306).
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
+        with:
+          tool: nextest@0.9.131
       - name: Run tests with poisoned environment
         run: |
           set -o pipefail
@@ -77,7 +83,10 @@ jobs:
         with:
           # No PR trigger (schedule/dispatch on main); only main saves (#1171)
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      # SC-11: pinned — see the same comment in the poisoned-env job above.
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
+        with:
+          tool: nextest@0.9.131
       - name: Run ignored tests (bug discovery)
         # Runs the surviving #[ignore]'d suite. Skips tests that fundamentally
         # cannot pass in CI: timing-sensitive, env-dependent, and

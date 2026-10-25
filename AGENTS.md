@@ -2,7 +2,7 @@
 
 Production-ready web scraper. Clean Architecture, AI semantic cleaning, sitemap-based crawling.
 
-**Stack:** Rust 1.88 · Tokio · wreq 6 (TLS fingerprint) · SQLite
+**Stack:** Rust 1.91 · Tokio · wreq 6 (TLS fingerprint) · SQLite
 
 > **How to use this file.** It is a **router**, not a manual. Every block either states the
 > rule (the one you cannot derive from the code or the compiler) or points at **where the rest

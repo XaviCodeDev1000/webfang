@@ -348,7 +348,7 @@ seed_recipe_workspace_contract() {
 #     .cargo/config.toml      include = "../shared/cargo-policy.toml"
 #     shared/cargo-policy.toml [profile.dev] …
 #
-# `include` was stabilised in Cargo 1.93, so on the 1.88 this repository builds
+# `include` was stabilised in Cargo 1.93, so on the 1.91 this repository builds
 # with today it cannot bite. Refusing anyway, for the same reason build-dir is
 # refused: the policy has to survive the next toolchain bump, and a config key
 # whose meaning changes with the channel is not something to leave in place to be
