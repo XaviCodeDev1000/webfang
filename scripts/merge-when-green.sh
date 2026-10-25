@@ -19,14 +19,17 @@
 #      so the UNKNOWN retry loop used to burn its 90s window and then FAIL on a
 #      PR whose merge was already done (#1970). `state` is the field that tells
 #      the two apart, and it is read in the SAME call as mergeStateStatus.
-#   1. Refuses a squash-merge that would destroy a breaking declaration. A
-#      breaking marker lives in a commit subject (`feat(ai)!: ...`) or in a
-#      `BREAKING CHANGE:` footer, and `gh pr merge --squash` rebuilds the subject
-#      from the PR TITLE — dropping the `!` — while release-plz ignores a footer
-#      buried in the squashed body. Measured on #2072 and #2078: both shipped as
-#      patches with the marker gone. So this runs BEFORE the wait: if the PR
-#      title or any branch commit declares a break and the strategy is squash,
-#      it exits 5 and names the remedy (--merge). See #2081.
+#   1. Refuses a merge whose strategy would LOSE a breaking declaration. A
+#      breaking marker is canonical only as `type!:` or `type(scope)!:` in a
+#      subject, and it must survive in the surface the strategy keeps:
+#        --squash, 1 commit   -> the commit subject (the PR title is dropped)
+#        --squash, 2+ commits -> the PR title       (commit subjects collapse)
+#        --merge              -> every branch commit (the PR title is dropped)
+#      #2321 measured the 1-commit squash case: the subject comes from the
+#      commit, not the title. The guard runs BEFORE the wait AND again at the
+#      merge boundary, so a title edit or a new push during the wait cannot
+#      slip a marker off the kept surface (#2081, #2320). A `BREAKING CHANGE:`
+#      footer alone does not satisfy the gate.
 #   2. Reads the required status-check contexts from branch protection, then polls
 #      `gh pr checks --json name,bucket` until EVERY one of them has REPORTED with
 #      a terminal bucket, and all report `pass`. Waiting on
@@ -65,9 +68,10 @@
 #      queue mode; in --queue mode the queue handles BEHIND).
 #   4  gh command failure (network, auth, etc.) or a required context that never
 #      reported before the deadline.
-#   5  Refused: this PR declares a breaking change and the chosen strategy would
-#      destroy the marker (squash). Nothing was merged. Re-run with --merge, or
-#      move the declaration into a commit. See #2081.
+#   5  Refused: the PR declares a breaking change in a surface the chosen
+#      strategy would DROP, the marker is malformed (`type!(scope):`), or it is
+#      only a `BREAKING CHANGE:` footer. Nothing was merged. Put a canonical
+#      `!` on the kept surface, or choose the other strategy. See #2081, #2320.
 #
 # Notes:
 #   - Respects branch protection: uses `gh pr merge --squash` (or `--merge`), NOT
@@ -88,8 +92,9 @@
 #     bypass would re-arm exactly the silent failure it exists to stop: the
 #     release would ship as a patch and nobody would notice until the tag was
 #     public. The marker is a property of the branch, so the remedy is always
-#     available — use `--merge`, or put the `!` in a commit instead of only in
-#     the PR title.
+#     available — move the canonical `!` to the surface the chosen strategy
+#     keeps. `--merge` is one way (it also preserves commit markers), never a
+#     mandatory recipe.
 #   - Never passes `--delete-branch`: in the worktree flow the head branch is
 #     checked out in a sibling worktree, and Git refuses to delete a branch that
 #     is any worktree's HEAD (linked-worktree invariant). `gh` would return
@@ -169,11 +174,9 @@ Flags:
   --squash    Squash-merge into one commit. This is the default.
   --merge     Merge commit instead of squash. Use for batch PRs, where squashing
               N independent fixes would destroy per-fix revert granularity.
-              Mutually exclusive with --squash.
-              REQUIRED when the PR declares a breaking change (a '!' before the
-              ':' in the title or a commit subject, or a 'BREAKING CHANGE:'
-              footer): squash would drop the marker and the release would ship
-              as a patch.
+              Mutually exclusive with --squash. A merge commit keeps every
+              branch commit, so a canonical `!` in a commit subject survives;
+              it DISCARDS the PR title, so a title-only marker does not.
   --timeout=<sec>  Watcher deadline in seconds (default 600). Accepts
               '--timeout 300' or '--timeout=300'. Overrides the
               MERGE_WHEN_GREEN_TIMEOUT env var. Useful for large PRs with
@@ -198,9 +201,10 @@ Exit codes:
   3  Checks green but PR is BEHIND or BLOCKED — rebase first (outside --queue;
      the queue handles BEHIND). A PR closed without merging also exits 3.
   4  gh network/auth failure, or the queue did not merge within the timeout.
-  5  Refused before merging: the PR declares a breaking change and the chosen
-     strategy would destroy the marker. Nothing was merged. Outside --queue,
-     re-run with --merge.
+  5  Refused before merging: the PR declares a breaking change on a surface the
+     chosen strategy would drop, the marker is malformed (`type!(scope):`), or
+     it is only a `BREAKING CHANGE:` footer. Nothing was merged. Put a canonical
+     `!` on the kept surface, or choose the other strategy.
 
 Result marker:
   After an actual merge (not --dry-run) the script prints this machine line last:
@@ -415,105 +419,202 @@ if [[ $queue_mode -eq 1 ]]; then
 fi
 
 # --- 1. Breaking-marker guard (before the wait, not after) -------------------
-# The marker has to SURVIVE the merge, and squash is the strategy that kills it:
-#   - `gh pr merge --squash` rebuilds the subject from the PR TITLE and drops the
-#     `!`: `fix(cli)!: ...` landed as `fix(cli): ... (#2078)`;
-#   - release-plz does not honour a `BREAKING CHANGE:` footer inside the squashed
-#     body: the squashed #2078 commit carried it and `release-plz update` still
-#     computed 2.13.1.
-# Both outcomes are SILENT — the major ships as a patch and nobody sees it until
-# the tag is public. So the refusal is here, before the ~9 minute wait and long
-# before the tag (#2081).
+# The marker must live in the subject the merge strategy KEEPS. GitHub's
+# squash subject depends on the commit count:
+#   1 commit   -> the commit subject
+#   2+ commits -> the PR title
+# A merge commit keeps every branch commit and DISCARDS the PR title.
+# The pre-#2321 guard assumed squash always used the title; #2321 measured the
+# 1-commit case and refuted it (the squash subject was the commit's). A marker
+# outside the kept surface is lost silently, so the guard refuses it instead of
+# warning (#2081, #2320).
 #
-# The marker is the `!` that belongs to the TYPE: `type!:`, `type(scope)!:`, and
-# also the malformed `type!(scope):` that #2072 used. Both positions are
-# recognised because both express the same intent, and the malformed one is the
-# one that already burned this repo. A `!` that is not in that position
-# (`fix: don't retry`) is prose, not a marker, and must not block a merge.
-#
-# NEGATION (scripts/test_merge_when_green_breaking.sh): before this guard, the
-# title-with-`!` + --squash case exited 0 and merged. That is the case pinned as
-# the mandatory failing test.
-breaking_subject_re='^[a-zA-Z]+(\([^)]*\))?!(\([^)]*\))?:'
+# Canonical marker: `type!:` or `type(scope)!:`. `type!(scope):` is malformed:
+# it expresses the intent but release-plz does not parse it, so it is refused
+# with the canonical form. A `!` outside the header (prose) is not a marker. A
+# `BREAKING CHANGE:` footer alone is not accepted: this gate requires the `!`.
+canonical_subject_re='^[A-Za-z]+(\([^)]*\))?!:'
+footer_re='(?im)^BREAKING[ -]CHANGE:'
 
-pr_meta="$(gh pr view "$pr_number" --json title,commits 2>/dev/null || true)"
-if [[ -z "$pr_meta" ]]; then
-  # Fail closed. An unreadable PR is not evidence that the marker is absent, and
-  # acting on an incomplete answer is the #1011 failure shape.
-  echo "error: could not read the title/commits of PR #${pr_number} from gh." >&2
-  echo "       Refusing to merge blind: the breaking-marker guard cannot run (#2081)." >&2
-  exit 4
-fi
-
-pr_title="$(printf '%s' "$pr_meta" | jq -r '.title // ""')"
-
-title_declares_breaking=0
-if [[ "$pr_title" =~ $breaking_subject_re ]]; then
-  title_declares_breaking=1
-fi
-
-# Offending commits, one per line: short sha + subject. The body is tested
-# separately because a footer is a line inside it, not the whole body.
-breaking_commits="$(printf '%s' "$pr_meta" | jq -r '
-  .commits[]?
-  | select(
-      ((.messageHeadline // "") | test("^[a-zA-Z]+(\\([^)]*\\))?!(\\([^)]*\\))?:"))
-      or ((.messageBody // "") | test("(?im)^BREAKING[ -]CHANGE:"))
-    )
-  | "         \(.oid[0:8])  \(.messageHeadline)"
-')"
-
-if [[ "$merge_strategy" == "squash" ]]; then
-  if [[ $title_declares_breaking -eq 1 || -n "$breaking_commits" ]]; then
-    {
-      if [[ $queue_mode -eq 1 ]]; then
-        echo "error: this PR declares a BREAKING change and the merge queue for '${base_branch}' uses SQUASH, which would destroy the marker."
-      else
-        echo "error: this PR declares a BREAKING change and --squash would destroy the marker."
-      fi
-      echo "       Nothing was merged."
-      if [[ $title_declares_breaking -eq 1 ]]; then
-        echo "       PR title: ${pr_title}"
-      fi
-      if [[ -n "$breaking_commits" ]]; then
-        echo "       commits that declare it:"
-        printf '%s\n' "$breaking_commits"
-      fi
-      echo
-      echo "       Why refused instead of warned: --squash rebuilds the subject from the PR"
-      echo "       title (dropping the '!') and release-plz ignores a 'BREAKING CHANGE:' footer"
-      echo "       inside the squashed body. Measured on #2072 and #2078: the major shipped as"
-      echo "       a patch and nobody saw it until the tag was public."
-      echo
-      if [[ $queue_mode -eq 1 ]]; then
-        echo "       The queue's merge method is fixed for every entry. Either change it to MERGE"
-        echo "       (repository merge queue settings) or land this break outside the queue."
-      else
-        echo "       Re-run with a merge commit, which preserves the branch commits:"
-        echo "         scripts/merge-when-green.sh ${pr_number} --merge"
-      fi
-    } >&2
-    exit 5
+# subject_kind <subject> -> canonical | malformed | none
+subject_kind() {
+  local subject="$1" header="${1%% *}"
+  if [[ "$header" =~ $canonical_subject_re ]]; then
+    printf 'canonical'
+  elif [[ "$header" == *'!'* ]]; then
+    printf 'malformed'
+  else
+    printf 'none'
   fi
-elif [[ $title_declares_breaking -eq 1 && -z "$breaking_commits" ]]; then
-  # The mirror image, and the reason this branch exists: a merge commit keeps the
-  # branch commits and DISCARDS the PR title (its subject becomes "Merge pull
-  # request #N ..."). A declaration that lives only in the title therefore never
-  # reaches main either — same silent patch, different strategy.
-  {
-    echo "error: the PR title declares a BREAKING change but no commit does."
-    echo "       PR title: ${pr_title}"
-    echo "       Nothing was merged."
-    echo
-    echo "       A merge commit keeps the branch commits and discards the PR title, so this"
-    echo "       declaration would never reach main: release-plz reads commit subjects and"
-    echo "       would compute a patch."
-    echo
-    echo "       Declare it where the release reads it: amend the branch so a commit subject"
-    echo "       carries the '!', or drop it from the title if the change is not breaking."
-  } >&2
+}
+
+read_breaking_meta() {
+  local raw
+  raw="$(gh pr view "$pr_number" --json title,commits,headRefOid 2>/dev/null)" || return 0
+  # Shape validation: a non-empty but INCOMPLETE payload is not evidence that
+  # the marker is absent. `commits` must be a non-empty array of objects with
+  # the fields the guard reads, and the title/headRefOid must be there; any
+  # parse or shape failure returns empty, and breaking_guard turns that into
+  # exit 4. A zero-commit payload has no effective subject to judge, so it is
+  # a fail-closed case too, never a silent "2+ commits" default.
+  if ! printf '%s' "$raw" | jq -e '
+      (.title | type == "string")
+      and (.headRefOid | type == "string")
+      and (.commits | type == "array" and length >= 1)
+      and all(.commits[]; ((.oid // null) | type == "string") and ((.messageHeadline // null) | type == "string"))
+    ' >/dev/null 2>&1; then
+    return 0
+  fi
+  printf '%s' "$raw"
+}
+
+# refuse <headline> <line>... — the loud, early refusal shared by every branch.
+refuse() {
+  local headline="$1"
+  shift
+  echo "error: ${headline}" >&2
+  local line
+  for line in "$@"; do
+    printf '%s\n' "$line" >&2
+  done
+  echo "       Nothing was merged." >&2
   exit 5
-fi
+}
+
+# breaking_guard <pr-meta-json>
+# Exits 5 when the declaration would not survive the chosen strategy, 4 when
+# the metadata cannot be read (fail closed).
+breaking_guard() {
+  local meta="$1"
+  local pr_title title_kind commits_json commit_rows
+  local n_commits n_canonical n_malformed n_footer
+
+  if [[ -z "$meta" ]]; then
+    # Fail closed. An unreadable PR is not evidence that the marker is absent,
+    # and acting on an incomplete answer is the #1011 failure shape.
+    echo "error: could not read the title/commits/headRefOid of PR #${pr_number} from gh." >&2
+    echo "       Refusing to merge blind: the breaking-marker guard cannot run (#2081)." >&2
+    exit 4
+  fi
+
+  pr_title="$(printf '%s' "$meta" | jq -r '.title // ""')"
+  title_kind="$(subject_kind "$pr_title")"
+  commits_json="$(printf '%s' "$meta" | jq -c '.commits // []')"
+
+  # shellcheck disable=SC2016  # $canon/$footer are jq variables passed with --arg
+  read -r n_commits n_canonical n_malformed n_footer < <(printf '%s' "$commits_json" | jq -r \
+    --arg canon "$canonical_subject_re" --arg footer "$footer_re" '
+      def header: (. // "") | split(" ")[0];
+      def canonical: header | test($canon);
+      def malformed: (header | test($canon) | not) and (header | contains("!"));
+      def footer: (. // "") | test($footer);
+      (. // []) as $c
+      | [
+          ($c | length),
+          ([$c[] | select((.messageHeadline // "") | canonical)] | length),
+          ([$c[] | select((.messageHeadline // "") | malformed)] | length),
+          ([$c[] | select((.messageBody // "") | footer)] | length)
+        ] | @tsv
+    ')
+  # shellcheck disable=SC2016  # $canon/$footer are jq variables passed with --arg
+  commit_rows="$(printf '%s' "$commits_json" | jq -r \
+    --arg canon "$canonical_subject_re" --arg footer "$footer_re" '
+      def header: (. // "") | split(" ")[0];
+      def canonical: header | test($canon);
+      def malformed: (header | test($canon) | not) and (header | contains("!"));
+      def footer: (. // "") | test($footer);
+      .[]?
+      | select(
+          ((.messageHeadline // "") | canonical)
+          or ((.messageHeadline // "") | malformed)
+          or ((.messageBody // "") | footer)
+        )
+      | "         \(.oid[0:8])  \(.messageHeadline)\(if ((.messageBody // "") | footer) then " [footer]" else "" end)"
+    ')"
+
+  if [[ "$merge_strategy" == "squash" ]]; then
+    if (( n_commits == 1 )); then
+      # Effective surface: the single commit subject. The title is discarded.
+      if (( n_canonical > 0 )); then
+        return 0
+      fi
+      if (( n_malformed > 0 )); then
+        refuse "the only commit's subject has a malformed breaking marker." \
+          "       commits:" "${commit_rows}" \
+          "       Use 'type!:' or 'type(scope)!:' (the '!' goes immediately before the colon)." \
+          "       'type!(scope):' is not parsed by release-plz."
+      fi
+      if (( n_footer > 0 )); then
+        refuse "the only commit declares the break only with a 'BREAKING CHANGE:' footer." \
+          "       commits:" "${commit_rows}" \
+          "       The gate requires the '!' in the effective subject: 'type!:' or 'type(scope)!:'." \
+          "       A footer alone is not accepted."
+      fi
+      if [[ "$title_kind" == "malformed" ]]; then
+        refuse "this PR's title has a malformed breaking marker, and a 1-commit squash keeps the COMMIT subject anyway." \
+          "       PR title: ${pr_title}" \
+          "       Use 'type!:' or 'type(scope)!:' in the commit subject." \
+          "       'type!(scope):' is not parsed by release-plz."
+      fi
+      if [[ "$title_kind" != "none" ]]; then
+        refuse "this PR declares a BREAKING change only in its title, but a 1-commit squash keeps the COMMIT subject, not the title." \
+          "       PR title: ${pr_title}" \
+          "       GitHub builds the squash subject from the single commit when the PR has one commit; the title is dropped." \
+          "       Put the '!' in the commit subject (amend the commit), or drop it from the title if the change is not breaking."
+      fi
+      return 0
+    fi
+    # 2+ commits: the PR title is the squash subject.
+    if [[ "$title_kind" == "canonical" ]]; then
+      return 0
+    fi
+    if [[ "$title_kind" == "malformed" ]]; then
+      refuse "this PR has ${n_commits} commits, so the squash keeps the PR title, and the title's breaking marker is malformed." \
+        "       PR title: ${pr_title}" \
+        "       Use 'type!:' or 'type(scope)!:' in the PR title." \
+        "       'type!(scope):' is not parsed by release-plz."
+    fi
+    if (( n_canonical > 0 || n_malformed > 0 || n_footer > 0 )); then
+      if [[ $queue_mode -eq 1 ]]; then
+        refuse "this PR has ${n_commits} commits, so the squash keeps the PR TITLE, but the breaking marker lives only in the commits." \
+          "       commits:" "${commit_rows}" \
+          "       Put the '!' in the PR title; the queue's method is fixed."
+      else
+        refuse "this PR has ${n_commits} commits, so the squash keeps the PR TITLE, but the breaking marker lives only in the commits." \
+          "       commits:" "${commit_rows}" \
+          "       Put the '!' in the PR title, or re-run with --merge to preserve the commits."
+      fi
+    fi
+    return 0
+  fi
+
+  # MERGE: the branch commits survive and the PR title is discarded.
+  if (( n_canonical > 0 )); then
+    return 0
+  fi
+  if (( n_malformed > 0 )); then
+    refuse "the commit subjects declare a breaking change, but the marker is malformed." \
+      "       commits:" "${commit_rows}" \
+      "       Use 'type!:' or 'type(scope)!:' in a commit subject." \
+      "       A merge commit preserves the commits, but not a malformed marker."
+  fi
+  if (( n_footer > 0 )); then
+    refuse "the commits declare the break only with a 'BREAKING CHANGE:' footer." \
+      "       commits:" "${commit_rows}" \
+      "       The gate requires the '!' in a commit subject: 'type!:' or 'type(scope)!:'." \
+      "       A footer alone is not accepted."
+  fi
+  if [[ "$title_kind" != "none" ]]; then
+    refuse "this PR's only breaking marker is in its title, but a merge commit DISCARDS the PR title." \
+      "       PR title: ${pr_title}" \
+      "       Put the '!' in a commit subject; that is the only surface a merge commit keeps."
+  fi
+  return 0
+}
+
+guard_meta="$(read_breaking_meta)"
+guard_head_oid="$(printf '%s' "$guard_meta" | jq -r '.headRefOid // ""' 2>/dev/null || true)"
+breaking_guard "$guard_meta"
 
 # --- 2. Wait for required checks to finish -----------------------------------
 # Do NOT trust `gh pr checks --watch --required` as the "all done" signal.
@@ -702,6 +803,19 @@ case "$state" in
     exit 3
     ;;
 esac
+
+# --- 3b. Re-check the breaking surface at the merge boundary (#2320) --------
+# The first guard runs before the wait. A title edit or a new push during the
+# wait can move the marker out of the surface the strategy keeps, so the same
+# projection is read again immediately before the merge/enqueue. The head SHA is
+# captured so a change is visible in the log; the guard always re-runs because a
+# title edit does not change the SHA.
+merge_meta="$(read_breaking_meta)"
+merge_head_oid="$(printf '%s' "$merge_meta" | jq -r '.headRefOid // ""' 2>/dev/null || true)"
+if [[ -n "$merge_head_oid" && "$merge_head_oid" != "$guard_head_oid" ]]; then
+  echo "==> PR head changed during the wait (${guard_head_oid:0:8} -> ${merge_head_oid:0:8}); re-checking the breaking marker."
+fi
+breaking_guard "$merge_meta"
 
 # --- 4. Merge (or report dry-run) -------------------------------------------
 # Resolve head branch + owner up front. The remote head branch is deleted only

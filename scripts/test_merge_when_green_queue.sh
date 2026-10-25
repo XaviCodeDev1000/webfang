@@ -35,7 +35,7 @@ case "${1:-}" in
         while [[ $# -gt 0 ]]; do case "$1" in --json) fields="$2"; shift 2;; --jq) shift 2;; *) shift;; esac; done
         case "$fields" in
           state,mergeStateStatus) emit "$(cat "$STATE/pr-state.json")" ;;
-          title,commits) emit "$(cat "$STATE/pr-meta.json")" ;;
+          title,commits,headRefOid) emit "$(cat "$STATE/pr-meta.json")" ;;
           baseRefName) emit '{"baseRefName":"main"}' ;;
           headRefName) emit '{"headRefName":"fix/queue"}' ;;
           headRepositoryOwner) emit '{"headRepositoryOwner":{"login":"forkowner"}}' ;;
@@ -63,7 +63,7 @@ chmod +x "$BIN/gh"
 reset_state() {
   rm -f "$STATE/polls" "$STATE/merge" "$STATE/calls"
   printf '%s' '{"state":"OPEN","mergeStateStatus":"BEHIND"}' > "$STATE/pr-state.json"
-  printf '%s' '{"title":"fix(queue): probe","commits":[{"oid":"abc12345","messageHeadline":"fix(queue): probe","messageBody":""}]}' > "$STATE/pr-meta.json"
+  printf '%s' '{"title":"fix(queue): probe","commits":[{"oid":"abc12345","messageHeadline":"fix(queue): probe","messageBody":""}],"headRefOid":"abc1234500000000000000000000000000000000"}' > "$STATE/pr-meta.json"
   printf '%s' '{"required_status_checks":{"checks":[{"context":"Validate PR metadata"},{"context":"cargo-mutants (PR diff)"},{"context":"CI Gate"}]}}' > "$STATE/protection.json"
   printf '%s' '[{"name":"Validate PR metadata","bucket":"pass"},{"name":"cargo-mutants (PR diff)","bucket":"pass"},{"name":"CI Gate","bucket":"pass"}]' > "$STATE/checks.json"
   printf '%s' '{"method":"MERGE"}' > "$STATE/method.json"

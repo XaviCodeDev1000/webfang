@@ -125,7 +125,7 @@ case "${1:-}" in
           state,mergeStateStatus) emit '{"state":"OPEN","mergeStateStatus":"CLEAN"}' "$jqexpr" ;;
           headRefName) emit '{"headRefName":"fixture-branch"}' "$jqexpr" ;;
           headRepositoryOwner) emit '{"headRepositoryOwner":{"login":"fork-owner"}}' "$jqexpr" ;;
-          title,commits) emit '{"title":"chore: harness","commits":[]}' "$jqexpr" ;;
+          title,commits,headRefOid) emit '{"title":"chore: harness","commits":[{"oid":"aaaaaaaa0000","messageHeadline":"chore: harness","messageBody":""}],"headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' "$jqexpr" ;;
           *) echo "fake gh: unhandled pr view --json $fields" >&2; exit 99 ;;
         esac
         ;;
