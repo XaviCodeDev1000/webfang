@@ -186,14 +186,34 @@ fn assert_store_records_complete(state_dir: &Path) {
 /// Shared by the plain rows and by `during_cancel_drain`, which differ only in
 /// how attempt 1 killed the child.
 fn resume_run(t: &BehavioralTest, state_dir: &Path, sitemap_url: &str) {
-    let resumed = t
-        .state_dir_cmd(state_dir)
-        .arg("--use-sitemap")
+    resume_run_with(t, state_dir, sitemap_url, &[], None);
+}
+
+/// [`resume_run`] with extra flags and an explicit config file.
+///
+/// The --clean-ai row must resume through the SAME cleaner it crashed in: the
+/// standard path exports the RAW page content under a different hash, so a
+/// standard resume over AI-written bytes would append a second line for the
+/// same page and fail the "exactly one line per page" invariant for a reason
+/// that has nothing to do with the drain.
+fn resume_run_with(
+    t: &BehavioralTest,
+    state_dir: &Path,
+    sitemap_url: &str,
+    extra_args: &[&str],
+    config: Option<&Path>,
+) {
+    let mut cmd = t.state_dir_cmd(state_dir);
+    cmd.arg("--use-sitemap")
         .arg("--sitemap-url")
-        .arg(sitemap_url)
-        .arg("--quiet")
-        .output()
-        .expect("spawn resume run");
+        .arg(sitemap_url);
+    for arg in extra_args {
+        cmd.arg(arg);
+    }
+    if let Some(path) = config {
+        cmd.env("WEBFANG_CONFIG", path);
+    }
+    let resumed = cmd.arg("--quiet").output().expect("spawn resume run");
     assert!(
         resumed.status.success(),
         "invariant (d): resume rerun must exit 0: {}",
@@ -557,6 +577,130 @@ async fn crash_during_cancel_drain_sigint_drain_kills_then_recovers() {
     // Attempt 2: same state dir, crash env and signal REMOVED, resume gate
     // active — the same contract as every other row.
     resume_run(&t, state_dir.path(), &sitemap_url);
+
+    assert_store_records_complete(state_dir.path());
+    assert_jsonl_exactly_once(&t);
+}
+
+/// Mount the loopback embeddings endpoint the --clean-ai rows need, and write
+/// the provider config that points at it.
+///
+/// The endpoint answers the startup probe (input: ["probe"]) and every batch
+/// with one 2-dim vector per input: that is the dimension `probe_dim` pins and
+/// the shape the cleaner reads back. The returned `TempDir` must outlive the
+/// child run — it owns the config file the child loads.
+async fn mount_loopback_embeddings(t: &BehavioralTest) -> (TempDir, std::path::PathBuf) {
+    Mock::given(method("POST"))
+        .and(path("/v1/embeddings"))
+        .respond_with(|request: &wiremock::Request| {
+            let body: serde_json::Value =
+                serde_json::from_slice(&request.body).unwrap_or(serde_json::Value::Null);
+            let count = body
+                .get("input")
+                .and_then(serde_json::Value::as_array)
+                .map_or(1, Vec::len);
+            let data: Vec<serde_json::Value> = (0..count)
+                .map(|index| serde_json::json!({ "embedding": [index as f32, 1.0_f32] }))
+                .collect();
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": data }))
+        })
+        .mount(&t.server)
+        .await;
+
+    let config = format!(
+        r#"
+[[providers]]
+id = "loopback-embeddings"
+display_name = "Loopback embeddings"
+kind = "open_ai_compatible"
+base_url = "{}/v1"
+auth = {{ source = "none" }}
+capabilities = ["embedding"]
+model = "text-embedding-test"
+embedding_dim = 2
+allow_loopback = true
+"#,
+        t.server.uri()
+    );
+    let dir = TempDir::new().expect("provider config tempdir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, config).expect("write provider config");
+    (dir, path)
+}
+
+/// `during_cancel_drain` under --clean-ai (#2269).
+///
+/// The AI export has its OWN drain branch (commit_ai_outcomes), and no row
+/// exercised it: the only cancellation row ran the standard path. This one
+/// runs the same crash-to-resume contract with the cleaner wired, which needs
+/// a mock embeddings provider (startup probe + batches) and a config file
+/// selecting it.
+///
+/// Why the signal lands during the CRAWL: cleaning starts after the crawl
+/// finishes, so a SIGINT there is already visible when cleaning begins — the
+/// phase #2270 made cooperative. Cleaning therefore stops before its first
+/// page, the AI export runs with no chunks to drive, and the drain must STILL
+/// be observed. That is the point: an early cancellation may not skip the
+/// drain, and the armed run may not exit clean because nothing was driven.
+///
+/// AlreadyCommitted is NOT reachable from here, and that is a measured fact,
+/// not an omission: the CLI's crawl-level resume gate drops every COMMITTED
+/// URL before the crawl (scrape_flow::apply_resume_mode), and a run whose
+/// whole list was committed returns "nothing pending" before the export ever
+/// starts (orchestrator::resume_nothing_pending). The all-skipped drain is
+/// covered instead by the unit test
+/// ai_cancelled_drain_with_every_chunk_already_committed_invents_nothing;
+/// what this row proves is the other half — a cancelled --clean-ai run with
+/// no chunks at all still reaches the drain instead of exiting clean.
+#[cfg(unix)]
+#[tokio::test]
+async fn crash_during_cancel_drain_clean_ai_sigint_kills_then_recovers() {
+    let t = BehavioralTest::new().await;
+    let sitemap_url = mount_crash_fixture_delayed(&t, PAGE_DELAY).await;
+    let (_config_dir, config_path) = mount_loopback_embeddings(&t).await;
+    let state_dir = TempDir::new().expect("state tempdir");
+    let cache_dir = TempDir::new().expect("cache tempdir");
+
+    let args: Vec<String> = vec![
+        "--resume".to_string(),
+        "--state-dir".to_string(),
+        state_dir.path().display().to_string(),
+        "--url".to_string(),
+        t.server.uri(),
+        "--output".to_string(),
+        t.out.path().display().to_string(),
+        "--use-sitemap".to_string(),
+        "--sitemap-url".to_string(),
+        sitemap_url.clone(),
+        "--clean-ai".to_string(),
+        "--quiet".to_string(),
+    ];
+    let child = spawn_webfang_with(&args, cache_dir.path(), DURING_CANCEL_DRAIN, |c| {
+        c.stdout(std::process::Stdio::null());
+        c.env(
+            webfang_core::cli::crash_points::ENV_VAR,
+            DURING_CANCEL_DRAIN,
+        );
+        // After the harness's WEBFANG_* strip: the provider is the only way
+        // past startup with --clean-ai, so a bad config fails at exit 78
+        // instead of reaching the drain.
+        c.env("WEBFANG_CONFIG", &config_path);
+    });
+    wait_for_page_fetches(&t.server, 1).await;
+    send_signal(&child, "INT", DURING_CANCEL_DRAIN);
+    let (crashed_status, crashed_stderr) = wait_exit(child, DURING_CANCEL_DRAIN);
+    assert_killed_by_sigkill(&crashed_status, &crashed_stderr);
+
+    // Attempt 2: same state dir, crash env and signal removed, resume gate
+    // active — through the SAME cleaner, so a chunk flushed before the kill
+    // is promoted by flush proof instead of being re-exported raw.
+    resume_run_with(
+        &t,
+        state_dir.path(),
+        &sitemap_url,
+        &["--clean-ai"],
+        Some(&config_path),
+    );
 
     assert_store_records_complete(state_dir.path());
     assert_jsonl_exactly_once(&t);

@@ -134,6 +134,13 @@ persist"). Cancelled runs exit **0** (cancellation beats error-class
 routing), and every persisted status is honest — no invented states. A
 following `--resume` re-drives everything not `COMMITTED`, exactly once.
 
+Since #2270 the **cleaning phase** of `--clean-ai` observes the same token: a
+SIGINT during semantic cleaning stops the run at the NEXT page, keeps the
+chunks that pages already finished produced, and drops the requests still in
+flight — so the run stops paying for embeddings as soon as the user asked it
+to. A cancelled cleaning never escalates the "every page failed" guard into a
+config error, and the export that follows still reaches the drain.
+
 **Windows termination events (#1808, XP-S-02)**: the same drain is driven by
 Ctrl+C **and** by the console close/logoff/shutdown events that
 `tokio::signal::ctrl_c()` never observes. One process-wide
@@ -163,19 +170,17 @@ wall-clock race), giving true crash semantics: no Drop impls, no cleanup.
 | 8 | `while_holding_lock` | killed inside store save txn |
 | 9 | `tmp_written_pre_rename` | tmp complete, rename pending |
 | 10 | `mid_state_file_write` | tmp PARTIAL (truncated artifact) |
+| 11 | `during_cancel_drain` | SIGINT observed: drained items committed, final persist pending |
+| 12 | `during_cancel_drain` (`--clean-ai`) | same window on the AI export path, cancelled during cleaning |
 
-There is an **eleventh armed point with no matrix row**: `during_cancel_drain`
-(the cancel-drain window, before the final persist). The point is armed in
-production (`application/export_factory.rs`), but the branch that would reach
-it **does not run yet**: the export session only observes a cancellation token
-when `ResumeContext::observing_cancel` is called, and in production nobody
-calls it (only the tests of `export_factory` do) — so the session's
-`cancelled()` is always false and the drain branch never runs.
-
-That wiring is **approved** (#2244, decision A: the CLI's export flow delivers
-its cancellation token to the `ResumeContext`), so the point is not
-impossible — it has simply **not been reached yet**. Its matrix row lands with
-that change: advertising it before then would be a row that cannot pass yet.
+The two `during_cancel_drain` rows (#2244, #2269) kill a child that was
+cancelled by a REAL SIGINT and then rerun it with `--resume`. The point is
+checked **once, after the export loop and before `final_persist()`**, not only
+when an item reports `Cancelled`: a cancelled run with nothing left to drive —
+every item already `COMMITTED`, or a cleaning phase that stopped before
+producing a chunk — still observes the drain instead of exiting clean. That is
+what the `--clean-ai` row pins: the AI path's drain cannot depend on an item
+having been driven.
 
 The matrix lives in `crates/webfang_core/tests/crash_matrix_test.rs`: each
 row kills a real CLI child at the pinned point, reruns with `--resume`, and
