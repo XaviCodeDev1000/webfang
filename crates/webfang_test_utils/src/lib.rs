@@ -720,16 +720,47 @@ fn resolve_webfang_path(
     built
 }
 
+/// Environment contract through which a **test runner** declares that it
+/// already built the `webfang` binary for this run.
+///
+/// Set it to `"1"` in the runner's environment (job-level in CI), next to the
+/// pre-build step that produced `<target>/debug/webfang`. The resolver then
+/// trusts that binary instead of spawning `cargo build` from every test
+/// process.
+///
+/// This exists because a test process is not a build orchestrator (#2331): in
+/// `test-crossplatform`, eight test processes serialised on cargo's build lock
+/// and the on-demand build inside `the_retired_shim_env_vars_are_ignored` cost
+/// 83 s of a passing attempt, while the same build inside
+/// `crawl_js_strategy_respects_timeout_secs` was charged to its 10 s
+/// wall-clock contract. The runner builds once, before any test starts.
+///
+/// Local runs leave it unset, so the resolver keeps building on demand and
+/// never reuses a binary the current feature set did not produce. The
+/// pre-build in the lane MUST use the same feature set the tests expect: the
+/// crossplatform lane builds default features, exactly what this resolver
+/// builds.
+pub const PREBUILT_BIN_ENV: &str = "WEBFANG_TEST_PREBUILT_BIN";
+
+/// Whether `PREBUILT_BIN_ENV`'s value is the declared marker.
+///
+/// Pure so the contract is pinned without mutating the process environment.
+fn prebuilt_bin_declared(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
 /// Resolve the path to the `webfang` binary, building it on demand.
 ///
 /// `webfang` is built by the `webfang_cli` crate (a workspace sibling),
 /// so `CARGO_BIN_EXE_webfang` is only set for the crate that owns the binary.
-/// This function falls back to building it via `cargo build`.
+/// This function falls back to building it via `cargo build`, **unless** the
+/// runner declared a pre-built binary through [`PREBUILT_BIN_ENV`].
 ///
 /// # Panics
 ///
 /// Panics if the workspace root cannot be resolved from the crate manifest
-/// directory, if `cargo` cannot be spawned, or if the build fails.
+/// directory, if `cargo` cannot be spawned, or if the build fails. When the
+/// runner declared a pre-built binary, panics if that path does not exist.
 #[must_use]
 pub fn webfang_path() -> PathBuf {
     if let Ok(p) = env::var("CARGO_BIN_EXE_webfang") {
@@ -738,14 +769,31 @@ pub fn webfang_path() -> PathBuf {
     let workspace_root = workspace_root_from_manifest(env!("CARGO_MANIFEST_DIR"));
     let target_dir = env::var("CARGO_TARGET_DIR").ok();
     let built = resolve_webfang_path(None, target_dir.as_deref(), env!("CARGO_MANIFEST_DIR"));
-    let cargo = option_env!("CARGO").unwrap_or("cargo");
-    let status = std::process::Command::new(cargo)
-        .args(["build", "-p", "webfang_cli", "--bin", "webfang", "--quiet"])
-        .current_dir(&workspace_root)
-        .status()
-        .expect("spawn cargo to build webfang");
-    assert!(status.success(), "cargo build --bin webfang failed");
-    built
+    if prebuilt_bin_declared(env::var(PREBUILT_BIN_ENV).ok().as_deref()) {
+        assert!(
+            built.is_file(),
+            "{PREBUILT_BIN_ENV}=1 declares a pre-built binary, but {} does not exist",
+            built.display()
+        );
+        return built;
+    }
+    // #1697/#2331: resolve ONCE per process. This function shells out to
+    // `cargo build`; without the cache every call in a test process re-invoked
+    // the compiler. The first call in a fresh target dir still pays the build
+    // (that is the local contract); a declared runner pre-build skips it.
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let cargo = option_env!("CARGO").unwrap_or("cargo");
+            let status = std::process::Command::new(cargo)
+                .args(["build", "-p", "webfang_cli", "--bin", "webfang", "--quiet"])
+                .current_dir(&workspace_root)
+                .status()
+                .expect("spawn cargo to build webfang");
+            assert!(status.success(), "cargo build --bin webfang failed");
+            built
+        })
+        .clone()
 }
 
 #[cfg(test)]
@@ -846,6 +894,19 @@ mod tests {
             via_target,
             PathBuf::from("/custom/target/debug").join(expected_binary_name())
         );
+    }
+
+    /// The runner contract is an exact marker: only `"1"` declares a
+    /// pre-built binary. Any other value — including an empty string, which a
+    /// sloppy workflow could interpolate — keeps the local on-demand build, so
+    /// a typo never turns into a silent stale-binary reuse (#2331).
+    #[test]
+    fn only_the_exact_marker_declares_a_prebuilt_binary() {
+        assert!(prebuilt_bin_declared(Some("1")));
+        assert!(!prebuilt_bin_declared(Some("0")));
+        assert!(!prebuilt_bin_declared(Some("true")));
+        assert!(!prebuilt_bin_declared(Some("")));
+        assert!(!prebuilt_bin_declared(None));
     }
 
     #[test]

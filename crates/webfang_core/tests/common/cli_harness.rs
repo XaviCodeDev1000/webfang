@@ -66,6 +66,35 @@ fn resolve_webfang_path() -> std::path::PathBuf {
         .parent()
         .and_then(|p| p.parent())
         .expect("resolve workspace root");
+    let mut built = if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
+        std::path::PathBuf::from(target_dir)
+            .join("debug")
+            .join("webfang")
+    } else {
+        workspace_root.join("target").join("debug").join("webfang")
+    };
+    if cfg!(windows) {
+        built.set_extension("exe");
+    }
+    // #2331: a runner that already built the binary for this run declares it
+    // through `webfang_test_utils::PREBUILT_BIN_ENV`. Trusting it removes the
+    // `cargo build` from every test process: in `test-crossplatform` eight
+    // processes serialised on cargo's build lock, and the build inside a test
+    // was charged to that test's own wall-clock contract. Local runs leave the
+    // variable unset and keep the hermetic on-demand build below.
+    if std::env::var(webfang_test_utils::PREBUILT_BIN_ENV)
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        assert!(
+            built.is_file(),
+            "{}=1 declares a pre-built binary, but {} does not exist",
+            webfang_test_utils::PREBUILT_BIN_ENV,
+            built.display()
+        );
+        return built;
+    }
     let cargo = option_env!("CARGO").unwrap_or("cargo");
     let mut build_args = vec!["build", "-p", "webfang_cli", "--bin", "webfang", "--quiet"];
     // Derive the exact feature set from the test crate's active features.
@@ -116,16 +145,6 @@ fn resolve_webfang_path() -> std::path::PathBuf {
         .status()
         .expect("spawn cargo to build webfang");
     assert!(status.success(), "cargo build --bin webfang failed");
-    let mut built = if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
-        std::path::PathBuf::from(target_dir)
-            .join("debug")
-            .join("webfang")
-    } else {
-        workspace_root.join("target").join("debug").join("webfang")
-    };
-    if cfg!(windows) {
-        built.set_extension("exe");
-    }
     built
 }
 
