@@ -1,6 +1,9 @@
 //! Export flow — handles result export (standard and AI-cleaned) and file saving.
 
 use std::path::{Path, PathBuf};
+
+use futures::future::FutureExt;
+use futures::stream::StreamExt;
 use tracing::warn;
 
 use crate::cli::error::CliExit;
@@ -168,7 +171,11 @@ async fn run_ai_export(
     let record_store = config.state_store.map(record_store_bridge);
     warn_unreadable_resume_state(&record_store);
 
-    let cleaned_chunks = clean_all_pages(&config.results, &cleaner).await?;
+    // #2270: the cleaning phase observes the run's token too, so a Ctrl-C
+    // during it stops at the next page instead of running to the end (and
+    // paying for embeddings the user already asked to stop paying for). The
+    // token is borrowed here and moved into the blocking closure below.
+    let cleaned_chunks = clean_all_pages(&config.results, &cleaner, config.cancel.as_ref()).await?;
 
     info!(
         "AI cleaning complete: {} chunks from {} pages",
@@ -231,17 +238,190 @@ async fn await_blocking_export(
     }
 }
 
+/// One page's cleaning outcome: its URL, the cleaner's result, and the source
+/// page (needed for the raw-content fallback and for chunk enrichment).
+type CleanedPage = (
+    crate::domain::value_objects::ValidUrl,
+    Result<Vec<DocumentChunk>, SemanticError>,
+    ScrapedContent,
+);
+
+/// Why the cleaning loop stopped asking for pages.
+enum NextPage {
+    Ready(Box<CleanedPage>),
+    /// Every page was folded.
+    Exhausted,
+    /// The token fired; the pages still in flight were dropped.
+    Cancelled,
+}
+
+impl NextPage {
+    fn ready(page: Option<CleanedPage>) -> Self {
+        page.map_or(Self::Exhausted, |page| Self::Ready(Box::new(page)))
+    }
+}
+
+/// Await the next page that finished cleaning, observing `cancel` first.
+///
+/// A result that is ALREADY available wins over the token: its embeddings were
+/// paid for, and dropping it would discard exactly the cost the cancellation
+/// check exists to protect (#2270).
+async fn next_cleaned_page<F>(
+    pending: &mut futures::stream::FuturesUnordered<F>,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
+) -> NextPage
+where
+    F: std::future::Future<Output = CleanedPage>,
+{
+    if let Some(ready) = pending.next().now_or_never() {
+        return NextPage::ready(ready);
+    }
+    match cancel {
+        None => NextPage::ready(pending.next().await),
+        Some(token) => tokio::select! {
+            biased;
+            () = token.cancelled() => NextPage::Cancelled,
+            item = pending.next() => NextPage::ready(item),
+        },
+    }
+}
+
+/// Accumulator for the cleaning phase: the chunks kept so far plus the counts
+/// the `#543` systemic-failure guard and the cancellation summary need.
+///
+/// Extracted from [`clean_all_pages`] to keep that function inside the
+/// `too_many_lines` ratchet, the same way `await_blocking_export` was.
+#[derive(Default)]
+struct CleaningTally {
+    chunks: Vec<DocumentChunk>,
+    failed: usize,
+    fallback: usize,
+    first_error: Option<SemanticError>,
+}
+
+impl CleaningTally {
+    fn with_capacity(pages: usize) -> Self {
+        Self {
+            chunks: Vec::with_capacity(pages * 2),
+            ..Self::default()
+        }
+    }
+
+    /// Fold ONE page's outcome: keep its chunks, or degrade to the raw content
+    /// and record the failure. `Err` is reserved for an infrastructure-fatal
+    /// error, which aborts the whole run (#581).
+    fn fold(&mut self, page: CleanedPage) -> Result<(), CliExit> {
+        let (url, chunks_result, result) = page;
+        let chunks = match chunks_result {
+            Ok(chunks) => chunks,
+            Err(e) => return self.record_failure(url, e, &result),
+        };
+        if chunks.is_empty() {
+            warn!(url = %url, "AI cleaner produced 0 chunks; using raw content fallback");
+            self.chunks
+                .push(DocumentChunk::from_scraped_content(&result));
+            return Ok(());
+        }
+        // The cleaner produces chunks with empty url/title (it only sees raw
+        // HTML). Enrich each chunk with identity from its source page so
+        // validate() passes and export succeeds (#569).
+        self.chunks.extend(
+            chunks
+                .into_iter()
+                .map(|chunk| chunk.enrich_from_scraped_content(&result)),
+        );
+        Ok(())
+    }
+
+    /// Classify a page failure by operational severity (#581): an
+    /// infrastructure fatal aborts the whole run instead of burning CPU on
+    /// pages that will all fail; anything else degrades to raw content and is
+    /// counted, so an all-fallback job still surfaces an error (#543).
+    fn record_failure(
+        &mut self,
+        url: crate::domain::value_objects::ValidUrl,
+        e: SemanticError,
+        result: &ScrapedContent,
+    ) -> Result<(), CliExit> {
+        match e.classify() {
+            ErrorClass::InternalFatal => Err(CliExit::ConfigError(format!(
+                "Falló la infraestructura de IA (error fatal, no reintentable): {e}"
+            ))),
+            ErrorClass::DomainRecoverable => {
+                warn!(
+                    url = %url,
+                    error = %e,
+                    "chunk exceeds character limit; using raw content fallback"
+                );
+                self.chunks
+                    .push(DocumentChunk::from_scraped_content(result));
+                self.fallback += 1;
+                if self.first_error.is_none() {
+                    self.first_error = Some(e);
+                }
+                Ok(())
+            },
+            // SemanticError::classify() only returns InternalFatal or
+            // DomainRecoverable, but handle the other classes exhaustively so
+            // future variants don't silently fall through.
+            ErrorClass::TransientRetriable
+            | ErrorClass::TransientBackoff
+            | ErrorClass::PermanentFatal => {
+                self.failed += 1;
+                crate::infrastructure::observability::log_scrape_error(
+                    &e,
+                    url.as_str(),
+                    "ai_clean",
+                    result.correlation_id.as_ref(),
+                    "AI content cleanup failed; keeping raw content fallback",
+                );
+                if self.first_error.is_none() {
+                    self.first_error = Some(e);
+                }
+                self.chunks
+                    .push(DocumentChunk::from_scraped_content(result));
+                Ok(())
+            },
+        }
+    }
+
+    /// EVERY page failed or fell back: the cause is systemic (not per-content),
+    /// so the caller must propagate it instead of returning raw fallback chunks
+    /// with a success exit code (#543 regression).
+    fn systemic_failure(&self, pages: usize) -> Option<CliExit> {
+        if pages == 0 || self.failed + self.fallback != pages {
+            return None;
+        }
+        let detail = self.first_error.as_ref().map_or_else(
+            || "sin detalle de error disponible".to_string(),
+            ToString::to_string,
+        );
+        Some(CliExit::ConfigError(format!(
+            "Falló la limpieza semántica AI en todas las páginas (error de modelo/configuración): {detail}"
+        )))
+    }
+}
+
 /// Run the cleaner over every scraped page concurrently and fold the results
 /// into a single chunk list.
 ///
 /// Per-page failures fall back to the raw content, but a TOTAL failure (every
 /// page fails to clean) is treated as a model/config error and propagated as
 /// `Err` instead of silently exiting 0 (#543).
+///
+/// Cancellation (#2270) is observed BETWEEN pages: the run's token is checked
+/// before awaiting the next page, so a Ctrl-C during the cleaning phase stops
+/// the run instead of letting it work — and pay for embeddings — until the
+/// last page finishes. Pages that already produced chunks are folded and
+/// returned (the caller exports them as the drain); pages still in flight are
+/// dropped, and a cancelled run never escalates the `#543` total-failure
+/// guard into a config error.
 async fn clean_all_pages(
     results: &[ScrapedContent],
     cleaner: &std::sync::Arc<dyn SemanticCleaner>,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
 ) -> Result<Vec<DocumentChunk>, CliExit> {
-    let cleaning_tasks: Vec<_> = results
+    let mut pending: futures::stream::FuturesUnordered<_> = results
         .iter()
         .map(|result| {
             let html_content = result
@@ -257,95 +437,40 @@ async fn clean_all_pages(
         })
         .collect();
 
-    let cleaning_results = futures::future::join_all(cleaning_tasks).await;
-
-    let mut cleaned_chunks: Vec<DocumentChunk> = Vec::with_capacity(results.len() * 2);
-    let mut failed = 0usize;
-    let mut fallback = 0usize;
-    let mut first_error: Option<SemanticError> = None;
-    for (url, chunks_result, result) in cleaning_results {
-        match chunks_result {
-            Ok(chunks) => {
-                if chunks.is_empty() {
-                    warn!(url = %url, "AI cleaner produced 0 chunks; using raw content fallback");
-                    cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
-                } else {
-                    // The cleaner produces chunks with empty url/title (it only
-                    // sees raw HTML). Enrich each chunk with identity from its
-                    // source page so validate() passes and export succeeds (#569).
-                    cleaned_chunks.extend(
-                        chunks
-                            .into_iter()
-                            .map(|chunk| chunk.enrich_from_scraped_content(&result)),
-                    );
-                }
+    let mut tally = CleaningTally::with_capacity(results.len());
+    let mut processed = 0usize;
+    let mut cancelled = false;
+    loop {
+        match next_cleaned_page(&mut pending, cancel).await {
+            NextPage::Ready(page) => {
+                processed += 1;
+                tally.fold(*page)?;
             },
-            Err(e) => {
-                // Classify the error by operational severity to decide
-                // fail-fast vs fallback (#581 follow-up: error classification).
-                match e.classify() {
-                    ErrorClass::InternalFatal => {
-                        // The model/inference stack is broken — retrying won't
-                        // help, so abort the whole crawl immediately instead of
-                        // burning CPU on 100 more pages that will all fail.
-                        return Err(CliExit::ConfigError(format!(
-                            "Falló la infraestructura de IA (error fatal, no reintentable): {e}"
-                        )));
-                    },
-                    ErrorClass::DomainRecoverable => {
-                        // ChunkTooLarge and similar: the chunk simply exceeds
-                        // the user's --max-chars budget. Fall back to raw for
-                        // this page and count it as a fallback (so an all-
-                        // fallback job still surfaces an error, #543).
-                        warn!(
-                            url = %url,
-                            error = %e,
-                            "chunk exceeds character limit; using raw content fallback"
-                        );
-                        cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
-                        fallback += 1;
-                        if first_error.is_none() {
-                            first_error = Some(e);
-                        }
-                        continue;
-                    },
-                    // SemanticError::classify() only returns InternalFatal or
-                    // DomainRecoverable, but handle the other classes
-                    // exhaustively so future variants don't silently fall through.
-                    ErrorClass::TransientRetriable
-                    | ErrorClass::TransientBackoff
-                    | ErrorClass::PermanentFatal => {
-                        failed += 1;
-                        crate::infrastructure::observability::log_scrape_error(
-                            &e,
-                            url.as_str(),
-                            "ai_clean",
-                            result.correlation_id.as_ref(),
-                            "AI content cleanup failed; keeping raw content fallback",
-                        );
-                        if first_error.is_none() {
-                            first_error = Some(e);
-                        }
-                        cleaned_chunks.push(DocumentChunk::from_scraped_content(&result));
-                    },
-                }
+            NextPage::Exhausted => break,
+            NextPage::Cancelled => {
+                cancelled = true;
+                break;
             },
         }
     }
 
-    // If EVERY page failed or fell back, the cause is systemic (not per-
-    // content), so propagate it instead of returning raw fallback chunks
-    // with a success exit code (#543 regression).
-    if failed + fallback == results.len() && !results.is_empty() {
-        let detail = first_error
-            .map(|e| e.to_string())
-            .unwrap_or_else(|| "sin detalle de error disponible".to_string());
-        return Err(CliExit::ConfigError(format!(
-            "Falló la limpieza semántica AI en todas las páginas (error de modelo/configuración): {detail}"
-        )));
+    if cancelled {
+        info!(
+            cleaned = processed,
+            total = results.len(),
+            "cancellation observed during AI cleaning; stopping before the next page"
+        );
+        // A cancelled run never escalates the systemic-failure guard into a
+        // config error: it stopped early by request, and the CLI already maps
+        // cancellation onto its own exit.
+        return Ok(tally.chunks);
     }
 
-    Ok(cleaned_chunks)
+    if let Some(exit) = tally.systemic_failure(results.len()) {
+        return Err(exit);
+    }
+
+    Ok(tally.chunks)
 }
 
 // ============================================================================
@@ -443,7 +568,7 @@ mod tests {
             sample_result("https://example.com/b", "<p>b</p>"),
         ];
 
-        let outcome = clean_all_pages(&results, &cleaner).await;
+        let outcome = clean_all_pages(&results, &cleaner, None).await;
 
         // Inference error is InternalFatal → fail-fast: abort immediately with
         // a config error instead of waiting for all pages to fail.
@@ -459,6 +584,94 @@ mod tests {
                 std::mem::discriminant(&other)
             ),
         }
+    }
+
+    /// Build the chunk a healthy page would produce, with a non-empty body.
+    fn cleaned_chunk(url: &str, html: &str) -> DocumentChunk {
+        let mut page = sample_result(url, html);
+        page.content = html.to_string();
+        DocumentChunk::from_scraped_content(&page)
+    }
+
+    /// Cleaner whose per-page behavior is scripted by the test: URLs carrying
+    /// `slow` never resolve (a remote embedding call still in flight when the
+    /// signal arrives), every other page returns one chunk immediately.
+    struct ScriptedCleaner {
+        hang_slow: bool,
+    }
+
+    impl Sealed for ScriptedCleaner {}
+
+    impl SemanticCleaner for ScriptedCleaner {
+        fn clean<'a>(
+            &'a self,
+            url: &'a str,
+            html: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<DocumentChunk>, SemanticError>> + Send + 'a>>
+        {
+            let hang = self.hang_slow && url.contains("slow");
+            Box::pin(async move {
+                if hang {
+                    std::future::pending::<()>().await;
+                }
+                Ok(vec![cleaned_chunk(url, html)])
+            })
+        }
+
+        fn max_chars(&self) -> usize {
+            512
+        }
+
+        fn is_ready(&self) -> bool {
+            true
+        }
+    }
+
+    /// #2270: a cancelled token stops the cleaning at the NEXT page and keeps
+    /// the work that already finished. The page still in flight is dropped
+    /// instead of awaited, so the run cannot keep paying for embeddings the
+    /// user already asked it to stop requesting.
+    #[tokio::test]
+    async fn test_clean_all_pages_stops_at_the_next_page_when_cancelled() {
+        let cleaner: Arc<dyn SemanticCleaner> = Arc::new(ScriptedCleaner { hang_slow: true });
+        let results = vec![
+            sample_result("https://example.com/fast", "<p>fast</p>"),
+            sample_result("https://example.com/slow", "<p>slow</p>"),
+        ];
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+
+        let outcome = clean_all_pages(&results, &cleaner, Some(&token))
+            .await
+            .expect("a cancelled cleaning is not an error");
+
+        assert_eq!(
+            outcome.len(),
+            1,
+            "only the page that already finished may survive the drain"
+        );
+        assert!(
+            outcome[0].url.ends_with("/fast"),
+            "the surviving chunk must be the completed page, got {}",
+            outcome[0].url
+        );
+    }
+
+    /// Regression guard for the stream rewrite: WITHOUT a token every page is
+    /// still cleaned and folded — cancellation must not swallow work.
+    #[tokio::test]
+    async fn test_clean_all_pages_without_token_cleans_every_page() {
+        let cleaner: Arc<dyn SemanticCleaner> = Arc::new(ScriptedCleaner { hang_slow: false });
+        let results = vec![
+            sample_result("https://example.com/one", "<p>one</p>"),
+            sample_result("https://example.com/two", "<p>two</p>"),
+        ];
+
+        let outcome = clean_all_pages(&results, &cleaner, None)
+            .await
+            .expect("an uncancelled cleaning succeeds");
+
+        assert_eq!(outcome.len(), 2, "every page must be folded exactly once");
     }
 }
 
