@@ -1084,6 +1084,13 @@ jobs:
       # Retry policy lives in .config/nextest.toml [profile.ci] (#2305): no
       # --retries flag here — the invocation lint rejects policy flags.
       - name: Unit + integration tests
+        # #2331: the pre-build above owns the binary. Without this contract
+        # every test process re-spawns `cargo build`; on windows-latest the
+        # eight processes serialise on the build lock, a passing attempt paid
+        # 83s of build, and a build inside a test was charged to that test's
+        # own wall-clock contract.
+        env:
+          WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
 
   # ============================================================================
@@ -1196,6 +1203,13 @@ jobs:
       # ones whose `required-features` are off instead of failing on them
       # (see the same comment in `test-core`).
       - name: Unit + integration tests
+        # #2331: the pre-build above owns the binary. Without this contract
+        # every test process re-spawns `cargo build`; on windows-latest the
+        # eight processes serialise on the build lock, a passing attempt paid
+        # 83s of build, and a build inside a test was charged to that test's
+        # own wall-clock contract.
+        env:
+          WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
       # #1834: the Windows console-control path was only ever COMPILED by this
       # lane, never EXERCISED — nobody drove a real CTRL_CLOSE_EVENT through

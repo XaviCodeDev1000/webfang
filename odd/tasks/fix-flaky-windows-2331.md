@@ -20,7 +20,7 @@ Acceptance evidence: local green runs of the three tests, a `cargo check`/clippy
 - **T1** — `webfang_test_utils::webfang_path`: honour `PREBUILT_BIN_ENV`, assert existence, cache the built path per process. **done** (unit test `only_the_exact_marker_declares_a_prebuilt_binary`).
 - **T2** — `cli_harness::resolve_webfang_path`: same contract before spawning cargo; keep feature forwarding for the unset case. **done**.
 - **T3** — `crawl_js_strategy_respects_timeout_secs`: build the `Command` before `Instant::now()`. **done** (PASS 5.29s with the binary absent and the helper build inside the function).
-- **T4** — CI: declare the pre-built binary in the lanes whose pre-build matches the helper's build (`test-core`, `test-crossplatform`). **pending** (repo asks before touching `.github/`).
+- **T4** — CI: declare the pre-built binary in the lanes whose pre-build matches the helper's build (`test-core`, `test-crossplatform`). **done** (step-level `env:` on «Unit + integration tests»; `actionlint` clean).
 - **T5** — Open finding, out of this slice: in `--all-features` lanes (`test-full`, nightly `flake-detection`) the core helper builds with the five forwarded features while the MCP helper builds with default ones; both write `<target>/debug/webfang`, so concurrent test processes alternate feature sets and invalidate each other's link. That explains the nightly parity TIMEOUT (180s, cold cache, no pre-build) and needs its own design (one authoritative pre-build + contract, or per-feature target dirs). Not `WEBFANG_TEST_PREBUILT_BIN` on those lanes: the pre-build uses `--all-features` (chromium) and the helper deliberately does not forward `chromium`.
 
 ## Log
@@ -33,3 +33,4 @@ Acceptance evidence: local green runs of the three tests, a `cargo check`/clippy
 - **E5** — Timer hoist: binary deleted, flag unset, `crawl_js_strategy_respects_timeout_secs` PASS in **5.29s** (build outside the measured clock).
 - **E6** — `cargo check` and clippy (`-D warnings`, cognitive-complexity, too-many-lines) green for `webfang_test_utils` all-targets and `webfang_core --test behavioral`; `cargo fmt --all -- --check` clean.
 - **E7** — `webfang_path` call sites: 33 across 13 files; the MCP entry point is `webfang_binary()` in `crates/webfang_mcp/tests/common/mod.rs`.
+- **E8** — CI scope confirmed with the maintainer: `test-core` and `test-crossplatform`, the two lanes whose pre-build is default features. `test-full` and nightly keep the on-demand build on purpose (see T5).
