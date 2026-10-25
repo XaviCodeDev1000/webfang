@@ -460,33 +460,39 @@ async fn crawl_js_strategy_respects_timeout_secs() {
 
     let out_path = t.out.path().to_path_buf();
 
+    // #2331/#1697: build the command — and therefore resolve the binary —
+    // BEFORE the clock starts. `cmd()` goes through `webfang_path()`, whose
+    // first call in a cold target dir shells out to `cargo build`; charging
+    // that compile to the 10 s contract below is what made this test flake on
+    // `windows-latest` under a loaded runner. The clock measures the CLI run,
+    // never the harness bootstrap.
+    let mut command = cmd();
+    command
+        .arg("--url")
+        .arg(&slow_url)
+        .arg("--sitemap-url")
+        .arg(&sitemap_url)
+        .arg("--use-sitemap")
+        .arg("--js-strategy")
+        .arg("static")
+        .arg("--timeout-secs")
+        .arg("2")
+        // F-08 (#1231): timeouts retry, so pin the budget to keep the
+        // measured contract the per-attempt timeout, not the retry
+        // backoff (default 3 retries × 2s + 1/2/4s backoff = exactly
+        // 15.0s — a dead heat with the 15s deadline below).
+        .arg("--max-retries")
+        .arg("1")
+        .arg("--max-depth")
+        .arg("0")
+        .arg("--output")
+        .arg(out_path)
+        .arg("--quiet");
+
     let start = Instant::now();
     let output = timeout(
         Duration::from_secs(15),
-        tokio::task::spawn_blocking(move || {
-            cmd()
-                .arg("--url")
-                .arg(&slow_url)
-                .arg("--sitemap-url")
-                .arg(&sitemap_url)
-                .arg("--use-sitemap")
-                .arg("--js-strategy")
-                .arg("static")
-                .arg("--timeout-secs")
-                .arg("2")
-                // F-08 (#1231): timeouts retry, so pin the budget to keep the
-                // measured contract the per-attempt timeout, not the retry
-                // backoff (default 3 retries × 2s + 1/2/4s backoff = exactly
-                // 15.0s — a dead heat with the 15s deadline below).
-                .arg("--max-retries")
-                .arg("1")
-                .arg("--max-depth")
-                .arg("0")
-                .arg("--output")
-                .arg(out_path)
-                .arg("--quiet")
-                .output()
-        }),
+        tokio::task::spawn_blocking(move || command.output()),
     )
     .await
     .expect("test must not hang")
