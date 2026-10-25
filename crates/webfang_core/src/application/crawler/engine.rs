@@ -892,6 +892,11 @@ impl Engine {
     /// Run the crawl loop until completion
     ///
     /// Returns the collected URLs and error count.
+    // A run is an ordered sequence of decided steps — seed, loop, drain,
+    // verdict, collect, summary — and the #2313 stall propagation spent the
+    // last of the line budget it had. Splitting it would hide that order
+    // behind jumps, so the length is accepted here rather than paid for there.
+    #[allow(clippy::too_many_lines)]
     pub async fn run(&mut self) -> Result<CrawlResult, CrawlError> {
         let config_clone = Arc::clone(&self.config);
 
@@ -972,9 +977,7 @@ impl Engine {
         // fetch (timeout_secs) or a rate-limit token (delay_ms), plus grace.
         let worker_wait_bound = Self::worker_wait_bound(&config_clone);
 
-        // Main crawl loop. A stall is captured, not acted on yet: the in-flight
-        // workers must still be drained (and aborted if wedged) before the run
-        // reports the failure.
+        // A stall is captured here and reported after the drain.
         let loop_result = self
             .crawl_loop(
                 &mut tasks,
@@ -1000,10 +1003,7 @@ impl Engine {
         // because a Sender clone inside the Arc<CrawlTaskCtx> is still alive.
         drop(task_ctx);
 
-        // A stalled loop is a FAILED run (#2313). The pages collected so far
-        // are not a crawl result: returning one would hide the wedge exactly
-        // the way the old warn-and-re-check did. The checkpoint stays on disk
-        // because the run did not complete, so resume state is still valid.
+        // A stalled loop is a FAILED run (#2313); the checkpoint stays for resume.
         loop_result?;
 
         // Final checkpoint verdict: a fully-completed crawl (no shutdown, no
@@ -1234,13 +1234,13 @@ impl Engine {
                 WaitOutcome::Progress => {
                     idle_since = None;
                     pause_reported = false;
-                }
+                },
                 WaitOutcome::Idle => {
                     let paused_for = idle_since
                         .get_or_insert_with(std::time::Instant::now)
                         .elapsed();
                     match pause.verdict(paused_for) {
-                        PauseVerdict::Wait => {}
+                        PauseVerdict::Wait => {},
                         PauseVerdict::Report => {
                             if !pause_reported {
                                 pause_reported = true;
@@ -1251,7 +1251,7 @@ impl Engine {
                                     "crawl paused by autoscale past the alert threshold — still waiting"
                                 );
                             }
-                        }
+                        },
                         PauseVerdict::GiveUp => {
                             self.cancel_run();
                             return Err(CrawlError::Internal(format!(
@@ -1259,10 +1259,10 @@ impl Engine {
                                 paused_for.as_secs(),
                                 self.scheduler.pending_len(),
                             )));
-                        }
+                        },
                     }
                     tokio::time::sleep(IDLE_POLL_INTERVAL).await;
-                }
+                },
                 WaitOutcome::Stalled => {
                     // Unblock the other workers before bailing out: the wedged
                     // one ignores this, but the drain should not have to burn
@@ -1274,7 +1274,7 @@ impl Engine {
                         tasks.len(),
                         self.scheduler.pending_len(),
                     )));
-                }
+                },
             }
         }
         Ok(())
@@ -1380,7 +1380,7 @@ impl Engine {
             Ok(Some(result)) => {
                 handle_crawl_result(result, &self.error_count, &self.error_breakdown);
                 WaitOutcome::Progress
-            }
+            },
             Ok(None) => WaitOutcome::Progress,
             Err(_elapsed) => {
                 warn!(
@@ -1389,7 +1389,7 @@ impl Engine {
                     "worker wait exceeded bound — ending the run"
                 );
                 WaitOutcome::Stalled
-            }
+            },
         }
     }
 
