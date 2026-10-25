@@ -1128,6 +1128,23 @@ jobs:
       # consumes --ignored tests, so no model cache entry is needed here.
       - name: Pre-build test binary
         run: cargo build -p webfang_cli --bin webfang --all-features
+      # #2335: the two test helpers build their OWN specs on demand here (no
+      # WEBFANG_TEST_PREBUILT_BIN in this lane — the all-features pre-build
+      # above does not match what they build, and blind trust would break the
+      # #302 hermeticity contract). Each spec's cold first materialization
+      # (~42s; the featured one recompiles 116 units) used to be paid INSIDE
+      # test processes, serialized under one build lock: a test queuing behind
+      # both first-builds burned past the slow-timeout (the nightly 180s
+      # parity TIMEOUT) or hang-then-passed into a flaky-result=fail red.
+      # Materialize both specs BEFORE nextest and every on-demand build
+      # becomes a ~0.3s no-op whose fingerprint check also keeps this list
+      # honest against the helper: drift degrades to one visible slow build,
+      # never a silently wrong binary. The feature list mirrors the cfg!()
+      # derivation in crates/webfang_core/tests/common/cli_harness.rs.
+      - name: Pre-build helper binary specs
+        run: |
+          cargo build -p webfang_cli --bin webfang
+          cargo build -p webfang_cli --bin webfang --features adaptive-selectors,mcp,persistence,console,dev-tracing
       # Retry policy lives in .config/nextest.toml [profile.ci] (#2305).
       - run: cargo nextest run --all-features --profile ci
 
@@ -2012,6 +2029,16 @@ jobs:
       - uses: taiki-e/install-action@e88e69ecdb9658bd172693dcdc2c84e7f0ab6a11
         with:
           tool: nextest@0.9.131
+      # #2335: materialize the two specs the test helpers build on demand
+      # (default + the five forwarded features — the full rationale and the
+      # cli_harness.rs sync note live in test-full's pre-build step). This
+      # lane had no pre-build at all, so with retries 0 the parity tests paid
+      # both cold first-builds inside their own wall clock, straight into the
+      # 180s slow-timeout.
+      - name: Pre-build helper binary specs
+        run: |
+          cargo build -p webfang_cli --bin webfang
+          cargo build -p webfang_cli --bin webfang --features adaptive-selectors,mcp,persistence,console,dev-tracing
       - name: Full suite with zero retries (known flakes excluded)
         run: |
           cargo nextest run --all-features --profile flake-nightly \
