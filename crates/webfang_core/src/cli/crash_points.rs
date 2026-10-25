@@ -44,8 +44,11 @@ pub const TMP_WRITTEN_PRE_RENAME: &str = "tmp_written_pre_rename";
 /// Record-store tmp PARTIALLY written (truncated artifact).
 pub const MID_STATE_FILE_WRITE: &str = "mid_state_file_write";
 /// During cancellation drain, before final persist (#2244 decision A): hit
-/// when a cancelled export drains after observing the run's token, before
-/// `final_persist()` writes the drained state.
+/// once the export loop has observed the run's token, before `final_persist()`
+/// writes the drained state. Reached by BOTH export paths (standard and
+/// `--clean-ai`), and also when the drain had nothing left to drive — every
+/// item already COMMITTED, or a cleaning phase that stopped before producing
+/// a chunk (#2269, #2270).
 pub const DURING_CANCEL_DRAIN: &str = "during_cancel_drain";
 
 static ARMED: OnceLock<Option<(String, u32)>> = OnceLock::new();
