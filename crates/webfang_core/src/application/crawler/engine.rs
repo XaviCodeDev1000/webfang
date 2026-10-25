@@ -3346,22 +3346,7 @@ mod tests {
             )))
             .await
             .expect("collector send must succeed");
-        // Task context assembled exactly like `Engine::run`.
-        let session = engine.session.take().expect("session present");
-        let task_ctx = session.task_ctx(CrawlExec {
-            queue: engine.scheduler.queue(),
-            rate_limiter: engine.rate_limiter.clone(),
-            pages_crawled: Arc::clone(&engine.pages_crawled),
-            error_count: Arc::clone(&engine.error_count),
-            error_breakdown: Arc::clone(&engine.error_breakdown),
-            collector: engine.collector.clone(),
-            cookie_bridge: Arc::clone(&engine.cookie_bridge),
-            banned_domains: Arc::clone(&engine.banned_domains),
-            robots_fetcher: Arc::clone(&engine.robots_fetcher),
-            fetch_router: engine.fetch_router.clone(),
-        });
-
-        let mut tasks = tokio::task::JoinSet::new();
+        let (task_ctx, mut tasks) = loop_harness(&mut engine);
         engine
             .crawl_loop(
                 &mut tasks,
@@ -3412,6 +3397,24 @@ mod tests {
         (task_ctx, tokio::task::JoinSet::new())
     }
 
+    /// The `max_depth(0)` shape shared by the two stall tests (#2313): one
+    /// dispatchable page, room for a second worker, and a frontier that
+    /// empties the moment the seed leaves — exactly one worker in flight.
+    fn stalled_shape() -> (
+        Engine,
+        Arc<CrawlTaskCtx>,
+        tokio::task::JoinSet<Result<(), CrawlError>>,
+    ) {
+        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .max_pages(1)
+            .concurrency(nz(2))
+            .build();
+        let mut engine = session_engine(config);
+        let (task_ctx, tasks) = loop_harness(&mut engine);
+        (engine, task_ctx, tasks)
+    }
+
     /// #2313 (strict-TDD RED): a worker that never completes must END the run
     /// with an error at `worker_wait_bound`.
     ///
@@ -3421,13 +3424,7 @@ mod tests {
     /// guard turns a regression into a failed assertion instead of a hung test.
     #[tokio::test]
     async fn wedged_worker_ends_the_run_instead_of_spinning() {
-        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
-        let config = CrawlerConfig::builder(seed)
-            .max_pages(1)
-            .concurrency(nz(2))
-            .build();
-        let mut engine = session_engine(config);
-        let (task_ctx, mut tasks) = loop_harness(&mut engine);
+        let (mut engine, task_ctx, mut tasks) = stalled_shape();
 
         // A worker that never completes and never observes cancellation.
         tasks.spawn(async { std::future::pending::<Result<(), CrawlError>>().await });
@@ -3466,13 +3463,7 @@ mod tests {
     /// every iteration with an empty frontier.
     #[tokio::test]
     async fn empty_frontier_with_worker_in_flight_is_not_a_stall() {
-        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
-        let config = CrawlerConfig::builder(seed)
-            .max_pages(1)
-            .concurrency(nz(2))
-            .build();
-        let mut engine = session_engine(config);
-        let (task_ctx, mut tasks) = loop_harness(&mut engine);
+        let (mut engine, task_ctx, mut tasks) = stalled_shape();
 
         let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = Arc::clone(&finished);
