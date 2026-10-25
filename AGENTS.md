@@ -689,10 +689,15 @@ diagnosis: query `merge-when-green context read fallback manual enqueue` in Engr
 the queue itself deletes the PR's remote branch: a fetch afterwards showing a vanished
 `origin/<branch>` is expected queue behavior; the local side is the post-merge runbook below.
 
-**Breaking change (maintainer decision):** if the queue method is squash, do not enqueue:
-squash drops the `!` and the script exits 5. Land it with a merge commit outside the queue
-(queue temporarily disabled), or switch the queue method to `MERGE` for that landing and
-switch back. Never leave the `!` only in the PR title.
+**Breaking change (maintainer decision):** the marker must sit on the surface the lander keeps.
+`scripts/merge-when-green.sh` reads the queue's merge method and applies this matrix: with SQUASH
+and **one commit** the squash subject is the commit subject — put the canonical `!` there (`type!:`,
+`type(scope)!:`); with SQUASH and **two or more commits** the squash subject is the PR title — put
+it there; with MERGE the branch commits survive and the title is discarded. `type!(scope):` is
+malformed (release-plz does not parse it) and a `BREAKING CHANGE:` footer alone does not satisfy
+the gate; the script refuses both with exit 5. A merge commit (`--merge`, outside the queue)
+preserves commit markers but discards the title; it is an option, never a mandatory recipe. Never
+leave the `!` only in a surface the chosen strategy drops.
 
 **Hooks and verification:** the `pre-commit` and `pre-push` consult the review gate; on a fresh
 clone you must enable the wiring with `git config core.hooksPath scripts/githooks`. To wait

@@ -114,7 +114,7 @@ case "${1:-}" in
           state) emit "$(jq -c '{state: .state}' "$state/pr-state.json")" "$jqexpr" ;;
           headRefName) emit '{"headRefName":"fixture-branch"}' "$jqexpr" ;;
           headRepositoryOwner) emit '{"headRepositoryOwner":{"login":"fork-owner"}}' "$jqexpr" ;;
-          title,commits) cat "$state/pr-meta.json" ;;
+          title,commits,headRefOid) cat "$state/pr-meta.json" ;;
           *) echo "fake gh: unhandled pr view --json $fields" >&2; exit 99 ;;
         esac
         ;;
@@ -134,7 +134,7 @@ chmod +x "$BIN/gh"
 
 printf '%s\n' '[{"name":"Validate PR metadata","bucket":"pass"},{"name":"CI Gate","bucket":"pass"}]' \
   > "$STATE/checks.json"
-printf '%s\n' '{"title":"fix(cli): harness fixture","commits":[]}' > "$STATE/pr-meta.json"
+printf '%s\n' '{"title":"fix(cli): harness fixture","commits":[{"oid":"abc12345","messageHeadline":"fix(cli): harness fixture","messageBody":""}],"headRefOid":"abc1234500000000000000000000000000000000"}' > "$STATE/pr-meta.json"
 
 # ─── Fixtures ───────────────────────────────────────────────────────────────
 # set_pr_state <state> <mergeStateStatus>: the exact shape GitHub answers for
