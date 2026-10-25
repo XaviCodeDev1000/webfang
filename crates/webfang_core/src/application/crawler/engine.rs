@@ -123,10 +123,21 @@ pub const TERMINATION_REGISTRATION_REJECTED: &str =
 
 /// Grace added to the longest legitimate worker wait when bounding joins (#509).
 ///
-/// The longest legitimate wait is a fetch (`config.timeout_secs`) or a
-/// rate-limit token (`config.delay_ms`); anything beyond that plus this grace
-/// is treated as a hung worker.
+/// The longest legitimate wait is one fetch — a connect phase plus a request
+/// phase, each carrying its own timeout — or a rate-limit token
+/// (`config.delay_ms`). Anything beyond that plus this grace is treated as a
+/// hung worker.
 const SHUTDOWN_GRACE_SECS: u64 = 10;
+
+/// Timeout-carrying phases a single worker pays before it can finish (#2313).
+///
+/// A fetch is not one timeout: the connect has its own cap (10s in
+/// `create_rate_limited_client`) and the request has `timeout_secs` on top. The
+/// bound must cover the SUM, not the larger of the two — measured on
+/// `test_crawl_with_sitemap_response_excludes_external_and_forbidden_urls`, an
+/// unreachable host took 47s end to end with a 30s request timeout, and a bound
+/// of `30 + grace` aborted the whole crawl over one slow address.
+const FETCH_TIMEOUT_PHASES: u64 = 2;
 
 /// Poll interval while the engine has work it cannot dispatch and no worker in
 /// flight to wait on — an autoscale `Critical` pause (#2313).
@@ -202,6 +213,34 @@ impl PauseWatchdog {
         } else {
             PauseVerdict::Wait
         }
+    }
+}
+
+/// One no-progress stretch of the crawl loop (#2313).
+///
+/// Kept as a single value so the loop's control flow does not have to carry two
+/// correlated fields — when the stretch started and whether it was reported —
+/// through every iteration.
+#[derive(Debug, Default)]
+struct PauseTracker {
+    /// When the current stretch started; `None` while workers are in flight.
+    since: Option<std::time::Instant>,
+    /// Whether the prolonged-pause event already fired for this stretch.
+    reported: bool,
+}
+
+impl PauseTracker {
+    /// How long the engine has been unable to dispatch anything.
+    fn elapsed(&mut self) -> Duration {
+        self.since
+            .get_or_insert_with(std::time::Instant::now)
+            .elapsed()
+    }
+
+    /// A worker completed: the stretch is over.
+    fn reset(&mut self) {
+        self.since = None;
+        self.reported = false;
     }
 }
 
@@ -1119,13 +1158,18 @@ impl Engine {
         }
     }
 
-    /// Bound every worker wait (#509): the longest legitimate wait is a fetch
-    /// (timeout_secs) or a rate-limit token (delay_ms), plus grace.
+    /// Bound every worker wait (#509): the longest legitimate wait is one fetch
+    /// — connect plus request, each with its own timeout — or a rate-limit
+    /// token (delay_ms), plus grace.
+    ///
+    /// See [`FETCH_TIMEOUT_PHASES`] for why the fetch arm is multiplied rather
+    /// than taken at face value.
     fn worker_wait_bound(config: &CrawlerConfig) -> Duration {
         Duration::from_secs(
             config
                 .timeout_secs
                 .max(config.delay_ms / 1000)
+                .saturating_mul(FETCH_TIMEOUT_PHASES)
                 .saturating_add(SHUTDOWN_GRACE_SECS),
         )
     }
@@ -1157,12 +1201,7 @@ impl Engine {
         worker_wait_bound: Duration,
         pause: PauseWatchdog,
     ) -> Result<(), CrawlError> {
-        // Tracks the no-progress case that has no completion to wait on: work
-        // pending, nothing in flight (autoscale `Critical`). Cleared on every
-        // completed worker.
-        let mut idle_since: Option<std::time::Instant> = None;
-        // The prolonged-pause event fires ONCE per pause, not on every tick.
-        let mut pause_reported = false;
+        let mut tracker = PauseTracker::default();
 
         loop {
             // Check shutdown signal
@@ -1209,7 +1248,7 @@ impl Engine {
             // been drained. Deciding to exit before draining drops the last
             // page's links — the busy spin used to hide this by draining the
             // queue thousands of times per fetch (#2313).
-            if !self.scheduler.has_pending_work() && tasks.is_empty() {
+            if self.is_drained(tasks) {
                 break;
             }
 
@@ -1228,56 +1267,110 @@ impl Engine {
             Self::spawn_available_tasks(&mut self.scheduler, tasks, task_ctx, remaining);
 
             // Nothing was dispatchable this iteration (frontier empty or tier
-            // full), so a completion is the only thing that can move the
-            // engine forward.
-            match self.wait_for_task(tasks, worker_wait_bound).await {
-                WaitOutcome::Progress => {
-                    idle_since = None;
-                    pause_reported = false;
-                },
-                WaitOutcome::Idle => {
-                    let paused_for = idle_since
-                        .get_or_insert_with(std::time::Instant::now)
-                        .elapsed();
-                    match pause.verdict(paused_for) {
-                        PauseVerdict::Wait => {},
-                        PauseVerdict::Report => {
-                            if !pause_reported {
-                                pause_reported = true;
-                                warn!(
-                                    paused_secs = paused_for.as_secs(),
-                                    pending = self.scheduler.pending_len(),
-                                    effective_concurrency = self.scheduler.effective_concurrency(),
-                                    "crawl paused by autoscale past the alert threshold — still waiting"
-                                );
-                            }
-                        },
-                        PauseVerdict::GiveUp => {
-                            self.cancel_run();
-                            return Err(CrawlError::Internal(format!(
-                                "crawl paused: autoscale held the crawl at Critical for {}s without lifting (pending={}) — the pause never recovered",
-                                paused_for.as_secs(),
-                                self.scheduler.pending_len(),
-                            )));
-                        },
-                    }
-                    tokio::time::sleep(IDLE_POLL_INTERVAL).await;
-                },
-                WaitOutcome::Stalled => {
-                    // Unblock the other workers before bailing out: the wedged
-                    // one ignores this, but the drain should not have to burn
-                    // its whole bound on workers that would have stopped.
-                    self.cancel_run();
-                    return Err(CrawlError::Internal(format!(
-                        "crawl stalled: a worker exceeded the {}s wait bound without completing                          (in_flight={}, pending={})",
-                        worker_wait_bound.as_secs(),
-                        tasks.len(),
-                        self.scheduler.pending_len(),
-                    )));
-                },
-            }
+            // full), so a completion — or a lifted pause — is the only thing
+            // that can move the engine forward.
+            self.wait_or_stop(tasks, worker_wait_bound, pause, &mut tracker)
+                .await?;
         }
         Ok(())
+    }
+
+    /// Whether the run has nothing left to do: no frontier and no worker in
+    /// flight.
+    ///
+    /// The `tasks.is_empty()` half is what makes this safe to ask after the
+    /// reap and the drain: a worker pushes its discoveries before returning, so
+    /// an empty set means every enqueue already happened (#2313).
+    fn is_drained(&self, tasks: &tokio::task::JoinSet<Result<(), CrawlError>>) -> bool {
+        !self.scheduler.has_pending_work() && tasks.is_empty()
+    }
+
+    /// Advance the loop by one wait (#2313): park on an in-flight worker, sleep
+    /// out an autoscale pause, or end the run.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stall or the pause give-up failure — the two ways a run with
+    /// work left can no longer make progress.
+    async fn wait_or_stop(
+        &mut self,
+        tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
+        worker_wait_bound: Duration,
+        pause: PauseWatchdog,
+        tracker: &mut PauseTracker,
+    ) -> Result<(), CrawlError> {
+        match self.wait_for_task(tasks, worker_wait_bound).await {
+            WaitOutcome::Progress => {
+                tracker.reset();
+                Ok(())
+            },
+            WaitOutcome::Idle => {
+                let paused_for = tracker.elapsed();
+                self.wait_out_pause(paused_for, pause, &mut tracker.reported)
+                    .await
+            },
+            WaitOutcome::Stalled => {
+                // Unblock the other workers before bailing out: the wedged one
+                // ignores this, but the drain should not have to burn its whole
+                // bound on workers that would have stopped.
+                self.cancel_run();
+                Err(self.stalled(worker_wait_bound, tasks.len()))
+            },
+        }
+    }
+
+    /// Apply the pause watchdog to one idle iteration (#2313).
+    ///
+    /// `Idle` means work is pending and nothing is in flight: only the
+    /// autoscale level can move the engine, so the run either waits, reports,
+    /// or gives up. Sleeping here instead of looping is what keeps a paused
+    /// crawl off a core, and `worker_wait_bound` deliberately has no say: a
+    /// deliberate throttle is not a hung worker.
+    async fn wait_out_pause(
+        &self,
+        paused_for: Duration,
+        pause: PauseWatchdog,
+        reported: &mut bool,
+    ) -> Result<(), CrawlError> {
+        match pause.verdict(paused_for) {
+            PauseVerdict::Wait => {},
+            PauseVerdict::Report => {
+                if !*reported {
+                    *reported = true;
+                    warn!(
+                        paused_secs = paused_for.as_secs(),
+                        pending = self.scheduler.pending_len(),
+                        effective_concurrency = self.scheduler.effective_concurrency(),
+                        "crawl paused by autoscale past the alert threshold — still waiting"
+                    );
+                }
+            },
+            PauseVerdict::GiveUp => {
+                self.cancel_run();
+                return Err(CrawlError::Internal(format!(
+                    "crawl paused: autoscale held the crawl at Critical for {}s without lifting (pending={}) — the pause never recovered",
+                    paused_for.as_secs(),
+                    self.scheduler.pending_len(),
+                )));
+            },
+        }
+        tokio::time::sleep(IDLE_POLL_INTERVAL).await;
+        Ok(())
+    }
+
+    /// The failure a run reports when a worker outlives `worker_wait_bound`
+    /// (#2313).
+    ///
+    /// The numbers are the diagnosis — in-flight workers and frontier size are
+    /// what separates "one page wedged" from "the loop is stuck" — so they
+    /// travel with the error instead of only reaching a log line.
+    fn stalled(&self, worker_wait_bound: Duration, in_flight: usize) -> CrawlError {
+        CrawlError::Internal(format!(
+            "crawl stalled: a worker exceeded the {}s wait bound without completing (in_flight={}, pending={})",
+            worker_wait_bound.as_secs(),
+            in_flight,
+            self.scheduler.pending_len(),
+        ))
     }
 
     /// Process completed tasks (non-blocking) and update error counters.
