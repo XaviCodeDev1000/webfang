@@ -33,4 +33,5 @@ Acceptance evidence: local green runs of the three tests, a `cargo check`/clippy
 - **E5** — Timer hoist: binary deleted, flag unset, `crawl_js_strategy_respects_timeout_secs` PASS in **5.29s** (build outside the measured clock).
 - **E6** — `cargo check` and clippy (`-D warnings`, cognitive-complexity, too-many-lines) green for `webfang_test_utils` all-targets and `webfang_core --test behavioral`; `cargo fmt --all -- --check` clean.
 - **E7** — `webfang_path` call sites: 33 across 13 files; the MCP entry point is `webfang_binary()` in `crates/webfang_mcp/tests/common/mod.rs`.
+- **E9** — Third flaky verified locally with the contract: `cli_vs_mcp_export_jsonl_record_parity` PASS in 0.24s.
 - **E8** — CI scope confirmed with the maintainer: `test-core` and `test-crossplatform`, the two lanes whose pre-build is default features. `test-full` and nightly keep the on-demand build on purpose (see T5).
