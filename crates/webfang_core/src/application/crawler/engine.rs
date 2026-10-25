@@ -128,6 +128,83 @@ pub const TERMINATION_REGISTRATION_REJECTED: &str =
 /// is treated as a hung worker.
 const SHUTDOWN_GRACE_SECS: u64 = 10;
 
+/// Poll interval while the engine has work it cannot dispatch and no worker in
+/// flight to wait on — an autoscale `Critical` pause (#2313).
+///
+/// The pause is a legitimate state (RAM > 90%): it must not spin a core, and it
+/// must not be mistaken for a stall on the first tick. Polling is what makes
+/// the difference between "paused" and "wedged" observable at all.
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Why one bounded wait in [`Engine::crawl_loop`] returned (#2313).
+///
+/// The distinction is the whole point of the fix: a wait that produced a
+/// completion is progress, a wait with nothing to await is an autoscale pause,
+/// and a wait that ran out with a worker still in flight is a stall the run
+/// must not survive silently.
+enum WaitOutcome {
+    /// A worker completed (or the task set emptied) — engine state moved.
+    Progress,
+    /// Nothing in flight and nothing dispatchable: only an external state
+    /// change (the autoscale level) can unblock the loop.
+    Idle,
+    /// A worker outlived `worker_wait_bound` without completing.
+    Stalled,
+}
+
+/// What to do about a deliberate autoscale pause that has lasted `paused_for`.
+enum PauseVerdict {
+    /// Short pause — keep waiting silently.
+    Wait,
+    /// Long pause — report it once as a distinct event, keep waiting.
+    Report,
+    /// The pause outlived every plausible recovery — give up on the run.
+    GiveUp,
+}
+
+/// Wall-clock thresholds for a DELIBERATE pause (#2313).
+///
+/// Deliberately separate from `worker_wait_bound`: that one bounds a WORKER
+/// that should have finished, this one bounds a THROTTLE that is working as
+/// designed. Judging both with one deadline is the bug — a RAM-pressure pause
+/// is not a hung fetch, and killing a healthy crawl because the machine is at
+/// 92% RAM is worse than waiting.
+///
+/// `Idle` is the only state this applies to, and it is typed rather than
+/// inferred: the loop can only reach it with work pending, no worker in
+/// flight, and `effective_concurrency() == 0`, which `CrawlConcurrency`'s
+/// non-zero invariant makes reachable only through `ConcurrencyLevel::Critical`.
+#[derive(Debug, Clone, Copy)]
+struct PauseWatchdog {
+    /// Emit the prolonged-pause event after this much paused time.
+    alert_after: Duration,
+    /// Give up on the run after this much paused time.
+    give_up_after: Duration,
+}
+
+impl PauseWatchdog {
+    /// Production thresholds: 5 min to alert, 30 min to give up.
+    ///
+    /// The ceiling matches the `global-timeout` of the `default` nextest
+    /// profile, so a run that would be killed by its own harness anyway
+    /// reports the reason first. Tests inject millisecond thresholds instead.
+    const PRODUCTION: Self = Self {
+        alert_after: Duration::from_secs(300),
+        give_up_after: Duration::from_secs(1800),
+    };
+
+    /// Classify a pause by how long it has lasted.
+    fn verdict(&self, paused_for: Duration) -> PauseVerdict {
+        if paused_for >= self.give_up_after {
+            PauseVerdict::GiveUp
+        } else if paused_for >= self.alert_after {
+            PauseVerdict::Report
+        } else {
+            PauseVerdict::Wait
+        }
+    }
+}
+
 /// Crawl engine — orchestrates URL fetching with concurrency control
 ///
 /// Uses `JoinSet` for task management (no redundant Semaphore).
@@ -895,8 +972,17 @@ impl Engine {
         // fetch (timeout_secs) or a rate-limit token (delay_ms), plus grace.
         let worker_wait_bound = Self::worker_wait_bound(&config_clone);
 
-        // Main crawl loop
-        self.crawl_loop(&mut tasks, &task_ctx, start, worker_wait_bound)
+        // Main crawl loop. A stall is captured, not acted on yet: the in-flight
+        // workers must still be drained (and aborted if wedged) before the run
+        // reports the failure.
+        let loop_result = self
+            .crawl_loop(
+                &mut tasks,
+                &task_ctx,
+                start,
+                worker_wait_bound,
+                PauseWatchdog::PRODUCTION,
+            )
             .await;
 
         // Wait for remaining tasks — bounded, then abort stragglers, so a
@@ -913,6 +999,12 @@ impl Engine {
         // Without this, collect() hangs forever — the mpsc channel stays open
         // because a Sender clone inside the Arc<CrawlTaskCtx> is still alive.
         drop(task_ctx);
+
+        // A stalled loop is a FAILED run (#2313). The pages collected so far
+        // are not a crawl result: returning one would hide the wedge exactly
+        // the way the old warn-and-re-check did. The checkpoint stays on disk
+        // because the run did not complete, so resume state is still valid.
+        loop_result?;
 
         // Final checkpoint verdict: a fully-completed crawl (no shutdown, no
         // pending work left, not truncated by max_pages) deletes its
@@ -1040,14 +1132,39 @@ impl Engine {
 
     /// Main crawl loop — process completed tasks, drain discovered links,
     /// checkpoint periodically, spawn new tasks, and wait for work.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CrawlError::Internal`] when the run can no longer make
+    /// progress, instead of spinning or waiting forever (#2313):
+    ///
+    /// - a worker outlives `worker_wait_bound` without completing, or
+    /// - there is work to dispatch, no worker in flight to free a slot, and the
+    ///   autoscale pause outlives [`PauseWatchdog`]'s give-up threshold.
+    ///
+    /// A stalled run is a FAILED run. The pages collected so far are not a
+    /// crawl result, and reporting one would hide the wedge the way the old
+    /// `warn!`-and-re-check did — the loop kept a 240 s hang alive in CI.
+    ///
+    /// A paused run is NOT a stalled one: `worker_wait_bound` never applies to
+    /// the pause, because a deliberate throttle and a hung worker are different
+    /// failures with different time constants.
     async fn crawl_loop(
         &mut self,
         tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
         task_ctx: &Arc<CrawlTaskCtx>,
         start: std::time::Instant,
         worker_wait_bound: Duration,
-    ) {
-        while self.scheduler.has_pending_work() || !tasks.is_empty() {
+        pause: PauseWatchdog,
+    ) -> Result<(), CrawlError> {
+        // Tracks the no-progress case that has no completion to wait on: work
+        // pending, nothing in flight (autoscale `Critical`). Cleared on every
+        // completed worker.
+        let mut idle_since: Option<std::time::Instant> = None;
+        // The prolonged-pause event fires ONCE per pause, not on every tick.
+        let mut pause_reported = false;
+
+        loop {
             // Check shutdown signal
             if self.shutdown.load(std::sync::atomic::Ordering::Relaxed) {
                 info!("Shutdown signal received — saving checkpoint and exiting");
@@ -1084,6 +1201,18 @@ impl Engine {
             // Drain discovered links from the deduplicated UrlQueue
             self.scheduler.drain_discovered().await;
 
+            // Termination: no frontier AND no worker in flight.
+            //
+            // Checked AFTER the reap and the drain, never before: a completing
+            // worker pushes its discoveries onto the shared queue, so "no
+            // pending work" is only true once everything that finished has
+            // been drained. Deciding to exit before draining drops the last
+            // page's links — the busy spin used to hide this by draining the
+            // queue thousands of times per fetch (#2313).
+            if !self.scheduler.has_pending_work() && tasks.is_empty() {
+                break;
+            }
+
             // Periodic checkpoint save
             self.maybe_save_periodic_checkpoint(start).await;
 
@@ -1098,9 +1227,57 @@ impl Engine {
                 Self::remaining_budget(self.config.max_pages, self.collector.len(), tasks.len());
             Self::spawn_available_tasks(&mut self.scheduler, tasks, task_ctx, remaining);
 
-            // If no tasks can be spawned and work remains, wait for one task.
-            self.wait_for_task(tasks, worker_wait_bound).await;
+            // Nothing was dispatchable this iteration (frontier empty or tier
+            // full), so a completion is the only thing that can move the
+            // engine forward.
+            match self.wait_for_task(tasks, worker_wait_bound).await {
+                WaitOutcome::Progress => {
+                    idle_since = None;
+                    pause_reported = false;
+                }
+                WaitOutcome::Idle => {
+                    let paused_for = idle_since
+                        .get_or_insert_with(std::time::Instant::now)
+                        .elapsed();
+                    match pause.verdict(paused_for) {
+                        PauseVerdict::Wait => {}
+                        PauseVerdict::Report => {
+                            if !pause_reported {
+                                pause_reported = true;
+                                warn!(
+                                    paused_secs = paused_for.as_secs(),
+                                    pending = self.scheduler.pending_len(),
+                                    effective_concurrency = self.scheduler.effective_concurrency(),
+                                    "crawl paused by autoscale past the alert threshold — still waiting"
+                                );
+                            }
+                        }
+                        PauseVerdict::GiveUp => {
+                            self.cancel_run();
+                            return Err(CrawlError::Internal(format!(
+                                "crawl paused: autoscale held the crawl at Critical for {}s without lifting (pending={}) — the pause never recovered",
+                                paused_for.as_secs(),
+                                self.scheduler.pending_len(),
+                            )));
+                        }
+                    }
+                    tokio::time::sleep(IDLE_POLL_INTERVAL).await;
+                }
+                WaitOutcome::Stalled => {
+                    // Unblock the other workers before bailing out: the wedged
+                    // one ignores this, but the drain should not have to burn
+                    // its whole bound on workers that would have stopped.
+                    self.cancel_run();
+                    return Err(CrawlError::Internal(format!(
+                        "crawl stalled: a worker exceeded the {}s wait bound without completing                          (in_flight={}, pending={})",
+                        worker_wait_bound.as_secs(),
+                        tasks.len(),
+                        self.scheduler.pending_len(),
+                    )));
+                }
+            }
         }
+        Ok(())
     }
 
     /// Process completed tasks (non-blocking) and update error counters.
@@ -1176,25 +1353,42 @@ impl Engine {
         }
     }
 
-    /// Wait for one task when no more can be spawned, bounded so a wedged
-    /// worker cannot hang the loop (#509).
+    /// Wait for one task, bounded so a wedged worker cannot hang the loop
+    /// (#509).
+    ///
+    /// Called after every dispatch attempt, so by construction nothing can be
+    /// spawned right now: either the frontier is empty or the tier is full.
+    /// Both states have exactly one way out — an in-flight worker finishing.
+    ///
+    /// The guard used to also require pending work (#2313), which meant a run
+    /// whose frontier emptied right after the seed — every `max_depth(0)`
+    /// crawl — skipped the wait entirely and busy-spun this loop for the whole
+    /// fetch, one core per run. Waiting unconditionally on the in-flight set is
+    /// what turns that spin into a park.
     async fn wait_for_task(
         &self,
         tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
         worker_wait_bound: Duration,
-    ) {
-        if !self.scheduler.can_spawn(tasks.len()) && self.scheduler.has_pending_work() {
-            match tokio::time::timeout(worker_wait_bound, tasks.join_next()).await {
-                Ok(Some(result)) => {
-                    handle_crawl_result(result, &self.error_count, &self.error_breakdown);
-                },
-                Ok(None) => {},
-                Err(_elapsed) => {
-                    warn!(
-                        bound_secs = worker_wait_bound.as_secs(),
-                        "worker wait exceeded bound — re-checking engine state"
-                    );
-                },
+    ) -> WaitOutcome {
+        if tasks.is_empty() {
+            // No worker can complete, so there is nothing to wait ON: only an
+            // external state change (the autoscale level) unblocks the loop.
+            return WaitOutcome::Idle;
+        }
+
+        match tokio::time::timeout(worker_wait_bound, tasks.join_next()).await {
+            Ok(Some(result)) => {
+                handle_crawl_result(result, &self.error_count, &self.error_breakdown);
+                WaitOutcome::Progress
+            }
+            Ok(None) => WaitOutcome::Progress,
+            Err(_elapsed) => {
+                warn!(
+                    bound_secs = worker_wait_bound.as_secs(),
+                    in_flight = tasks.len(),
+                    "worker wait exceeded bound — ending the run"
+                );
+                WaitOutcome::Stalled
             }
         }
     }
@@ -3081,8 +3275,10 @@ mod tests {
                 &task_ctx,
                 std::time::Instant::now(),
                 Duration::from_secs(1),
+                PauseWatchdog::PRODUCTION,
             )
-            .await;
+            .await
+            .expect("a budget exit is not a stall");
 
         assert!(
             engine.cancel_token.is_cancelled(),
@@ -3092,6 +3288,222 @@ mod tests {
             tasks.is_empty(),
             "no worker may be spawned after the budget decision"
         );
+    }
+
+    // ——— #2313 bounded-loop contract (stall vs pause vs progress) ———
+
+    /// Test helper: the task context plus an empty in-flight set that
+    /// `crawl_loop` needs, assembled exactly like `Engine::run` does.
+    ///
+    /// The loop never uses the context itself — it only hands it to spawned
+    /// workers — so these tests drive the loop without a real fetch.
+    fn loop_harness(
+        engine: &mut Engine,
+    ) -> (
+        Arc<CrawlTaskCtx>,
+        tokio::task::JoinSet<Result<(), CrawlError>>,
+    ) {
+        let session = engine.session.take().expect("session present");
+        let task_ctx = session.task_ctx(CrawlExec {
+            queue: engine.scheduler.queue(),
+            rate_limiter: engine.rate_limiter.clone(),
+            pages_crawled: Arc::clone(&engine.pages_crawled),
+            error_count: Arc::clone(&engine.error_count),
+            error_breakdown: Arc::clone(&engine.error_breakdown),
+            collector: engine.collector.clone(),
+            cookie_bridge: Arc::clone(&engine.cookie_bridge),
+            banned_domains: Arc::clone(&engine.banned_domains),
+            robots_fetcher: Arc::clone(&engine.robots_fetcher),
+            fetch_router: engine.fetch_router.clone(),
+        });
+        (task_ctx, tokio::task::JoinSet::new())
+    }
+
+    /// #2313 (strict-TDD RED): a worker that never completes must END the run
+    /// with an error at `worker_wait_bound`.
+    ///
+    /// Pre-fix `wait_for_task` only warned — and with an empty frontier it did
+    /// not even wait, so the loop spun on a core and the run outlived every
+    /// timeout the runner had (240 s in CI, reported as `TERMINATING`). The 2 s
+    /// guard turns a regression into a failed assertion instead of a hung test.
+    #[tokio::test]
+    async fn wedged_worker_ends_the_run_instead_of_spinning() {
+        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .max_pages(1)
+            .concurrency(nz(2))
+            .build();
+        let mut engine = session_engine(config);
+        let (task_ctx, mut tasks) = loop_harness(&mut engine);
+
+        // A worker that never completes and never observes cancellation.
+        tasks.spawn(async { std::future::pending::<Result<(), CrawlError>>().await });
+
+        let bound = Duration::from_millis(100);
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            engine.crawl_loop(
+                &mut tasks,
+                &task_ctx,
+                std::time::Instant::now(),
+                bound,
+                PauseWatchdog::PRODUCTION,
+            ),
+        )
+        .await
+        .expect("crawl_loop must return instead of spinning on a wedged worker");
+
+        let err = result.expect_err("a wedged worker must fail the run");
+        assert!(
+            err.to_string().contains("crawl stalled"),
+            "the failure must name the stall, got: {err}"
+        );
+        assert!(
+            engine.cancel_token.is_cancelled(),
+            "a stalled run must cancel the workers it is about to abandon"
+        );
+    }
+
+    /// #2313: the shape of the four flaky tests — `max_depth(0)` empties the
+    /// frontier the moment the seed is dispatched, leaving exactly one worker
+    /// in flight. That is WAITING, not stalling: the loop must park on the
+    /// worker and finish `Ok`.
+    ///
+    /// Pins the other side of the fix, so nobody "solves" the spin by failing
+    /// every iteration with an empty frontier.
+    #[tokio::test]
+    async fn empty_frontier_with_worker_in_flight_is_not_a_stall() {
+        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .max_pages(1)
+            .concurrency(nz(2))
+            .build();
+        let mut engine = session_engine(config);
+        let (task_ctx, mut tasks) = loop_harness(&mut engine);
+
+        let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&finished);
+        tasks.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        });
+        assert!(
+            !engine.scheduler.has_pending_work(),
+            "the fixture must reproduce the max_depth(0) shape: frontier empty"
+        );
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            engine.crawl_loop(
+                &mut tasks,
+                &task_ctx,
+                std::time::Instant::now(),
+                Duration::from_secs(1),
+                PauseWatchdog::PRODUCTION,
+            ),
+        )
+        .await
+        .expect("the loop must return once the worker completes");
+
+        assert!(
+            result.is_ok(),
+            "an empty frontier with a worker in flight is not a stall: {result:?}"
+        );
+        assert!(
+            finished.load(std::sync::atomic::Ordering::SeqCst),
+            "the loop must have waited for the worker instead of returning early"
+        );
+    }
+
+    /// #2313 sibling: an autoscale `Critical` pause has work to dispatch, no
+    /// worker in flight and no completion to wait on.
+    ///
+    /// It must not spin (a core per paused crawl) and — the point of this test —
+    /// it must NOT be judged by `worker_wait_bound`: a deliberate throttle is not
+    /// a hung worker. The pause survives several worker bounds and only ends at
+    /// its own give-up threshold, with the state that explains why.
+    #[tokio::test]
+    async fn autoscale_pause_is_judged_by_its_own_watchdog() {
+        use crate::application::crawler::concurrency_level::{
+            ConcurrencyLevel, SharedConcurrencyLevel,
+        };
+
+        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .max_pages(10)
+            .concurrency(nz(2))
+            .build();
+        let mut engine = session_engine(config);
+        // Buffered work without touching the discovery queue: the loop must see
+        // a frontier it cannot dispatch.
+        engine
+            .scheduler
+            .restore_pending(&["http://127.0.0.1:9/".to_string()]);
+
+        let level = Arc::new(SharedConcurrencyLevel::new());
+        level.set(ConcurrencyLevel::Critical);
+        engine.scheduler.set_autoscale(level);
+
+        let (task_ctx, mut tasks) = loop_harness(&mut engine);
+        // 20 ms worker bound vs 180 ms give-up: the pause outlives the worker
+        // bound nine times over, so a run that dies at the bound fails here.
+        let bound = Duration::from_millis(20);
+        let pause = PauseWatchdog {
+            alert_after: Duration::from_millis(60),
+            give_up_after: Duration::from_millis(180),
+        };
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            engine.crawl_loop(&mut tasks, &task_ctx, started, bound, pause),
+        )
+        .await
+        .expect("a pause that never lifts must end the run, not spin on it");
+        let elapsed = started.elapsed();
+
+        let err = result.expect_err("a pause past its ceiling must fail the run");
+        let message = err.to_string();
+        assert!(
+            elapsed >= pause.give_up_after,
+            "a deliberate pause must outlive worker_wait_bound ({bound:?}): it ended after {elapsed:?}"
+        );
+        assert!(
+            message.contains("crawl paused"),
+            "the failure must name the pause, not a stall, got: {message}"
+        );
+        assert!(
+            message.contains("pending=1"),
+            "the report must carry the frontier size, got: {message}"
+        );
+    }
+
+    /// The pause thresholds are a pure decision: wait, report once, give up.
+    /// Pinned at the exact boundaries so a future tuning cannot silently turn
+    /// the alert into a failure (or the failure into a hang).
+    #[test]
+    fn pause_verdict_waits_reports_then_gives_up() {
+        let pause = PauseWatchdog {
+            alert_after: Duration::from_secs(300),
+            give_up_after: Duration::from_secs(1800),
+        };
+        assert!(matches!(pause.verdict(Duration::ZERO), PauseVerdict::Wait));
+        assert!(matches!(
+            pause.verdict(Duration::from_secs(299)),
+            PauseVerdict::Wait
+        ));
+        assert!(matches!(
+            pause.verdict(Duration::from_secs(300)),
+            PauseVerdict::Report
+        ));
+        assert!(matches!(
+            pause.verdict(Duration::from_secs(1799)),
+            PauseVerdict::Report
+        ));
+        assert!(matches!(
+            pause.verdict(Duration::from_secs(1800)),
+            PauseVerdict::GiveUp
+        ));
     }
 
     // ——— #1610 crawl run outcome + duration contract (OBS-H7) ———

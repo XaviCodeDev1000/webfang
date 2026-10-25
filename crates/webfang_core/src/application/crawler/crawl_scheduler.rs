@@ -194,6 +194,14 @@ impl CrawlScheduler {
         !self.pending.is_empty()
     }
 
+    /// URLs buffered for dispatch — diagnostic payload for a stalled run
+    /// (#2313). A stall report without the frontier size cannot tell "nothing
+    /// to do" from "plenty to do and no slot to do it in".
+    #[must_use]
+    pub(crate) fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Effective concurrency limit (autoscale-aware).
     ///
     /// Autoscale levels stay WITHIN the model's `Operation.crawl` ceiling:
