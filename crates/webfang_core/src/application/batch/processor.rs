@@ -33,6 +33,7 @@
 //! # }
 //! ```
 
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tokio::sync::Semaphore;
@@ -108,15 +109,24 @@ impl BatchProcessor {
     ///
     /// Returns [`BatchError::InvalidConcurrency`] if `max_concurrent` is 0.
     pub fn new(max_concurrent: usize) -> Result<Self, BatchError> {
-        if max_concurrent == 0 {
-            return Err(BatchError::InvalidConcurrency);
-        }
-        Ok(Self {
-            max_concurrent_jobs: max_concurrent,
-            semaphore: Arc::new(Semaphore::new(max_concurrent)),
+        NonZeroUsize::new(max_concurrent)
+            .map(Self::new_nonzero)
+            .ok_or(BatchError::InvalidConcurrency)
+    }
+
+    /// Create a batch processor from an already-validated concurrency limit
+    ///
+    /// A batch `Semaphore` bound of 0 would exhaust every permit before the
+    /// first job, so the zero case is excluded by the type itself instead of
+    /// a runtime check (#2355).
+    #[must_use]
+    pub fn new_nonzero(max_concurrent: NonZeroUsize) -> Self {
+        Self {
+            max_concurrent_jobs: max_concurrent.get(),
+            semaphore: Arc::new(Semaphore::new(max_concurrent.get())),
             content_sink: None,
             correlation: None,
-        })
+        }
     }
 
     /// Capture every fetched page body into `sink` (#631).
