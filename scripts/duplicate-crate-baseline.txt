@@ -7,7 +7,7 @@
 # whenever `cargo deny check bans` reports a crate that is not listed here.
 #
 # THE CONTRACT IS DESCENDING, NOT ABSOLUTE. Every name below is an ACCEPTED
-# duplicate that a reviewer has already looked at; 52 of them, and most of them
+# duplicate that a reviewer has already looked at; 58 of them, and most of them
 # are not accidents at all. The intentional ones are documented in AGENTS.md
 # under "Crate version conflicts (DO NOT unify)":
 #   dashmap      5.x (via governor) + 6.x (direct) — both needed
@@ -34,8 +34,15 @@
 # 5.0.0 (2026-10-22, issue #1607 baseline refreshed by the L9 build-graph lote:
 # the default workspace graph no longer carries chromiumoxide, so its
 # transitive duplicates disappeared).
+# 2026-10-26 (issue #2364): async-compression 0.4.51 pulls zstd 0.14.3 and
+# brotli 9.1.0; the six new names below are the intentional duplicates that
+# the zstd security fix introduces (see deny.toml).
+alloc-no-stdlib
+alloc-stdlib
 base64
 block-buffer
+brotli
+brotli-decompressor
 chacha20
 cpufeatures
 crypto-common
@@ -79,3 +86,5 @@ windows_x86_64_gnu
 windows_x86_64_gnullvm
 windows_x86_64_msvc
 xml5ever
+zstd
+zstd-safe
