@@ -816,10 +816,10 @@ cli/config.rs	8	use	crate::cli::error::CliError
 cli/config.rs	9	use	crate::cli::error::CliExit
 cli/config.rs	52	inline	crate::domain::providers::ProviderConfig
 cli/config.rs	61	inline	crate::domain::model_profile::ModelProfilesConfig
-cli/config.rs	231	inline	crate::domain::paths::config_base_dir
-cli/config.rs	335	inline	crate::domain::console::ansi_enabled
-cli/config.rs	373	inline	crate::infrastructure::observability::FileTraceLayer
-cli/config.rs	389	inline	crate::domain::console::ansi_enabled
+cli/config.rs	248	inline	crate::domain::paths::config_base_dir
+cli/config.rs	352	inline	crate::domain::console::ansi_enabled
+cli/config.rs	390	inline	crate::infrastructure::observability::FileTraceLayer
+cli/config.rs	406	inline	crate::domain::console::ansi_enabled
 cli/discovery_phase.rs	20	use	crate::application::crawl_options::CrawlOptions
 cli/discovery_phase.rs	21	use	crate::application::crawler::CapturedPage
 cli/discovery_phase.rs	21	use	crate::application::crawler::InMemoryContentSink
