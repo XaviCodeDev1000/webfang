@@ -161,6 +161,47 @@ ignore = [
     # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0253
     # Expires: 2027-03-20
     { id = "RUSTSEC-2026-0253", reason = "lru 0.16.4 unsound; potential use-after-free on a panicking Drop inside LruCache::pop(), via html-to-markdown-rs, which does not run panicking code inside pop; wreq's lru 0.18.5 is already outside the vulnerable range" },
+
+    # RUSTSEC-2026-0391..0406 (zstd 0.13.3 / zstd-safe 7.2.4 only via wreq-util static emulation)
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0391
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0391", reason = "zstd 0.13.3 with_context not used; only remaining consumer is wreq-util static emulation compression via Encoder::new/Decoder::new, with a fresh stream context and no context reuse" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0395
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0395", reason = "zstd-safe 7.2.4 StableInBuffer parameter not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0396
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0396", reason = "zstd-safe 7.2.4 Seekable not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0397
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0397", reason = "zstd-safe 7.2.4 OutBuffer::around_pos not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0398
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0398", reason = "zstd-safe 7.2.4 Seekable::decompress not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0399
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0399", reason = "zstd-safe 7.2.4 dictionary initialization not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0400
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0400", reason = "zstd-safe 7.2.4 one-shot dictionary with open stream not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0401
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0401", reason = "zstd-safe 7.2.4 train_from_buffer not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0402
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0402", reason = "zstd-safe 7.2.4 CCtx::try_clone not used; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0403
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0403", reason = "legacy streaming path is not used by wreq-util static emulation compression; untrusted body decompression runs on zstd 0.14.3/zstd-safe 8.2.0 where the advisory is fixed" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0404
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0404", reason = "zstd-safe 7.2.4 DCtx::try_clone not used and the experimental feature is not enabled; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0405
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0405", reason = "zstd-safe 7.2.4 InBuffer::pos is not set out of range and the untrusted path uses zstd-safe 8.2.0; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0406
+    # Expires: 2027-03-20
+    { id = "RUSTSEC-2026-0406", reason = "zstd-safe 7.2.4 zstdmt is not enabled; only remaining consumer is wreq-util static emulation compression" },
 ]
 
 [licenses]
