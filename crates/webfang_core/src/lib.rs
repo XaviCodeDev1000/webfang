@@ -4,7 +4,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::disallowed_types))]
 // Raw process-env mutations must go through webfang_test_utils (#1126,
-// #1349). Ungated on purpose: cfg(test) mods in this crate are covered too.
+// #1349). Ungated: the deny covers all non-test code in this crate, inline
+// or not. Test builds are exempt from `disallowed_methods` as a whole per
+// the blanket test policy of #1951; non-test code keeps the full deny.
 #![deny(clippy::disallowed_methods)]
 // Explicit per docs-truthfulness audit (S5): these rustdoc lints are
 // allow-by-default, so CI's `-D warnings` never reaches them. Declare intent.
@@ -38,6 +40,11 @@
 #![warn(clippy::style)]
 #![warn(clippy::complexity)]
 #![warn(clippy::perf)]
+// Blanket test exemption for `disallowed_methods` (#1951): placed AFTER the
+// clippy group warns above on purpose — a group mention re-implies the
+// member lint, so an allow set before them would be defeated (the last
+// lint-level mention wins). Covers the inline cfg(test) spawn sites.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 #![deny(missing_docs)]
 #![warn(clippy::undocumented_unsafe_blocks)]
 #![allow(clippy::module_name_repetitions)]
