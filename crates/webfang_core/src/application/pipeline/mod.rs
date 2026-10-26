@@ -7,7 +7,6 @@ mod executor;
 pub mod stages;
 
 pub use executor::PipelineExecutor;
-pub(crate) use stages::OutputStage;
 pub use stages::{CleanStage, ValidateStage};
 
 // Re-export domain types used by the pipeline API

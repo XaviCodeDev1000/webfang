@@ -9,7 +9,7 @@ use crate::application::http_client::HttpClientPort;
 use crate::application::scraper_service::scrape_with_config;
 use crate::domain::config::ScraperConfig;
 use crate::domain::html_cleaner::clean_html;
-use crate::domain::scraper_port::{author_extractor, dom_pruner, fallback, readability};
+use crate::domain::html_extraction::{author_extractor, dom_pruner, fallback, readability};
 use crate::domain::{
     CorrelationId, DomInspectorPort, ExtractResult, ScrapedContent, SelectorErrorKind, ValidUrl,
 };

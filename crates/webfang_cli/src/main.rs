@@ -883,7 +883,18 @@ fn build_ai_cleaner(
     ),
     CliExit,
 > {
-    let mut ports = webfang_core::application::container::VaultAiPorts::default();
+    // The chunker has no external dependency: it is a pure Markdown splitter
+    // whose only knob is the operator's character budget, so it is wired
+    // unconditionally. Without it the vault-search tool bails on a missing
+    // chunker even when an embedding provider did resolve.
+    let mut ports = webfang_core::application::container::VaultAiPorts {
+        text_chunker: Some(Arc::new(
+            webfang_core::infrastructure::text_chunker::MarkdownChunker::new(
+                opts.ai_config.max_chars,
+            ),
+        )),
+        ..Default::default()
+    };
     if let Some(port) = &embedding_port {
         ports.embedding_port = Some(Arc::clone(port));
     }

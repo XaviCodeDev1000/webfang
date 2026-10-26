@@ -43,7 +43,7 @@ use super::progress::CrawlProgress;
 use super::session::{CheckpointAction, CrawlExec, CrawlSession};
 use crate::application::crawler::crawl_task_ctx::CrawlTaskCtx;
 use crate::application::crawler::ports::TerminationSource;
-use crate::application::pipeline::{OutputStage, PipelineExecutor};
+use crate::application::pipeline::PipelineExecutor;
 use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
 use crate::domain::budget::BudgetModel;
 use crate::domain::cookie_bridge::CookieBridge;
@@ -301,8 +301,6 @@ pub struct Engine {
     content_sink: Option<Arc<dyn CrawlContentSink>>,
     /// Optional item pipeline for processing scraped content.
     pipeline: Option<Arc<PipelineExecutor>>,
-    /// Output stages that receive items after pipeline processing.
-    output_stages: Vec<Arc<Box<dyn OutputStage>>>,
     /// Run owner (P6-2): the validated session this engine was built from.
     /// `Engine::from_session` is the only constructor, so an engine always
     /// owns its session until [`Engine::run`] consumes it to derive the task
@@ -426,7 +424,6 @@ impl Engine {
             banned_domains: Arc::new(RwLock::new(Vec::new())),
             content_sink: None,
             pipeline: None,
-            output_stages: Vec::new(),
             // Filled by `from_session` before the engine escapes the
             // private machinery builder — no engine ever runs session-less.
             session: None,
@@ -502,7 +499,6 @@ impl Engine {
             engine = engine.with_content_sink(sink);
         }
         engine.pipeline = session.ports.pipeline.clone();
-        engine.output_stages = session.ports.output_stages.clone();
         // Checkpoint wiring from the session policy (mirrors
         // `with_checkpoint`, but reuses the state `begin()` loaded
         // instead of hitting disk a second time).
@@ -1875,7 +1871,7 @@ pub async fn crawl_site_capturing(
 }
 
 /// Session-builder helper (T7 slice-6, #1881): owns the shared
-/// `content_sink`/`pipeline`/`output_stages` ports → `.identity(...)` →
+/// `content_sink`/`pipeline` ports → `.identity(...)` →
 /// `.build()` → `map_err` chain of the crawl-path entries.
 ///
 /// The two crawl paths differ in persistence, transport, and injected ports,
@@ -1911,7 +1907,6 @@ fn build_crawl_session(
             downloader_factory,
             content_sink,
             pipeline: None,
-            output_stages: Vec::new(),
         })
         .identity(super::session::CrawlIdentity {
             root: correlation_id.clone(),
@@ -2606,7 +2601,6 @@ mod tests {
                 downloader_factory: None,
                 content_sink: None,
                 pipeline: None,
-                output_stages: Vec::new(),
             })
             .identity(crate::application::crawler::session::CrawlIdentity {
                 root: CorrelationId::new(),
@@ -2946,7 +2940,6 @@ mod tests {
                 downloader_factory: None,
                 content_sink: None,
                 pipeline: None,
-                output_stages: Vec::new(),
             })
             .identity(crate::application::crawler::session::CrawlIdentity {
                 root: CorrelationId::new(),

@@ -16,7 +16,6 @@ use crate::application::crawler::content_sink::CrawlContentSink;
 use crate::application::crawler::ports::{
     ContentPipeline, CrawlResultCollector, LinkExtractorPort, PageFetcher, RobotsChecker,
 };
-use crate::application::pipeline::OutputStage;
 use crate::application::rate_limiter::SharedRateLimiter;
 use crate::domain::cookie_bridge::CookieBridge;
 use crate::domain::crawler_port::UrlQueuePort;
@@ -64,7 +63,6 @@ pub struct CrawlTaskCtx {
 
     // --- Pipeline ---
     pub(crate) pipeline: Option<Arc<dyn ContentPipeline>>,
-    pub(crate) output_stages: Vec<Arc<Box<dyn OutputStage>>>,
 
     /// Optional sink that captures every fetched page body (#631).
     ///

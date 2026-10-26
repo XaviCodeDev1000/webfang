@@ -4,9 +4,7 @@
 //! well-defined transformation or validation on [`crate::domain::pipeline_item::ScrapedItem`]s.
 
 mod clean;
-pub mod output;
 mod validate;
 
 pub use clean::CleanStage;
-pub(crate) use output::OutputStage;
 pub use validate::ValidateStage;
