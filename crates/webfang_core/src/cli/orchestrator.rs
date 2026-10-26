@@ -167,6 +167,9 @@ pub async fn run(
         Err(e) => return e,
         Ok(p) => p,
     };
+    // #2338: read BEFORE the struct is consumed piecemeal below — the reason
+    // only turns into an exit code AFTER the partial output is written.
+    let discovery_truncated_by = prepare.truncated_by;
 
     let discovered_count = prepare.urls_to_scrape.len();
     let (urls_to_scrape, state_store) = match apply_resume_mode(
@@ -279,6 +282,16 @@ pub async fn run(
     // written (graceful shutdown).
     if let Some(exit) = crate::cli::error::cancelled_exit(cancel.is_cancelled()) {
         return exit;
+    }
+
+    // Special cell — PartialRun (error-classification-matrix, #2338): the
+    // discovery crawl ended early but the partial set above was already
+    // scraped and exported. The operator gets BOTH the written output and
+    // the failure (InternalFatal → 69), never a silent success.
+    if let Some(reason) = discovery_truncated_by {
+        return CliExit::NetworkError(format!(
+            "el rastreo terminó anticipadamente; los resultados parciales fueron escritos: {reason}"
+        ));
     }
 
     if let Some(exit) = report_phase(&results, &failures, blocked, opts.verbosity) {
@@ -556,6 +569,14 @@ async fn run_dry_run(opts: CrawlOptions, root_correlation: &domain::CorrelationI
     println!("\nDry-run: {} URL(s) would be scraped:", discovered.len());
     for url in discovered {
         println!("  {url}");
+    }
+
+    // #2338: a preview whose discovery crawl ended early lists the partial
+    // set (above) and still exits as a failure — never a silent exit 0.
+    if let Some(reason) = output.truncated_by {
+        return CliExit::NetworkError(format!(
+            "el preview terminó anticipadamente (URLs parciales listadas arriba): {reason}"
+        ));
     }
     CliExit::Success
 }

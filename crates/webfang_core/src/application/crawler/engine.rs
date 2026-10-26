@@ -1043,7 +1043,11 @@ impl Engine {
         drop(task_ctx);
 
         // A stalled loop is a FAILED run (#2313); the checkpoint stays for resume.
-        loop_result?;
+        // #2338: the failure carries the results the crawl DID collect, so the
+        // caller can persist them instead of discarding completed work.
+        if let Err(loop_err) = loop_result {
+            return Err(self.fail_run_with_partials(loop_err).await);
+        }
 
         // Final checkpoint verdict: a fully-completed crawl (no shutdown, no
         // pending work left, not truncated by max_pages) deletes its
@@ -1097,6 +1101,34 @@ impl Engine {
             errors,
             breakdown,
         ))
+    }
+
+    /// Collect what the run completed and wrap `err` so the partial results
+    /// travel with the failure (#2338).
+    ///
+    /// The caller already drained the worker set and dropped the task context
+    /// before this runs, so the collector's senders are gone and `collect()`
+    /// terminates. The run stays FAILED: the payload does not soften the class
+    /// (matrix row 34), and the checkpoint keeps for resume because the
+    /// session verdict after the loop never executes on this return.
+    ///
+    /// The summary event is deliberately NOT the canonical `crawl completed`
+    /// message — the benchmark aggregator keys on that message and a failed
+    /// run must not look like a completed one.
+    async fn fail_run_with_partials(&mut self, err: CrawlError) -> CrawlError {
+        let collected_urls = std::mem::take(&mut self.collector).collect().await;
+        let total_pages = collected_urls.len();
+        let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
+        let breakdown = self.collect_error_breakdown();
+        warn!(
+            collected = total_pages,
+            reason = %err,
+            "crawl ended early — partial results travel with the failure (#2338)"
+        );
+        CrawlError::PartialRun {
+            message: err.to_string(),
+            partial: CrawlResult::new(collected_urls, total_pages, errors, breakdown),
+        }
     }
 
     /// Load checkpoint state if resuming (visited, queued, banned domains and
@@ -2166,7 +2198,18 @@ mod tests {
     /// construction exactly: robots ignored via the transport, static
     /// strategy, default transport knobs, no injected ports.
     fn session_engine(config: CrawlerConfig) -> Engine {
-        Engine::from_session(pool_session(config, None, false)).expect("engine must build")
+        Engine::from_session(pool_session(config, None, false, None)).expect("engine must build")
+    }
+
+    /// Test helper: a session-built engine with an injected pipeline — the
+    /// seam a test wedges to hold a worker past its wait bound through a
+    /// real async await point (#2338).
+    fn session_engine_with_pipeline(
+        config: CrawlerConfig,
+        pipeline: Arc<PipelineExecutor>,
+    ) -> Engine {
+        Engine::from_session(pool_session(config, None, false, Some(pipeline)))
+            .expect("engine must build")
     }
     use super::*;
     use crate::domain::budget::detector::FixedDetector;
@@ -2579,6 +2622,7 @@ mod tests {
         config: CrawlerConfig,
         pool: Option<Arc<FakeSessionPort>>,
         session_pool_enabled: bool,
+        pipeline: Option<Arc<PipelineExecutor>>,
     ) -> CrawlSession {
         // #1439: identity is a REQUIRED builder part (no silent mint), so
         // the pool-wiring proof supplies its own standalone root. The label
@@ -2605,7 +2649,7 @@ mod tests {
                 session_pool: pool.map(|p| p as Arc<dyn SessionPort>),
                 downloader_factory: None,
                 content_sink: None,
-                pipeline: None,
+                pipeline,
                 output_stages: Vec::new(),
             })
             .identity(crate::application::crawler::session::CrawlIdentity {
@@ -2639,8 +2683,9 @@ mod tests {
             .build();
         let pool = Arc::new(FakeSessionPort::default());
 
-        let mut engine = Engine::from_session(pool_session(config, Some(Arc::clone(&pool)), false))
-            .expect("engine must build from a pooled session");
+        let mut engine =
+            Engine::from_session(pool_session(config, Some(Arc::clone(&pool)), false, None))
+                .expect("engine must build from a pooled session");
         let result = engine.run().await.expect("crawl must complete");
         engine.shutdown().await;
 
@@ -2664,8 +2709,8 @@ mod tests {
         let seed = Url::parse("https://example.com").expect("valid seed URL");
         let config = CrawlerConfig::builder(seed).max_depth(0).build();
 
-        let engine =
-            Engine::from_session(pool_session(config, None, true)).expect("engine must build");
+        let engine = Engine::from_session(pool_session(config, None, true, None))
+            .expect("engine must build");
 
         let owned = engine
             .session
@@ -3452,6 +3497,114 @@ mod tests {
             engine.cancel_token.is_cancelled(),
             "a stalled run must cancel the workers it is about to abandon"
         );
+    }
+
+    use crate::application::pipeline::{PipelineStage, ScrapedItem, StageOutcome};
+    use std::future::Future;
+    use std::pin::Pin;
+
+    /// A pipeline stage that never completes — the async wedge: the worker
+    /// awaits `process` forever, the same production shape as a hung stage
+    /// that ignores its own timeout and the cancel token (#2313). Unlike a
+    /// sync block, a pending future stays abortable, so the drain contract
+    /// stays exercisable.
+    struct NeverStage;
+
+    impl PipelineStage for NeverStage {
+        fn name(&self) -> &str {
+            "never"
+        }
+
+        fn process(
+            &self,
+            _item: ScrapedItem,
+        ) -> Pin<Box<dyn Future<Output = StageOutcome> + Send + '_>> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    /// #2338 (strict-TDD RED): a run a wedged worker kills must surface
+    /// `CrawlError::PartialRun`, not a bare `Internal`, so the caller keeps
+    /// whatever the crawl completed instead of discarding it. Also pins the
+    /// other half of the #2313 contract at the `run()` level: the loop error
+    /// propagates — deleting the `loop_result?` turns this test red.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stalled_run_returns_partial_results_in_the_error() {
+        let _entry_off = entry_off();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("<html><body>seed</body></html>"),
+            )
+            .mount(&server)
+            .await;
+        let seed = Url::parse(&format!("{}/", server.uri())).expect("seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .max_depth(0)
+            .max_pages(10)
+            .concurrency(nz(1))
+            .timeout_secs(1)
+            .ignore_robots(true)
+            .build();
+        let mut executor = PipelineExecutor::new();
+        executor.add_stage(Box::new(NeverStage));
+        let mut engine = session_engine_with_pipeline(config, Arc::new(executor));
+
+        let result = tokio::time::timeout(Duration::from_secs(40), engine.run())
+            .await
+            .expect("a stalled run must end within its own bounds");
+        let err = result.expect_err("a wedged worker must fail the run");
+        assert!(
+            err.to_string().contains("crawl stalled"),
+            "the failure must name the stall, got: {err}"
+        );
+        let CrawlError::PartialRun { message, partial } = &err else {
+            panic!("the stall must travel as PartialRun so partial results survive, got: {err:?}");
+        };
+        assert!(
+            message.contains("crawl stalled"),
+            "the rendered reason must be preserved, got: {message}"
+        );
+        assert!(
+            partial.is_empty(),
+            "no page reaches the collector through the wedged pipeline"
+        );
+    }
+
+    /// #2338: the partial payload is the summary a completed run would have
+    /// returned, truncated to what the collector already held — URLs, error
+    /// count and breakdown, with the rendered failure preserved verbatim.
+    #[tokio::test]
+    async fn fail_run_with_partials_carries_collected_urls() {
+        use crate::application::crawler::collector::CrawlMessage;
+        use crate::domain::DiscoveredUrl;
+
+        let seed = Url::parse("https://example.com").expect("valid seed URL");
+        let mut engine = session_engine(CrawlerConfig::builder(seed).build());
+        let collected = DiscoveredUrl::html(
+            Url::parse("https://example.com/page").expect("valid page URL"),
+            0,
+            Url::parse("https://example.com/").expect("valid parent URL"),
+        );
+        engine
+            .collector
+            .send(CrawlMessage::success(collected))
+            .await
+            .expect("collector channel must be open");
+
+        let err = engine
+            .fail_run_with_partials(CrawlError::Internal("crawl stalled: test".to_string()))
+            .await;
+
+        let CrawlError::PartialRun { message, partial } = err else {
+            panic!("the failure must carry the partials, got: {err:?}");
+        };
+        assert!(
+            message.contains("crawl stalled"),
+            "the rendered reason must be preserved, got: {message}"
+        );
+        assert_eq!(partial.total_pages, 1, "the collected page must survive");
+        assert_eq!(partial.urls.len(), 1);
     }
 
     /// #2313: the shape of the four flaky tests — `max_depth(0)` empties the

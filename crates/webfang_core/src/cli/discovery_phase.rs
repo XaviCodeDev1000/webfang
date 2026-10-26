@@ -105,6 +105,10 @@ pub(crate) async fn prepare_phase(
     // Discovery-captured bodies (F-05, #1229): filled by the DOM branch
     // below, reused by the scrape phase instead of refetching.
     let mut captured_pages: Vec<CapturedPage> = Vec::new();
+    // #2338: set when the discovery crawl ended early with partial results —
+    // travels on PrepareResult so the orchestrator reports the failure after
+    // the export.
+    let mut truncated_by: Option<String> = None;
     let urls_to_scrape = if opts.crawl.single_page {
         // F-35 (#1216): single-page mode never runs discovery, so the seed
         // pattern guard needs a patterns-only config — no TLS/sitemap
@@ -136,7 +140,7 @@ pub(crate) async fn prepare_phase(
             // Recursive BFS discovery respects max_depth/max_pages/robots/
             // patterns; the existing scrape_phase + export_phase still own
             // content extraction and on-disk output.
-            let (urls, pages) = discover_dom_with_capture(
+            let (urls, pages, truncated) = discover_dom_with_capture(
                 &crawler_config,
                 opts,
                 persistence_mode,
@@ -144,6 +148,7 @@ pub(crate) async fn prepare_phase(
             )
             .await?;
             captured_pages = pages;
+            truncated_by = truncated;
             urls
         };
 
@@ -226,6 +231,7 @@ pub(crate) async fn prepare_phase(
         scraper_config,
         shared_downloader,
         captured_pages,
+        truncated_by,
     })
 }
 
@@ -246,7 +252,7 @@ async fn discover_dom_with_capture(
     opts: &CrawlOptions,
     persistence_mode: &PersistenceMode,
     root_correlation: &domain::CorrelationId,
-) -> Result<(Vec<url::Url>, Vec<CapturedPage>), CliExit> {
+) -> Result<(Vec<url::Url>, Vec<CapturedPage>, Option<String>), CliExit> {
     let capture_sink = std::sync::Arc::new(InMemoryContentSink::new());
     let cfg = crawler_config.clone();
     // dry-run-fail-fast: the real DOM path keeps full operator retry
@@ -262,7 +268,10 @@ async fn discover_dom_with_capture(
     .await
     {
         Err(e) => Err(CliExit::NetworkError(format!("URL discovery failed: {e}"))),
-        Ok(output) => Ok((output.urls, output.pages)),
+        // #2338: a run the engine ended early still delivers its partial set —
+        // the reason rides along so the run is still reported as FAILED after
+        // the export writes the partial output.
+        Ok(output) => Ok((output.urls, output.pages, output.truncated_by)),
     }
 }
 
@@ -274,6 +283,10 @@ pub(crate) struct PrepareResult {
     /// reuses them instead of refetching. Empty for single-page, sitemap,
     /// and dry-run shapes.
     pub(crate) captured_pages: Vec<CapturedPage>,
+    /// The discovery crawl ended early with partial results (#2338): the
+    /// reason the orchestrator must report as a failure AFTER the export
+    /// wrote the partial output. `None` on a complete discovery.
+    pub(crate) truncated_by: Option<String>,
 }
 
 /// Plan the final scrape list from discovery output.
