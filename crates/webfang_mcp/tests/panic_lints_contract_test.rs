@@ -48,7 +48,7 @@ fn toml_section(manifest: &str, header: &str) -> Option<String> {
 }
 
 #[test]
-fn workspace_declares_panic_lint_denies() {
+fn issue_2354_workspace_declares_panic_lint_denies() {
     let manifest = workspace_manifest();
     let section = toml_section(&manifest, "[workspace.lints.clippy]")
         .expect("[workspace.lints.clippy] exists in the root Cargo.toml");
@@ -65,7 +65,7 @@ fn workspace_declares_panic_lint_denies() {
 }
 
 #[test]
-fn every_member_inherits_workspace_lints() {
+fn issue_2354_every_member_inherits_workspace_lints() {
     let manifest = workspace_manifest();
     let members_section = toml_section(&manifest, "members = [")
         .expect("[workspace] members list exists in the root Cargo.toml");
@@ -93,7 +93,7 @@ fn every_member_inherits_workspace_lints() {
 }
 
 #[test]
-fn mcp_bins_carry_the_test_carve_out() {
+fn issue_2354_mcp_bins_carry_the_test_carve_out() {
     for bin in ["mcp_server_http.rs", "mcp_server_stdio.rs"] {
         let bin_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/bin")
