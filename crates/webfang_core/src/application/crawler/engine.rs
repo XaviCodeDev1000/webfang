@@ -1035,8 +1035,9 @@ impl Engine {
         // Progress tracking start (issue #356 Fase 4)
         let start = std::time::Instant::now();
 
-        // Bound every worker wait (#509): the longest legitimate wait is a
-        // fetch (timeout_secs) or a rate-limit token (delay_ms), plus grace.
+        // Bound every worker wait (#509): rate-limit token + both fetch
+        // timeout phases + grace; the post-fetch pipeline rides on the grace
+        // (residual risk documented on `worker_wait_bound`, #2338).
         let worker_wait_bound = Self::worker_wait_bound(&config_clone);
 
         // A stall is captured here and reported after the drain.
@@ -1224,6 +1225,15 @@ impl Engine {
     /// Bound every worker wait (#509): the longest legitimate wait is one fetch
     /// — connect plus request, each with its own timeout — or a rate-limit
     /// token (delay_ms), plus grace.
+    ///
+    /// The worker lifecycle is rate-limit wait + fetch + post-fetch pipeline.
+    /// The first two arms are covered above; the pipeline is deliberately NOT
+    /// given its own additive allowance (#2338): it is CPU-bound
+    /// `spawn_blocking` work on an already-fetched body, normally far faster
+    /// than the grace, and inventing a pipeline constant without a
+    /// measurement would be fabrication. The documented residual risk: a
+    /// pipeline that runs longer than the grace is classified as a stall and
+    /// fails the run — surfaced as such by [`Self::stalled`], never silently.
     ///
     /// See [`FETCH_TIMEOUT_PHASES`] for why the fetch arm is multiplied rather
     /// than taken at face value.
