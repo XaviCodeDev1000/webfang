@@ -54,3 +54,7 @@ Issue: #2354 (approved, `type:chore`) — Worktree: `chore-centralize-panic-lint
   docs/architecture/ai-providers-design.md (#2136 gate pins test line numbers; the +2
   shift from the sweep broke them).
 - L7: Delivered: PR #2369 (Closes #2354, type:chore). Merge is maintainer-owned.
+- L8: PR went CONFLICTING after main absorbed #2361 (the same lru patch my branch
+  carried from local main) plus #2365 (zstd advisories). Merged origin/main: the only
+  conflict (deny.toml) auto-resolved by rerere — my side never touched it. Gate GREEN
+  again after the merge (PASS=33 FAIL=0); PR back to MERGEABLE.
