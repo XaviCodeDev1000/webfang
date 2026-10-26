@@ -1159,7 +1159,8 @@ jobs:
   # to observed failures. Advisory only — never in `gate` needs: the first
   # runs are EXPECTED to fail on Windows (fail-closed wizard identity,
   # signal semantics) and must not block merges. Promotion to required is a
-  # deliberate follow-up once the lane is green.
+  # deliberate follow-up once the lane is green — the concrete condition is
+  # the REVIEW entry below.
   # No extra tooling: release.yml already builds Windows (x86_64-pc-windows-msvc)
   # and macOS (aarch64-apple-darwin) with BoringSSL/mcp without installing
   # anything — cmake/NASM are preinstalled on GitHub runners.
@@ -1184,6 +1185,23 @@ jobs:
   # design lane with the `known-false-positive` label, W-03 style) lives in
   # ci-health.yml, not here. Revisit with #1631 (the inventory of the real
   # Windows/macOS failures) in the same transaction.
+  #
+  # REVIEW (#2333, 2026-10-26): promotion is NOT due — the lane still flakes
+  # chronically under flaky-result=fail. Measured on main run 40407265924
+  # (2026-10-26), AFTER the build-lock fixes #2336/#2345 removed the shared
+  # in-test cargo build: 2 FLKY-FL, both passing on TRY 2
+  # (batch_empty_stdin_exits_64 in 1.0s, crawl_js_strategy_respects_timeout_secs
+  # in 7.1s), and both ALREADY carrying their per-test spawn-latency
+  # mitigations (#1697 budget, clock-started-after-binary-resolve). Earlier
+  # evidence of the same class: PR #2325's three FLKY-FL (#2331, closed with
+  # two of these same tests still reproducing), #1766, #1697, #2302, #2276.
+  # Gating a lane that red would block merges on spawn-timing retries.
+  # EXIT CONDITION: promote `test-crossplatform` into `gate`'s needs only
+  # after 10 consecutive green windows-latest executions across push and
+  # nightly main runs. If a structural Windows cause is confirmed before
+  # that, fix the test — never a per-test flaky override (#2313 retires
+  # those). This entry is the tracking record; the promotion needs no
+  # separate issue to stay alive.
   # ============================================================================
   test-crossplatform:
     name: Tests (${{ matrix.os }})
