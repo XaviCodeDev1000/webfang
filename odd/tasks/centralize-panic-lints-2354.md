@@ -42,3 +42,15 @@ Issue: #2354 (approved, `type:chore`) — Worktree: `chore-centralize-panic-lint
   main (7897173c; origin/main is 2 commits behind — local main is ahead).
 - L2: Probe results: cargo `[lints]` deny is overridable by source attrs; workspace deny
   applies to test targets and bins.
+- L3: webfang_core already carried `[lints] workspace = true` (line 253) — the issue's
+  premise was stale; codedb word search missed it, manifest load caught the duplicate.
+- L4: clippy iterations caught: 3 test files with pre-existing unconditional allow
+  (duplicated_attributes, removed), the auto-discovered tests/behavioral/main.rs root
+  missed by the first glob (236 violations), and the contract test itself created after
+  the sweep. Final: clippy --all-targets --all-features -D warnings GREEN.
+- L5: RED probe on webfang-mcp-stdio: unwrap in production fails clippy; green after
+  revert. Contract test renamed to issue_2354_* per regression-test-naming.
+- L6: ci_fast_gate GREEN (PASS=33 FAIL=0) after re-anchoring two line citations in
+  docs/architecture/ai-providers-design.md (#2136 gate pins test line numbers; the +2
+  shift from the sweep broke them).
+- L7: Delivered: PR #2369 (Closes #2354, type:chore). Merge is maintainer-owned.
