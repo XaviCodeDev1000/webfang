@@ -195,6 +195,11 @@ serde_json = { workspace = true }
 name = "page_state"
 path = "tests/compile_fail/page_state.rs"
 
+# #2355: batch construction rejects zero concurrency at compile time.
+[[test]]
+name = "batch_manager"
+path = "tests/compile_fail/batch_manager.rs"
+
 # ---------------------------------------------------------------------------
 
 
