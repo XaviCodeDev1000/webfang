@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Resiliencia de `RemoteEmbeddingAdapter` contra un endpoint remoto hostil.
 //!
 //! ## Por qué estas filas son de integración y no unitarias

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! SSRF integration probe — the guard tested LIVE with protection ENABLED.
 //!
 //! This is the ONLY MCP integration suite that runs with the SSRF guard ON

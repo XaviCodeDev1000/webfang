@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! F-05 single-fetch capture proof (#1229, slice 2).
 //!
 //! Discovery must produce (url, content) and the consumer must reuse it —

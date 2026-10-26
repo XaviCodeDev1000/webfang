@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! E2E suite: per-provider `NetworkPolicy` (B2 slice 2, ADR-0004 M2,
 //! issue #1947) reaching an allowlisted LAN embedding endpoint.
 //!

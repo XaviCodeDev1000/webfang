@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP Server behavioral tests
 //!
 //! End-to-end tests that start the MCP server and verify HTTP-level behavior:

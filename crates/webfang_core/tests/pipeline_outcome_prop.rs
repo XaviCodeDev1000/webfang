@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Property tests for the evolved [`StageOutcome`] contract (Sprint 9).
 //!
 //! Algebraic properties of the pipeline executor over the outcome space:

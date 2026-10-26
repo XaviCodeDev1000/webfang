@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP rate limiter — keyed, and inside authentication (#1611, F5).
 //!
 //! The finding was a `NotKeyed` limiter mounted BEFORE authentication, which

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #2237 \u2014 the JSONL tail recovery reads ONLY the tail it needs.
 //!
 //! `recover_torn_tail` used to read the whole export file with `fs::read`, so

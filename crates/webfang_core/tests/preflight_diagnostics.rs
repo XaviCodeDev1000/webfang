@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Exit-code contract for preflight validation, plus the exit-code table pin.
 //!
 //! Two contracts, both behavioral:

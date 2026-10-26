@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1824 behavioral regression: DNS resolution failure must surface as the
 //! network exit code (69, EX_UNAVAILABLE), never as exit 3 (ScraperFailure).
 //!

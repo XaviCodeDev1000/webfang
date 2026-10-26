@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Out-of-crate proof of the #1812 non-UTF-8 export policy.
 //!
 //! The DECIDED policy: a JSONL line that is not valid UTF-8 is SKIPPED, the

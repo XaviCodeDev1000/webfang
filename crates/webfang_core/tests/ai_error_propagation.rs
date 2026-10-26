@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! AI error propagation behavioral tests (#339).
 //!
 //! Verifies that when `--clean-ai` cannot be honored, the CLI surfaces the

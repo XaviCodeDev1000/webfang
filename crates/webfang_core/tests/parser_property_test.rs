@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Property-based tests over the product's parsers and validators (FIX-0,
 //! #1235 / AUDIT-01 RC-4).
 //!

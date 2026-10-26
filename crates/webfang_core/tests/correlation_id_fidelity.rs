@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! CorrelationId fidelity tests.
 //!
 //! Verifies that CorrelationId is preserved through:

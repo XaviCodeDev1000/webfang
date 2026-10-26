@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! PR3 resume-gate contract tests (SC2, A2/E10).
 //!
 //! The gate in [`webfang_core::application::resume`] is THE single skip

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1615 — SSRF layer 2 on the paths that lacked it (F11, G-3, G-4, G-5).
 //!
 //! ## What this file is

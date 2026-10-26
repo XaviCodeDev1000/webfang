@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Adapter-layer behavioral tests for the `webfang` binary.
 //!
 //! Every test uses wiremock (no real network) and TempDir (auto-cleanup).

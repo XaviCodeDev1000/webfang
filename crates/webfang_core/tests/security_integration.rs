@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Security-focused integration tests for WAF evasion scenarios
 //!
 //! These tests verify that the scraper correctly detects and handles

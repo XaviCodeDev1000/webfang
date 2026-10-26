@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Tracing overhead benchmark (observability roadmap #356, Fase 2).
 //!
 //! Measures the cost of the `#[instrument]` tracing added to the hot paths,

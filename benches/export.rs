@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use webfang_core::domain::entities::ScrapedContent;
 use webfang_core::domain::value_objects::ValidUrl;

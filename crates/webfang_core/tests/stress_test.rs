@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Stress test para métricas de runtime
 //!
 //! Mide task starvation y throughput bajo carga pesada.
