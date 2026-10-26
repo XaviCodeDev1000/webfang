@@ -69,6 +69,17 @@ default-filter = "not test(ai_integration)"
 filter = 'test(=illegal_page_transitions_fail_to_compile)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# Mismo tratamiento para el segundo suite trybuild (#2355): compila el crate y
+# un caso `batch_manager/`, así que en frío hereda el techo común y muere
+# terminado antes de terminar. Dato medido (run de PR, Windows, cache frío):
+# TERM en los intentos 1 y 2 al techo de 240s y PASS al tercero en 201.6s —
+# el patrón exacto que `flaky-result = "fail"` convierte en rojo. El override
+# le da un solo intento sin techo de terminación prematura; el backstop sigue
+# siendo el `global-timeout` del perfil.
+[[profile.default.overrides]]
+filter = 'test(=zero_batch_concurrency_fails_to_compile)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
