@@ -129,6 +129,15 @@ pub const TERMINATION_REGISTRATION_REJECTED: &str =
 /// hung worker.
 const SHUTDOWN_GRACE_SECS: u64 = 10;
 
+/// Drain grace after a FAILED loop (#2338).
+///
+/// A failed loop already ran `cancel_run()` (#2313) and carries its reason:
+/// responsive workers are unwinding and finish within this grace, and the
+/// wedged one was already declared hung — draining it again at the full
+/// [`worker_wait_bound`] doubles the failure latency for zero information.
+/// The failure is reported at detection + this grace, not detection + bound.
+const FAILED_RUN_DRAIN_GRACE: Duration = Duration::from_secs(1);
+
 /// Timeout-carrying phases a single worker pays before it can finish (#2313).
 ///
 /// A fetch is not one timeout: the connect has its own cap (10s in
@@ -1028,12 +1037,20 @@ impl Engine {
             .await;
 
         // Wait for remaining tasks — bounded, then abort stragglers, so a
-        // shutdown can never hang on a blocked worker (#509).
+        // shutdown can never hang on a blocked worker (#509). A FAILED loop
+        // gets only the short grace (#2338): `cancel_run` already fired and
+        // the failure reason is known, so the wedged worker must not cost a
+        // second full bound before the error surfaces.
+        let drain_bound = if loop_result.is_err() {
+            FAILED_RUN_DRAIN_GRACE
+        } else {
+            worker_wait_bound
+        };
         Self::drain_tasks(
             &mut tasks,
             &self.error_count,
             &self.error_breakdown,
-            worker_wait_bound,
+            drain_bound,
         )
         .await;
 
@@ -3528,6 +3545,12 @@ mod tests {
     /// whatever the crawl completed instead of discarding it. Also pins the
     /// other half of the #2313 contract at the `run()` level: the loop error
     /// propagates — deleting the `loop_result?` turns this test red.
+    ///
+    /// The latency assertion pins the single-bound contract: the run ends at
+    /// loop detection + one short drain grace (~12s here), never the bound
+    /// twice — the old shape burned a second full 12s bound draining the
+    /// worker it had just declared wedged. The 18s ceiling sits between the
+    /// two shapes so either regression flips the assertion.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stalled_run_returns_partial_results_in_the_error() {
         let _entry_off = entry_off();
@@ -3546,13 +3569,16 @@ mod tests {
             .timeout_secs(1)
             .ignore_robots(true)
             .build();
+        let bound = Engine::worker_wait_bound(&config);
         let mut executor = PipelineExecutor::new();
         executor.add_stage(Box::new(NeverStage));
         let mut engine = session_engine_with_pipeline(config, Arc::new(executor));
 
+        let started = std::time::Instant::now();
         let result = tokio::time::timeout(Duration::from_secs(40), engine.run())
             .await
             .expect("a stalled run must end within its own bounds");
+        let elapsed = started.elapsed();
         let err = result.expect_err("a wedged worker must fail the run");
         assert!(
             err.to_string().contains("crawl stalled"),
@@ -3568,6 +3594,11 @@ mod tests {
         assert!(
             partial.is_empty(),
             "no page reaches the collector through the wedged pipeline"
+        );
+        assert!(
+            elapsed < Duration::from_secs(18),
+            "stall latency is one wait bound ({:?}) plus a short drain grace, never the bound twice; got {elapsed:?}",
+            bound
         );
     }
 
