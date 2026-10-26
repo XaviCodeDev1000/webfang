@@ -24,8 +24,16 @@ fn workspace_root() -> PathBuf {
 }
 
 fn workspace_manifest() -> String {
-    fs::read_to_string(workspace_root().join("Cargo.toml"))
-        .expect("workspace Cargo.toml is readable")
+    read_normalized(&workspace_root().join("Cargo.toml"))
+}
+
+/// Reads a manifest normalizing CRLF to LF: on a Windows checkout
+/// (`core.autocrlf=true`) the raw bytes carry `\r\n` and the newline-joined
+/// assertions below would never match.
+fn read_normalized(path: &Path) -> String {
+    fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("{} is readable: {err}", path.display()))
+        .replace("\r\n", "\n")
 }
 
 /// Returns the body of `header` (e.g. `[workspace.lints.clippy]`), up to the
@@ -81,8 +89,7 @@ fn issue_2354_every_member_inherits_workspace_lints() {
         "expected the five workspace members, found: {members:?}"
     );
     for member in members {
-        let member_manifest = fs::read_to_string(workspace_root().join(member).join("Cargo.toml"))
-            .unwrap_or_else(|err| panic!("member {member} manifest is readable: {err}"));
+        let member_manifest = read_normalized(&workspace_root().join(member).join("Cargo.toml"));
         assert!(
             member_manifest.contains("[lints]\nworkspace = true"),
             "member {member} must inherit the workspace lints via \
