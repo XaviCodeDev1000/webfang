@@ -18,7 +18,7 @@ use tracing::{error, info, warn};
 use crate::application::batch::{BatchManager, BatchManagerSummary};
 use crate::application::crawl_options::{CrawlLimits, CrawlOptions};
 use crate::application::crawler::BoundedFileSink;
-use crate::cli::discovery_phase::resolve_sitemap_projection;
+use crate::cli::discovery_phase::base_crawler_config_builder;
 use crate::cli::elastic::{build_elastic_ingestion, run_elastic_ingestion};
 use crate::cli::error::CliExit;
 use crate::cli::exit_codes::{batch_exit_code, report_phase};
@@ -614,25 +614,12 @@ fn build_batch_crawler_config(
     tls_emulation: wreq_util::Profile,
     budget: &crate::domain::budget::BudgetModel,
 ) -> Result<CrawlerConfig, CliExit> {
-    let crawler_config = CrawlerConfig::builder(opts.url.as_url().clone())
-        .max_pages(opts.crawl.max_pages)
-        .max_depth(opts.crawl.max_depth)
-        .include_patterns(opts.crawl.include_patterns.clone())
-        .exclude_patterns(opts.crawl.exclude_patterns.clone())
-        .ignore_robots(opts.crawl.ignore_robots)
-        .sitemap(resolve_sitemap_projection(opts)?)
-        .timeout_secs(opts.network.timeout_secs)
-        .delay_ms(opts.network.delay_ms)
+    Ok(base_crawler_config_builder(opts)?
         // Concurrency bound derives from the run's budget model
         // Operation.crawl tier (task 2.5b), not from the raw CLI flag.
         .concurrency(budget.crawl().nonzero())
-        // Bug R2-1: each batch URL is crawled through the Engine via
-        // `crawl_site`; without the overrides the Engine drops the explicit
-        // --concurrency / --rate-limit-burst and re-derives the auto tiers.
-        .budget_overrides(opts.budget_overrides)
         .tls_emulation(tls_emulation)
-        .build();
-    Ok(crawler_config)
+        .build())
 }
 
 /// Load the batch manager from a file or stdin.
