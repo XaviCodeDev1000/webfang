@@ -1,3 +1,7 @@
+// unwrap/expect are denied workspace-wide and inherited by this bin from the
+// package's `[lints] workspace = true` (#2354); this attribute is the
+// test-only carve-out for this bin's cfg(test) mods.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 //! MCP Server — Stdio transport (binary entry point).
 //!
 //! Launches the webfang MCP server over stdin/stdout for clients that spawn

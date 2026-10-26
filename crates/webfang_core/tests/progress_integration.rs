@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Progress Integration Tests
 //!
 //! These tests verify the reactive behavior of the progress view:

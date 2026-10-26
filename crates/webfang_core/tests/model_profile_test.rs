@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Model-profile contract (ADR-0004 §"Perfiles de modelo", unit A3).
 //!
 //! These tests are the *acceptance surface* of the profile unit, and they are

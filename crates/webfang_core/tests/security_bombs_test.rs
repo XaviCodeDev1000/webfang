@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Security: decompression-bomb containment through the CLI sitemap flow (batch 2).
 //!
 //! A hostile server can serve highly-compressible payloads that expand far

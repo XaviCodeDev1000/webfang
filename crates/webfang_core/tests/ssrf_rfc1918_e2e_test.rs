@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! E2E regression suite: SSRF RFC1918 + reserved-range entry guard (P9-2, #1217).
 //!
 //! Mission C: pins the AUDIT-02 P9-2 confirmation as executable regression

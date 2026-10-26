@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Behavioral tests: the config loader must never lie about what it read (#1659).
 //!
 //! Before #1659 `ConfigDefaults::load` degraded to defaults on EVERY IO error,
@@ -21,8 +23,6 @@
 //! - `permission_denied` is `#[cfg(unix)]`: the mode bits are the mechanism.
 //!   A privileged runner bypasses them, so that test asserts nothing rather
 //!   than asserting something the OS will not enforce.
-
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 #[path = "common/cli_harness.rs"]
 mod common;

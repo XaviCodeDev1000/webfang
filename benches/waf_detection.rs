@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use webfang_core::domain::waf::InspectionContext;
 use webfang_core::infrastructure::http::waf_engine::WafInspector;

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! SC4 — single-writer JSONL session concurrency proof (PR4).
 //!
 //! 100 tokio tasks × 10 items each share ONE [`JsonlSession`] (one writer

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for DomainSessionPool — concurrent access patterns.
 //!
 //! Exercises acquire/report_success/report_failure lifecycle across multiple

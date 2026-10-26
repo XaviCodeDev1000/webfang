@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! `--retention-days` end-of-run pruning (#1827 slice B).
 //!
 //! Behavioral contract, pinned through the CLI boundary:

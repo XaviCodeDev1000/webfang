@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1613 slice 4: internal failures must not masquerade as tool SUCCESS.
 //!
 //! Two error classes were reported to the agent as a successful tool result,

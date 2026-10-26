@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! CLI↔MCP parity table generated from OptionsSpec (#940, ADR-002 slice 4).
 //!
 //! Proves that EVERY MCP parameter overlapping an OptionsSpec entry advertises

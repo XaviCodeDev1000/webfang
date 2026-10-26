@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Export-path data integrity (issue #1812).
 //!
 //! # The DECIDED policy for a non-UTF8 JSONL

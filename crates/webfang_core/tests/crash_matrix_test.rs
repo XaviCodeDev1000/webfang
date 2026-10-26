@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! SIGKILL crash matrix harness (design D6, PR5a).
 //!
 //! One test per pinned crash point. Each row:

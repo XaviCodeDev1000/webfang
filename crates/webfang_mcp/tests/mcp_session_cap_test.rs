@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP session admission cap — #1611, F6.
 //!
 //! `LocalSessionManager` has no count knob of any kind, so before this slice an

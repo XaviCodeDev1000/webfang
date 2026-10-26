@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1613 slice 3 (EC-02): settle the rmcp error-channel mapping, on a transport.
 //!
 //! EC-02 was classified **"Needs verification"** in `docs/src/mcp-error-contract.md`

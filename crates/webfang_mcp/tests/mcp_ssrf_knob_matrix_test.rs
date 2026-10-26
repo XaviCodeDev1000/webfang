@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP SSRF layer/knob matrix (issue #1294, P6-3).
 //!
 //! The reported symptom is a divergence: "the CLI sitemap works on loopback

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Typed page lifecycle state machine — SC1 acceptance tests (PR1).
 //!
 //! Spec scenarios under test:

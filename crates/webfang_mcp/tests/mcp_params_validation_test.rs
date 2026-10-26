@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Unit tests for MCP parameter validation (issue #512, Slice 1)
 //!
 //! These tests cover two contracts:

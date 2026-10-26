@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! AC-3.3 / AC-3.4 — golden-file pinning of the trace parser.
 //!
 //! The goldens under `tests/goldens/` capture the FileTraceLayer JSONL shapes

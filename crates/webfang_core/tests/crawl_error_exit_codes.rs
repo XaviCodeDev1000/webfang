@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! End-to-end exit-code contract for `CrawlError` flattening (#508) and
 //! severity-aware exit routing (#537).
 //!
@@ -38,8 +40,6 @@
 //! mock HTTP server or a live binary spawn. The exit-code constants come from
 //! `cli::error::EXIT_*`, so a future refactor of severity routing will be
 //! visible here.
-
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::process::{ExitCode, Termination};
 

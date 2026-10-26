@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! SD-07 — the regression fixture for the **advertised** MCP input schemas.
 //!
 //! Every other finding in this issue class is only *provable* because the

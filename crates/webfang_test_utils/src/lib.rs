@@ -7,6 +7,11 @@
 // every crate once configured — this allow is the owner's exemption, the
 // mirror image of the deny active in webfang_core and webfang_mcp.
 #![allow(clippy::disallowed_methods)]
+// Harness crate exempt from the workspace panic lints (#2354): this crate
+// compiles OUTSIDE cfg(test) (its consumers are the tests), so the
+// `cfg_attr(test, ...)` carve-out used at the other roots does not apply
+// here. unwrap/expect on fallible setup steps is the harness idiom.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Shared test utilities for the webfang workspace.
 //!
 //! Provides RAII environment isolation, output redaction for deterministic

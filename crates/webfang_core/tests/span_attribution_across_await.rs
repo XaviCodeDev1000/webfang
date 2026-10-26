@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Regression tests for span attribution under the multi-threaded runtime.
 //!
 //! Issue #519: span attribution must survive `.await`. Production spans in the

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for EngineOptions and crawl_site_with_options.
 //!
 //! Tests use wiremock for deterministic HTTP mocking — no network required.

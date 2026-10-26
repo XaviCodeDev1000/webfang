@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Stdio handshake + lifecycle integration test — regression guard for #759.
 //!
 //! Contract-based audit:

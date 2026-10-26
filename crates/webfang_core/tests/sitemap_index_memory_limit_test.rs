@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests: the sitemap-index aggregate stays under the configured
 //! `memory_limit_mb` (issue #1822).
 //!

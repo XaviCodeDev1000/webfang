@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! CLI binary integration tests
 //!
 //! Tests the actual `webfang` binary using `assert_cmd`.

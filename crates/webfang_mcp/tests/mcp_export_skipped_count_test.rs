@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! The MCP export result carries the count of lines skipped for not being
 //! UTF-8 (issue #2238).
 //!

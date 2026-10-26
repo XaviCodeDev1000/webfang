@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 // The orphaned-default relevance threshold (ADR-0004 step 5, spec T5).
 //
 // The shipped `0.3` relevance threshold was calibrated for Granite, and

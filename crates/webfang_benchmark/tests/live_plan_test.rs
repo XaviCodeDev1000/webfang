@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Tier B Step 0 live-run guards: projected-credit budget refusal, free-plan
 //! concurrency clamp, and inter-request pacing. All pure library-level logic
 //! (unit-testable without running the bin); nothing here performs I/O.
