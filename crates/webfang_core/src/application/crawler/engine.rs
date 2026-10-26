@@ -203,23 +203,13 @@ struct PauseWatchdog {
 }
 
 impl PauseWatchdog {
-    /// Thresholds for the loop-level tests: 5 min to alert, 30 min to give up.
-    ///
-    /// Run-time thresholds come from the operator config
-    /// ([`PauseWatchdog::from_config`], #2338); these literals stay for the
-    /// tests that drive `crawl_loop` directly and inject their own watchdog.
-    /// The 30-min default's ceiling matches the `global-timeout` of the
-    /// `default` nextest profile, so a run that would be killed by its own
-    /// harness anyway reports the reason first.
-    const PRODUCTION: Self = Self {
-        alert_after: Duration::from_secs(300),
-        give_up_after: Duration::from_secs(1800),
-    };
-
     /// Derive the pause thresholds from the operator configuration (#2338):
     /// a legitimately longer RAM-pressure ride-out raises
     /// `pause_give_up_after_secs` instead of losing the crawl to a hardcoded
-    /// 30-minute ceiling.
+    /// 30-minute ceiling. The defaults (300/1800) live on `CrawlerConfig`;
+    /// the 30-min give-up ceiling matches the `global-timeout` of the
+    /// `default` nextest profile, so a run that would be killed by its own
+    /// harness anyway reports the reason first.
     fn from_config(config: &CrawlerConfig) -> Self {
         Self {
             alert_after: Duration::from_secs(config.pause_alert_after_secs),
@@ -2234,6 +2224,14 @@ mod tests {
         std::num::NonZeroUsize::new(n).expect("test literal is non-zero")
     }
 
+    /// Watchdog for the loop-level tests: thresholds far beyond any test
+    /// duration, so only an injected millisecond watchdog decides verdicts.
+    /// Run-time values live on `CrawlerConfig` (#2338).
+    const TEST_WATCHDOG: PauseWatchdog = PauseWatchdog {
+        alert_after: Duration::from_secs(300),
+        give_up_after: Duration::from_secs(1800),
+    };
+
     /// Test helper: a session-built engine — the only construction path
     /// since P6-2 slice 4. Mirrors the former direct `(config, true)`
     /// construction exactly: robots ignored via the transport, static
@@ -3439,7 +3437,7 @@ mod tests {
                 &task_ctx,
                 std::time::Instant::now(),
                 Duration::from_secs(1),
-                PauseWatchdog::PRODUCTION,
+                TEST_WATCHDOG,
             )
             .await
             .expect("a budget exit is not a stall");
@@ -3523,7 +3521,7 @@ mod tests {
                 &task_ctx,
                 std::time::Instant::now(),
                 bound,
-                PauseWatchdog::PRODUCTION,
+                TEST_WATCHDOG,
             ),
         )
         .await
@@ -3677,7 +3675,10 @@ mod tests {
         assert_eq!(watchdog.alert_after, Duration::from_secs(30));
         assert_eq!(watchdog.give_up_after, Duration::from_secs(3600));
         assert!(
-            matches!(watchdog.verdict(Duration::from_secs(3599)), PauseVerdict::Report),
+            matches!(
+                watchdog.verdict(Duration::from_secs(3599)),
+                PauseVerdict::Report
+            ),
             "a pause inside the raised ceiling is reported, never given up on"
         );
         assert!(matches!(
@@ -3716,7 +3717,7 @@ mod tests {
                 &task_ctx,
                 std::time::Instant::now(),
                 Duration::from_secs(1),
-                PauseWatchdog::PRODUCTION,
+                TEST_WATCHDOG,
             ),
         )
         .await
