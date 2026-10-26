@@ -1,5 +1,6 @@
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
-#![cfg_attr(not(test), deny(clippy::expect_used))]
+// unwrap/expect are denied workspace-wide ([workspace.lints.clippy], #2354);
+// this attribute is the test-only carve-out for this bin's cfg(test) mods.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 // Explicit per docs-truthfulness audit (S5): these rustdoc lints are
 // allow-by-default, so CI's `-D warnings` never reaches them. Declare intent.
 #![allow(rustdoc::missing_crate_level_docs)]
