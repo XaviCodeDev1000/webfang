@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-10-26
+
+
+### 📦 Dependencies
+
+- Rust 1.91.1 + cargo-nextest 0.9.131, flaky-result=fail y perfiles con inherits ([#2306](https://github.com/XaviCodeDev1000/webfang/pull/2306)) ([#2310](https://github.com/XaviCodeDev1000/webfang/pull/2310))
+- Update Cargo.lock dependencies
+
+### 🔧 Fixed
+
+- --clean-ai observes cancellation during cleaning (#2270, #2269) ([#2325](https://github.com/XaviCodeDev1000/webfang/pull/2325))
+- Stop building the webfang binary inside every test process ([#2336](https://github.com/XaviCodeDev1000/webfang/pull/2336))
+- Bound the crawl loop and split the pause watchdog ([#2313](https://github.com/XaviCodeDev1000/webfang/pull/2313)) ([#2339](https://github.com/XaviCodeDev1000/webfang/pull/2339))
+- Type batch concurrency as NonZeroUsize ([#2366](https://github.com/XaviCodeDev1000/webfang/pull/2366))
 ## [6.0.0] - 2026-10-24
 
 ### ⚠ BREAKING CHANGES
