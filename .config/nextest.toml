@@ -39,7 +39,8 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 default-filter = "not test(ai_integration)"
 
 # El test trybuild de compile-fail no es lento-por-naturaleza como un scrape:
-# COMPILA el crate y cada caso `page_state/`. Sin este override el techo que lo
+# COMPILA el crate y cada caso de los suites `page_state/` y `batch_manager/`
+# (un solo runner: ver #2366). Sin este override el techo que lo
 # mata es el `slow-timeout` global de más arriba — 60s x 3 = 180s exactos.
 #
 # Medido, en frío y sin cache de trybuild: macOS 467.0 s AL PRIMER intento —
@@ -66,7 +67,7 @@ default-filter = "not test(ai_integration)"
 # sin `=` habría aplicado este techo a cualquier test futuro cuyo nombre
 # contenga el texto.
 [[profile.default.overrides]]
-filter = 'test(=illegal_page_transitions_fail_to_compile)'
+filter = 'test(=compile_fail_cases_fail_to_compile)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
 [profile.ci]
