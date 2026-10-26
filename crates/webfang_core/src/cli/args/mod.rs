@@ -50,15 +50,45 @@ pub(crate) mod test_support {
     ///
     /// This is the ONLY parse entry point of the crate's test surface, and
     /// every test parse is therefore ALWAYS hermetic: a test can never
-    /// observe the ambient shell (issue #2234). The hermeticity is
+    /// observe the ambient shell (issue #2234), and never observes the
+    /// poisoned window another test opens (issue #2341). The hermeticity is
     /// structural, not a convention — there is no non-hermetic sibling left
     /// to call by mistake.
     pub(crate) fn parse_args_hermetic(extra: &[&str]) -> Result<crate::Args, String> {
+        let _window = clap_env_window();
+        parse_args_hermetic_in_window(extra)
+    }
+
+    /// [`parse_args_hermetic`] for a caller that already holds [`clap_env_window`].
+    ///
+    /// Only the ambient-environment test needs this shape: it must span
+    /// `set → parse → restore` inside one window, so the parse it performs
+    /// cannot re-acquire the non-reentrant window lock.
+    pub(crate) fn parse_args_hermetic_in_window(extra: &[&str]) -> Result<crate::Args, String> {
         with_clap_env_cleared(|| {
             let mut argv = vec!["webfang"];
             argv.extend_from_slice(extra);
             crate::Args::try_parse_from(argv).map_err(|e| e.to_string())
         })
+    }
+
+    /// The clap-env window: a lock that spans a whole *set → parse → restore*
+    /// sequence, so no sibling parse can slip inside it (issue #2341).
+    ///
+    /// `ENV_LOCK` alone cannot express that window: `env_set` and the parse's
+    /// own `EnvGuard` both acquire it, on a lock that is not reentrant, so a
+    /// caller cannot hold it across both. This lock is always taken **before**
+    /// `ENV_LOCK` and released after it, never the other way round.
+    ///
+    /// Poison-tolerant on purpose (same rule as `ENV_LOCK`, #1788): the
+    /// poisoner asserts while holding the window, and a failed assertion must
+    /// not cascade into every later test in the process.
+    #[must_use = "the guard is the window; dropping it reopens the surface for sibling parses"]
+    pub(crate) fn clap_env_window() -> std::sync::MutexGuard<'static, ()> {
+        static WINDOW: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        WINDOW
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Every non-builtin clap arg must have an `OptionSpec` entry.
@@ -254,14 +284,14 @@ pub(crate) mod test_support {
 
     /// Runs `f` with every ambient environment variable that could leak into
     /// clap's `env` fallbacks (`WEBFANG_*`, `AI_MODEL_ID`) temporarily
-    /// removed, restoring them afterwards.
+    /// removed, restoring them afterwards. Callers hold [`clap_env_window`].
     ///
     /// Hermeticity: several args declare `env = "WEBFANG_..."` fallbacks, so a
     /// bare parse absorbs ambient variables and default assertions fail in
     /// environments that export them (the scheduled bug-discovery job poisons
     /// exactly these names — issue #926). Tests must observe the declared
     /// defaults, not the ambient shell.
-    pub(crate) fn with_clap_env_cleared<T>(f: impl FnOnce() -> T) -> T {
+    fn with_clap_env_cleared<T>(f: impl FnOnce() -> T) -> T {
         // Snapshot the matching keys while holding ENV_LOCK so the iteration
         // cannot race a concurrent mutation (issue #1126); the guard then
         // removes them and restores on drop.
@@ -661,33 +691,10 @@ fn build_ai_config(args: &Args) -> crate::application::crawl_options::AiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
-
-    /// Remove poisoned env vars once before any arg-parsing test runs.
-    /// CI bug-discovery sets WEBFANG_*=POISON / AI_MODEL_ID=POISON which
-    /// clap reads via `env = "..."` attributes, breaking hermeticity.
-    static ENV_GUARD: std::sync::Once = std::sync::Once::new();
-    fn clean_env() {
-        ENV_GUARD.call_once(|| {
-            // Snapshot the poisoned keys under ENV_LOCK so the iteration
-            // cannot race a concurrent mutation, then drop the lock before
-            // mutating: `env_remove` acquires ENV_LOCK itself (permanent,
-            // process-wide removal — no restore-on-drop; #1126).
-            let poisoned: Vec<String> = {
-                let _lock = webfang_test_utils::env_lock();
-                std::env::vars()
-                    .filter(|(k, _)| k.starts_with("WEBFANG_") || k == "AI_MODEL_ID")
-                    .map(|(k, _)| k)
-                    .collect()
-            };
-            for key in poisoned {
-                webfang_test_utils::env_remove(&key);
-            }
-        });
-    }
 
     // ========================================================================
-    // #2234 — the crate's test parse surface must be hermetic.
+    // #2234 / #2341 — the crate's test parse surface must be hermetic, and no
+    // sibling parse may observe another test's poisoned window.
     //
     // The bug-discovery lane poisons the environment on purpose
     // (`WEBFANG_URL=POISON_TRASH` and friends). A test that parses through
@@ -696,30 +703,40 @@ mod tests {
     // passing on a developer machine — a test that depends on the shell of
     // whoever runs it.
     //
-    // The env lock is NOT reentrant: `EnvGuard` holds it while alive and
-    // the parse helper takes it again, so holding a guard across the parse
-    // deadlocks. The poison is therefore set and removed with the
-    // transient helpers (`env_set` / `env_remove`), which take the lock
-    // only for the duration of the mutation.
+    // #2341: hermeticity alone was not enough. This test mutates the process
+    // environment for a window, and libtest runs the sibling parsers
+    // concurrently in ONE process (the Coverage lane's `cargo llvm-cov`), so a
+    // raw `Args::try_parse_from` could read the poison here. The window lock
+    // spans `set → parse → restore`, and every parse in this module takes it,
+    // so the poison is observable only by the parse that means to observe it.
+    //
+    // The env lock is NOT reentrant: `EnvGuard` holds it while alive and the
+    // parse helper takes it again, so holding a guard across the parse
+    // deadlocks. The poison is therefore set and removed with the transient
+    // helpers (`env_set` / `env_remove`), which take the lock only for the
+    // duration of the mutation.
     // ========================================================================
 
     #[test]
     fn the_test_parse_surface_ignores_the_ambient_environment() {
         // Snapshot the ambient value (if any) so the test leaves the
-        // environment exactly as it found it.
+        // environment exactly as it found it. Snapshot before taking the
+        // window: `env_lock` is only held for the read.
         let original = {
             let _lock = webfang_test_utils::env_lock();
             std::env::var("WEBFANG_URL").ok()
         };
 
+        let window = test_support::clap_env_window();
         webfang_test_utils::env_set("WEBFANG_URL", "POISON_TRASH");
         // Capture the outcome BEFORE restoring the environment: the
         // assertion runs against the parse that saw the poisoned env.
-        let parsed = test_support::parse_args_hermetic(&[]);
+        let parsed = test_support::parse_args_hermetic_in_window(&[]);
         match original {
             Some(value) => webfang_test_utils::env_set("WEBFANG_URL", &value),
             None => webfang_test_utils::env_remove("WEBFANG_URL"),
         }
+        drop(window);
 
         let args = parsed.expect("bare invocation must parse despite the poisoned environment");
         assert!(
@@ -738,25 +755,24 @@ mod tests {
 
     #[test]
     fn ignore_waf_flag_defaults_to_false() {
-        clean_env();
         let args =
-            Args::try_parse_from(["webfang", "-u", "https://example.com"]).expect("valid args");
+            test_support::parse_args_hermetic(&["-u", "https://example.com"]).expect("valid args");
         assert!(!args.crawler.ignore_waf, "ignore_waf defaults to false");
     }
 
     #[test]
     fn ignore_waf_flag_parses() {
-        clean_env();
-        let args = Args::try_parse_from(["webfang", "-u", "https://example.com", "--ignore-waf"])
-            .expect("valid args");
+        let args =
+            test_support::parse_args_hermetic(&["-u", "https://example.com", "--ignore-waf"])
+                .expect("valid args");
         assert!(args.crawler.ignore_waf, "--ignore-waf sets the flag");
     }
 
     #[test]
     fn ignore_waf_maps_into_crawl_options() {
-        clean_env();
-        let args = Args::try_parse_from(["webfang", "-u", "https://example.com", "--ignore-waf"])
-            .expect("valid args");
+        let args =
+            test_support::parse_args_hermetic(&["-u", "https://example.com", "--ignore-waf"])
+                .expect("valid args");
         let opts = crate::application::crawl_options::CrawlOptions::from(args);
         assert!(
             opts.crawl.ignore_waf,
@@ -779,10 +795,8 @@ mod tests {
 
     #[test]
     fn from_args_never_panics_on_invalid_rate_limit_burst() {
-        clean_env();
         for raw in ["0", "banana", "4294967296"] {
-            let args = Args::try_parse_from([
-                "webfang",
+            let args = test_support::parse_args_hermetic(&[
                 "-u",
                 "https://example.com",
                 "--rate-limit-burst",
@@ -807,9 +821,7 @@ mod tests {
     /// together proves the override is never lost.
     #[test]
     fn from_args_defers_valid_rate_limit_burst_to_the_pipeline() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "--rate-limit-burst",
@@ -829,8 +841,7 @@ mod tests {
 
     #[test]
     fn positional_url_parses() {
-        clean_env();
-        let args = Args::try_parse_from(["webfang", "https://example.com"]).expect("valid args");
+        let args = test_support::parse_args_hermetic(&["https://example.com"]).expect("valid args");
         assert_eq!(
             args.positional_url.as_ref().map(ValidUrl::as_str),
             Some("https://example.com/"),
@@ -840,8 +851,7 @@ mod tests {
 
     #[test]
     fn positional_url_with_flags() {
-        clean_env();
-        let args = Args::try_parse_from(["webfang", "https://example.com", "--max-pages", "5"])
+        let args = test_support::parse_args_hermetic(&["https://example.com", "--max-pages", "5"])
             .expect("valid args");
         assert_eq!(
             args.positional_url.as_ref().map(ValidUrl::as_str),
@@ -852,16 +862,14 @@ mod tests {
 
     #[test]
     fn positional_url_conflicts_with_flag() {
-        clean_env();
         let result =
-            Args::try_parse_from(["webfang", "https://example.com", "-u", "https://other.com"]);
+            test_support::parse_args_hermetic(&["https://example.com", "-u", "https://other.com"]);
         assert!(result.is_err(), "positional + -u must conflict");
     }
 
     #[test]
     fn completions_still_work() {
-        clean_env();
-        let args = Args::try_parse_from(["webfang", "completions", "bash"]).expect("valid args");
+        let args = test_support::parse_args_hermetic(&["completions", "bash"]).expect("valid args");
         assert!(
             matches!(
                 args.subcommand,
@@ -873,8 +881,7 @@ mod tests {
 
     #[test]
     fn no_args_no_url_is_ok() {
-        clean_env();
-        let args = Args::try_parse_from(["webfang"]).expect("valid args");
+        let args = test_support::parse_args_hermetic(&[]).expect("valid args");
         assert!(args.positional_url.is_none());
         assert!(args.crawler.url.is_none());
     }
@@ -885,9 +892,7 @@ mod tests {
 
     #[test]
     fn batch_concurrency_zero_is_rejected() {
-        clean_env();
-        let result = Args::try_parse_from([
-            "webfang",
+        let result = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "--batch-concurrency",
@@ -901,9 +906,7 @@ mod tests {
 
     #[test]
     fn batch_concurrency_positive_is_accepted() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "--batch-concurrency",
@@ -915,9 +918,8 @@ mod tests {
 
     #[test]
     fn batch_concurrency_omitted_is_none_auto() {
-        clean_env();
         let args =
-            Args::try_parse_from(["webfang", "-u", "https://example.com"]).expect("valid args");
+            test_support::parse_args_hermetic(&["-u", "https://example.com"]).expect("valid args");
         // Omitted flag = auto: the budget model derives the tier.
         assert_eq!(args.export.batch_concurrency, None);
     }
@@ -928,9 +930,7 @@ mod tests {
 
     #[test]
     fn header_flag_parses_single() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "-H",
@@ -945,9 +945,7 @@ mod tests {
 
     #[test]
     fn header_flag_parses_multiple() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "-H",
@@ -967,9 +965,7 @@ mod tests {
 
     #[test]
     fn cookie_flag_parses_single() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "--cookie",
@@ -981,9 +977,7 @@ mod tests {
 
     #[test]
     fn cookie_flag_parses_multiple() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "--cookie",
@@ -1000,9 +994,7 @@ mod tests {
 
     #[test]
     fn headers_propagate_to_crawl_options() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "-H",
@@ -1018,9 +1010,7 @@ mod tests {
 
     #[test]
     fn cookies_propagate_to_crawl_options() {
-        clean_env();
-        let args = Args::try_parse_from([
-            "webfang",
+        let args = test_support::parse_args_hermetic(&[
             "-u",
             "https://example.com",
             "--cookie",
