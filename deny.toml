@@ -152,14 +152,15 @@ ignore = [
     # Expires: 2027-03-20
     { id = "RUSTSEC-2026-0221", reason = "event-listener 5.4.1 unsound; !Send tags can cross thread boundaries via StackSlot, transitive via async-lock/async-process <- async-std <- chromiumoxide 0.7 and never used directly in webfang code" },
 
-    # RUSTSEC-2026-0253 (lru 0.16.4 + 0.18.1, severity: unsound)
-    # Potential use-after-free on panic inside `LruCache::pop()`. Via
-    # html-to-markdown-rs (0.16.4) and wreq (0.18.1); both IDs flagged under
-    # the single advisory ID. Trigger requires a panicking Drop during pop;
-    # neither path runs panicking code inside pop.
+    # RUSTSEC-2026-0253 (lru 0.16.4, severity: unsound)
+    # Potential use-after-free on panic inside `LruCache::pop()`. The only
+    # remaining occurrence is html-to-markdown-rs (lru 0.16.4); the wreq path
+    # was patched to lru 0.18.5, outside the vulnerable range (advisory
+    # `patched = [">= 0.18.2"]`). Trigger requires a panicking Drop during
+    # pop; this path does not run panicking code inside pop.
     # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0253
     # Expires: 2027-03-20
-    { id = "RUSTSEC-2026-0253", reason = "lru 0.16.4 and 0.18.1 unsound; potential use-after-free on a panicking Drop inside LruCache::pop(), via html-to-markdown-rs and wreq, neither of which runs panicking code inside pop" },
+    { id = "RUSTSEC-2026-0253", reason = "lru 0.16.4 unsound; potential use-after-free on a panicking Drop inside LruCache::pop(), via html-to-markdown-rs, which does not run panicking code inside pop; wreq's lru 0.18.5 is already outside the vulnerable range" },
 
     # RUSTSEC-2026-0391..0406 (zstd 0.13.3 / zstd-safe 7.2.4 only via wreq-util static emulation)
     # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0391
