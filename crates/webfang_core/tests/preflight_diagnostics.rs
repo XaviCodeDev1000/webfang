@@ -14,11 +14,10 @@
 //!    against vacuous matching).
 //!
 //!    History: this contract used to be the opposite — `abc` degraded to the
-//!    default and a `preflight_notes` WARN announced the substitution (#1431,
-//!    which had to exist because the notice was emitted before the tracing
-//!    subscriber was installed and would have been dropped). Failing closed
-//!    removes the need for the notice entirely, so that replay path has no
-//!    producer left.
+//!    default and a WARN announced the substitution (#1431, which had to
+//!    route through a pre-subscriber replay buffer because the notice would
+//!    otherwise have been dropped). Failing closed removes the need for the
+//!    notice entirely, and the replay machinery behind it was deleted (#1866).
 //!
 //! 2. **Exit-code table cannot drift.** The `--help` `EXIT CODES` table and
 //!    the `docs/src/cli-reference.md` mirror must name every `EXIT_*`
