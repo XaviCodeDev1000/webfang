@@ -73,6 +73,14 @@ What the compiler **cannot** catch. Everything else comes from the harness or th
 above.
 
 - **Never `.unwrap()` in production** — use `?`, `match` or `.context()`.
+- **A poisoned `std::sync::Mutex` is never fatal and never silent.** Recover the guard with
+  `PoisonError::into_inner()` — it still grants exclusive access — and keep going. Where the
+  function already returns `Result` and a recovered write could corrupt an output stream,
+  propagate it as a typed error instead (`infrastructure::stream` does this for the vector
+  sink). Two shapes are banned in production: `.lock().expect(..)`/`.unwrap()`, because one
+  panic turns into a process-wide outage, and `if let Ok(..) = mutex.lock()`, because it
+  silently drops the work. `MockClock` keeps its `expect`: a poisoned test clock is a test
+  bug, not runtime state.
 - **User-facing errors in Spanish; tracing fields and logs in English.**
 - **HTTP: always `wreq`, never `reqwest`** — TLS fingerprint impersonation for WAF evasion.
   An agent that suggests `reqwest` is wrong.

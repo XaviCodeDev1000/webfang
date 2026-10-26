@@ -302,11 +302,13 @@ impl CrawlResultRepository for CrawlResultRepositoryImpl {
             let _send_result = self.tx.send(WriteCommand::Shutdown).await;
             // The std guard is dropped before the await — never held across
             // a suspension point.
+            // Recovered: a poisoned slot still grants exclusive access, and
+            // returning early here would skip waiting for the writer to flush.
             let handle = self
                 .writer_handle
                 .lock()
-                .ok()
-                .and_then(|mut pending| pending.take());
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             let Some(handle) = handle else {
                 return Ok(());
             };

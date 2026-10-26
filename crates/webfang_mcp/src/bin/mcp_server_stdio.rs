@@ -85,9 +85,15 @@ impl TransportDeathSignal {
     /// `poll_read`).
     fn mark_broken(&self, error: &std::io::Error) {
         if !self.inner.broken.swap(true, Ordering::SeqCst) {
-            if let Ok(mut slot) = self.inner.first_error.lock() {
-                *slot = Some(error.to_string());
-            }
+            // Recovered: the slot is one `Option<String>` written exactly once,
+            // and losing the shutdown diagnostic is worse than reusing a guard
+            // whose critical section only did an assignment.
+            let mut slot = self
+                .inner
+                .first_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *slot = Some(error.to_string());
             self.inner.notify.notify_waiters();
         }
     }
@@ -96,8 +102,8 @@ impl TransportDeathSignal {
         self.inner
             .first_error
             .lock()
-            .ok()
-            .and_then(|slot| slot.clone())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Resolve when either half dies. The notified future is created
