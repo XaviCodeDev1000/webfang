@@ -5,12 +5,12 @@ Branch: `chore/unify-lru-2352` · Worktree: `~/Projects/Rust/webfang-worktrees/c
 
 ## Status
 
-Slice 1 (done): the patched half. Slice 2 (blocked on a maintainer decision): the single-version half.
+Closed. Slice 1 (the patched half) is delivered locally. The single-version half is transferred to #2360, which removes `html-to-markdown-rs` — and with it `lru 0.16.4` — by consolidating on `htmd`.
 
 ## Specs
 
 - **S1** — `lru 0.18.1 -> 0.18.5`. The advisory is patched from `>= 0.18.2`; `wreq` requires `^0.18.0`, so this is a lock-only change with no API movement.
-- **S2** — one `lru` in `Cargo.lock`. **Not achieved.** See the fork below.
+- **S2** — one `lru` in `Cargo.lock`. **Not achieved here; moved to #2360.** The fork below records why a lock-only change cannot satisfy it.
 - **S3** — `cargo deny check` and `scripts/check_advisory_policy.sh` green, with no new duplicate crate and no new license.
 
 ## The fork
@@ -24,7 +24,7 @@ Measured cost of that bump (3.18.6, resolved against this lock):
 - adds a new license: `tiny-keccak 2.0.2` (CC0-1.0) via `ahash -> const-random -> const-random-macro`, not in `[licenses].allow`
 - every 3.x pays some of this: 3.11-3.13 bring the `phf` family instead of the html5ever chain
 
-Net: the "unify a duplicate" chore would add five duplicate names. That is the decision left open, not an oversight.
+Net: the "unify a duplicate" chore would add five duplicate names. That is the decision that was left open, not an oversight. Resolved in T3: do not pay that cost here; the converter consolidation is tracked in #2360.
 
 Also wrong in the issue text: RUSTSEC-2026-0253 **is** already in `deny.toml` with `# Expires: 2027-03-20` and a written rationale, so "el purgado fue RUSTSEC-2026-0002" describes an older state of the file.
 
@@ -32,7 +32,7 @@ Also wrong in the issue text: RUSTSEC-2026-0253 **is** already in `deny.toml` wi
 
 - **T1** — `cargo update -p lru@0.18.1` -> 0.18.5. **done**.
 - **T2** — `cargo update -p html-to-markdown-rs` to 3.x and port `convert_to_markdown` to the new `ConversionResult` return type. **done and reverted** — see the fork.
-- **T3** — Decision on the fork. **open**.
+- **T3** — Decision on the fork: deliver the patch now, open the converter consolidation separately as #2360. **done** (owner decision, L2).
 
 ## Log
 
@@ -43,3 +43,7 @@ Also wrong in the issue text: RUSTSEC-2026-0253 **is** already in `deny.toml` wi
 - **E4** — 3.x also pulls `rmcp`/`axum`/`tower-http`/`comrak`, but behind the `mcp`/`mcp-http` features, which stay off: none of them reached the lock.
 - **E5** — The 3.x attempt compiled and the converter port was green (`convert` now returns `ConversionResult`, `content: Option<String>`); 68 converter/markdown/file_saver tests passed. Only the dependency-policy cost blocked it.
 - **E6** — Slice 1 gates: `cargo deny check` all ok; `check_advisory_policy.sh` 42 live duplicates all in baseline, 8 justified ignores, no new duplicate.
+- **L2** — Owner decision, verbatim: «la recomendación es la correcta: **Opción 2 ya, Opción 3 en su propio issue**».
+- **E7** — Verification for the split: `htmd 0.5.4` is already a direct dependency (`webfang_core/Cargo.toml`) and is the fallback converter in `infrastructure/scraper/fallback.rs::extract_text`, duplicated in `domain/scraper_port.rs::fallback::extract_text`. `cargo tree -i lru@0.16.4` -> only `html-to-markdown-rs 2.20.0`; `cargo tree -i lru@0.18.5` -> `wreq 6.0.0-rc.29`. `check_advisory_policy.sh` green after slice 1: 42 baseline duplicates, 8 justified ignores.
+- **E8** — Draft figures corrected before opening #2360: the tree has 107 `*.snap` files (not 68 markdown snapshots; 68 was the test count of the reverted 3.x attempt in E5), and no verified total test count backs `1337`. The issue cites neither.
+- **E9** — `deny.toml`'s RUSTSEC-2026-0253 reason corrected: after slice 1 it no longer applies to `lru 0.18.1`; the only remaining occurrence is `lru 0.16.4` via `html-to-markdown-rs`.
