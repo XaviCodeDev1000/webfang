@@ -747,6 +747,12 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
                 ScraperError::Internal("task cancelled by engine shutdown".to_string())
             },
             // LCOV_EXCL_STOP
+            // #2338: the CLI intercepts `PartialRun` BEFORE this conversion to
+            // persist the partial results, so this arm only serves consumers
+            // that do not match the typed variant (batch, MCP fallthrough).
+            // Mapping to `Internal` preserves the exact ScraperError the same
+            // failure produced before the variant existed.
+            CrawlError::PartialRun { message, .. } => ScraperError::Internal(message),
         }
     }
 }
