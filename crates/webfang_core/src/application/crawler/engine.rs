@@ -203,15 +203,29 @@ struct PauseWatchdog {
 }
 
 impl PauseWatchdog {
-    /// Production thresholds: 5 min to alert, 30 min to give up.
+    /// Thresholds for the loop-level tests: 5 min to alert, 30 min to give up.
     ///
-    /// The ceiling matches the `global-timeout` of the `default` nextest
-    /// profile, so a run that would be killed by its own harness anyway
-    /// reports the reason first. Tests inject millisecond thresholds instead.
+    /// Run-time thresholds come from the operator config
+    /// ([`PauseWatchdog::from_config`], #2338); these literals stay for the
+    /// tests that drive `crawl_loop` directly and inject their own watchdog.
+    /// The 30-min default's ceiling matches the `global-timeout` of the
+    /// `default` nextest profile, so a run that would be killed by its own
+    /// harness anyway reports the reason first.
     const PRODUCTION: Self = Self {
         alert_after: Duration::from_secs(300),
         give_up_after: Duration::from_secs(1800),
     };
+
+    /// Derive the pause thresholds from the operator configuration (#2338):
+    /// a legitimately longer RAM-pressure ride-out raises
+    /// `pause_give_up_after_secs` instead of losing the crawl to a hardcoded
+    /// 30-minute ceiling.
+    fn from_config(config: &CrawlerConfig) -> Self {
+        Self {
+            alert_after: Duration::from_secs(config.pause_alert_after_secs),
+            give_up_after: Duration::from_secs(config.pause_give_up_after_secs),
+        }
+    }
 
     /// Classify a pause by how long it has lasted.
     fn verdict(&self, paused_for: Duration) -> PauseVerdict {
@@ -1032,7 +1046,7 @@ impl Engine {
                 &task_ctx,
                 start,
                 worker_wait_bound,
-                PauseWatchdog::PRODUCTION,
+                PauseWatchdog::from_config(&config_clone),
             )
             .await;
 
@@ -3636,6 +3650,30 @@ mod tests {
         );
         assert_eq!(partial.total_pages, 1, "the collected page must survive");
         assert_eq!(partial.urls.len(), 1);
+    }
+
+    /// #2338: `run()` derives the pause watchdog from the operator config —
+    /// raising `pause_give_up_after_secs` must reach the verdicts, not stay
+    /// behind the hardcoded 30-minute ceiling the tests still carry.
+    #[test]
+    fn pause_watchdog_comes_from_the_crawler_config() {
+        let seed = Url::parse("https://example.com").expect("valid seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .pause_alert_after_secs(30)
+            .pause_give_up_after_secs(3600)
+            .build();
+
+        let watchdog = PauseWatchdog::from_config(&config);
+        assert_eq!(watchdog.alert_after, Duration::from_secs(30));
+        assert_eq!(watchdog.give_up_after, Duration::from_secs(3600));
+        assert!(
+            matches!(watchdog.verdict(Duration::from_secs(3599)), PauseVerdict::Report),
+            "a pause inside the raised ceiling is reported, never given up on"
+        );
+        assert!(matches!(
+            watchdog.verdict(Duration::from_secs(3600)),
+            PauseVerdict::GiveUp
+        ));
     }
 
     /// #2313: the shape of the four flaky tests — `max_depth(0)` empties the
