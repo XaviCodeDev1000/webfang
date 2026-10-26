@@ -190,13 +190,13 @@ impl VectorExporter {
     /// legal JSON whitespace and right-alignment avoids leading zeros, so both
     /// fields can be overwritten later without rewriting the whole file.
     fn build_header_line(&self, created_at: &str) -> String {
-        // Mutex poisoning indicates a bug in the calling code, not a recoverable error.
-        #[allow(clippy::expect_used)]
+        // The slot holds one `Option<usize>`; recovering it keeps the header
+        // written with whatever dimension the run learned instead of aborting
+        // the export over a panic in an unrelated writer thread.
         let dimensions_json = self
             .dimensions
             .lock()
-            // LCOV_EXCL_LINE defensive: mutex-poisoning — poisoning indicates a bug in the calling code
-            .expect("lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .map(|d| d.to_string())
             .unwrap_or_else(|| "null".to_string());
         let count = 0_usize;
@@ -212,10 +212,11 @@ impl VectorExporter {
     fn serialize_document(&self, doc: &DocumentChunkValidated) -> ExportResult<String> {
         // Validate embedding dimensions if present
         if let Some(ref embeddings) = doc.embeddings {
-            // Mutex poisoning indicates a bug in the calling code, not a recoverable error.
-            #[allow(clippy::expect_used)]
-            // LCOV_EXCL_LINE defensive: mutex-poisoning — poisoning indicates a bug in the calling code
-            let mut dim_guard = self.dimensions.lock().expect("lock poisoned");
+            // Recovered, not panicked: the slot is a single `Option<usize>`.
+            let mut dim_guard = self
+                .dimensions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(exp) = *dim_guard {
                 if embeddings.len() != exp {
                     // Dimension mismatch: the document is degraded (no embeddings in output).
@@ -365,10 +366,12 @@ impl VectorExporter {
 
         // Dimensions may have been learned mid-run by serialize_document —
         // backfill the reserved window now that the final value is known.
-        // Mutex poisoning indicates a bug in the calling code, not a recoverable error.
-        #[allow(clippy::expect_used)]
-        // LCOV_EXCL_LINE defensive: mutex-poisoning — poisoning indicates a bug in the calling code
-        let known_dimensions = *self.dimensions.lock().expect("lock poisoned");
+        // Same recovery as `build_header_line`: the backfill must not be
+        // dropped because another thread panicked while holding the slot.
+        let known_dimensions = *self
+            .dimensions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(dimensions) = known_dimensions {
             let value = format!("{dimensions:>DIM_FIELD_WIDTH$}");
             patch_header_field(
