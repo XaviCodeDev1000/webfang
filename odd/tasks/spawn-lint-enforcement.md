@@ -45,3 +45,37 @@ Issue: #1951 (`status:approved`, label `type:chore`) — ban `tokio::spawn` via 
   authorized, resource-careful). Worktree created at sibling path; indexes ready
   (codedb 1152 files @ 6f8ed0aa, codegraph ok). Seed `cold` (no seed for key) — first
   build pays the graph once.
+- L2 (2026-10-27): Worktree misplacement fixed — `git -C webfang worktree add
+  <relative>` created an in-repo worktree; removed and recreated at the sibling path
+  with absolute paths.
+- L3 (2026-10-27): Audit strategy — added the clippy.toml entry FIRST and let clippy
+  enumerate violations (DefId-authoritative) instead of text search (130 files mention
+  "spawn"; too noisy). Two warm clippy passes with `-j 8`, no full cold rebuild.
+- L4 (2026-10-27): Authoritative census (clippy, --all-targets --all-features):
+  8 production sites (webfang_core lib) — ALL supervised, zero migrations needed;
+  ~33 inline cfg(test) sites in webfang_core + 3 in webfang_mcp (lib test);
+  13 integration test files (9 core, 4 mcp); ZERO sites in webfang_cli,
+  webfang_test_utils, webfang_benchmark, benches/, examples/.
+- L5 (2026-10-27): Production audit table (each verified by reading the lifecycle):
+  - bounded_sink.rs (with_backlog_bytes): handle stored in Self.writer, joined in
+    finish() with JoinError → BoundedSinkError::Writer.
+  - collector.rs (new): handle stored in ResultsCollector.handle, joined in collect().
+  - engine.rs (with_autoscale): stored in self.autoscale_handle, aborted in shutdown()
+    (#1941 lifecycle).
+  - engine.rs (spawn_signal_handler): returns JoinHandle; caller stores + aborts at
+    shutdown (#1941 lifecycle).
+  - shutdown.rs (ShutdownGuard::install): guard owns handle, aborts on Drop.
+  - chromiumoxide_downloader.rs: HandlerGuard aborts the CDP pump on every non-join
+    exit (#1129).
+  - axtree/mod.rs (fetch_raw_axtree): deterministic finally calls handler_job.abort(),
+    even on timeout.
+  - bridge.rs (dispatch_resource): handle intentionally not stored; the oneshot
+    receiver is the supervision surface — task death closes tx, receiver observes.
+- L6 (2026-10-27): Attribute-leveling mechanics: webfang_core's crate-root deny is
+  followed by `#![warn(clippy::style)]` (implied member re-warn) — the test allow must
+  be placed AFTER the group warns, and a group mention downgrades the deny to warn
+  (CI -D warnings re-escalates). Documented for the PR.
+- L7 (2026-10-27): Spelling probe: temporary test using `tokio::task::spawn` failed
+  clippy -D warnings (exit 101) → both spellings fire. Probe deleted after verification.
+- L8 (2026-10-27): Two work-unit commits: 89f7ef36 (lint entry + crate roots + 8
+  production allows), 20bb322f (13 test-file exemptions). ci_fast_gate launched.
