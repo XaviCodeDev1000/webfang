@@ -1559,7 +1559,15 @@ jobs:
     name: Feature matrix
     needs: [clippy]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 min is the measured worst case plus headroom, not a round number
+    # (#2332). Run 40197111976 / job 121180893990 (PR #2325, cold-ish cache):
+    # setup ~1m, "Feature matrix check" 7m03s, "Feature-gated test targets
+    # compile" 1m27s — the harness step was killed with only ~6m30 left and the
+    # job concluded `cancelled` (a job timeout cancels the whole run, #1512).
+    # Warm-cache main runs finish the same job in ~9m (step 1 ~2m40, harness
+    # ~5m09, job 121853846485). Worst observed sums to ~22m30 with the harness
+    # cap below; the remainder is headroom.
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -1588,8 +1596,11 @@ jobs:
       # Per-combo runtime probes: build + behavioral crawl + resume round-trip +
       # exit-contract gates (65) for default, no-default, chromium, mcp and full
       # feature sets. Advisory only (not in `gate` needs). The script
-      # rebuilds per combo, so the timeout is generous.
+      # rebuilds per combo (5 sequential builds): ~5m09 warm, so 12 covers the
+      # cold path while bounding a hang to a step failure instead of burning
+      # the whole job budget and cancelling the run (#1512, #2332).
       - name: Compatibility harness (per-combo probes)
+        timeout-minutes: 12
         run: bash scripts/check_compatibility.sh --ci-required
 
   # ============================================================================
