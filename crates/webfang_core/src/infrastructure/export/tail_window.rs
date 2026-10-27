@@ -172,9 +172,7 @@ mod tests {
     /// The application's ONE reader of the export file (#2393) — the same
     /// function `CommitSession::open` uses, so the index assertions below pin
     /// exactly what the resume gate will see after a recovery.
-    fn app_index(
-        path: &Path,
-    ) -> crate::application::export_factory::JsonlChecksumIndex {
+    fn app_index(path: &Path) -> crate::application::export_factory::JsonlChecksumIndex {
         crate::application::export_factory::read_jsonl_checksum_index(path)
             .expect("read the checksum index")
     }
