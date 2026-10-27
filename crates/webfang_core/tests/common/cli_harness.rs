@@ -149,8 +149,14 @@ fn resolve_webfang_path() -> std::path::PathBuf {
 }
 
 /// Shared binary command builder for tests that don't need a mock server.
+///
+/// The hermetic env contract is applied on the std layer and wrapped with
+/// `Command::from_std`: ONE sanitized builder feeds both this assert_cmd
+/// path and the budget machinery (`std_cmd`), so the two spawn surfaces
+/// cannot drift — the cost of drift here was already paid once by the
+/// duplicated redaction chain (#1649).
 pub(crate) fn cmd() -> Command {
-    sanitize_env(Command::new(webfang_path()))
+    Command::from_std(std_cmd())
 }
 
 /// Wall-clock budget for one spawned-binary attempt whose real latency is
@@ -469,64 +475,31 @@ pub(crate) fn strip_poisoned_env(cmd: &mut Command) {
 /// WITHOUT the port (`127.0.0.1.json`), so it collides across every
 /// wiremock test. Giving each spawned binary its own cache base keeps both
 /// state files per-test without changing any production default.
-fn sanitize_env(mut cmd: Command) -> Command {
-    apply_hermetic_env(&mut cmd);
-    cmd
-}
-
-/// The env contract of [`cmd`], applied to BOTH command types — the budget
-/// machinery spawns through `std::process::Command` (the child must stay
-/// reachable for the kill, #2387) and the two types share no deref, so the
-/// contract lives once behind this tiny seam instead of twice.
-fn apply_hermetic_env(cmd: &mut impl SanitizableCommand) {
+fn sanitize_std_env() -> std::process::Command {
+    let mut cmd = std::process::Command::new(webfang_path());
     for key in poisoned_env_names() {
-        cmd.remove_env(&key);
+        cmd.env_remove(&key);
     }
     // SSRF entry-guard allowance (F-06 + F-32, #1217): every behavioral
     // mock binds 127.0.0.1 — a forbidden literal the production request
     // path now rejects — so the harness disarms ONLY the entry layer for
     // spawned binaries. Production never sets this; the entry-guard
     // regression test opts back out with `.env_remove(...)`.
-    cmd.set_env(
+    cmd.env(
         webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
         "1",
     );
-    cmd.set_env("XDG_CACHE_HOME", hermetic_cache_dir());
+    cmd.env("XDG_CACHE_HOME", hermetic_cache_dir());
     // Config gets the same treatment, and for a stronger reason than the
     // cache: the CLI resolves its config file through `WEBFANG_CONFIG`
     // (`cli::config::load_config_defaults`), so pointing that at a file that
     // carries no settings means a spawned binary can never read the
     // developer's real `~/.config/webfang/config.toml`, and the run cannot
     // depend on the operator's machine. A per-test `.env("WEBFANG_CONFIG", …)`
-    // applied after `cmd()` still wins: both writes land in the inner
-    // `std::process::Command` env map, and the last write for a key is the one
-    // applied at spawn.
-    cmd.set_env("WEBFANG_CONFIG", hermetic_empty_config_file());
-}
-
-/// The env-writing surface `assert_cmd::Command` and `std::process::Command`
-/// share, without a dyn object behind it.
-trait SanitizableCommand {
-    fn set_env(&mut self, key: &str, value: impl AsRef<std::ffi::OsStr>);
-    fn remove_env(&mut self, key: &str);
-}
-
-impl SanitizableCommand for Command {
-    fn set_env(&mut self, key: &str, value: impl AsRef<std::ffi::OsStr>) {
-        self.env(key, value);
-    }
-    fn remove_env(&mut self, key: &str) {
-        self.env_remove(key);
-    }
-}
-
-impl SanitizableCommand for std::process::Command {
-    fn set_env(&mut self, key: &str, value: impl AsRef<std::ffi::OsStr>) {
-        self.env(key, value);
-    }
-    fn remove_env(&mut self, key: &str) {
-        self.env_remove(key);
-    }
+    // applied after `cmd()` still wins: both writes land in the same env map,
+    // and the last write for a key is the one applied at spawn.
+    cmd.env("WEBFANG_CONFIG", hermetic_empty_config_file());
+    cmd
 }
 
 /// The std twin of [`cmd`]: the same sanitized environment and the same
@@ -535,9 +508,7 @@ impl SanitizableCommand for std::process::Command {
 /// can kill an overrunning spawn (#2387), and `assert_cmd::Command` exposes
 /// no handle to it.
 pub(crate) fn std_cmd() -> std::process::Command {
-    let mut cmd = std::process::Command::new(webfang_path());
-    apply_hermetic_env(&mut cmd);
-    cmd
+    sanitize_std_env()
 }
 
 /// Unique cache base directory for one spawned-binary invocation.
@@ -729,7 +700,7 @@ pub(crate) fn spawn_webfang(args: &[String], cache_dir: &Path, what: &str) -> Ki
 /// `WEBFANG_CRASH_AT` this way, AFTER the strip, so the parent process can
 /// never poison the armed point).
 ///
-/// Hermeticity matches [`sanitize_env`]: the poisoned names are stripped, the
+/// Hermeticity matches [`std_cmd`]: the poisoned names are stripped, the
 /// cache is per-invocation, and `WEBFANG_CONFIG` points at an empty file. The
 /// config matters for the same reason it does there — without a replacement
 /// the child falls back to the developer's `~/.config/webfang/config.toml`,
@@ -836,7 +807,7 @@ impl BehavioralTest {
     /// Build a `Command` for the `webfang` binary with `--url` and
     /// `--output` pre-filled to this harness's server and temp dir.
     pub fn scraper_cmd(&self) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--url")
             .arg(self.server.uri())
             .arg("--output")
@@ -870,7 +841,7 @@ impl BehavioralTest {
     /// Build a `Command` with `--elastic` flag, `--url`, and a fresh SQLite
     /// temp directory for the elastic output path.
     pub fn elastic_cmd(&self) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--elastic")
             .arg("--url")
             .arg(self.server.uri())
@@ -882,7 +853,7 @@ impl BehavioralTest {
     /// Build a `Command` with `--resume` flag, `--url`, and the existing
     /// output directory (resume reads from a prior crawl state).
     pub fn resume_cmd(&self) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--resume")
             .arg("--url")
             .arg(self.server.uri())
@@ -897,7 +868,7 @@ impl BehavioralTest {
     /// (`~/.cache/webfang/state`), which collides across wiremock runs because
     /// the state file is keyed by host without the port (`127.0.0.1.json`).
     pub fn state_dir_cmd(&self, state_dir: &Path) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--resume")
             .arg("--state-dir")
             .arg(state_dir)
