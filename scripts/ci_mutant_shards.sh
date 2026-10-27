@@ -19,20 +19,36 @@
 #       stdout: base_sha=, head_sha=. git.diff is written to the CWD.
 #
 #   ci_mutant_shards.sh shard-count <mutant_count>
-#       Pure formula (#2285 calibration, provisional): shards of ~8 mutants
-#       capped at 16 (the #1436 wall was ~20 mutants/shard against a
-#       90-minute timeout with a ~10-15 min BoringSSL base build; 8 mutants
-#       with that base build stays well under the new 45-minute shard
-#       timeout). Calibration knobs: MUTANT_SHARD_SIZE, MUTANT_SHARD_CAP.
+#       Pure formula (#2296 calibration, measured 2026-10-27): shards of ~6
+#       mutants capped at 16. The measured worst case on the CI runner
+#       (cargo-mutants 27.1.0, CARGO_PROFILE_DEV_DEBUG=0) is ~61 s build +
+#       300 s per-test timeout per mutant — a shard of 8 where 4+ mutants hit
+#       the --timeout=300 ceiling blew past the 45-minute shard timeout, and
+#       a real shard (run 40586006186) spent 24 min on just 6 timeout-heavy
+#       mutants. 6 mutants/shard fits the worst case in ~40 min including the
+#       ~3.5 min non-mutant overhead. The cap is the cost ceiling, not a
+#       sizing promise: a diff so big that cap*size mutants stay uncovered
+#       draws cap/size mutants per shard and its shards can still hit the
+#       shard timeout (fail-closed) — the pressure valve is splitting the PR.
+#       Calibration knobs: MUTANT_SHARD_SIZE, MUTANT_SHARD_CAP.
 #
 #   ci_mutant_shards.sh shards <git.diff> [extra cargo-mutants args...]
 #       Counts the diff's mutants with `cargo mutants --list --json
 #       --in-diff` (a --list run needs no compilation) and emits the matrix
 #       sizing. Fail-closed (#2285 docs contract): a nonzero --list exit
 #       code never becomes a count of 0 or a fallback matrix — the job
-#       fails with the code. Exit code 5 means the diff's new side does not
-#       match the checked-out tree (an advanced-base
-#       mismatch or a foreign diff), exit 6 means the diff is not a diff.
+#       fails with the code. Exit code 5 means the diff was read but is not
+#       usable (its new side does not match the checked-out tree — an
+#       advanced-base mismatch or a foreign diff — or its hunks are
+#       malformed); exit 6 means the diff file itself could not be read
+#       (missing path, directory, EACCES). Measured against 27.1.0 in #2296.
+#
+#   The emitted shards are 0-BASED: `cargo mutants --shard k/N` requires
+#   0 <= k < N (k == N is a CLI usage error — observed live in run
+#   40586006186, where shard 2/2 died with "shard k must be less than n"
+#   under continue-on-error) and partitions mutants by index (slice default:
+#   the first ceil(count/N) on shard 0). Emitting 1..N (the pre-#2296
+#   behavior) silently skipped partition 0 and killed the last shard.
 #
 # stdout lines are key=value / shards=[...] for GITHUB_OUTPUT consumption;
 # diagnostics go to stderr. Offline by construction: prepare-diff and shards
@@ -41,7 +57,7 @@
 set -u
 set -o pipefail
 
-SHARD_SIZE="${MUTANT_SHARD_SIZE:-8}"
+SHARD_SIZE="${MUTANT_SHARD_SIZE:-6}"
 SHARD_CAP="${MUTANT_SHARD_CAP:-16}"
 
 die() {
@@ -60,7 +76,9 @@ emit_matrix() {
   if (( count <= 0 )); then
     list=""
   else
-    if ! list="$(seq -s, 1 "$shard_count" 2>/dev/null)"; then
+    # 0-based shard ids (see the header): --shard k/N requires k < N and
+    # partition 0 is the first ceil(count/N) mutants.
+    if ! list="$(seq -s, 0 $((shard_count - 1)) 2>/dev/null)"; then
       die "cannot build the shard list for shard_count=$shard_count"
     fi
   fi
@@ -133,6 +151,13 @@ cmd_shards() {
   if [[ -z "$count" ]]; then
     count=0
   fi
+  # Hardening (#2296 native review R3-4): the count is about to enter the
+  # emit_matrix arithmetic and the matrix JSON; with the pinned 27.1.0 a
+  # `jq 'length'` over its own --list output is always a non-negative
+  # integer, but an unvalidated value would turn "3.7" into a cryptic
+  # arithmetic abort instead of this fail-closed message.
+  [[ "$count" =~ ^[0-9]+$ ]] \
+    || die "the mutant count parsed from the --list JSON is not a non-negative integer: '${count}'"
   printf 'mutant_count=%s\n' "$count"
   emit_matrix "$count"
 }
