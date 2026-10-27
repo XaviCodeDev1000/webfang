@@ -32,3 +32,9 @@ L2 = Análisis: el issue asumía "todos los PRs activos ya lo reportan" — fals
 L3 = Fix: chmod 100644→100755 en `scripts/check_breaking_surface.sh`. Diff de modo puro: sin build local (nada que compilar); verificación proporcional = harness de semántica 49/49.
 
 L4 = Colisión resuelta: una segunda sesión de agente escribió este mismo registro de misión (23:34) replicando el análisis de esta sesión; sin commits propios. El usuario no respondió la consulta de propiedad; esta sesión continúa el delivery (mayor avance, guards de git hacen la carrera visible). Registro adoptado como misión compartida.
+
+L5 = Pivot: #2423 (misión fix-llm-artifact-coverage) aterrizó el mismo chmod y quedó MERGED → PR #2422 cerrada como superseded. Branch sincronizada con main (merge 4d333206).
+
+L6 = Diagnóstico del check en runner (post-chmod): 4/4 corridas mueren instantáneas (~560ms: start 23:14:22.10 → error .67) en la lectura GraphQL de la cola, con REST funcionando en el mismo runner y el mismo query respondiendo SQUASH al instante con token admin local. GITHUB_TOKEN es una integración sin permiso de administración → hipótesis "Resource not accessible by integration" sobre Repository.mergeQueue.configuration. El 2>/dev/null del script tapaba la causa.
+
+L7 = Fix en branch: `administration: read` en las permissions del job + fail-loud (stderr de gh se surfacea en el die). Harness 49/49 y meta-guard FAIL=0 tras los edits. Experimento en PR nueva; si `administration: read` no es clave válida para GITHUB_TOKEN en repo público, el workflow muere ruidosamente solo en esta PR y se pivota (PAT secret).

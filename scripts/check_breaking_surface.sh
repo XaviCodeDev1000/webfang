@@ -209,11 +209,13 @@ repo_owner="${REPO%%/*}"
 repo_name="${REPO#*/}"
 # shellcheck disable=SC2016  # $owner/$repo/$branch are GraphQL variables
 queue_query='query($owner:String!,$repo:String!,$branch:String!){repository(owner:$owner,name:$repo){mergeQueue(branch:$branch){configuration{mergeMethod}}}}'
+# gh's stderr is captured and surfaced on failure: a fail-closed check must
+# report WHY it is red (permission denied vs transport error), not just that.
 queue_method="$(gh api graphql \
   -f query="$queue_query" \
   -F owner="$repo_owner" -F repo="$repo_name" -F branch="$base" \
-  --jq '.data.repository.mergeQueue.configuration.mergeMethod // empty' 2>/dev/null)" \
-  || die "No se pudo leer la configuracion de la merge queue de '${base}' (gh/API)."
+  --jq '.data.repository.mergeQueue.configuration.mergeMethod // empty' 2>&1)" \
+  || die "No se pudo leer la configuracion de la merge queue de '${base}' (gh/API): ${queue_method}"
 case "$queue_method" in
   SQUASH) strategy="squash" ;;
   MERGE|REBASE) strategy="merge" ;;

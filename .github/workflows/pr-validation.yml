@@ -340,6 +340,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # The queue configuration is repository administration data:
+      # Repository.mergeQueue.configuration (GraphQL) answers only to actors
+      # with admin read access, so without this the fail-closed check dies
+      # instantly ("Resource not accessible by integration") on every run.
+      administration: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
