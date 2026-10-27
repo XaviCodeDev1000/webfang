@@ -144,6 +144,19 @@ impl<'a> CommitSession<'a> {
             .is_some_and(|t| t.is_cancelled())
     }
 
+    /// Consume the session into its export outcome (#2272): the URLs that
+    /// were driven plus the count of lines the index skipped. The count
+    /// travels BOTH in the structured summary log (the surface the operator
+    /// reads) and in the outcome (the surface callers transport).
+    fn finish(self, processed_urls: Vec<String>, summary: String) -> ExportOutcome {
+        let skipped_non_utf8 = self.skipped_non_utf8;
+        info!(total = processed_urls.len(), skipped_non_utf8, "{summary}");
+        ExportOutcome {
+            processed_urls,
+            skipped_non_utf8,
+        }
+    }
+
     /// Claim one `(url, content_hash)` append for this run. Returns `false`
     /// when the pair was already appended — the caller must skip the export
     /// append so the file stays idempotent on that key (#1215). Same URL with
@@ -1012,16 +1025,11 @@ pub fn process_results(
     }
     session.final_persist();
 
-    info!(
-        total = processed_urls.len(),
-        skipped_non_utf8 = session.skipped_non_utf8,
-        "✅ Export completado: {} documentos procesados",
-        processed_urls.len()
-    );
-    Ok(ExportOutcome {
+    let total = processed_urls.len();
+    Ok(session.finish(
         processed_urls,
-        skipped_non_utf8: session.skipped_non_utf8,
-    })
+        format!("✅ Export completado: {total} documentos procesados"),
+    ))
 }
 
 /// Result of a batch export ([`process_results`]): the URLs that were driven
@@ -1274,16 +1282,11 @@ pub fn process_results_with_chunks(
     );
     session.final_persist();
 
-    info!(
-        total = processed_urls.len(),
-        skipped_non_utf8 = session.skipped_non_utf8,
-        "✅ AI-cleaned export completed: {} chunks processed",
-        processed_urls.len()
-    );
-    Ok(ExportOutcome {
+    let total = processed_urls.len();
+    Ok(session.finish(
         processed_urls,
-        skipped_non_utf8: session.skipped_non_utf8,
-    })
+        format!("✅ AI-cleaned export completed: {total} chunks processed"),
+    ))
 }
 
 #[cfg(test)]
@@ -1307,6 +1310,14 @@ mod tests {
             correlation_id: None,
             quality_hint: None,
         }
+    }
+
+    /// Export through the public port (fresh run, no resume) and return the
+    /// URLs it drove: the arrange shared by the outcome-shape tests.
+    fn export_urls(results: &[ScrapedContent], dir: &TempDir, format: ExportFormat) -> Vec<String> {
+        process_results(results, dir.path().to_path_buf(), format, "export", None)
+            .expect("the export succeeds")
+            .processed_urls
     }
 
     // =========================================================================
@@ -1335,15 +1346,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let results: Vec<ScrapedContent> = vec![];
 
-        let processed = process_results(
-            &results,
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&results, &temp_dir, ExportFormat::Jsonl);
 
         assert!(processed.is_empty());
     }
@@ -1391,15 +1394,7 @@ mod tests {
             "Content of page one",
         );
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 1);
         assert_eq!(processed[0], "https://example.com/page1");
@@ -1416,15 +1411,7 @@ mod tests {
             make_scraped_content("https://c.com/", "C", "Content C"),
         ];
 
-        let processed = process_results(
-            &contents,
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&contents, &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 3);
         // URLs get normalized through ValidUrl — check that all 3 are present
@@ -1440,15 +1427,7 @@ mod tests {
         let first = make_scraped_content("https://dup.test/a", "Dup", "same body text here");
         let second = make_scraped_content("https://dup.test/a", "Dup", "same body text here");
 
-        let processed = process_results(
-            &[first, second],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[first, second], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(
             processed.len(),
@@ -1471,15 +1450,7 @@ mod tests {
         let first = make_scraped_content("https://dup.test/a", "Dup", "first body text here");
         let second = make_scraped_content("https://dup.test/a", "Dup", "second body text here");
 
-        let processed = process_results(
-            &[first, second],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[first, second], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 2);
         let body = std::fs::read_to_string(temp_dir.path().join("export.jsonl")).unwrap();
@@ -1498,15 +1469,7 @@ mod tests {
         let first = make_scraped_content("https://mirror.test/a", "A", "shared body text here");
         let second = make_scraped_content("https://mirror.test/b", "B", "shared body text here");
 
-        let processed = process_results(
-            &[first, second],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[first, second], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 2);
         let body = std::fs::read_to_string(temp_dir.path().join("export.jsonl")).unwrap();
@@ -1522,15 +1485,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let content = make_scraped_content("https://example.com", "Test", "Body");
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Vector,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Vector);
 
         assert_eq!(processed.len(), 1);
         assert!(temp_dir.path().join("export.json").exists());
@@ -1645,15 +1600,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let content = make_scraped_content("https://example.com", "Test", "Body");
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Auto,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Auto);
 
         assert_eq!(processed.len(), 1);
         // Default fallback creates .jsonl file
@@ -1667,15 +1614,7 @@ mod tests {
         std::fs::write(temp_dir.path().join("export.jsonl"), "").unwrap();
 
         let content = make_scraped_content("https://example.com", "Test", "Body");
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Auto,
-            "export",
-            None,
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Auto);
 
         assert_eq!(processed.len(), 1);
         // Should have appended to the existing .jsonl file
@@ -1692,15 +1631,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let content = make_scraped_content("https://example.com/page", "Page", "Body");
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None, // legacy StateStore no longer drives export; RecordStore does (resume_gate_test)
-        )
-        .unwrap()
-        .processed_urls;
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 1);
     }
