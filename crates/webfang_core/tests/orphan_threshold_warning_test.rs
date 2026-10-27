@@ -21,10 +21,9 @@
 // `init_logging_dual`, so a `tracing::warn!` raised during argv normalization
 // is silently dropped (#796). The verdict is therefore computed at parse time
 // (`PendingNotices`, in `cli::args::ai`) and rendered by `webfang_cli::main`
-// right after the subscriber is installed, as its own `warn!` — the
-// `preflight_notes` buffer's replay prints the note as both the event message
-// and a structured field, and a line repeated like that is unreadable for a
-// notice this long.
+// right after the subscriber is installed, as its own `warn!` — routing the
+// prose through both the event message and a structured field would print it
+// twice per line, unreadable for a notice this long.
 //
 // Hermeticity (#1813 T1 lesson): every case mounts a wiremock, so a run whose
 // preflight regressed fails fast against a local server instead of dialing the

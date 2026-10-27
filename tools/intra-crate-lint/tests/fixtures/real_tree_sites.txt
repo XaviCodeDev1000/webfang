@@ -907,7 +907,7 @@ cli/llm_wire.rs	19	use	crate::domain::providers::RegistryError
 cli/llm_wire.rs	22	use	crate::infrastructure::llm::provider::OpenAiCompatibleProvider
 cli/llm_wire.rs	23	use	crate::infrastructure::llm::remote_embedding::RemoteEmbeddingAdapter
 cli/llm_wire.rs	24	use	crate::CliExit
-cli/mod.rs	30	use	crate::CliExit
+cli/mod.rs	29	use	crate::CliExit
 cli/orchestrator.rs	7	use	crate::application::crawl_options::CrawlOptions
 cli/orchestrator.rs	8	use	crate::application::crawler::CapturedPage
 cli/orchestrator.rs	9	use	crate::cli::batch_flow::load_batch_manager
