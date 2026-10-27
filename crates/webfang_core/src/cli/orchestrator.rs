@@ -194,9 +194,10 @@ pub async fn run(
         resume_nothing_pending(&opts, &urls_to_scrape, discovered_count, &root_correlation)
     {
         if let Some(reason) = &discovery_truncated_by {
-            return CliExit::NetworkError(format!(
-                "el rastreo terminó anticipadamente; nada pendiente de reprocesar, pero el descubrimiento no completó: {reason}"
-            ));
+            return truncated_discovery_exit(
+                "nada pendiente de reprocesar, pero el descubrimiento no completó",
+                reason,
+            );
         }
         return exit;
     }
@@ -298,9 +299,7 @@ pub async fn run(
     // scraped and exported. The operator gets BOTH the written output and
     // the failure (InternalFatal → 69), never a silent success.
     if let Some(reason) = discovery_truncated_by {
-        return CliExit::NetworkError(format!(
-            "el rastreo terminó anticipadamente; los resultados parciales fueron escritos: {reason}"
-        ));
+        return truncated_discovery_exit("los resultados parciales fueron escritos", &reason);
     }
 
     if let Some(exit) = report_phase(&results, &failures, blocked, opts.verbosity) {
@@ -308,6 +307,15 @@ pub async fn run(
     }
 
     export_exit
+}
+
+/// The typed exit for a discovery crawl that ended early (#2338): the
+/// partial output may already be written (after the export) or not (the
+/// nothing-pending short-circuit), but the run always reports FAILED.
+fn truncated_discovery_exit(detail: &str, reason: &str) -> CliExit {
+    CliExit::NetworkError(format!(
+        "el rastreo terminó anticipadamente; {detail}: {reason}"
+    ))
 }
 
 /// #705 Paso 2: a `--resume` run where every discovered URL was already
