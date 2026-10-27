@@ -143,6 +143,8 @@ jobs:
   # rust-toolchain.toml, or a changed .rs carrying a cfg/target marker. A
   # change without such a marker can still break Windows; that residual risk
   # is accepted here and falls to the scheduled full-scope run (nightly).
+  # #2342: that lane is no longer on the pull_request/merge_group path at all;
+  # the decision and its evidence live in its own block below.
   # ============================================================================
   change-scope:
     name: Plan
@@ -1188,24 +1190,35 @@ jobs:
   # No rust-cache (#1171): non-gate job, compiles cold — cache pool budget,
   # tokio-console-smoke precedent.
   #
-  # DECISION (#1633, revised by #2282): this lane STAYS GATING — deliberately
-  # NOT shielded, and the recorded reason is not "we forgot", it is the trade:
-  #   - it is absent from `gate`'s needs and from `notify`'s needs, so it never
-  #     blocks a merge through CI Gate; the only cost of its redness is the
-  #     red RUN conclusion on push/PR, and
-  #   - it is path-gated on needs_crossplatform (Cargo.toml/Cargo.lock,
-  #     build.rs, .cargo/**, rust-toolchain.toml, or a changed .rs carrying a
-  #     cfg/target marker). A platform change without such a marker can still
-  #     break Windows; that residual risk is accepted and falls to the
-  #     scheduled full-scope run (nightly), which sets
-  #     needs_crossplatform=true, and
-  #   - shielding it would buy silence, not green: the CI Health Observer
-  #     branches on the RUN conclusion, not on the jobs, so `continue-on-error`
-  #     removes the false alarm AND the only mechanism reporting its red jobs.
-  # The middle ground the issue names (shield + register as a known-RED-by-
-  # design lane with the `known-false-positive` label, W-03 style) lives in
-  # ci-health.yml, not here. Revisit with #1631 (the inventory of the real
-  # Windows/macOS failures) in the same transaction.
+  # DECISION (#2342, superseding the visibility trade of #1633/#2282): this
+  # lane runs on push, schedule and workflow_dispatch — NOT on pull_request or
+  # merge_group.
+  #
+  # #2282 kept it on the PR path deliberately: its redness cost only the run
+  # conclusion, because it is absent from `gate`'s needs and ci-health.yml
+  # branches on the RUN conclusion rather than shielding individual jobs. What
+  # changed is the NATURE of the red. Since #2306 makes a retried pass fail the
+  # job (`flaky-result = "fail"`, .config/nextest.toml), this lane goes red on
+  # `TRY 2 PASS`, and the flaking set MOVES between runs — the same commit
+  # failed with two disjoint sets (the `batch_*` pair in the original attempt;
+  # a 429 wall-clock test, a spawn-budget meta-test and the trybuild
+  # compile-fail in the re-run). A moving, environment-driven set cannot be
+  # declared known-flaky (#2342), and it is not attributable to the PR's diff,
+  # so on a PR the red carries no review signal while still marking every code
+  # PR failed.
+  #
+  # What is kept: it is still absent from `gate`'s needs, and it still runs
+  # path-gated on needs_crossplatform (Cargo.toml/Cargo.lock, build.rs,
+  # .cargo/**, rust-toolchain.toml, or a changed .rs carrying a cfg/target
+  # marker) on push to main, plus the scheduled full-scope run, which sets
+  # needs_crossplatform=true. What is lost: per-PR Windows/macOS execution;
+  # that residual risk is the accepted trade of #2342.
+  #
+  # Not decided here, tracked separately: the wall-clock tests that move the
+  # set (#2342) and #1631 (inventory of the real Windows/macOS failures). One
+  # of the three re-run flakes is already covered: `.config/nextest.toml`
+  # gives `illegal_page_transitions_fail_to_compile` 600s with
+  # terminate-after 1, so its 186.8s attempt sits inside the ceiling.
   #
   # REVIEW (#2333, 2026-10-26): promotion is NOT due — the lane still flakes
   # chronically under flaky-result=fail. Measured on main run 40407265924
@@ -1227,7 +1240,10 @@ jobs:
   test-crossplatform:
     name: Tests (${{ matrix.os }})
     needs: [change-scope]
-    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_crossplatform == 'true' }}
+    # #2342: off the PR path — see the decision block above. `schedule` and
+    # `workflow_dispatch` resolve to full scope in scripts/ci_plan.sh, so
+    # needs_crossplatform is true there; on push it stays path-gated.
+    if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_crossplatform == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
