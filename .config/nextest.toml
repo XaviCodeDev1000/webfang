@@ -98,9 +98,10 @@ final-status-level = "slow"
 # sólo muestra el compacto "TRY 2 PASS"), así que la causa estructural de un
 # FLKY-FL nunca llega al log. El JUnit registra cada reintento como
 # <flakyFailure>/<rerunFailure> CON su salida (store-failure-output=true por
-# defecto; success-output no se almacena). La lane windows-latest sube el
-# archivo como artifact sólo cuando el job falla. Path relativo a
-# target/nextest/<perfil>/.
+# defecto; success-output no se almacena). #2387: TODAS las lanes de test suben
+# el archivo (tests-core, all-features, crossplatform por OS, flake-nightly) —
+# el primer upload de #2384 quedó en el job equivocado y las lanes con la
+# evidencia real no subían nada. Path relativo a target/nextest/<perfil>/.
 [profile.ci.junit]
 path = "junit.xml"
 
