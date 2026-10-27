@@ -420,21 +420,30 @@ mod tests {
 
     /// #1610: a burst permit costs nothing but is STILL emitted, so "this run
     /// was never paced" is an observation rather than an absence.
+    ///
+    /// The test pins the OBSERVATION, not the clock (#2389): a granted
+    /// burst permit involves no governor-imposed delay, but the measured
+    /// wall time around the `.await` still includes scheduler wake-up,
+    /// which a loaded runner can push past any sub-millisecond bound.
+    /// Asserting `waited < 1ms` (or `waited_ms == 0`) there made the test
+    /// fail on timing, not behavior.
     #[test]
     fn observed_wait_emits_zero_cost_for_burst_permit() {
         let limiter = SharedRateLimiter::new(&RateLimiterConfig::new(5_000, 4)).unwrap();
         let records = capture_trace(|| async {
             let ctx = PacingContext::bare("cli_scrape").with_url("https://example.com/a");
-            assert!(
-                limiter.until_ready_observed(&ctx).await < Duration::from_millis(1),
-                "a burst permit must report no wait"
-            );
+            limiter.until_ready_observed(&ctx).await;
         });
 
         let events = wait_events(&records);
         assert_eq!(events.len(), 1);
         let fields = events[0]["fields"].as_object().expect("fields");
-        assert_eq!(fields["waited_ms"].as_u64(), Some(0));
+        assert_eq!(fields["outcome"].as_str(), Some("granted"));
+        assert!(
+            fields["waited_ms"].is_u64(),
+            "waited_ms must always be present, even when the wait was free, got {:?}",
+            fields["waited_ms"]
+        );
         assert!(
             !fields.contains_key("correlation_id"),
             "a wait with no identity must OMIT the key, not report an empty one"
