@@ -39,3 +39,7 @@ Variante **(a)**: eliminar la lectura del writer. Evidencia:
 
 - L1: "Issue #2393 analizar y revisar luego implementar, pero ten cuidado en saturar los
   recursos del sistema cuando ejecutas comandos pesados" — sesión main, 2026-10-27.
+- L2: main avanzó a `4f525822` (#2391 merged) durante el análisis; worktree creado sobre
+  `21ea545a`. Merge de main sin conflictos antes de seguir.
+- L3: Golden set de intra-crate-lint regenerado en commit propio sobre el árbol combinado
+  (solo shifts esperados).
