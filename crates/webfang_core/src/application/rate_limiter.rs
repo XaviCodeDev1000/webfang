@@ -622,8 +622,21 @@ mod tests {
     // `tokio::time::pause()` therefore freezes our measurement clock while
     // governor may decide the wait has already elapsed in real time, making
     // these assertions report 0ns and flake under load. We measure with
-    // `std::time::Instant` instead: governor guarantees it will not return
-    // before the real delay has elapsed, so this is deterministic.
+    // `std::time::Instant` instead.
+    //
+    // LOWER BOUNDS CARRY 10% SLACK (#2394): governor enforces the delay in
+    // its own clock domain (quanta's TSC reading), while the test measures
+    // with `std::time::Instant` (CLOCK_MONOTONIC) — two different time
+    // sources whose rates are not identical (NTP slew, TSC calibration on
+    // VMs). The baseline `Instant::now()` is also taken AFTER the limiter
+    // grants the first permit, so scheduler latency between that grant and
+    // the reading shifts the measured window earlier relative to governor's
+    // deadline. On a loaded runner those effects can make the measured wait
+    // land just below the configured period (observed: a <1ms shortfall on
+    // ubuntu-latest, run 40421910807, caught by flaky-result=fail). The
+    // floor is period − 10%: orders of magnitude above every noise term,
+    // and still ~10x the unpaced wait (≈0ms), so a limiter that stopped
+    // pacing cannot pass.
     //
     // IMPORTANT: MockClock from domain::clock is designed for CONTROLLING
     // time in tests (advance/set_now), not for measuring real elapsed time.
@@ -646,8 +659,8 @@ mod tests {
 
         let elapsed = start.elapsed();
         assert!(
-            elapsed >= std::time::Duration::from_millis(500),
-            "Rate limiter should enforce 500ms delay, got {elapsed:?}"
+            elapsed >= std::time::Duration::from_millis(450), // 10% slack, see M5 header
+            "Rate limiter should enforce ~500ms delay (floor 450ms, #2394), got {elapsed:?}"
         );
     }
 
@@ -666,8 +679,8 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(
-            elapsed >= std::time::Duration::from_millis(100),
-            "Third request should be delayed by 100ms, got {elapsed:?}"
+            elapsed >= std::time::Duration::from_millis(90), // 10% slack, see M5 header
+            "Third request should be delayed by ~100ms (floor 90ms, #2394), got {elapsed:?}"
         );
     }
 
