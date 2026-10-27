@@ -186,6 +186,16 @@ impl From<&CrawlError> for CrawlErrorCategory {
 mod tests {
     use super::*;
     use crate::domain::error::WafDetectionKind;
+    use crate::domain::CrawlResult;
+
+    #[test]
+    fn categorize_partial_run_lands_in_internal() {
+        let err = CrawlError::PartialRun {
+            message: "crawl stalled: test".into(),
+            partial: CrawlResult::empty(),
+        };
+        assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Internal);
+    }
 
     #[test]
     fn categorize_waf() {

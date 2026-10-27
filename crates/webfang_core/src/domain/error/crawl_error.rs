@@ -412,6 +412,22 @@ impl From<crate::domain::http_error::HttpError> for CrawlError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::CrawlResult;
+
+    #[test]
+    fn test_partial_run_classifies_internal_fatal_and_displays_reason() {
+        let error = CrawlError::PartialRun {
+            message: "crawl stalled: test".to_string(),
+            partial: CrawlResult::empty(),
+        };
+        assert!(matches!(
+            error.classify(),
+            crate::domain::error::ErrorClass::InternalFatal
+        ));
+        let rendered = error.to_string();
+        assert!(rendered.contains("partial results"));
+        assert!(rendered.contains("crawl stalled: test"));
+    }
 
     #[test]
     fn test_crawl_error_network_no_reqwest() {

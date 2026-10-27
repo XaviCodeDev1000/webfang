@@ -186,9 +186,18 @@ pub async fn run(
 
     // #705 Paso 2: a --resume run where every discovered URL was already
     // processed by a prior run is a technical success ("nothing pending").
+    // #2338: a TRUNCATED discovery never reports Success — the run failed
+    // even when nothing is pending (the prior run's output stays on disk, so
+    // no export claim is made here; the reason is the review finding from
+    // lineage review-e9b0d70105d5b474).
     if let Some(exit) =
         resume_nothing_pending(&opts, &urls_to_scrape, discovered_count, &root_correlation)
     {
+        if let Some(reason) = &discovery_truncated_by {
+            return CliExit::NetworkError(format!(
+                "el rastreo terminó anticipadamente; nada pendiente de reprocesar, pero el descubrimiento no completó: {reason}"
+            ));
+        }
         return exit;
     }
 

@@ -985,6 +985,19 @@ mod tests {
         );
     }
 
+    /// #2338: the conversion fallback for `PartialRun` preserves the exact
+    /// rendered failure the same error produced as `Internal` before the
+    /// variant existed (programmatic consumers match the typed variant first).
+    #[test]
+    fn test_scraper_error_from_crawl_partial_run_preserves_message() {
+        let err = CrawlError::PartialRun {
+            message: "crawl stalled: test".to_string(),
+            partial: crate::domain::CrawlResult::empty(),
+        };
+        let scraper_err: ScraperError = err.into();
+        assert!(matches!(scraper_err, ScraperError::Internal(ref m) if m == "crawl stalled: test"));
+    }
+
     /// The message must name what failed, not a runtime the crate no longer has.
     #[test]
     fn inference_message_does_not_name_onnx() {

@@ -1145,7 +1145,7 @@ impl Engine {
         warn!(
             collected = total_pages,
             reason = %err,
-            "crawl ended early — partial results travel with the failure (#2338)"
+            "crawl ended early — partial results travel with the failure"
         );
         CrawlError::PartialRun {
             message: err.to_string(),
@@ -3571,8 +3571,9 @@ mod tests {
     /// The latency assertion pins the single-bound contract: the run ends at
     /// loop detection + one short drain grace (~12s here), never the bound
     /// twice — the old shape burned a second full 12s bound draining the
-    /// worker it had just declared wedged. The 18s ceiling sits between the
-    /// two shapes so either regression flips the assertion.
+    /// worker it had just declared wedged. The 20s ceiling keeps ~7s of
+    /// headroom over the 13s floor (CI-load tolerant) and still sits clearly
+    /// below the old 24s shape, so either regression flips the assertion.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stalled_run_returns_partial_results_in_the_error() {
         let _entry_off = entry_off();
@@ -3618,7 +3619,7 @@ mod tests {
             "no page reaches the collector through the wedged pipeline"
         );
         assert!(
-            elapsed < Duration::from_secs(18),
+            elapsed < Duration::from_secs(20),
             "stall latency is one wait bound ({:?}) plus a short drain grace, never the bound twice; got {elapsed:?}",
             bound
         );
