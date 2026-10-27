@@ -103,6 +103,16 @@ final-status-level = "slow"
 inherits = "ci"
 retries = 0
 
+# Job `coverage` (ci.yml): informational coverage run. Inherits the ci
+# profile's parallelism, timeouts and output, but runs the same test set as the
+# former `cargo llvm-cov -- ... --skip test_mcp` (all tests, including
+# ai_integration) and treats a retry-passed test as a pass: a flake must not
+# turn the coverage report red.
+[profile.coverage]
+inherits = "ci"
+default-filter = "all()"
+flaky-result = "pass"
+
 [profile.dev]
 # Perfil para desarrollo iterativo (ultra-rápido)
 # Ejecuta solo lo afectado → 8-25 segundos típico
