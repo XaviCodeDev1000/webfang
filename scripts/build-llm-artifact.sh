@@ -52,13 +52,32 @@ OUT_DIR=docs/book/webfang-docs-llm
 OUT_PARENT="$(dirname "$OUT_DIR")"
 SOURCE_COMMIT="${GITHUB_SHA:-}"
 PAGES_PREFIX="https://xavicode1000.github.io/webfang/webfang-docs-llm"
-CHAPTERS="overview debugging testing troubleshooting"
+# Narrative chapters: derived from the mdBook SUMMARY.md at run time, never
+# hand-maintained. A hardcoded copy of the table of contents rots: every
+# chapter added to SUMMARY.md later (installation, state-recovery-runbook,
+# the MCP contracts…) silently missed the artifact — more than half of the
+# narrative never shipped. Every file SUMMARY links is a chapter, in SUMMARY
+# order, except cli-reference.md, which is its own artifact source
+# (06-cli-reference.md) and would be duplicated in the narrative otherwise.
+# Fail-closed: no SUMMARY or a dangling link below stops the build.
+if [ ! -s docs/src/SUMMARY.md ]; then
+  echo "ERROR: docs/src/SUMMARY.md is missing or empty: the narrative chapter list is derived from it." >&2
+  exit 1
+fi
+CHAPTERS="$(sed -n 's/.*](\([^)#]*\)\.md).*/\1/p' docs/src/SUMMARY.md |
+  sed '/^cli-reference$/d')"
+if [ -z "$CHAPTERS" ]; then
+  echo "ERROR: no chapters could be derived from docs/src/SUMMARY.md." >&2
+  exit 1
+fi
 # webfang_cli is bin-only and stays excluded from the API render: it is covered
 # by the 06-cli-reference chapter (#733). The `webfang_ai` crate was removed in
 # ADR-0004 paso 6, so the rendered set is the 3 remaining lib crates. The
 # per-source numbers keep their historical values (02 is a gap where
 # webfang_ai used to be), so the published URLs of the surviving files do not
-# change under a reader's bookmark.
+# change under a reader's bookmark. webfang_benchmark is excluded too: a leaf
+# tooling harness for repo benchmarks, not part of the product surface a
+# documentation consumer calls.
 ALL_CRATES="webfang_core webfang_mcp webfang_test_utils"
 
 # The expected published file set. The swap is gated on it: a directory that
@@ -152,8 +171,8 @@ generated_line() {
 # thousands of ≥H7 headings that CommonMark renders as plain text. awk counts
 # the leading hashes exactly once and clamps at 6 (the CommonMark maximum), so
 # H5 → H6 and H6 stays H6.
-demote_headings() {
-  awk '
+demote_headings() { # <levels> <file> — demote every heading by LEVELS, clamped at H6
+  awk -v demote="$1" '
     function fence_run(line,   n) {
       n = 0
       while (substr(line, n + 1, 1) == fence_char) n++
@@ -177,12 +196,12 @@ demote_headings() {
       n = 0
       while (substr($0, n + 1, 1) == "#") n++
       if (n >= 1 && substr($0, n + 1, 1) == " ") {
-        level = (n < 6 ? n + 1 : 6)
+        level = (n + demote < 6 ? n + demote : 6)
         print substr("######", 1, level) substr($0, n + 1)
       } else {
         print
       }
-    }' "$1"
+    }' "$2"
 }
 
 # Count the H1 headings of a file, ignoring the ones that live inside a code
@@ -294,7 +313,7 @@ render_api() {
   local -a cmd=(rustdoc-markdown print "$crate" --manifest "crates/$crate/Cargo.toml" --include-other --output "$out.raw")
   [ -n "$features" ] && cmd+=(--features "$features")
   "${cmd[@]}"
-  demote_headings "$out.raw" >"$out.tmp"
+  demote_headings 1 "$out.raw" >"$out.tmp"
   {
     echo "# $crate API Reference"
     generated_line
@@ -313,11 +332,13 @@ render_api() {
   }
 }
 
-# mdBook chapters with their leading H1 downgraded to $1 (body untouched).
+# mdBook chapters demoted LEVELS deep (the whole heading tree, not just the
+# chapter H1: an internal `## Section` must never outrank the chapter it
+# belongs to after demotion), fence-aware via demote_headings.
 emit_chapters() {
-  local level="$1" f
+  local levels="$1" f
   for f in $CHAPTERS; do
-    sed "1s/^# /$level /" "docs/src/$f.md"
+    demote_headings "$levels" "docs/src/$f.md"
     echo
     echo "---"
     echo
@@ -364,7 +385,7 @@ done
   generated_line
   echo "---"
   echo
-  emit_chapters "##"
+  emit_chapters 1
 } >"$STAGE_DIR/00-narrative.md"
 
 {
@@ -372,7 +393,7 @@ done
   generated_line
   echo "---"
   echo
-  sed '1s/^# /## /' docs/src/cli-reference.md
+  demote_headings 1 docs/src/cli-reference.md
 } >"$STAGE_DIR/06-cli-reference.md"
 
 # Phase 3: back-compat monolith (pre-#734 composition preserved; API sections
@@ -386,10 +407,10 @@ done
   echo
   echo "## Narrative Documentation"
   echo
-  emit_chapters "###"
+  emit_chapters 2
   echo "## CLI Reference"
   echo
-  sed '1s/^# /### /' docs/src/cli-reference.md
+  demote_headings 2 docs/src/cli-reference.md
   echo
   echo "---"
   echo
@@ -425,7 +446,7 @@ done
   echo
   echo "Focused sources:"
   echo
-  echo "- [00-narrative.md]($PAGES_PREFIX/00-narrative.md): guides — debugging/tracing, testing, troubleshooting ($(wc -w <"$STAGE_DIR/00-narrative.md") words)"
+  echo "- [00-narrative.md]($PAGES_PREFIX/00-narrative.md): every mdBook chapter, derived from SUMMARY.md ($(wc -w <"$STAGE_DIR/00-narrative.md") words)"
   for crate in $ALL_CRATES; do
     out_file=$(per_source_file "$crate")
     [ -n "$out_file" ] && [ -f "$STAGE_DIR/$out_file" ] || continue
