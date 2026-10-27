@@ -71,7 +71,8 @@ fn a_non_utf8_line_does_not_abort_the_export() {
         "export",
         None,
     )
-    .expect("the export must COMPLETE even with a damaged line");
+    .expect("the export must COMPLETE even with a damaged line")
+    .processed_urls;
 
     assert_eq!(processed.len(), 1, "the new record is exported");
     let body = export_bytes(&path);
@@ -106,7 +107,8 @@ fn a_non_utf8_line_does_not_abort_the_ai_export() {
         "export",
         None,
     )
-    .expect("the --clean-ai export must COMPLETE even with a damaged line");
+    .expect("the --clean-ai export must COMPLETE even with a damaged line")
+    .processed_urls;
 
     assert_eq!(processed.len(), 1, "the cleaned chunk is exported");
     let body = export_bytes(&path);

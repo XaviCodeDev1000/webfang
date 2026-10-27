@@ -167,6 +167,9 @@ pub async fn run(
         Err(e) => return e,
         Ok(p) => p,
     };
+    // #2338: read BEFORE the struct is consumed piecemeal below — the reason
+    // only turns into an exit code AFTER the partial output is written.
+    let discovery_truncated_by = prepare.truncated_by;
 
     let discovered_count = prepare.urls_to_scrape.len();
     let (urls_to_scrape, state_store) = match apply_resume_mode(
@@ -183,9 +186,19 @@ pub async fn run(
 
     // #705 Paso 2: a --resume run where every discovered URL was already
     // processed by a prior run is a technical success ("nothing pending").
+    // #2338: a TRUNCATED discovery never reports Success — the run failed
+    // even when nothing is pending (the prior run's output stays on disk, so
+    // no export claim is made here; the reason is the review finding from
+    // lineage review-e9b0d70105d5b474).
     if let Some(exit) =
         resume_nothing_pending(&opts, &urls_to_scrape, discovered_count, &root_correlation)
     {
+        if let Some(reason) = &discovery_truncated_by {
+            return truncated_discovery_exit(
+                "nada pendiente de reprocesar, pero el descubrimiento no completó",
+                reason,
+            );
+        }
         return exit;
     }
 
@@ -281,11 +294,28 @@ pub async fn run(
         return exit;
     }
 
+    // Special cell — PartialRun (error-classification-matrix, #2338): the
+    // discovery crawl ended early but the partial set above was already
+    // scraped and exported. The operator gets BOTH the written output and
+    // the failure (InternalFatal → 69), never a silent success.
+    if let Some(reason) = discovery_truncated_by {
+        return truncated_discovery_exit("los resultados parciales fueron escritos", &reason);
+    }
+
     if let Some(exit) = report_phase(&results, &failures, blocked, opts.verbosity) {
         return exit;
     }
 
     export_exit
+}
+
+/// The typed exit for a discovery crawl that ended early (#2338): the
+/// partial output may already be written (after the export) or not (the
+/// nothing-pending short-circuit), but the run always reports FAILED.
+fn truncated_discovery_exit(detail: &str, reason: &str) -> CliExit {
+    CliExit::NetworkError(format!(
+        "el rastreo terminó anticipadamente; {detail}: {reason}"
+    ))
 }
 
 /// #705 Paso 2: a `--resume` run where every discovered URL was already
@@ -556,6 +586,14 @@ async fn run_dry_run(opts: CrawlOptions, root_correlation: &domain::CorrelationI
     println!("\nDry-run: {} URL(s) would be scraped:", discovered.len());
     for url in discovered {
         println!("  {url}");
+    }
+
+    // #2338: a preview whose discovery crawl ended early lists the partial
+    // set (above) and still exits as a failure — never a silent exit 0.
+    if let Some(reason) = output.truncated_by {
+        return CliExit::NetworkError(format!(
+            "el preview terminó anticipadamente (URLs parciales listadas arriba): {reason}"
+        ));
     }
     CliExit::Success
 }

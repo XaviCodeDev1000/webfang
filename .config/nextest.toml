@@ -93,6 +93,17 @@ success-output = "never"
 status-level = "fail"
 final-status-level = "slow"
 
+# Reporte JUnit por intento (#2331): el output del perfil ci oculta por
+# construcción el fallo del intento 1 de un test que pasa en reintento (el log
+# sólo muestra el compacto "TRY 2 PASS"), así que la causa estructural de un
+# FLKY-FL nunca llega al log. El JUnit registra cada reintento como
+# <flakyFailure>/<rerunFailure> CON su salida (store-failure-output=true por
+# defecto; success-output no se almacena). La lane windows-latest sube el
+# archivo como artifact sólo cuando el job falla. Path relativo a
+# target/nextest/<perfil>/.
+[profile.ci.junit]
+path = "junit.xml"
+
 # Lane nocturna de detección de flakes (#2286; adopción en #2305 paso 4): la
 # misma suite que test-full pero con reintentos a cero, para que cada flake
 # genuino ponga el job en rojo (report-only vía continue-on-error en ci.yml).
@@ -102,6 +113,16 @@ final-status-level = "slow"
 [profile.flake-nightly]
 inherits = "ci"
 retries = 0
+
+# Job `coverage` (ci.yml): informational coverage run. Inherits the ci
+# profile's parallelism, timeouts and output, but runs the same test set as the
+# former `cargo llvm-cov -- ... --skip test_mcp` (all tests, including
+# ai_integration) and treats a retry-passed test as a pass: a flake must not
+# turn the coverage report red.
+[profile.coverage]
+inherits = "ci"
+default-filter = "all()"
+flaky-result = "pass"
 
 [profile.dev]
 # Perfil para desarrollo iterativo (ultra-rápido)

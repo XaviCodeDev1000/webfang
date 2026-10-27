@@ -202,19 +202,6 @@ async fn __main() -> CliExit {
         return CliExit::ConfigError(e.to_string());
     }
 
-    // #1431: replay parse-time diagnostics recorded before the subscriber
-    // existed (e.g. the --rate-limit-burst substitution notice). The note
-    // text already names the offending value; it travels once more as a
-    // structured field so trace queries can select it without parsing.
-    //
-    // Suited to SHORT substitution notices only: the compact formatter prints
-    // the note as the message and again as the field value, which is invisible
-    // at ~40 characters and unreadable at the ~600 a deprecation needs. The two
-    // ADR-0004 notices below are therefore NOT routed through this buffer.
-    for note in webfang_core::cli::preflight_notes::take() {
-        tracing::warn!(preflight_note = %note, "{note}");
-    }
-
     // ADR-0004 step 5, the orphan-threshold announcement (spec T5). Split out
     // of `__main` for the same reason `dispatch_subcommand` is: the complexity
     // and length ratchets (#516) apply per function, and the `if` block plus
@@ -295,14 +282,12 @@ async fn __main() -> CliExit {
 /// `value_source` distinction that does not survive into `CrawlOptions`.
 ///
 /// Shape: English structured fields carrying the facts, the Spanish prose as
-/// the event message. The prose appears EXACTLY once. The earlier cut of this
-/// feature routed the notices through `preflight_notes`, whose replay is
-/// `warn!(preflight_note = %note, "{note}")` — the compact formatter then
-/// printed the same ~600 characters twice per line (message plus field value),
-/// which is invisible for the short substitution notes that buffer was built
-/// for and unreadable here. The fields below carry only what is meant to be
-/// QUERIED: which notice, what value is in play, what it was calibrated for,
-/// what replaces it. Never a second copy of the sentence.
+/// the event message. The prose appears EXACTLY once: the compact formatter
+/// prints a structured field's value right after the message, so routing the
+/// same text through both doubles the line — invisible at ~40 characters,
+/// unreadable at the ~600 a deprecation needs. The fields below carry only
+/// what is meant to be QUERIED: which notice, what value is in play, what it
+/// was calibrated for, what replaces it. Never a second copy of the sentence.
 fn emit_orphan_threshold_notice(pending: webfang_core::cli::args::ai::PendingNotices) {
     if let Some(threshold) = pending.orphan_threshold {
         tracing::warn!(

@@ -420,21 +420,30 @@ mod tests {
 
     /// #1610: a burst permit costs nothing but is STILL emitted, so "this run
     /// was never paced" is an observation rather than an absence.
+    ///
+    /// The test pins the OBSERVATION, not the clock (#2389): a granted
+    /// burst permit involves no governor-imposed delay, but the measured
+    /// wall time around the `.await` still includes scheduler wake-up,
+    /// which a loaded runner can push past any sub-millisecond bound.
+    /// Asserting `waited < 1ms` (or `waited_ms == 0`) there made the test
+    /// fail on timing, not behavior.
     #[test]
     fn observed_wait_emits_zero_cost_for_burst_permit() {
         let limiter = SharedRateLimiter::new(&RateLimiterConfig::new(5_000, 4)).unwrap();
         let records = capture_trace(|| async {
             let ctx = PacingContext::bare("cli_scrape").with_url("https://example.com/a");
-            assert!(
-                limiter.until_ready_observed(&ctx).await < Duration::from_millis(1),
-                "a burst permit must report no wait"
-            );
+            limiter.until_ready_observed(&ctx).await;
         });
 
         let events = wait_events(&records);
         assert_eq!(events.len(), 1);
         let fields = events[0]["fields"].as_object().expect("fields");
-        assert_eq!(fields["waited_ms"].as_u64(), Some(0));
+        assert_eq!(fields["outcome"].as_str(), Some("granted"));
+        assert!(
+            fields["waited_ms"].is_u64(),
+            "waited_ms must always be present, even when the wait was free, got {:?}",
+            fields["waited_ms"]
+        );
         assert!(
             !fields.contains_key("correlation_id"),
             "a wait with no identity must OMIT the key, not report an empty one"
@@ -622,8 +631,21 @@ mod tests {
     // `tokio::time::pause()` therefore freezes our measurement clock while
     // governor may decide the wait has already elapsed in real time, making
     // these assertions report 0ns and flake under load. We measure with
-    // `std::time::Instant` instead: governor guarantees it will not return
-    // before the real delay has elapsed, so this is deterministic.
+    // `std::time::Instant` instead.
+    //
+    // LOWER BOUNDS CARRY 10% SLACK (#2394): governor enforces the delay in
+    // its own clock domain (quanta's TSC reading), while the test measures
+    // with `std::time::Instant` (CLOCK_MONOTONIC) — two different time
+    // sources whose rates are not identical (NTP slew, TSC calibration on
+    // VMs). The baseline `Instant::now()` is also taken AFTER the limiter
+    // grants the first permit, so scheduler latency between that grant and
+    // the reading shifts the measured window earlier relative to governor's
+    // deadline. On a loaded runner those effects can make the measured wait
+    // land just below the configured period (observed: a <1ms shortfall on
+    // ubuntu-latest, run 40421910807, caught by flaky-result=fail). The
+    // floor is period − 10%: orders of magnitude above every noise term,
+    // and still ~10x the unpaced wait (≈0ms), so a limiter that stopped
+    // pacing cannot pass.
     //
     // IMPORTANT: MockClock from domain::clock is designed for CONTROLLING
     // time in tests (advance/set_now), not for measuring real elapsed time.
@@ -646,8 +668,8 @@ mod tests {
 
         let elapsed = start.elapsed();
         assert!(
-            elapsed >= std::time::Duration::from_millis(500),
-            "Rate limiter should enforce 500ms delay, got {elapsed:?}"
+            elapsed >= std::time::Duration::from_millis(450), // 10% slack, see M5 header
+            "Rate limiter should enforce ~500ms delay (floor 450ms, #2394), got {elapsed:?}"
         );
     }
 
@@ -666,8 +688,8 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(
-            elapsed >= std::time::Duration::from_millis(100),
-            "Third request should be delayed by 100ms, got {elapsed:?}"
+            elapsed >= std::time::Duration::from_millis(90), // 10% slack, see M5 header
+            "Third request should be delayed by ~100ms (floor 90ms, #2394), got {elapsed:?}"
         );
     }
 

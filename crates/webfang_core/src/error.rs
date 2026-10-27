@@ -747,6 +747,12 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
                 ScraperError::Internal("task cancelled by engine shutdown".to_string())
             },
             // LCOV_EXCL_STOP
+            // #2338: the CLI intercepts `PartialRun` BEFORE this conversion to
+            // persist the partial results, so this arm only serves consumers
+            // that do not match the typed variant (batch, MCP fallthrough).
+            // Mapping to `Internal` preserves the exact ScraperError the same
+            // failure produced before the variant existed.
+            CrawlError::PartialRun { message, .. } => ScraperError::Internal(message),
         }
     }
 }
@@ -977,6 +983,19 @@ mod tests {
             ),
             "SemanticError must convert to ScraperError::Semantic"
         );
+    }
+
+    /// #2338: the conversion fallback for `PartialRun` preserves the exact
+    /// rendered failure the same error produced as `Internal` before the
+    /// variant existed (programmatic consumers match the typed variant first).
+    #[test]
+    fn test_scraper_error_from_crawl_partial_run_preserves_message() {
+        let err = CrawlError::PartialRun {
+            message: "crawl stalled: test".to_string(),
+            partial: crate::domain::CrawlResult::empty(),
+        };
+        let scraper_err: ScraperError = err.into();
+        assert!(matches!(scraper_err, ScraperError::Internal(ref m) if m == "crawl stalled: test"));
     }
 
     /// The message must name what failed, not a runtime the crate no longer has.

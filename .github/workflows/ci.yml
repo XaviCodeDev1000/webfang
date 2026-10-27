@@ -1092,6 +1092,20 @@ jobs:
         env:
           WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
+      - name: Upload nextest JUnit report
+        # #2331: a test that passes on retry prints only a compact "TRY 2 PASS"
+        # line — the profile's output policy never shows attempt-1 output, so a
+        # FLKY-FL is unexplainable from the log alone. The JUnit report
+        # ([profile.ci.junit] in .config/nextest.toml) records every retry
+        # attempt with its own output as <flakyFailure>/<rerunFailure>. Upload
+        # it only when the job failed: green runs never need it.
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-windows
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   # ============================================================================
   # TIER 4: TEST FULL (4-6 minutes)
@@ -1998,14 +2012,23 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          # Official nextest coverage setup: llvm-cov needs the LLVM tools.
+          components: llvm-tools-preview
       # no rust-cache (#1171): non-gate job, compiles cold — cache pool budget, benches.yml:55-60 precedent
-      # SC-11: pinned — see the nextest pin above for why an unpinned `tool:`
-      # floats an executable inside a SHA-pinned step.
+      # SC-11: both tools pinned; `tool:` accepts a comma-separated
+      # `name@version` list (same pattern as feature-matrix). 0.9.131 is the
+      # repository's nextest pin; `cargo llvm-cov nextest` needs it installed.
       - uses: taiki-e/install-action@166cdddc0349c6f3c1da17f66a8fc88ec3bc4dd5
         with:
-          tool: cargo-llvm-cov@0.9.1
+          tool: cargo-llvm-cov@0.9.1,nextest@0.9.131
+      # Coverage is informational: nextest parallelizes the test binaries. The
+      # `coverage` profile in .config/nextest.toml preserves the old `cargo
+      # test` test set (default-filter = "all()") and treats a retry-passed
+      # test as pass; the ci profile would otherwise exclude ai_integration and
+      # fail on flaky.
       - name: Generate coverage
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info -- --skip test_mcp
+        run: cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info --profile coverage -E 'not test(test_mcp)'
       - name: Report coverage
         run: |
           cargo llvm-cov report --lcov | tail -5

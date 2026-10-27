@@ -174,6 +174,10 @@ impl From<&CrawlError> for CrawlErrorCategory {
             // Special cell — Cancelled: control signal, not an operational
             // failure category; Internal catch-all if it ever surfaces.
             CrawlError::Cancelled => Self::Internal,
+            // #2338: a run that ended early is an engine-level failure; the
+            // Internal catch-all is the closest existing category (same cell
+            // the stall error occupied as `Internal` before the variant).
+            CrawlError::PartialRun { .. } => Self::Internal,
         }
     }
 }
@@ -182,6 +186,16 @@ impl From<&CrawlError> for CrawlErrorCategory {
 mod tests {
     use super::*;
     use crate::domain::error::WafDetectionKind;
+    use crate::domain::CrawlResult;
+
+    #[test]
+    fn categorize_partial_run_lands_in_internal() {
+        let err = CrawlError::PartialRun {
+            message: "crawl stalled: test".into(),
+            partial: CrawlResult::empty(),
+        };
+        assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Internal);
+    }
 
     #[test]
     fn categorize_waf() {
