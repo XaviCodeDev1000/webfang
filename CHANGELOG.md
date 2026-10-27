@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-10-27
+
+
+### 🏗️ Architecture Improvements
+
+- One lock-poisoning policy ([#2353](https://github.com/XaviCodeDev1000/webfang/pull/2353)) ([#2363](https://github.com/XaviCodeDev1000/webfang/pull/2363))
+
+### 📦 Dependencies
+
+- Rust 1.91.1 + cargo-nextest 0.9.131, flaky-result=fail y perfiles con inherits ([#2306](https://github.com/XaviCodeDev1000/webfang/pull/2306)) ([#2310](https://github.com/XaviCodeDev1000/webfang/pull/2310))
+
+### 🔧 Fixed
+
+- --clean-ai observes cancellation during cleaning (#2270, #2269) ([#2325](https://github.com/XaviCodeDev1000/webfang/pull/2325))
+- Stop building the webfang binary inside every test process ([#2336](https://github.com/XaviCodeDev1000/webfang/pull/2336))
+- Bound the crawl loop and split the pause watchdog ([#2313](https://github.com/XaviCodeDev1000/webfang/pull/2313)) ([#2339](https://github.com/XaviCodeDev1000/webfang/pull/2339))
+- Type batch concurrency as NonZeroUsize ([#2366](https://github.com/XaviCodeDev1000/webfang/pull/2366))
+- Warn on stderr when a malformed platform config degrades ([#2378](https://github.com/XaviCodeDev1000/webfang/pull/2378))
+
+### 🔧 Other
+
+- Document redact_path contract (global prefix + bounded run) ([#2375](https://github.com/XaviCodeDev1000/webfang/pull/2375))
+- Deduplicate jsonl_exporter/checkpoint self-clones (issue #1757) ([#2382](https://github.com/XaviCodeDev1000/webfang/pull/2382))
+- Centralize panic lints in workspace lints and cover MCP bins ([#2369](https://github.com/XaviCodeDev1000/webfang/pull/2369))
+- Remove dead preflight-note replay machinery ([#2381](https://github.com/XaviCodeDev1000/webfang/pull/2381))
 ## [6.0.0] - 2026-10-24
 
 ### ⚠ BREAKING CHANGES
