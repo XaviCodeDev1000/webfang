@@ -2,8 +2,8 @@
 // this attribute is the test-only carve-out, preserving the semantics the old
 // per-crate `cfg_attr(not(test), deny)` copies had.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
-// Explicit per docs-truthfulness audit (S5): these rustdoc lints are
-// allow-by-default, so CI's `-D warnings` never reaches them. Declare intent.
+// Rustdoc lints are allow-by-default (docs-truthfulness audit, S5), so
+// CI's `-D warnings` never reaches them: each allow below is deliberate.
 #![allow(rustdoc::missing_crate_level_docs)]
 #![allow(rustdoc::private_doc_tests)]
 #![allow(rustdoc::unescaped_backticks)]
