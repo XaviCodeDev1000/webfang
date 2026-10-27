@@ -527,13 +527,14 @@ mod tests {
 
     /// #1617 (D3) — THE GATE for the pinned checksum field name.
     ///
-    /// `CHECKSUM_FIELD` is what `build_hash_index` and `CommitSession` read to
-    /// rebuild the resume dedup index; `serde(rename)` cannot take a const, so
-    /// the writer side has no compile-time link to it. This test is that link:
-    /// rename the struct field, or change the constant, and the emitted key
-    /// stops matching what the readers look for — which is precisely the
-    /// "rename silently empties the hash index" defect, caught here instead of
-    /// in production.
+    /// `CHECKSUM_FIELD` is what the application's `read_jsonl_checksum_index`
+    /// reads to rebuild the resume dedup index (#2393: the ONE reader — the
+    /// writer session no longer reads the file); `serde(rename)` cannot take a
+    /// const, so the writer side has no compile-time link to it. This test is
+    /// that link: rename the struct field, or change the constant, and the
+    /// emitted key stops matching what the reader looks for — which is
+    /// precisely the "rename silently empties the hash index" defect, caught
+    /// here instead of in production.
     #[test]
     fn serialized_uses_the_pinned_checksum_field_name() {
         let chunk = create_test_chunk("Checksum Field Test");
