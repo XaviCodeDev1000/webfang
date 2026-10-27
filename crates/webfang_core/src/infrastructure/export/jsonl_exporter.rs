@@ -165,8 +165,9 @@ impl<'a> WebfangMetadata<'a> {
 pub struct JsonlExporter {
     config: ExporterConfig,
     /// Single-writer session (PR4, design D4): created lazily on first
-    /// write, ONE writer thread per run; owns torn-tail recovery, the
-    /// content-hash index, and the flush-ack barrier.
+    /// write, ONE writer thread per run; owns torn-tail recovery and the
+    /// flush-ack barrier. It does NOT index the output file's checksums
+    /// (#2393): the resume dedup index is the application's `CommitSession`.
     session: std::sync::OnceLock<super::jsonl_writer::JsonlSession>,
 }
 
@@ -174,8 +175,8 @@ impl JsonlExporter {
     /// Access the per-run single-writer session, creating it on first use.
     ///
     /// One session per RUN (the exporter instance lives for the run): its
-    /// open() performs torn-tail recovery + hash-index build + tmp GC before
-    /// any append of this run touches the file.
+    /// open() performs torn-tail recovery + tmp GC before any append of this
+    /// run touches the file.
     fn session(&self) -> ExportResult<&super::jsonl_writer::JsonlSession> {
         if let Some(session) = self.session.get() {
             return Ok(session);
@@ -184,7 +185,7 @@ impl JsonlExporter {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(ExporterError::DirectoryCreation)?;
         }
-        let (session, _hash_index) = super::jsonl_writer::JsonlSession::open(&path)
+        let session = super::jsonl_writer::JsonlSession::open(&path)
             .map_err(|e| ExporterError::WriteError(format!("{}: {}", path.display(), e)))?;
         let _ = self.session.set(session);
         self.session.get().ok_or_else(|| {
@@ -526,13 +527,14 @@ mod tests {
 
     /// #1617 (D3) — THE GATE for the pinned checksum field name.
     ///
-    /// `CHECKSUM_FIELD` is what `build_hash_index` and `CommitSession` read to
-    /// rebuild the resume dedup index; `serde(rename)` cannot take a const, so
-    /// the writer side has no compile-time link to it. This test is that link:
-    /// rename the struct field, or change the constant, and the emitted key
-    /// stops matching what the readers look for — which is precisely the
-    /// "rename silently empties the hash index" defect, caught here instead of
-    /// in production.
+    /// `CHECKSUM_FIELD` is what the application's `read_jsonl_checksum_index`
+    /// reads to rebuild the resume dedup index (#2393: the ONE reader — the
+    /// writer session no longer reads the file); `serde(rename)` cannot take a
+    /// const, so the writer side has no compile-time link to it. This test is
+    /// that link: rename the struct field, or change the constant, and the
+    /// emitted key stops matching what the reader looks for — which is
+    /// precisely the "rename silently empties the hash index" defect, caught
+    /// here instead of in production.
     #[test]
     fn serialized_uses_the_pinned_checksum_field_name() {
         let chunk = create_test_chunk("Checksum Field Test");

@@ -149,8 +149,14 @@ fn resolve_webfang_path() -> std::path::PathBuf {
 }
 
 /// Shared binary command builder for tests that don't need a mock server.
+///
+/// The hermetic env contract is applied on the std layer and wrapped with
+/// `Command::from_std`: ONE sanitized builder feeds both this assert_cmd
+/// path and the budget machinery (`std_cmd`), so the two spawn surfaces
+/// cannot drift — the cost of drift here was already paid once by the
+/// duplicated redaction chain (#1649).
 pub(crate) fn cmd() -> Command {
-    sanitize_env(Command::new(webfang_path()))
+    Command::from_std(std_cmd())
 }
 
 /// Wall-clock budget for one spawned-binary attempt whose real latency is
@@ -172,21 +178,20 @@ pub(crate) const SPAWN_LATENCY_BUDGET: Duration = Duration::from_secs(20);
 /// which is why one flaky test consumed 26% of the `Integration tests` step's
 /// wall clock while reporting itself as a plain FLAKY.
 ///
-/// The assertion therefore runs on a worker thread and the caller waits with
-/// `recv_timeout`, so an overrunning attempt is *abandoned* instead of being
-/// allowed to hold the test process open. One retry, then a panic carrying
-/// BOTH measured latencies — a real regression overruns every attempt and so
-/// still fails, with the numbers that say by how much.
-///
-/// The abandoned thread outlives the budget but not the test: nextest gives
-/// each test its own process, so whatever is still blocked dies with it.
+/// The assertion runs on a worker thread and the caller waits with
+/// `recv_timeout`. When the budget fires, the harness KILLS the spawned child
+/// and joins the worker (#2387): the original shape abandoned the thread, the
+/// thread stayed blocked on the child, and nextest flagged the test as LEAK.
+/// One retry, then a panic carrying BOTH measured latencies — a real
+/// regression overruns every attempt and so still fails, with the numbers
+/// that say by how much.
 ///
 /// The retry loop itself lives in [`run_under_budget`], so the budget property
 /// can be asserted on the waits THIS harness measured rather than on a caller's
 /// wall clock — see [`SpawnOutcome`] (#2063).
 pub(crate) fn assert_spawn_within<F>(budget: Duration, what: &str, attempt: F)
 where
-    F: Fn() -> Result<(), String> + Send + Sync + 'static,
+    F: Fn(&BudgetChild) -> Result<(), String> + Send + Sync + 'static,
 {
     match run_under_budget(budget, attempt) {
         SpawnOutcome::Passed => {},
@@ -194,11 +199,15 @@ where
         SpawnOutcome::Disconnected(attempt_no) => {
             panic!("{what}: the attempt ended without a verdict (attempt {attempt_no})")
         },
-        SpawnOutcome::Overran(overruns) => panic!(
+        SpawnOutcome::Overran(overruns, killed_pid) => panic!(
             "{what}: exceeded its {budget:?} budget on 2 consecutive attempts \
-             (latencies {overruns:?}). A regression would overrun every attempt, \
-             so this failure is real — see #1697 for the windows-latest flake this \
-             budget exists to bound."
+             (latencies {overruns:?}).{} A regression would overrun every \
+             attempt, so this failure is real — see #1697 for the \
+             windows-latest flake this budget exists to bound.",
+            match killed_pid {
+                Some(pid) => format!(" The overrunning child (pid {pid}) was killed and reaped."),
+                None => String::new(),
+            }
         ),
     }
 }
@@ -220,15 +229,17 @@ enum SpawnOutcome {
     Reported(String),
     /// The attempt ended without a verdict (its sender was dropped).
     Disconnected(u8),
-    /// Both attempts overran, carrying each attempt's measured wait.
-    Overran(Vec<Duration>),
+    /// Both attempts overran, carrying each attempt's measured wait and, when
+    /// the attempt held a spawned child, its OS id — killed and reaped by the
+    /// harness (#2387).
+    Overran(Vec<Duration>, Option<u32>),
 }
 
-/// Run `attempt` up to twice under a wall-clock budget, abandoning each
-/// overrunning attempt and recording how long it was allowed to run.
+/// Run `attempt` up to twice under a wall-clock budget, killing each
+/// overrunning attempt's child and recording how long the attempt ran.
 fn run_under_budget<F>(budget: Duration, attempt: F) -> SpawnOutcome
 where
-    F: Fn() -> Result<(), String> + Send + Sync + 'static,
+    F: Fn(&BudgetChild) -> Result<(), String> + Send + Sync + 'static,
 {
     let attempt = std::sync::Arc::new(attempt);
     // #1697: the budget covers the SPAWN, never a compiler invocation.
@@ -238,24 +249,186 @@ where
     // cold target directory from being charged to the spawn latency.
     let _ = webfang_path();
     let mut overruns: Vec<Duration> = Vec::new();
+    let mut killed_pid: Option<u32> = None;
     for attempt_no in 1..=2u8 {
         let started = Instant::now();
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let worker = std::sync::Arc::clone(&attempt);
-        std::thread::spawn(move || {
-            let _ = tx.send(worker());
+        let worker_child = BudgetChild::new();
+        let child = worker_child.clone();
+        let handle = std::thread::spawn(move || {
+            let _ = tx.send(worker(&worker_child));
         });
         match rx.recv_timeout(budget) {
             Ok(Ok(())) => return SpawnOutcome::Passed,
             Ok(Err(failure)) => return SpawnOutcome::Reported(failure),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => overruns.push(started.elapsed()),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                overruns.push(started.elapsed());
+                // #2387: kill the overrunning child so the worker's wait
+                // returns and the thread finishes — the abandoned thread of
+                // #1697 is exactly what nextest reported as LEAK. The join is
+                // bounded by the kill UNBLOCKING the poll; it assumes the
+                // killed child is the last holder of its piped stdout/stderr
+                // (a grandchild inheriting the pipes would hold the reader
+                // threads open — neither current budget caller spawns
+                // subprocesses; #2387 review, resilience R4-1). A join error
+                // means the worker panicked after the timeout, and its
+                // verdict was already lost to the budget — the overrun itself
+                // is what the caller asked to know.
+                let pid = child.pid();
+                if child.kill() {
+                    killed_pid = pid;
+                    let _ = handle.join();
+                }
+                // No registered child, or one that already self-exited →
+                // nothing to unblock; the attempt is abandoned, the semantics
+                // the closure-only unit tests pin.
+            },
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 return SpawnOutcome::Disconnected(attempt_no)
             },
         }
     }
-    SpawnOutcome::Overran(overruns)
+    SpawnOutcome::Overran(overruns, killed_pid)
 }
+
+/// The child of one budget attempt, registered so the budget owner can kill
+/// it when the attempt overruns (#2387).
+///
+/// [`Self::output`] is the `assert_cmd::Command::output()` twin for the
+/// budget machinery: stdio is piped (stdin `null` — an immediately-readable
+/// EOF, which is all both budget callers feed), the live child stays in a
+/// shared slot for the duration of the wait, and the wait itself is a
+/// `try_wait` poll whose locks are held for one poll only, never across the
+/// sleep. When the budget owner kills the child, the poll observes the exit
+/// and the worker finishes instead of being abandoned.
+#[derive(Clone)]
+pub(crate) struct BudgetChild {
+    slot: std::sync::Arc<std::sync::Mutex<Option<Child>>>,
+}
+
+impl BudgetChild {
+    fn new() -> Self {
+        Self {
+            slot: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Poisoned harness state is never fatal: the recovered guard still
+    /// grants exclusive access (project rule). The only possible poisoner is
+    /// a worker thread that panicked mid-poll.
+    fn lock_slot(&self) -> std::sync::MutexGuard<'_, Option<Child>> {
+        self.slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Spawn `cmd` and wait for it to exit, capturing its output.
+    pub(crate) fn output(
+        &self,
+        mut cmd: std::process::Command,
+    ) -> Result<std::process::Output, String> {
+        use std::io::Read;
+        use std::process::Stdio;
+
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("could not spawn the binary: {e}"))?;
+        // Register FIRST, then take the pipes through the slot: the budget
+        // owner may fire between spawn and registration, and everything after
+        // the registration is inside one lock. The residual window — spawn to
+        // register — is a few statements against a seconds-long budget.
+        *self.lock_slot() = Some(child);
+        let (stdout, stderr) = {
+            let mut guard = self.lock_slot();
+            let registered = guard
+                .as_mut()
+                .expect("child was just registered into the slot");
+            (registered.stdout.take(), registered.stderr.take())
+        };
+
+        // The pipes are drained on their own threads so a chatty child can
+        // never fill the OS pipe buffer and block a process that would
+        // otherwise exit; both readers end when the child does.
+        let stdout_reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stdout {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        });
+        let stderr_reader = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = stderr {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        });
+
+        let status = loop {
+            let next = match self.lock_slot().as_mut() {
+                // INVARIANT: the slot is Some for the whole poll — the worker
+                // registers before polling and empties it only in the cleanup
+                // below. The arm is a fail-loud guard, not a reachable state.
+                Some(child) => match child.try_wait() {
+                    Ok(next) => next,
+                    // A poll error must not leave the child registered with
+                    // its pipe readers blocked — that is the leaked-process
+                    // class this machinery exists to remove (#2387 review,
+                    // resilience R4-2). Kill, unregister, report.
+                    Err(e) => {
+                        let _ = child.kill();
+                        self.lock_slot().take();
+                        return Err(format!("could not poll the binary: {e}"));
+                    },
+                },
+                None => return Err("the binary vanished from the budget slot".to_owned()),
+            };
+            if let Some(status) = next {
+                break status;
+            }
+            std::thread::sleep(BUDGET_POLL_INTERVAL);
+        };
+        let stdout = stdout_reader
+            .join()
+            .expect("stdout pipe reader thread cannot panic");
+        let stderr = stderr_reader
+            .join()
+            .expect("stderr pipe reader thread cannot panic");
+        self.lock_slot().take();
+        Ok(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+
+    /// Kill the child if one is registered, reporting whether the kill was
+    /// actually DELIVERED — `Child::kill` errs on an already-exited child, so
+    /// `false` also covers a child that self-exited at the budget boundary
+    /// (the Overran panic then stays silent about the pid instead of claiming
+    /// a kill that never happened; #2387 review). `false` also covers the
+    /// "attempt spawned nothing" case, which keeps the abandon semantics.
+    fn kill(&self) -> bool {
+        match self.lock_slot().as_mut() {
+            Some(child) => child.kill().is_ok(),
+            None => false,
+        }
+    }
+
+    /// OS id of the registered child, for the overran panic message.
+    fn pid(&self) -> Option<u32> {
+        self.lock_slot().as_ref().map(Child::id)
+    }
+}
+
+/// Granularity of the `try_wait` poll in [`BudgetChild::output`]. The budget
+/// is seconds; a 10 ms poll costs at most one interval of detection lag and
+/// holds the mutex for microseconds.
+const BUDGET_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// The env names a spawned binary must never inherit: `WEBFANG_*` (every flag
 /// override and the crash-point arming var) plus `AI_MODEL_ID`.
@@ -302,8 +475,11 @@ pub(crate) fn strip_poisoned_env(cmd: &mut Command) {
 /// WITHOUT the port (`127.0.0.1.json`), so it collides across every
 /// wiremock test. Giving each spawned binary its own cache base keeps both
 /// state files per-test without changing any production default.
-fn sanitize_env(mut cmd: Command) -> Command {
-    strip_poisoned_env(&mut cmd);
+fn sanitize_std_env() -> std::process::Command {
+    let mut cmd = std::process::Command::new(webfang_path());
+    for key in poisoned_env_names() {
+        cmd.env_remove(&key);
+    }
     // SSRF entry-guard allowance (F-06 + F-32, #1217): every behavioral
     // mock binds 127.0.0.1 — a forbidden literal the production request
     // path now rejects — so the harness disarms ONLY the entry layer for
@@ -320,11 +496,19 @@ fn sanitize_env(mut cmd: Command) -> Command {
     // carries no settings means a spawned binary can never read the
     // developer's real `~/.config/webfang/config.toml`, and the run cannot
     // depend on the operator's machine. A per-test `.env("WEBFANG_CONFIG", …)`
-    // applied after `cmd()` still wins: both writes land in the inner
-    // `std::process::Command` env map, and the last write for a key is the one
-    // applied at spawn.
+    // applied after `cmd()` still wins: both writes land in the same env map,
+    // and the last write for a key is the one applied at spawn.
     cmd.env("WEBFANG_CONFIG", hermetic_empty_config_file());
     cmd
+}
+
+/// The std twin of [`cmd`]: the same sanitized environment and the same
+/// binary, built for attempts that run under [`assert_spawn_within`] — there
+/// the child must be spawned through [`BudgetChild::output`] so the harness
+/// can kill an overrunning spawn (#2387), and `assert_cmd::Command` exposes
+/// no handle to it.
+pub(crate) fn std_cmd() -> std::process::Command {
+    sanitize_std_env()
 }
 
 /// Unique cache base directory for one spawned-binary invocation.
@@ -516,7 +700,7 @@ pub(crate) fn spawn_webfang(args: &[String], cache_dir: &Path, what: &str) -> Ki
 /// `WEBFANG_CRASH_AT` this way, AFTER the strip, so the parent process can
 /// never poison the armed point).
 ///
-/// Hermeticity matches [`sanitize_env`]: the poisoned names are stripped, the
+/// Hermeticity matches [`std_cmd`]: the poisoned names are stripped, the
 /// cache is per-invocation, and `WEBFANG_CONFIG` points at an empty file. The
 /// config matters for the same reason it does there — without a replacement
 /// the child falls back to the developer's `~/.config/webfang/config.toml`,
@@ -623,7 +807,7 @@ impl BehavioralTest {
     /// Build a `Command` for the `webfang` binary with `--url` and
     /// `--output` pre-filled to this harness's server and temp dir.
     pub fn scraper_cmd(&self) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--url")
             .arg(self.server.uri())
             .arg("--output")
@@ -657,7 +841,7 @@ impl BehavioralTest {
     /// Build a `Command` with `--elastic` flag, `--url`, and a fresh SQLite
     /// temp directory for the elastic output path.
     pub fn elastic_cmd(&self) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--elastic")
             .arg("--url")
             .arg(self.server.uri())
@@ -669,7 +853,7 @@ impl BehavioralTest {
     /// Build a `Command` with `--resume` flag, `--url`, and the existing
     /// output directory (resume reads from a prior crawl state).
     pub fn resume_cmd(&self) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--resume")
             .arg("--url")
             .arg(self.server.uri())
@@ -684,7 +868,7 @@ impl BehavioralTest {
     /// (`~/.cache/webfang/state`), which collides across wiremock runs because
     /// the state file is keyed by host without the port (`127.0.0.1.json`).
     pub fn state_dir_cmd(&self, state_dir: &Path) -> assert_cmd::Command {
-        let mut cmd = sanitize_env(Command::new(webfang_path()));
+        let mut cmd = Command::from_std(std_cmd());
         cmd.arg("--resume")
             .arg("--state-dir")
             .arg(state_dir)
@@ -826,6 +1010,10 @@ mod spawn_latency_budget {
     /// helper could silently degrade back into "wait for whatever the child
     /// does", which is exactly the 180 s burn it was written to stop.
     ///
+    /// This closure spawns nothing, so it pins the wait shape; an attempt
+    /// holding a real child is additionally KILLED at the budget — that
+    /// contract is pinned by [`issue_2387_an_overrunning_child_is_killed_and_reaped`].
+    ///
     /// Asserted on the waits the harness ITSELF measured, never on this test's
     /// wall clock. The clock additionally pays for thread spawn, the panic
     /// hook, backtrace symbolization and unwinding; on `windows-latest` that
@@ -840,16 +1028,20 @@ mod spawn_latency_budget {
     fn an_overrunning_attempt_is_abandoned_at_its_budget() {
         let budget = Duration::from_millis(100);
         let sleep_ms = 20 * budget.as_millis() as u64;
-        let outcome = run_under_budget(budget, move || {
+        let outcome = run_under_budget(budget, move |_child| {
             std::thread::sleep(Duration::from_millis(sleep_ms));
             Ok(())
         });
-        let overruns = match outcome {
-            SpawnOutcome::Overran(overruns) => overruns,
+        let (overruns, killed_pid) = match outcome {
+            SpawnOutcome::Overran(overruns, killed_pid) => (overruns, killed_pid),
             other => {
                 panic!("a closure outliving its budget must overrun both attempts, got {other:?}")
             },
         };
+        assert!(
+            killed_pid.is_none(),
+            "an attempt that spawned nothing must not report a killed child"
+        );
         assert_eq!(
             overruns.len(),
             2,
@@ -875,10 +1067,50 @@ mod spawn_latency_budget {
     fn issue_2063_an_overrunning_attempt_fails_the_test_naming_its_budget() {
         let budget = Duration::from_millis(100);
         let sleep_ms = 10 * budget.as_millis() as u64;
-        assert_spawn_within(budget, "stuck_spawn", move || {
+        assert_spawn_within(budget, "stuck_spawn", move |_child| {
             std::thread::sleep(Duration::from_millis(sleep_ms));
             Ok(())
         });
+    }
+
+    /// #2387: when the budget fires on an attempt holding a REAL child, the
+    /// harness kills it and the worker finishes — the abandoned thread of
+    /// #1697 is exactly what nextest reported as LEAK. The kill is observed
+    /// through the child's own death: the worker only reaps the child after
+    /// its wait returns, so a pid that disappears proves the thread ended.
+    /// Unix-only gate: it needs a spawnable long-running command (`sleep`) and
+    /// `/proc/<pid>` liveness. `Child::kill` and the reaping poll are std and
+    /// behave identically on Windows, where the LEAK was observed.
+    #[cfg(unix)]
+    #[test]
+    fn issue_2387_an_overrunning_child_is_killed_and_reaped() {
+        let budget = Duration::from_millis(500);
+        let outcome = run_under_budget(budget, |child| {
+            let mut cmd = std::process::Command::new("sleep");
+            cmd.arg("30");
+            let _ = child.output(cmd);
+            Ok(())
+        });
+        let (overruns, pid) = match outcome {
+            SpawnOutcome::Overran(overruns, pid) => (overruns, pid),
+            other => panic!("a hanging child must overrun both attempts, got {other:?}"),
+        };
+        assert_eq!(
+            overruns.len(),
+            2,
+            "the helper retries once, so both attempts must be abandoned"
+        );
+        let pid = pid.expect("an attempt that spawned a child reports its pid");
+        // The child must be gone long before `sleep 30` would end on its own.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            assert!(
+                Instant::now() < deadline,
+                "child {pid} is still alive after both attempts overran: \
+                 the harness abandoned it instead of killing it"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// The counterpart: a healthy attempt returns immediately and never pays
@@ -895,7 +1127,7 @@ mod spawn_latency_budget {
     fn a_healthy_attempt_returns_without_paying_the_budget() {
         let _ = super::webfang_path();
         let started = Instant::now();
-        assert_spawn_within(SPAWN_LATENCY_BUDGET, "healthy_spawn", || Ok(()));
+        assert_spawn_within(SPAWN_LATENCY_BUDGET, "healthy_spawn", |_child| Ok(()));
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "a passing attempt must not wait on the budget"
@@ -908,7 +1140,7 @@ mod spawn_latency_budget {
     #[test]
     #[should_panic(expected = "expected code 64, got 0")]
     fn a_failing_attempt_reports_its_own_verdict() {
-        assert_spawn_within(SPAWN_LATENCY_BUDGET, "wrong_code", || {
+        assert_spawn_within(SPAWN_LATENCY_BUDGET, "wrong_code", |_child| {
             Err("expected code 64, got 0".to_owned())
         });
     }
@@ -921,7 +1153,9 @@ mod spawn_latency_budget {
     #[test]
     #[should_panic(expected = "gone_spawn: the attempt ended without a verdict (attempt 1)")]
     fn issue_2063_a_disconnected_attempt_reports_the_attempt_number() {
-        assert_spawn_within(SPAWN_LATENCY_BUDGET, "gone_spawn", || panic!("worker died"));
+        assert_spawn_within(SPAWN_LATENCY_BUDGET, "gone_spawn", |_child| {
+            panic!("worker died")
+        });
     }
 }
 

@@ -25,7 +25,7 @@ async fn one_hundred_tasks_share_one_session_without_corruption() {
     let dir = TempDir::new().expect("temp dir");
     let path = dir.path().join("sc4.jsonl");
 
-    let (session, _hash_index) = JsonlSession::open(&path).expect("session opens");
+    let session = JsonlSession::open(&path).expect("session opens");
 
     let mut handles = Vec::with_capacity(TASKS as usize);
     for task in 0..TASKS {
