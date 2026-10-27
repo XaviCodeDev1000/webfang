@@ -118,6 +118,35 @@ pub fn mock_scraped_content(url: &str, title: &str, content: &str) -> webfang_co
     }
 }
 
+/// A minimal record that passes the D2 reconciliation table as
+/// `COMMITTED`-proven (attempts >= 1, no last_error, output_location and
+/// content_hash present). Shared by the resume-gate and export-decision
+/// tests.
+pub fn committed_record(url: &str) -> webfang_core::infrastructure::export::RawRecord {
+    webfang_core::infrastructure::export::RawRecord {
+        url: url.to_string(),
+        canonical_url: url.to_string(),
+        run_id: "018f3c1e-7a2b-4c0d-9e1f-2a3b4c5d6e7f".to_string(),
+        content_hash: Some("sha256:abc".to_string()),
+        attempts: 1,
+        status: webfang_core::domain::page_state::PageStatus::Committed,
+        last_error: None,
+        output_location: Some("out/export.jsonl".to_string()),
+        updated_at: 1_760_000_000_000,
+    }
+}
+
+/// Count the non-empty lines of the run's `export.jsonl` under `dir`
+/// (the default filename used by the export-gate tests).
+pub fn jsonl_lines(dir: &TempDir) -> usize {
+    let path = dir.path().join("export.jsonl");
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count()
+}
+
 #[allow(dead_code)]
 pub fn mock_scraped_content_with_html(
     url: &str,
