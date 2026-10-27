@@ -169,6 +169,14 @@ mod tests {
     // Torn-tail recovery (SC: crash mid-write leaves half-written line)
     // ------------------------------------------------------------------
 
+    /// The application's ONE reader of the export file (#2393) — the same
+    /// function `CommitSession::open` uses, so the index assertions below pin
+    /// exactly what the resume gate will see after a recovery.
+    fn app_index(path: &Path) -> crate::application::export_factory::JsonlChecksumIndex {
+        crate::application::export_factory::read_jsonl_checksum_index(path)
+            .expect("read the checksum index")
+    }
+
     #[tokio::test]
     async fn torn_tail_is_truncated_to_last_valid_newline_before_appends() {
         let dir = tempfile::TempDir::new().expect("temp dir");
@@ -182,7 +190,7 @@ mod tests {
         initial.push_str(r#"{"n":3,"checksum_sha256":"ha"#); // torn tail, no newline
         fs::write(&path, &initial).expect("seed torn file");
 
-        let (session, index) = JsonlSession::open(&path).expect("open recovers torn tail");
+        let session = JsonlSession::open(&path).expect("open recovers torn tail");
 
         // Truncation happened synchronously at open time, BEFORE appends.
         let recovered = fs::read_to_string(&path).expect("read recovered file");
@@ -191,8 +199,11 @@ mod tests {
             format!("{}\n{}\n", valid_line(1), valid_line(2)),
             "tail must be cut back to the last valid newline"
         );
+        let index = app_index(&path);
         assert!(
-            index.contains("hash-1") && index.contains("hash-2") && !index.contains("hash-3"),
+            index.hashes.contains("hash-1")
+                && index.hashes.contains("hash-2")
+                && !index.hashes.contains("hash-3"),
             "hash index must reflect exactly the surviving valid lines"
         );
 
@@ -219,7 +230,7 @@ mod tests {
         let pristine = format!("{}\n{}\n", valid_line(1), valid_line(2));
         fs::write(&path, &pristine).expect("seed clean file");
 
-        let (_session, index) = JsonlSession::open(&path).expect("open clean file");
+        let _session = JsonlSession::open(&path).expect("open clean file");
 
         assert_eq!(
             fs::read_to_string(&path).expect("read"),
@@ -231,7 +242,7 @@ mod tests {
             "a clean file must not produce a .bak — only a destructive rewrite backs up"
         );
         assert_eq!(
-            index,
+            app_index(&path).hashes,
             HashSet::from(["hash-1".to_string(), "hash-2".to_string()])
         );
     }
@@ -253,7 +264,7 @@ mod tests {
         let abandoned = r#"{"n":2,"checksum_sha256":"partial"#;
         fs::write(&path, format!("{prefix}{abandoned}")).expect("seed torn file");
 
-        let (_session, _index) = JsonlSession::open(&path).expect("open recovers torn tail");
+        let _session = JsonlSession::open(&path).expect("open recovers torn tail");
 
         let backup = crate::application::resume::backup_sibling(&path);
         assert_eq!(
@@ -288,7 +299,7 @@ mod tests {
         let abandoned = "x".repeat((TAIL_WINDOW_BYTES * 3) as usize);
         fs::write(&path, format!("{prefix}{abandoned}")).expect("seed long torn file");
 
-        let (session, _index) = JsonlSession::open(&path).expect("open recovers long torn tail");
+        let session = JsonlSession::open(&path).expect("open recovers long torn tail");
         session.close().await.expect("clean exit");
 
         assert_eq!(
@@ -317,7 +328,7 @@ mod tests {
         let content = r#"{"n":1,"checksum_sha256":"hash-1""#;
         fs::write(&path, content).expect("seed unterminated file");
 
-        let (session, index) = JsonlSession::open(&path).expect("open wipes unterminated file");
+        let session = JsonlSession::open(&path).expect("open wipes unterminated file");
 
         assert!(
             fs::read(&path).expect("read recovered").is_empty(),
@@ -330,7 +341,7 @@ mod tests {
             "the abandoned bytes are the whole file here"
         );
         assert!(
-            index.is_empty(),
+            app_index(&path).hashes.is_empty(),
             "no line survives, so the hash index is empty"
         );
         session.close().await.expect("clean exit");

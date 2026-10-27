@@ -37,7 +37,7 @@ async fn short_torn_tail_is_cut_back_to_the_last_newline() {
     let abandoned = "{\"n\":2,\"checksum_sha256\":\"ha";
     fs::write(&path, format!("{prefix}{abandoned}")).expect("seed torn file");
 
-    let (session, index) = JsonlSession::open(&path).expect("open recovers the torn tail");
+    let session = JsonlSession::open(&path).expect("open recovers the torn tail");
     session.close().await.expect("clean exit");
 
     assert_eq!(
@@ -50,9 +50,19 @@ async fn short_torn_tail_is_cut_back_to_the_last_newline() {
         abandoned,
         "the backup carries the abandoned bytes"
     );
-    assert!(
-        index.contains("hash-1"),
-        "the surviving line stays in the hash index"
+    // The surviving line must stay indexable by the resume reader: the byte
+    // equality above already pins it, and the index CONTRACT (what the
+    // application's `read_jsonl_checksum_index` counts) is pinned at the
+    // application layer (#2393). This only asserts the surviving bytes still
+    // carry the checksum field.
+    let surviving = serde_json::from_str::<serde_json::Value>(
+        fs::read_to_string(&path).expect("read recovered").trim(),
+    )
+    .expect("surviving line is valid JSON");
+    assert_eq!(
+        surviving.get("checksum_sha256").and_then(|v| v.as_str()),
+        Some("hash-1"),
+        "the surviving line still carries its checksum"
     );
 }
 
@@ -66,7 +76,7 @@ async fn torn_tail_longer_than_the_initial_window_grows_the_window() {
     let abandoned = "x".repeat((TAIL_WINDOW_BYTES * 3) as usize);
     fs::write(&path, format!("{prefix}{abandoned}")).expect("seed long torn file");
 
-    let (session, _index) = JsonlSession::open(&path).expect("open recovers the long torn tail");
+    let session = JsonlSession::open(&path).expect("open recovers the long torn tail");
     session.close().await.expect("clean exit");
 
     assert_eq!(
@@ -88,7 +98,7 @@ async fn file_without_any_newline_is_wiped_and_preserved() {
     let content = "{\"n\":1,\"checksum_sha256\":\"hash-1\"";
     fs::write(&path, content).expect("seed unterminated file");
 
-    let (session, index) = JsonlSession::open(&path).expect("open wipes the unterminated file");
+    let session = JsonlSession::open(&path).expect("open wipes the unterminated file");
     session.close().await.expect("clean exit");
 
     assert!(
@@ -99,10 +109,6 @@ async fn file_without_any_newline_is_wiped_and_preserved() {
         fs::read_to_string(backup_of(&path)).expect("read backup"),
         content,
         "the abandoned bytes (here: the whole file) are preserved"
-    );
-    assert!(
-        index.is_empty(),
-        "no line survives the wipe, so the index is empty"
     );
 }
 
