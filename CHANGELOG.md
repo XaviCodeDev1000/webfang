@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-10-27
+
+
+### ⚠️ Breaking Changes
+
+- Skipped_non_utf8 travels in the export outcome ([#2391](https://github.com/XaviCodeDev1000/webfang/pull/2391))
+
+### 🏗️ Architecture Improvements
+
+- One lock-poisoning policy ([#2353](https://github.com/XaviCodeDev1000/webfang/pull/2353)) ([#2363](https://github.com/XaviCodeDev1000/webfang/pull/2363))
+
+### 📦 Dependencies
+
+- Rust 1.91.1 + cargo-nextest 0.9.131, flaky-result=fail y perfiles con inherits ([#2306](https://github.com/XaviCodeDev1000/webfang/pull/2306)) ([#2310](https://github.com/XaviCodeDev1000/webfang/pull/2310))
+
+### 🔧 Fixed
+
+- --clean-ai observes cancellation during cleaning (#2270, #2269) ([#2325](https://github.com/XaviCodeDev1000/webfang/pull/2325))
+- Stop building the webfang binary inside every test process ([#2336](https://github.com/XaviCodeDev1000/webfang/pull/2336))
+- Bound the crawl loop and split the pause watchdog ([#2313](https://github.com/XaviCodeDev1000/webfang/pull/2313)) ([#2339](https://github.com/XaviCodeDev1000/webfang/pull/2339))
+- Type batch concurrency as NonZeroUsize ([#2366](https://github.com/XaviCodeDev1000/webfang/pull/2366))
+- Warn on stderr when a malformed platform config degrades ([#2378](https://github.com/XaviCodeDev1000/webfang/pull/2378))
+
+### 🔧 Other
+
+- Document redact_path contract (global prefix + bounded run) ([#2375](https://github.com/XaviCodeDev1000/webfang/pull/2375))
+- Deduplicate jsonl_exporter/checkpoint self-clones (issue #1757) ([#2382](https://github.com/XaviCodeDev1000/webfang/pull/2382))
+- Cerrar los follow-ups de #2313 (resultados parciales, test e2e, bound único, watchdog configurable) ([#2383](https://github.com/XaviCodeDev1000/webfang/pull/2383))
+- Drop the discarded checksum index from JsonlSession::open ([#2411](https://github.com/XaviCodeDev1000/webfang/pull/2411))
+- Restore crate-root deny order defeated by clippy::style group mention ([#2403](https://github.com/XaviCodeDev1000/webfang/pull/2403))
+- Centralize panic lints in workspace lints and cover MCP bins ([#2369](https://github.com/XaviCodeDev1000/webfang/pull/2369))
+- Remove dead preflight-note replay machinery ([#2381](https://github.com/XaviCodeDev1000/webfang/pull/2381))
+
+### 🧪 Testing
+
+- Give pacing lower bounds 10% slack ([#2394](https://github.com/XaviCodeDev1000/webfang/pull/2394)) ([#2400](https://github.com/XaviCodeDev1000/webfang/pull/2400))
+- Assert the observation, not the clock, in the zero-cost burst permit test ([#2401](https://github.com/XaviCodeDev1000/webfang/pull/2401))
 ## [6.0.0] - 2026-10-24
 
 ### ⚠ BREAKING CHANGES
