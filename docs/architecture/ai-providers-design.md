@@ -378,7 +378,7 @@ Estado real de cada punto del diseño, verificado contra el árbol.
 5. [x] **`ProvidersConfig` + `ProviderRegistry`** — `crates/webfang_core/src/domain/providers.rs` (`ProvidersConfig` `:201`, `ProviderRegistry` `:232`); viven en `domain/`, no en `application/`.
 6. [x] **`OpenAiCompatibleProvider`** — `crates/webfang_core/src/infrastructure/llm/provider.rs:113`.
 7. [x] **Integración con container** — el wiring real está en `crates/webfang_core/src/cli/llm_wire.rs:45` (`build_llm_provider`) y `:130` (`build_embedding_provider`), no en `container.rs`.
-8. [x] **Tests de integración** — `crates/webfang_core/tests/auth_source_none_test.rs` (`:33`, `:452`).
+8. [x] **Tests de integración** — `crates/webfang_core/tests/auth_source_none_test.rs` (`:35`, `:454`).
 9. [ ] **Fixtures de contrato** (`crates/webfang_core/tests/fixtures/{openai,openrouter,freellm,groq}.json`) — se mantienen por decisión del owner: la cobertura cross-proveedor sigue siendo necesaria.
 
 ---
@@ -542,7 +542,7 @@ claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 86 | pub fn bu
 claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 95 | }
 claim  | crates/webfang_core/src/infrastructure/llm/client.rs | 119 | pub fn with_http(client: wreq::Client, base_url: Url, api_key: ApiKey) -> Self {
 # --- tests de integración -----------------------------------------------------
-claim  | crates/webfang_core/tests/auth_source_none_test.rs | 33 | OpenAiCompatibleProvider
-claim  | crates/webfang_core/tests/auth_source_none_test.rs | 452 | OpenAiCompatibleProvider::new(config)
+claim  | crates/webfang_core/tests/auth_source_none_test.rs | 35 | OpenAiCompatibleProvider
+claim  | crates/webfang_core/tests/auth_source_none_test.rs | 454 | OpenAiCompatibleProvider::new(config)
 ```
 <!-- claims:end -->

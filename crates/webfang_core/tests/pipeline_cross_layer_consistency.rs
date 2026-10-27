@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Cross-layer `StageOutcome` consistency (Sprint 9 roadmap DoD).
 //!
 //! Every layer must interpret every [`StageOutcome`] variant IDENTICALLY:

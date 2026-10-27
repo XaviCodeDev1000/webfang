@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! The `--enable-ai` flag and its `WEBFANG_MCP_AI` env binding are retired
 //! from both MCP binaries (issue #2123).
 //!

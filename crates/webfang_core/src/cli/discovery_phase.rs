@@ -28,7 +28,7 @@ use crate::domain::config::ScraperConfig;
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::persistence::PersistenceMode;
 use crate::domain::site::SitemapConfig;
-use crate::CrawlerConfig;
+use crate::{CrawlerConfig, CrawlerConfigBuilder};
 
 /// Resolve the CLI-projected sitemap pair into the domain boundary (#1190).
 ///
@@ -42,12 +42,18 @@ pub(crate) fn resolve_sitemap_projection(opts: &CrawlOptions) -> Result<SitemapC
         .map_err(|e| CliExit::ConfigError(e.to_string()))
 }
 
-/// Build a `CrawlerConfig` for URL discovery (shared by dry-run, prepare, and batch).
-pub(crate) fn build_crawler_config_for_discovery(
+/// The `CrawlerConfig` prefix shared by every CLI crawl path: seed URL, page
+/// budget, patterns, robots, the sitemap projection (#1190) and the network
+/// settings with the operator budget overrides.
+///
+/// Bug R2-1: every consumer runs the real crawl Engine, so the operator
+/// overrides must ride on the config or the Engine silently re-derives the
+/// auto tiers. Callers append their tier-specific tail (the batch path adds
+/// the budget-derived concurrency) and build.
+pub(crate) fn base_crawler_config_builder(
     opts: &CrawlOptions,
-    tls_emulation: wreq_util::Profile,
-) -> Result<CrawlerConfig, CliExit> {
-    let crawler_config = CrawlerConfig::builder(opts.url.as_url().clone())
+) -> Result<CrawlerConfigBuilder, CliExit> {
+    Ok(CrawlerConfig::builder(opts.url.as_url().clone())
         .max_pages(opts.crawl.max_pages)
         .max_depth(opts.crawl.max_depth)
         .include_patterns(opts.crawl.include_patterns.clone())
@@ -56,13 +62,17 @@ pub(crate) fn build_crawler_config_for_discovery(
         .sitemap(resolve_sitemap_projection(opts)?)
         .timeout_secs(opts.network.timeout_secs)
         .delay_ms(opts.network.delay_ms)
-        // Bug R2-1: recursive URL discovery runs the real crawl Engine, so
-        // the operator overrides must ride on the config or the Engine
-        // silently re-derives the auto tiers.
-        .budget_overrides(opts.budget_overrides)
+        .budget_overrides(opts.budget_overrides))
+}
+
+/// Build a `CrawlerConfig` for URL discovery (shared by dry-run, prepare, and batch).
+pub(crate) fn build_crawler_config_for_discovery(
+    opts: &CrawlOptions,
+    tls_emulation: wreq_util::Profile,
+) -> Result<CrawlerConfig, CliExit> {
+    Ok(base_crawler_config_builder(opts)?
         .tls_emulation(tls_emulation)
-        .build();
-    Ok(crawler_config)
+        .build())
 }
 
 /// Run sitemap discovery and map its terminal states to `CliExit` (#1439
@@ -451,14 +461,17 @@ mod tests {
         );
     }
 
+    fn discovered_urls(paths: &[&str]) -> Vec<url::Url> {
+        paths
+            .iter()
+            .map(|p| url::Url::parse(&format!("https://example.com{p}")).unwrap())
+            .collect()
+    }
+
     #[test]
     fn plan_urls_dom_mode_prepends_seed() {
         let seed = url::Url::parse("https://example.com").unwrap();
-        let discovered = vec![
-            url::Url::parse("https://example.com/a").unwrap(),
-            url::Url::parse("https://example.com/b").unwrap(),
-            url::Url::parse("https://example.com/c").unwrap(),
-        ];
+        let discovered = discovered_urls(&["/a", "/b", "/c"]);
 
         let guard = permissive_guard(&seed);
         let result = plan_urls(false, false, seed.clone(), discovered.clone(), &guard);
@@ -472,10 +485,7 @@ mod tests {
     #[test]
     fn plan_urls_sitemap_mode_does_not_prepend_seed() {
         let seed = url::Url::parse("https://example.com").unwrap();
-        let discovered = vec![
-            url::Url::parse("https://example.com/a").unwrap(),
-            url::Url::parse("https://example.com/b").unwrap(),
-        ];
+        let discovered = discovered_urls(&["/a", "/b"]);
 
         let guard = permissive_guard(&seed);
         let result = plan_urls(false, true, seed, discovered.clone(), &guard);

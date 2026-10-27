@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1230 / F-07 — the record store's read-modify-write cycle must be atomic.
 //!
 //! Deterministic pin: two independent handles on one state directory,

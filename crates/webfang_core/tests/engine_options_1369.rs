@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1369: the migrated batch and plain-discovery entries must honor the
 //! explicit `EngineOptions` seam — no silent knobless defaults.
 //!

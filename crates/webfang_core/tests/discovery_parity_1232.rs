@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! F-14 discovery parity guard (#1232, slice 1).
 //!
 //! Dry-run and the real DOM path must share one discovery function behind

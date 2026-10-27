@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 // Temporary probe (not committed): what does wreq produce for unsupported scheme?
 #[tokio::test]
 async fn probe_scheme_error_kind() {

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP panic containment — a panicking tool is an error, not a dead transport
 //! (issue #1611, slice F2).
 //!

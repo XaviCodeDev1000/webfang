@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! End-to-end test for channel plumbing: observer → channel → receiver.
 
 #[tokio::test]

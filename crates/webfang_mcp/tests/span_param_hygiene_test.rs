@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1615 (DF-L2 / F10 / VG-07) — no MCP handler span may record its params.
 //!
 //! ## Why this file exists, and why it reads source

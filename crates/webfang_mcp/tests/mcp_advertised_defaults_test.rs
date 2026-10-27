@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Advertised contract vs runtime behavior (issue #1294, NS-04 + NS-02).
 //!
 //! Both items are the same root: what an MCP client is *told* about a tool is not

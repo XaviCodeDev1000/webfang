@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP authentication is fail-closed by default — #1611, G-18.
 //!
 //! The finding was that `expected_token: None` passed EVERY request, so the

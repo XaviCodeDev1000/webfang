@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Staleness-differential E2E + CLI-vs-MCP sitemap parity (issue #1429, Phase 4).
 //!
 //! 4.1 (success criterion 1): two wiremock sites, one MCP session —

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! AC-1.1 / AC-1.2 — Tier A corpus determinism and local-only guarantees.
 //!
 //! Requests use raw one-shot TCP HTTP/1.1 reads so the test observes the exact

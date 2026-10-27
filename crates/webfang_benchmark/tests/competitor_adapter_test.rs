@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Slice-2 competitor adapter skeletons: request-building/validation logic
 //! only. These tests exercise URL construction, auth-key presence checks, the
 //! fail-closed gate, and the deferred-execution behavior of `run()` — all

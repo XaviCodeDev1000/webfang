@@ -587,15 +587,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn round_trip_save_load() {
+    /// Saves `checkpoint` to a fresh temp dir under the canonical
+    /// "checkpoint.json" name and hands back the dir (bound to keep the file
+    /// alive), the path and the store, so each test keeps its own
+    /// load/tamper flow.
+    fn saved_checkpoint(checkpoint: &CrawlCheckpoint) -> (TempDir, PathBuf, BincodeCheckpoint) {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("checkpoint.json");
-
         let store = BincodeCheckpoint::new();
-        let original = sample_checkpoint();
+        store.save(checkpoint, &path).unwrap();
+        (tmp, path, store)
+    }
 
-        store.save(&original, &path).unwrap();
+    #[test]
+    fn round_trip_save_load() {
+        let original = sample_checkpoint();
+        let (_tmp, path, store) = saved_checkpoint(&original);
         let loaded = store.load(&path).unwrap();
 
         assert_eq!(original, loaded);
@@ -603,13 +610,8 @@ mod tests {
 
     #[test]
     fn empty_state_round_trip() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("checkpoint.json");
-
-        let store = BincodeCheckpoint::new();
         let original = CrawlCheckpoint::new();
-
-        store.save(&original, &path).unwrap();
+        let (_tmp, path, store) = saved_checkpoint(&original);
         let loaded = store.load(&path).unwrap();
 
         assert_eq!(original, loaded);
@@ -619,13 +621,7 @@ mod tests {
 
     #[test]
     fn corruption_detection_tamper_checksum() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("checkpoint.json");
-
-        let store = BincodeCheckpoint::new();
-        let original = sample_checkpoint();
-
-        store.save(&original, &path).unwrap();
+        let (_tmp, path, store) = saved_checkpoint(&sample_checkpoint());
 
         // Tamper with the checksum (first 4 bytes)
         let mut data = fs::read(&path).unwrap();
@@ -639,13 +635,7 @@ mod tests {
 
     #[test]
     fn corruption_detection_tamper_payload() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("checkpoint.json");
-
-        let store = BincodeCheckpoint::new();
-        let original = sample_checkpoint();
-
-        store.save(&original, &path).unwrap();
+        let (_tmp, path, store) = saved_checkpoint(&sample_checkpoint());
 
         // Tamper with the payload (after the 4-byte checksum)
         let mut data = fs::read(&path).unwrap();
@@ -688,13 +678,7 @@ mod tests {
 
     #[test]
     fn checksum_is_first_four_bytes() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("checkpoint.json");
-
-        let store = BincodeCheckpoint::new();
-        let state = sample_checkpoint();
-
-        store.save(&state, &path).unwrap();
+        let (_tmp, path, _store) = saved_checkpoint(&sample_checkpoint());
 
         let data = fs::read(&path).unwrap();
         let stored = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
@@ -711,11 +695,7 @@ mod tests {
     /// one-way door for every byte the checksum covered.
     #[test]
     fn crc32_mismatch_preserves_bak_before_the_rewrite() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("checkpoint.json");
-
-        let store = BincodeCheckpoint::new();
-        store.save(&sample_checkpoint(), &path).unwrap();
+        let (_tmp, path, store) = saved_checkpoint(&sample_checkpoint());
 
         // Tamper with a single payload byte: the checksum no longer matches,
         // and the file is not a legacy pure-JSON checkpoint either.
@@ -787,9 +767,6 @@ mod tests {
 
     #[test]
     fn test_banned_domains_roundtrip() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("checkpoint.json");
-
         let banned = vec![
             BannedDomain {
                 domain: "waf.example.com".into(),
@@ -806,8 +783,7 @@ mod tests {
         let mut original = sample_checkpoint();
         original.banned_domains = banned;
 
-        let store = BincodeCheckpoint::new();
-        store.save(&original, &path).unwrap();
+        let (_tmp, path, store) = saved_checkpoint(&original);
         let loaded = store.load(&path).unwrap();
 
         assert_eq!(loaded.banned_domains.len(), 2);
@@ -971,10 +947,7 @@ mod tests {
         #[cfg_attr(miri, ignore)]
         #[test]
         fn prop_roundtrip_save_load(state in arb_checkpoint()) {
-            let tmp = TempDir::new().unwrap();
-            let path = tmp.path().join("checkpoint.json");
-            let store = BincodeCheckpoint::new();
-            store.save(&state, &path).unwrap();
+            let (_tmp, path, store) = saved_checkpoint(&state);
             let loaded = store.load(&path).unwrap();
             prop_assert_eq!(state, loaded);
         }
@@ -986,10 +959,7 @@ mod tests {
             xor_byte in 1u8..=255,
             crc_offset in 0u8..4,
         ) {
-            let tmp = TempDir::new().unwrap();
-            let path = tmp.path().join("checkpoint.json");
-            let store = BincodeCheckpoint::new();
-            store.save(&state, &path).unwrap();
+            let (_tmp, path, store) = saved_checkpoint(&state);
 
             let mut data = fs::read(&path).unwrap();
             data[crc_offset as usize] ^= xor_byte;

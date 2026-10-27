@@ -184,6 +184,18 @@ unexpected_cfgs = { level = "deny", check-cfg = ["cfg(tokio_unstable)", "cfg(loo
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
+# Panic lints, declared once (#2354): every member inherits them via
+# `[lints] workspace = true`, and so do every bin and bench target of those
+# packages — the gap the old per-crate `cfg_attr(not(test), deny)` copies
+# could never cover. Workspace lints cannot express `not(test)`, so the
+# test-only carve-out lives at each root as
+# `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]`:
+# a source attribute overrides the command-line deny, and it only fires under
+# `cfg(test)`, so production code cannot opt out. Harness crates whose whole
+# body compiles outside `cfg(test)` (webfang_test_utils, webfang_benchmark)
+# carry the explicit allow at their own root instead.
+unwrap_used = { level = "deny" }
+expect_used = { level = "deny" }
 
 [profile.dev]
 opt-level = 0

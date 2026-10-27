@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Mutation-targeted tests for the credentials domain.
 //!
 //! These tests exist to kill specific surviving mutants found by the weekly

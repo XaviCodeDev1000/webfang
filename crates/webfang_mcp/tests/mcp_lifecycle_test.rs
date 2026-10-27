@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP Server lifecycle test — init → notify → list → call
 //!
 //! Tests the full MCP session lifecycle over HTTP Streamable transport.

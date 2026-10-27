@@ -92,11 +92,16 @@ impl FileTraceLayer {
     ///
     /// Owns the whole lock → serialize → write → flush → report chain, so
     /// every emitter shares identical failure paths. A poisoned lock is
-    /// silently skipped, matching the pre-extraction behavior at each call
-    /// site. Never blocks across `.await`: all callers are synchronous
-    /// `Layer` callbacks.
+    /// recovered rather than skipped: the guard still grants exclusive access,
+    /// and dropping trace lines silently is the one thing a trace sink must not
+    /// do. Never blocks across `.await`: all callers are synchronous `Layer`
+    /// callbacks.
     fn write_record(&self, record: &Value) {
-        if let Ok(mut writer) = self.writer.lock() {
+        {
+            let mut writer = self
+                .writer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut line = match serde_json::to_vec(record) {
                 Ok(v) => v,
                 Err(e) => {

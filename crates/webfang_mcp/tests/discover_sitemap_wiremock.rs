@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Wiremock behavioral test for the discover_sitemap MCP tool.
 //!
 //! Serves a fake sitemap via wiremock, invokes `crawl_with_sitemap`

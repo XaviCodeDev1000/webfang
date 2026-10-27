@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for SqliteVectorRepository — real I/O with temp dirs.
 //!
 //! Exercises CRUD operations, deduplication, vector storage, and schema

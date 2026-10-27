@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Source-scan enforcement of the workspace ENV_LOCK invariant (#1126,
 //! #1349).
 //!

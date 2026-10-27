@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS extraction_fingerprints (\
     PRIMARY KEY (site_base_url, selector_signature)\
 );";
 
+/// The failure-count lookup shared by the upsert read-back and the getter.
+const FAILURE_COUNT_SQL: &str = "\
+SELECT failure_count FROM extraction_fingerprints \
+ WHERE site_base_url = ?1 AND selector_signature = ?2";
+
 /// SQLite-backed [`FingerprintRepository`].
 ///
 /// Reuses the WAL-mode pool from
@@ -46,6 +51,15 @@ impl SqliteFingerprintRepository {
         Self { pool }
     }
 
+    /// Acquire a pooled connection with the error mapping every entry point
+    /// of this repository shares.
+    async fn pooled_connection(&self) -> Result<deadpool_sqlite::Connection, ScraperError> {
+        self.pool
+            .get()
+            .await
+            .map_err(|e| ScraperError::persistence(format!("obtener conexión SQLite: {e}")))
+    }
+
     /// Create the `extraction_fingerprints` table if missing.
     ///
     /// The database is SHARED with the vector repository, so this runs the
@@ -59,11 +73,7 @@ impl SqliteFingerprintRepository {
     /// Returns [`ScraperError::Persistence`] if the schema marker belongs to
     /// another version, or if the DDL batch fails.
     pub async fn setup_schema(&self) -> Result<(), ScraperError> {
-        let conn = self
-            .pool
-            .get()
-            .await
-            .map_err(|e| ScraperError::persistence(format!("obtener conexión SQLite: {e}")))?;
+        let conn = self.pooled_connection().await?;
         conn.interact(|c| {
             super::sqlite::enforce_schema_version(c)?;
             c.execute_batch(FINGERPRINT_DDL)
@@ -88,10 +98,7 @@ impl FingerprintRepository for SqliteFingerprintRepository {
             let last_seen = record.last_seen;
             let note = record.last_note.clone();
 
-            let conn =
-                self.pool.get().await.map_err(|e| {
-                    ScraperError::persistence(format!("obtener conexión SQLite: {e}"))
-                })?;
+            let conn = self.pooled_connection().await?;
             let count = conn
                     .interact(move |c| {
                         c.execute(
@@ -106,8 +113,7 @@ impl FingerprintRepository for SqliteFingerprintRepository {
                             rusqlite::params![site, signature, score, last_seen, note],
                         )?;
                         c.query_row(
-                            "SELECT failure_count FROM extraction_fingerprints \
-                             WHERE site_base_url = ?1 AND selector_signature = ?2",
+                            FAILURE_COUNT_SQL,
                             rusqlite::params![site, signature],
                             |row| row.get(0),
                         )
@@ -128,15 +134,11 @@ impl FingerprintRepository for SqliteFingerprintRepository {
             let site = site_base_url.to_owned();
             let signature = selector_signature.to_owned();
 
-            let conn =
-                self.pool.get().await.map_err(|e| {
-                    ScraperError::persistence(format!("obtener conexión SQLite: {e}"))
-                })?;
+            let conn = self.pooled_connection().await?;
             let count = conn
                 .interact(move |c| {
                     c.query_row(
-                        "SELECT failure_count FROM extraction_fingerprints \
-                             WHERE site_base_url = ?1 AND selector_signature = ?2",
+                        FAILURE_COUNT_SQL,
                         rusqlite::params![site, signature],
                         |row| row.get(0),
                     )

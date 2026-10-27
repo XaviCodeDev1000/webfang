@@ -39,7 +39,8 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 default-filter = "not test(ai_integration)"
 
 # El test trybuild de compile-fail no es lento-por-naturaleza como un scrape:
-# COMPILA el crate y cada caso `page_state/`. Sin este override el techo que lo
+# COMPILA el crate y cada caso de los suites `page_state/` y `batch_manager/`
+# (un solo runner: ver #2366). Sin este override el techo que lo
 # mata es el `slow-timeout` global de más arriba — 60s x 3 = 180s exactos.
 #
 # Medido, en frío y sin cache de trybuild: macOS 467.0 s AL PRIMER intento —
@@ -66,7 +67,7 @@ default-filter = "not test(ai_integration)"
 # sin `=` habría aplicado este techo a cualquier test futuro cuyo nombre
 # contenga el texto.
 [[profile.default.overrides]]
-filter = 'test(=illegal_page_transitions_fail_to_compile)'
+filter = 'test(=compile_fail_cases_fail_to_compile)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
 [profile.ci]
@@ -91,6 +92,17 @@ global-timeout = "1h"
 success-output = "never"
 status-level = "fail"
 final-status-level = "slow"
+
+# Reporte JUnit por intento (#2331): el output del perfil ci oculta por
+# construcción el fallo del intento 1 de un test que pasa en reintento (el log
+# sólo muestra el compacto "TRY 2 PASS"), así que la causa estructural de un
+# FLKY-FL nunca llega al log. El JUnit registra cada reintento como
+# <flakyFailure>/<rerunFailure> CON su salida (store-failure-output=true por
+# defecto; success-output no se almacena). La lane windows-latest sube el
+# archivo como artifact sólo cuando el job falla. Path relativo a
+# target/nextest/<perfil>/.
+[profile.ci.junit]
+path = "junit.xml"
 
 # Lane nocturna de detección de flakes (#2286; adopción en #2305 paso 4): la
 # misma suite que test-full pero con reintentos a cero, para que cada flake

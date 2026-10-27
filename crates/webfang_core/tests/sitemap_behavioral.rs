@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Sitemap behavioral tests — end-to-end sitemap contracts.
 //!
 //! Tests the full sitemap pipeline: parse → discover URLs → validate.
