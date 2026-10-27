@@ -604,10 +604,10 @@ pub fn redact_temp_path(dir: &Path, text: &str) -> String {
 #[must_use]
 pub fn redact_nondeterministic(dir: &Path, text: &str) -> String {
     let text = redact_temp_path(dir, text);
-    // #1777: the redaction token replaces a directory PREFIX, but the separator
-    // that FOLLOWED the prefix is the OS's, and it survives verbatim — Windows
-    // renders `<OUT_DIR>\typo.toml` where POSIX renders `<OUT_DIR>/typo.toml`.
-    // A committed snapshot can only ever match one of them, which is how four
+    // #1777: the redaction token replaces a directory PREFIX, but the separators
+    // that FOLLOW it are the OS's, and they survive verbatim — Windows renders
+    // `<OUT_DIR>\typo.toml` where POSIX renders `<OUT_DIR>/typo.toml`. A
+    // committed snapshot can only ever match one of them, which is how four
     // `config_default_contract_test` snapshots passed on Linux and failed on
     // `windows-latest` with nothing but this character between them.
     //
@@ -615,8 +615,21 @@ pub fn redact_nondeterministic(dir: &Path, text: &str) -> String {
     // would corrupt any message that carries one as content (a regex, a
     // literal path, a Windows-style escape) and silently fork every snapshot
     // that contains one.
-    let sep = Regex::new(r"(<OUT_DIR>|<TEMP_PATH>)\\").expect("valid path separator regex");
-    let text = sep.replace_all(&text, "$1/").into_owned();
+    //
+    // #2242 extended the anchored run from ONE separator to the WHOLE path
+    // that follows the token: a nested platform path such as
+    // `<OUT_DIR>\webfang\config.toml` renders its INNER separators verbatim
+    // too, and a single-separator rewrite left `<OUT_DIR>/webfang\config.toml`
+    // — a snapshot no single platform can produce on both. The run is the
+    // token plus every path character up to whitespace, an ANSI escape or a
+    // quote, and every backslash inside it becomes `/`; text outside the run
+    // is untouched, so a backslash that is message content (not part of the
+    // redacted path) never crosses this rule.
+    let path_run =
+        Regex::new("(<OUT_DIR>|<TEMP_PATH>)[^\\s\\x1b\"']*").expect("valid path run regex");
+    let text = path_run
+        .replace_all(&text, |caps: &regex::Captures| caps[0].replace('\\', "/"))
+        .into_owned();
     let ansi = Regex::new(r"\x1b\[[0-9;]*m").expect("valid ANSI regex");
     let text = ansi.replace_all(&text, "").into_owned();
     let ts = Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)")
@@ -815,6 +828,24 @@ mod tests {
         } else {
             "webfang"
         }
+    }
+
+    /// #2242 regression pin: the token-anchored separator rule must cover the
+    /// WHOLE path run that follows the token, not only the first separator.
+    /// The platform default config path nests one level (`<base>/webfang/
+    /// config.toml`), so Windows renders inner `\` separators that a
+    /// single-separator rewrite left in the snapshot.
+    #[test]
+    fn redaction_normalizes_every_separator_after_the_token() {
+        let dir = Path::new("C:\\Users\\runner\\tmp\\base");
+        let text =
+            "el archivo de configuración C:\\Users\\runner\\tmp\\base\\webfang\\config.toml \
+                    no es TOML válido";
+        let redacted = redact_nondeterministic(dir, text);
+        assert!(
+            redacted.contains("<OUT_DIR>/webfang/config.toml"),
+            "every separator after the token must normalize: {redacted}"
+        );
     }
 
     /// #1366 regression pin: with BOTH harness variables absent
