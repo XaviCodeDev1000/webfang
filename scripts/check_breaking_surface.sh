@@ -229,9 +229,9 @@ esac
 # shellcheck disable=SC2016  # single-quoted jq program
 commits_jsonl="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits?per_page=100" \
   --jq 'def m: ((.commit.message // "") | split("\n"));
-        {oid: .sha,
-         messageHeadline: (m[0] // ""),
-         messageBody: ((m[1:]) | join("\n"))}' 2>/dev/null)" \
+        .[] | {oid: .sha,
+               messageHeadline: (m[0] // ""),
+               messageBody: ((m[1:]) | join("\n"))}' 2>/dev/null)" \
   || die "No se pudo leer la lista de commits del PR #${PR_NUMBER} (REST paginada)."
 [[ -n "$commits_jsonl" ]] || die "La lista de commits del PR #${PR_NUMBER} vino vacía (fail closed)."
 
