@@ -1092,6 +1092,20 @@ jobs:
         env:
           WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
+      - name: Upload nextest JUnit report
+        # #2331: a test that passes on retry prints only a compact "TRY 2 PASS"
+        # line — the profile's output policy never shows attempt-1 output, so a
+        # FLKY-FL is unexplainable from the log alone. The JUnit report
+        # ([profile.ci.junit] in .config/nextest.toml) records every retry
+        # attempt with its own output as <flakyFailure>/<rerunFailure>. Upload
+        # it only when the job failed: green runs never need it.
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-windows
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   # ============================================================================
   # TIER 4: TEST FULL (4-6 minutes)
