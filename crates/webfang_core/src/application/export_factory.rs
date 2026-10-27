@@ -586,9 +586,11 @@ pub(crate) struct JsonlChecksumIndex {
 ///
 /// The file is read LINE BY LINE through a [`BufReader`], never as one
 /// string: an export larger than RAM must not be loaded into RAM to be
-/// indexed. This is the ONE reader for the export file — the application's
-/// `CommitSession` and the infrastructure writer session read the same bytes
-/// through it, so both sides agree on what a line is.
+/// indexed. This is the ONE reader for the export file's checksum field
+/// (#2393): the JSONL writer session no longer reads the output file at all
+/// on open — only its torn tail — so the application layer is the single
+/// place that parses lines for `CHECKSUM_FIELD`, and the resume gate's view
+/// of the file is built exactly here.
 ///
 /// # Damaged bytes (#1812)
 ///
@@ -675,10 +677,10 @@ fn log_io_error_with_kind(
 /// Rebuild the resume dedup index from an existing output file.
 ///
 /// The field name comes from the pinned [`CHECKSUM_FIELD`] constant (#1617,
-/// D3), not from a string literal at this site: three sites read this name and
-/// a rename in one of them would empty the index with no error. Lines that
-/// parse but carry no checksum are counted and reported, so a mismatch between
-/// the writer and the readers is visible instead of silent.
+/// D3), not from a string literal at this site: the exporter writes it and
+/// this is the ONE reader (#2393), so a rename on either side is visible
+/// here. Lines that parse but carry no checksum are counted and reported, so
+/// a writer/reader field-name mismatch is visible instead of silent.
 ///
 /// The read itself is [`read_jsonl_checksum_index`]'s: STREAMING, and a line
 /// that is not valid UTF-8 is skipped and reported instead of failing the
@@ -1256,6 +1258,37 @@ mod tests {
             correlation_id: None,
             quality_hint: None,
         }
+    }
+
+    // =========================================================================
+    // checksum-index reader tests (#2393, formerly pinned at the writer)
+    // =========================================================================
+
+    /// #1617 (D3): a line that parses as JSON but lacks [`CHECKSUM_FIELD`] is
+    /// the signature of a renamed writer. It must produce an EMPTY index (the
+    /// honest answer) AND be counted, so the emptiness is attributable in the
+    /// logs instead of looking like a clean file. The writer no longer reads
+    /// the file (#2393), so this contract is pinned at its only remaining
+    /// reader.
+    #[test]
+    fn renamed_checksum_field_is_counted_and_not_indexed() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("renamed.jsonl");
+        // Same shape as a real export line, with the field name changed.
+        let mut content = String::new();
+        for n in 1..=3 {
+            content.push_str(&format!("{{\"n\":{n},\"content_hash\":\"hash-{n}\"}}\n"));
+        }
+        std::fs::write(&path, &content).unwrap();
+
+        let index = read_jsonl_checksum_index(&path).unwrap();
+        assert!(
+            index.hashes.is_empty(),
+            "no line carries CHECKSUM_FIELD, so no line may be indexed"
+        );
+        assert_eq!(index.report.lines, 3);
+        assert_eq!(index.report.without_checksum, 3);
+        assert_eq!(index.report.skipped_non_utf8, 0);
     }
 
     // =========================================================================

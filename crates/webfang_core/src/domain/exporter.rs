@@ -22,18 +22,18 @@ use crate::domain::entities::{DocumentChunkUnvalidated, DocumentChunkValidated, 
 /// This lives in the domain, not in the exporter that writes it, because the
 /// contract is read by code on the OTHER side of the layer boundary: the
 /// application layer rebuilds the resume dedup index from an existing output
-/// file, and `infrastructure::export::jsonl_writer` reads it when opening a
-/// session for append. Pinning the name in the exporter would make those
-/// readers import `infrastructure` outward, which ADR-0010 forbids — the
-/// dependency direction is not negotiable, and the field name is exactly the
-/// kind of cross-layer contract the domain is for.
+/// file. Pinning the name in the exporter would make that reader import
+/// `infrastructure` outward, which ADR-0010 forbids — the dependency
+/// direction is not negotiable, and the field name is exactly the kind of
+/// cross-layer contract the domain is for.
 ///
-/// Three sites read this name off disk: the JSONL exporter WRITES it (as the
-/// serde name of `WebfangMetadata::checksum_sha256`), and
-/// `jsonl_writer::build_hash_index` plus the application's `CommitSession` READ
-/// it. A rename of the Rust field would leave the readers skipping every line
-/// and returning an empty index with `Ok`: `--resume` would re-drive every
-/// already-committed page and nothing in the logs would say why.
+/// The exporter WRITES the name (as the serde name of
+/// `WebfangMetadata::checksum_sha256`) and the application's
+/// `read_jsonl_checksum_index` READS it — the ONE reader since #2393 removed
+/// the writer's own index build. A rename of the Rust field would leave the
+/// reader skipping every line and returning an empty index with `Ok`:
+/// `--resume` would re-drive every already-committed page and nothing in the
+/// logs would say why.
 ///
 /// `serde(rename)` takes a string literal, not a const, so this cannot be the
 /// single source of truth on the write side. It is the pinned READ contract
