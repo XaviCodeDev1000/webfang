@@ -712,6 +712,15 @@ the gate; the script refuses both with exit 5. A merge commit (`--merge`, outsid
 preserves commit markers but discards the title; it is an option, never a mandatory recipe. Never
 leave the `!` only in a surface the chosen strategy drops.
 
+**The same invariant is a required CI check (`breaking-surface`, #2328).** The job in
+`pr-validation.yml` runs on `pull_request` (PR head) and `merge_group` (queue entry), reads the
+merge method from the queue configuration (GraphQL) and pages every commit via REST — a marker on
+commit 101 counts. The decision matrix lives in `scripts/breaking_surface_lib.sh`, consumed by
+both the check and the local guard, so they cannot drift. Fail closed: unreadable metadata, zero
+commits, or an unreadable queue method is a red check. The local guard stays as defense in depth:
+CI closes the TOCTOU window and covers merges that bypass the script; the script keeps its
+refusal at the merge boundary.
+
 **Hooks and verification:** the `pre-commit` and `pre-push` consult the review gate; on a fresh
 clone you must enable the wiring with `git config core.hooksPath scripts/githooks`. To wait
 for CI prefer the non-blocking pattern (`gh run list --workflow=ci.yml …`) and never

@@ -30,6 +30,12 @@
 #      merge boundary, so a title edit or a new push during the wait cannot
 #      slip a marker off the kept surface (#2081, #2320). A `BREAKING CHANGE:`
 #      footer alone does not satisfy the gate.
+#      DEFENSE IN DEPTH (#2328): the same invariant is also the required CI
+#      check `breaking-surface` (pr-validation.yml), evaluated on the PR head
+#      and on the merge_group entry — it closes the TOCTOU window between the
+#      merge-boundary re-validation and the actual enqueue/merge, and covers
+#      merges that never run this script (UI, plain `gh pr merge`). The matrix
+#      both consumers apply lives in scripts/breaking_surface_lib.sh.
 #   2. Reads the required status-check contexts from branch protection, then polls
 #      `gh pr checks --json name,bucket` until EVERY one of them has REPORTED with
 #      a terminal bucket, and all report `pass`. Waiting on
@@ -582,7 +588,6 @@ breaking_guard() {
       exit 4
       ;;
   esac
-  return 0
 }
 
 guard_meta="$(read_breaking_meta)"

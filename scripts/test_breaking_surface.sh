@@ -186,6 +186,9 @@ rest_commit() { # rest_commit <sha> <full-message>
 echo "test_breaking_surface: the CI check keeps the marker on the kept surface (#2328)"
 
 # ─── 1. THE NEGATION: N=1 title-only marker under a SQUASH queue ────────────
+# NEGATION: a title-only marker under a SQUASH queue must be RED — the kept
+# surface is the single commit's subject, so a check that passed on the title
+# alone would re-arm the #2078 hole in CI.
 # The #2078 shape, now in CI: the title carries the `!`, the (single) commit
 # does not. A naive title check would pass; the kept surface is the commit
 # subject, so the check must be RED.
