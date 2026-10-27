@@ -50,15 +50,30 @@ bad() {
   fail=$((fail + 1))
 }
 
-# The fixture: a docs tree with the five chapters the script demands, a
+# The fixture: a docs tree mirroring the real repo shape — a SUMMARY.md that
+# links MORE chapters than the script historically rendered, every chapter
+# carrying an internal heading (so the demotion depth is observable), a
 # rustdoc-markdown stub and nothing else. The stub emits a page with a stray
 # "~~~" inside a ``` block on purpose (B29) and counts its invocations so a
 # failure can be injected at a chosen crate (B21).
 make_fixture() { # <dir>
   local d="$1" f
   mkdir -p "$d/docs/src" "$d/docs/book" "$d/stub"
-  for f in overview debugging testing troubleshooting cli-reference; do
-    printf '# %s\n\nSome body text.\n' "$f" >"$d/docs/src/$f.md"
+  cat >"$d/docs/src/SUMMARY.md" <<'SUMMARYEOF'
+# Summary
+
+[Overview](overview.md)
+
+- [Installation & Uninstall](installation.md)
+- [Debugging & Trace Analysis](debugging.md)
+- [Testing](testing.md)
+- [Troubleshooting](troubleshooting.md)
+- [State Recovery Runbook](state-recovery-runbook.md)
+- [MCP Error Contract](mcp-error-contract.md)
+- [CLI Reference](cli-reference.md)
+SUMMARYEOF
+  for f in overview installation debugging testing troubleshooting state-recovery-runbook mcp-error-contract cli-reference; do
+    printf '# %s\n\nSome body text.\n\n## Internal Section\n\nInternal body.\n' "$f" >"$d/docs/src/$f.md"
   done
   cat >"$d/stub/rustdoc-markdown" <<'STUBEOF'
 #!/usr/bin/env bash
@@ -255,6 +270,72 @@ if grep -qE 'Generated: [0-9]{4}-[0-9]{2}-[0-9]{2}' "$fixture/docs/book/webfang-
 else
   bad "B30 without SOURCE_DATE_EPOCH the date falls back to the UTC day"
   grep 'Generated:' "$fixture/docs/book/webfang-docs-llm/llms.txt" | sed 's/^/        /'
+fi
+
+# --- Coverage: every chapter SUMMARY links reaches the artifact -------------
+# NEGATION: CHAPTERS was a hand-maintained list ("overview debugging testing
+# troubleshooting") that silently missed every chapter added to SUMMARY.md
+# later (installation, state-recovery-runbook, mcp-error-contract): more than
+# half of the narrative never shipped in the LLM artifact. This case accepts
+# that gap.
+fixture="$WORKDIR/coverage"
+make_fixture "$fixture"
+(cd "$fixture" && PATH="$fixture/stub:$PATH" RDM_COUNT="$fixture/stub/count" bash "$SCRIPT" >/dev/null 2>&1)
+mono="$fixture/docs/book/webfang-docs-llm/webfang-docs-full.md"
+missing=""
+for f in overview installation debugging testing troubleshooting state-recovery-runbook mcp-error-contract; do
+  grep -qx "### $f" "$mono" || missing="$missing $f"
+done
+if [ -z "$missing" ]; then
+  ok "coverage every SUMMARY chapter lands in the monolith (as H3)"
+else
+  bad "coverage every SUMMARY chapter lands in the monolith (as H3) (missing:$missing)"
+fi
+missing=""
+for f in overview installation debugging testing troubleshooting state-recovery-runbook mcp-error-contract; do
+  grep -qx "## $f" "$fixture/docs/book/webfang-docs-llm/00-narrative.md" || missing="$missing $f"
+done
+if [ -z "$missing" ]; then
+  ok "coverage every SUMMARY chapter lands in 00-narrative (as H2)"
+else
+  bad "coverage every SUMMARY chapter lands in 00-narrative (as H2) (missing:$missing)"
+fi
+if grep -qx "## cli-reference" "$fixture/docs/book/webfang-docs-llm/00-narrative.md"; then
+  bad "coverage cli-reference is NOT re-emitted as a narrative chapter (it has its own source file)"
+else
+  ok "coverage cli-reference is NOT re-emitted as a narrative chapter (it has its own source file)"
+fi
+
+# --- Hierarchy: a chapter's internal headings never outrank their chapter ---
+# NEGATION: only the chapter's line 1 was demoted (sed 1s/^# /N/), so the
+# internal `## Internal Section` stayed at H2 while its own chapter went to
+# H3: content outranked the section containing it. This case accepts that
+# inversion.
+fixture="$WORKDIR/hierarchy"
+make_fixture "$fixture"
+(cd "$fixture" && PATH="$fixture/stub:$PATH" RDM_COUNT="$fixture/stub/count" bash "$SCRIPT" >/dev/null 2>&1)
+mono="$fixture/docs/book/webfang-docs-llm/webfang-docs-full.md"
+narr="$fixture/docs/book/webfang-docs-llm/00-narrative.md"
+if grep -qx "#### Internal Section" "$mono"; then
+  ok "hierarchy chapter internals sit two levels deep in the monolith (H4 under an H3 chapter)"
+else
+  bad "hierarchy chapter internals sit two levels deep in the monolith (H4 under an H3 chapter)"
+fi
+if grep -qx "## Internal Section" "$mono"; then
+  bad "hierarchy no H2 narrative internal survives the monolith demotion"
+else
+  ok "hierarchy no H2 narrative internal survives the monolith demotion"
+fi
+if grep -qx "### Internal Section" "$narr"; then
+  ok "hierarchy chapter internals sit one level deep in 00-narrative (H3 under an H2 chapter)"
+else
+  bad "hierarchy chapter internals sit one level deep in 00-narrative (H3 under an H2 chapter)"
+fi
+cli_ref="$fixture/docs/book/webfang-docs-llm/06-cli-reference.md"
+if grep -qx "### Internal Section" "$cli_ref"; then
+  ok "hierarchy cli-reference internals are demoted under its wrapper H1 (H3)"
+else
+  bad "hierarchy cli-reference internals are demoted under its wrapper H1 (H3)"
 fi
 
 echo
