@@ -234,6 +234,23 @@ pub enum CrawlError {
     /// permit. Handlers must NOT count it as a crawl error.
     #[error("task cancelled by engine shutdown")]
     Cancelled,
+
+    /// The run ended early (stall, unrecovered pause) with pages already
+    /// collected (#2338)
+    ///
+    /// The run is still FAILED — this variant preserves the #2313 contract
+    /// (error exit, checkpoint kept for resume) while carrying the results
+    /// the engine had already gathered, so the caller can persist them
+    /// instead of discarding completed work. `message` is the rendered
+    /// original failure; `partial` is the same summary a successful run
+    /// would have returned, truncated to what completed before the end.
+    #[error("crawl ended early with partial results: {message}")]
+    PartialRun {
+        /// Rendered reason the run ended early.
+        message: String,
+        /// Results collected before the run ended.
+        partial: crate::domain::CrawlResult,
+    },
 }
 
 impl CrawlError {
@@ -291,6 +308,12 @@ impl CrawlError {
             // Matrix taxonomy: unspecified internal error = bug indicator
             // (InternalFatal family; cf. row 23).
             Self::Internal(_) => ErrorClass::InternalFatal,
+            // #2338: a run that ended early is a terminal failure of the run
+            // as a whole — it preserves the InternalFatal class the stall
+            // carried as `Internal` before the variant existed. The partial
+            // results do not soften the class: resuming is a separate
+            // mechanism (checkpoint), never a retry of this result.
+            Self::PartialRun { .. } => ErrorClass::InternalFatal,
             // Row 33 (P6-2 slice 2): an invalid run description is caller
             // error — permanent, surfaced as exit 78 through
             // `ScraperError::Config` (same contract family as row 31).
@@ -389,6 +412,22 @@ impl From<crate::domain::http_error::HttpError> for CrawlError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::CrawlResult;
+
+    #[test]
+    fn test_partial_run_classifies_internal_fatal_and_displays_reason() {
+        let error = CrawlError::PartialRun {
+            message: "crawl stalled: test".to_string(),
+            partial: CrawlResult::empty(),
+        };
+        assert!(matches!(
+            error.classify(),
+            crate::domain::error::ErrorClass::InternalFatal
+        ));
+        let rendered = error.to_string();
+        assert!(rendered.contains("partial results"));
+        assert!(rendered.contains("crawl stalled: test"));
+    }
 
     #[test]
     fn test_crawl_error_network_no_reqwest() {

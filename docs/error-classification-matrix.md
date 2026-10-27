@@ -97,6 +97,7 @@ SemaphoreInanition (#13) indicates a backpressure configuration bug.
 | 31 | CrawlSession: InvalidConfiguration / CheckpointUnwritable (P6-2) | PermanentFatal | **78 override** | No |
 | 32 | CrawlSession: Internal (P6-2) | InternalFatal | 3 | No |
 | 33 | CrawlError: InvalidSession (P6-2 slice 2) | PermanentFatal | **78 override** | No |
+| 34 | CrawlError: PartialRun (run ended early carrying partial results, #2338) | InternalFatal | 3 | No |
 
 Rows 21-22 classify by `io::ErrorKind`, mirroring the existing
 `DownloadError::classify()` behavior. Rows 29-30 document the existing
@@ -135,6 +136,20 @@ failure. Treatment:
 2. **Defensive fallback:** if it ever escapes through an unexpected path,
    `classify() -> InternalFatal` so it can never be retried or silently swallowed
    while the runtime is tearing down.
+
+### Special cell — `PartialRun`
+
+A run that ended early (stall, unrecovered pause) is still a FAILED run (#2313);
+carrying partial results (#2338) does not soften the class. Treatment:
+
+1. **Primary path:** the CLI intercepts the typed variant BEFORE conversion,
+   writes the partial results with the normal export path, and exits with the
+   failure code (69) after the report — the operator sees both the partial
+   output and the failure.
+2. **Conversion fallback:** `From<CrawlError>` maps the rendered message
+   through `ScraperError::Internal` — the exact error the same failure
+   produced before the variant existed. Programmatic consumers (batch, MCP)
+   should match the typed variant to reach the partial results.
 
 ## Typed overrides over class defaults
 
