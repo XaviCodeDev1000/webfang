@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP transport contract — what rmcp owns and what we own (issue #1294, P5-1 + P5-2).
 //!
 //! Root cause of both reported items: the Streamable HTTP transport answers

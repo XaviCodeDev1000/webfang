@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Schema-drift contract tests: what the MCP tools advertise versus what they
 //! do (#1612, SD-06 and the no-op fields SD-03/SD-04).
 //!

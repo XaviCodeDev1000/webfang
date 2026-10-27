@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1428: `--delay-ms` paces the batch path — server-side arrival proof.
 //!
 //! Contract: batch runs one engine per URL, and every engine used to mint a

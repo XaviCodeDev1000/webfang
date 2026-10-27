@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! F-13 deterministic crawl order (#1237, slice 3).
 //!
 //! Same input + same flags must yield the same output set in the same order,

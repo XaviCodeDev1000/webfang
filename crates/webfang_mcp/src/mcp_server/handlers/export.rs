@@ -28,11 +28,12 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
 use rmcp::tool_router;
 use rmcp::{model::CallToolResult, ErrorData as McpError};
-use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::instrument;
-use webfang_core::application::export_factory::{create_exporter, process_results};
+use webfang_core::application::export_factory::{
+    create_exporter, jsonl_index_report, process_results,
+};
 use webfang_core::domain::entities::ExportFormat;
 use webfang_core::domain::DocumentChunkUnvalidated;
 use webfang_core::domain::ScrapedContent;
@@ -131,72 +132,6 @@ fn jsonl_export_file(output_dir: &Path, filename: &str) -> PathBuf {
     output_dir.join(format!("{filename}.jsonl"))
 }
 
-/// Count the lines of a JSONL file that are not valid UTF-8.
-///
-/// #1812 decided the policy: a line that is not valid UTF-8 is SKIPPED, the
-/// export COMPLETES, and the damage is REPORTED — never a silent skip and
-/// never a failed export. The report is the structured ERROR the application
-/// emits (`stage = "jsonl_resume_index"`, `ErrorKind::InvalidData`), and it
-/// was the ONLY place the count existed: the CLI's console level is `warn` by
-/// default (the count needs `-v` or `--trace-file`) and an MCP client has no
-/// log at all. This helper is the count the MCP surface reports.
-///
-/// The line semantics are the ones the application reader uses: the file is
-/// read LINE BY LINE, the `\n`/`\r` terminators are stripped, an empty line
-/// is not a line, and a line that is not valid UTF-8 is the damage being
-/// counted.
-///
-/// The read is STREAMING (the file is never loaded whole) and BEST-EFFORT: a
-/// file that cannot be read yields 0, because the export itself succeeded and
-/// a failed count must never turn a successful export into an error.
-///
-/// It runs on the blocking pool in the shared export path (`export_results`);
-/// `export_file` calls it on the handler's own thread, which already performs
-/// the export's blocking I/O.
-fn count_non_utf8_lines(path: &Path) -> usize {
-    let file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return 0,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                path = %path.display(),
-                "could not read the export file to count the skipped non-UTF-8 lines"
-            );
-            return 0;
-        },
-    };
-    let mut reader = std::io::BufReader::new(file);
-    let mut line = Vec::new();
-    let mut skipped = 0usize;
-    loop {
-        line.clear();
-        match reader.read_until(b'\n', &mut line) {
-            Ok(0) => break,
-            Ok(_) => {},
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    path = %path.display(),
-                    "could not read the export file to count the skipped non-UTF-8 lines"
-                );
-                break;
-            },
-        }
-        // Strip the line terminator: the `\n` and the `\r` of a CRLF file.
-        while matches!(line.last(), Some(b'\n') | Some(b'\r')) {
-            line.pop();
-        }
-        if line.is_empty() {
-            continue;
-        }
-        if std::str::from_utf8(&line).is_err() {
-            skipped += 1;
-        }
-    }
-    skipped
-}
-
 /// Build the success result of an export tool.
 ///
 /// The count of the skipped non-UTF-8 lines travels in TWO additive places:
@@ -262,22 +197,21 @@ async fn export_results(
     let span = tracing::Span::current();
     let outcome = tokio::task::spawn_blocking(move || {
         let _span_guard = span.enter();
-        // The count of the lines the export phase is about to skip while it
-        // indexes the existing JSONL file (#1812). Taken BEFORE the export,
-        // because that is when the index is built.
-        let skipped_non_utf8 = count_non_utf8_lines(&jsonl_export_file(&work_dir, &name));
-        let exported = process_results(&results, work_dir, format, &name, None);
-        (skipped_non_utf8, exported)
+        // The skipped_non_utf8 count is the one the export itself computed
+        // while indexing the existing JSONL file (#1812) — the core transports
+        // it in its outcome, so the MCP never recomputes it (#2272).
+        process_results(&results, work_dir, format, &name, None)
     })
     .await;
     match outcome {
-        Ok((skipped_non_utf8, Ok(_))) => {
+        Ok(Ok(exported)) => {
+            let skipped_non_utf8 = exported.skipped_non_utf8;
             let path = resolve_export_path(&output_dir, &filename, format);
             write_provenance_sidecar(&path, format, count);
             tracing::info!(documents = count, skipped_non_utf8, path = %path.display(), "export completed");
             Ok(export_success_result(count, &path, skipped_non_utf8))
         },
-        Ok((_, Err(e))) => Ok(provenance::neutralized_error(&format!(
+        Ok(Err(e)) => Ok(provenance::neutralized_error(&format!(
             "error al exportar: {e}"
         ))),
         Err(join) => {
@@ -513,9 +447,12 @@ impl McpHandler {
 
         // The count of the lines the writer's index is about to skip while it
         // reads the existing JSONL file (#1812) — the same damage the export
-        // phase reports through its structured ERROR.
+        // phase reports through its structured ERROR. Read through the core's
+        // ONE index reader: the MCP transports the number, it does not
+        // recompute it (#2272).
         let skipped_non_utf8 =
-            count_non_utf8_lines(&jsonl_export_file(&output_dir, safe_filename.as_str()));
+            jsonl_index_report(&jsonl_export_file(&output_dir, safe_filename.as_str()))
+                .skipped_non_utf8;
 
         match exporter.export(validated) {
             Ok(()) => {
@@ -755,38 +692,6 @@ mod tests {
         assert!(
             text.contains("no hay resultados disponibles para exportar"),
             "honest Spanish no-results error expected, got: {text}"
-        );
-    }
-
-    /// #2238: the counter the MCP export result reports must use the SAME
-    /// line semantics as the application reader: the `\n`/`\r` terminators are
-    /// stripped, an empty line is not a line, and only a line that is not
-    /// valid UTF-8 is the damage being counted.
-    #[test]
-    fn count_non_utf8_lines_uses_the_application_line_semantics() {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let path = dir.path().join("out.jsonl");
-
-        // A valid line, an empty line, a CRLF line and one damaged line.
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"{\"a\":1}\n");
-        bytes.extend_from_slice(b"\n");
-        bytes.extend_from_slice(b"{\"b\":2}\r\n");
-        bytes.extend_from_slice(b"{\"c\":\"\xff\xfe\"}\n");
-        std::fs::write(&path, &bytes).expect("write the fixture");
-
-        assert_eq!(
-            count_non_utf8_lines(&path),
-            1,
-            "only the undecodable line is damage"
-        );
-
-        // A file that does not exist has no damaged line (a first run).
-        let missing = dir.path().join("absent.jsonl");
-        assert_eq!(
-            count_non_utf8_lines(&missing),
-            0,
-            "a missing export file reports zero skipped lines"
         );
     }
 }

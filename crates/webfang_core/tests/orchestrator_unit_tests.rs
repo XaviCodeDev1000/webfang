@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Orchestrator integration tests — public interface contracts.
 //!
 //! Tests sitemap integration via `SitemapParser` (public API).

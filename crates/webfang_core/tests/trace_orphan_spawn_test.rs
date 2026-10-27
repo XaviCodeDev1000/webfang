@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Acceptance test for issue #704 (Paso 1): every `tokio::spawn` /
 //! `JoinSet::spawn` hot-path site must attach the spawned future to the
 //! current span via `tracing::Instrument::in_current_span()`.

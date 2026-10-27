@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! E2E regression suite: sitemap-discovery SSRF entry guard (#1382, #1376).
 //!
 //! `--use-sitemap` against a loopback listener produced 18 real requests

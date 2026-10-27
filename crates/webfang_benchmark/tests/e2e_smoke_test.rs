@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! End-to-end smoke (AC-5.1) + ADR-B2/R2 tripwire.
 //!
 //! Runs the full Tier A pipeline in-process: corpus → runner → aggregator →

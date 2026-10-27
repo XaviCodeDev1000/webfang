@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! JSONL byline-artifact regression tests (#800 slice 1, non-AI path).
 //!
 //! Reproduces the quotes.toscrape.com audit (2026-08-17) against the FULL

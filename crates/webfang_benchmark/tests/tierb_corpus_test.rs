@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Tier B live-run corpus manifest v2: ordered site list with per-site page
 //! caps and credit projection. Pure data + pure functions — fully offline.
 //!

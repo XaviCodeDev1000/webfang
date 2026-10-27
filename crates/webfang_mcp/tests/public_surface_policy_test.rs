@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! The MCP public-surface policy, made checkable (issue #1614).
 //!
 //! `docs/src/mcp-public-surface-policy.md` is the decision; this file is the

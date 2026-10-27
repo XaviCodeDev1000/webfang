@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Engine-level regression test for issue #280.
 //!
 //! `Engine::with_js_strategy()` previously built its `WreqDownloader` with a

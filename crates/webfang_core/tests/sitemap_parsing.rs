@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Sitemap parsing integration tests using shared fixtures.
 
 mod common;

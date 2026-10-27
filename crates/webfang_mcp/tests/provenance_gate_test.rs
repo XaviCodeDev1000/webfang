@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Mechanical provenance gate (audit M1, PI-3 invariant; issue #1600).
 //!
 //! This is a STRUCTURAL gate in the same spirit as

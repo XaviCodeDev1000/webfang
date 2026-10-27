@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! FR-4 / AC-4.2 groundwork — harness-side cost model.
 //!
 //! Hand-computed expectations over a fixed config prove the formula

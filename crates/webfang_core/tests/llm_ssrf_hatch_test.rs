@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1615, DF-E9 — `WEBFANG_DISABLE_SSRF` must not disarm the LLM base-URL
 //! SSRF gate in a production build.
 //!

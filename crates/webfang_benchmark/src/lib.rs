@@ -1,4 +1,8 @@
 #![deny(missing_docs)]
+// Tooling leaf exempt from the workspace panic lints (#2354): this crate
+// compiles OUTSIDE cfg(test), so the `cfg_attr(test, ...)` carve-out used at
+// the other roots does not apply here.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 //! WebFang Stage 0 benchmark harness (`webfang_benchmark`).
 //!
 //! Decision instrument, not a shipped feature: measures WebFang across cost

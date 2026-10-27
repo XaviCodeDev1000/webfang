@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! CLI ↔ MCP JSONL export record parity — the acceptance evidence that
 //! closes P6-2/F-16 (#1290).
 //!

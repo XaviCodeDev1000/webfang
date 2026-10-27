@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for the adaptive selector repair engine.
 //!
 //! Tests the 2-tier cascade (lexical + semantic) with caching and backpressure.

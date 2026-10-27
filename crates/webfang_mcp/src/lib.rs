@@ -1,5 +1,7 @@
-#![cfg_attr(not(test), deny(clippy::unwrap_used))]
-#![cfg_attr(not(test), deny(clippy::expect_used))]
+// unwrap/expect are denied workspace-wide ([workspace.lints.clippy], #2354);
+// this attribute is the test-only carve-out, and unlike the old per-crate
+// `cfg_attr(not(test), deny)` copy it also covers this package's bins.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 // Raw process-env mutations must go through webfang_test_utils (#1126,
 // #1349). Ungated on purpose: cfg(test) mods in this crate are covered too.
 #![deny(clippy::disallowed_methods)]

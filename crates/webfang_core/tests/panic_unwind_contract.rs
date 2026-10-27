@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Unwind-contract regression tests (#1219).
 //!
 //! The `catch_unwind` guards in `CpuBridge::dispatch`,
