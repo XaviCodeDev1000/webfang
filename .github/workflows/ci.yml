@@ -686,6 +686,13 @@ jobs:
       # network, no cargo, mktemp fixtures only.
       - name: Breaking-marker guard semantics harness
         run: bash scripts/test_merge_when_green_breaking.sh
+      # Breaking-surface CI guard harness (#2328). The required check
+      # `breaking-surface` (pr-validation.yml) applies the same matrix as the
+      # local merge-when-green guard, reads the queue merge method via GraphQL,
+      # and pages commits past the 100-cap of `gh pr view --json commits`.
+      # Offline: fixtures + fake `gh`, no network, no cargo, mktemp only.
+      - name: Breaking-surface guard semantics harness
+        run: bash scripts/test_breaking_surface.sh
       # Merged-state semantics harness (#1970). `merge-when-green.sh` read only
       # `mergeStateStatus`, and GitHub answers UNKNOWN for a CLOSED PR forever
       # (the mergeability of a closed PR is never computed): the script used to
