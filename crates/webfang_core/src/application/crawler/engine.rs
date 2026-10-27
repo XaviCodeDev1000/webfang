@@ -1091,11 +1091,9 @@ impl Engine {
 
         // Collect results via mpsc channel — now all Senders are dropped,
         // so the receiver worker will drain and terminate.
-        let collected_urls = std::mem::take(&mut self.collector).collect().await;
-        let total_pages = collected_urls.len();
-        let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
-
-        let breakdown = self.collect_error_breakdown();
+        let summary = self.collect_result_summary().await;
+        let total_pages = summary.total_pages;
+        let errors = summary.errors;
 
         // Structured crawl summary (issue #356 Fase 4, error breakdown #374)
         self.log_crawl_summary(total_pages, errors, start);
@@ -1117,12 +1115,23 @@ impl Engine {
             "crawl session closed"
         );
 
-        Ok(CrawlResult::new(
-            collected_urls,
-            total_pages,
-            errors,
-            breakdown,
-        ))
+        Ok(summary)
+    }
+
+    /// Snapshot the collector and the error counters into a [`CrawlResult`].
+    ///
+    /// Shared by the success tail of [`Self::run`] and
+    /// [`Self::fail_run_with_partials`]: the summary a caller sees must be
+    /// identical on both paths (#2338) — one extraction, one place.
+    ///
+    /// Callers must have released the task context first, so every collector
+    /// sender is gone and the mpsc drain terminates.
+    async fn collect_result_summary(&mut self) -> CrawlResult {
+        let collected_urls = std::mem::take(&mut self.collector).collect().await;
+        let total_pages = collected_urls.len();
+        let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
+        let breakdown = self.collect_error_breakdown();
+        CrawlResult::new(collected_urls, total_pages, errors, breakdown)
     }
 
     /// Collect what the run completed and wrap `err` so the partial results
@@ -1138,18 +1147,15 @@ impl Engine {
     /// message — the benchmark aggregator keys on that message and a failed
     /// run must not look like a completed one.
     async fn fail_run_with_partials(&mut self, err: CrawlError) -> CrawlError {
-        let collected_urls = std::mem::take(&mut self.collector).collect().await;
-        let total_pages = collected_urls.len();
-        let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
-        let breakdown = self.collect_error_breakdown();
+        let partial = self.collect_result_summary().await;
         warn!(
-            collected = total_pages,
+            collected = partial.total_pages,
             reason = %err,
             "crawl ended early — partial results travel with the failure"
         );
         CrawlError::PartialRun {
             message: err.to_string(),
-            partial: CrawlResult::new(collected_urls, total_pages, errors, breakdown),
+            partial,
         }
     }
 
