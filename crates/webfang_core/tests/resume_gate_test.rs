@@ -304,7 +304,8 @@ fn process_results_commits_every_item_through_the_checkpoint_sequence() {
         "export",
         Some(&ctx),
     )
-    .expect("export succeeds");
+    .expect("export succeeds")
+    .processed_urls;
 
     assert_eq!(processed.len(), 2);
     assert_eq!(jsonl_lines(&dir), 2, "one flushed line per item");
@@ -345,7 +346,8 @@ fn second_resume_run_skips_committed_items_without_re_exporting() {
         "export",
         Some(&second),
     )
-    .unwrap();
+    .unwrap()
+    .processed_urls;
 
     assert!(processed.is_empty(), "nothing left to drive");
     assert_eq!(
@@ -502,7 +504,8 @@ fn item_failure_records_classified_error_and_crawl_continues() {
         "export",
         Some(&ctx),
     )
-    .expect("item-level failures must not abort the export");
+    .expect("item-level failures must not abort the export")
+    .processed_urls;
 
     assert_eq!(processed.len(), 1, "only the healthy item exports");
     let records = store.load().unwrap();
@@ -551,7 +554,8 @@ fn fresh_run_without_resume_refetches_but_preserves_prior_records() {
         "export",
         Some(&fresh),
     )
-    .unwrap();
+    .unwrap()
+    .processed_urls;
 
     assert_eq!(processed.len(), 1);
     let records = store.load().unwrap();
@@ -591,7 +595,8 @@ fn fresh_run_re_drives_committed_urls_because_skip_gates_only_on_resume() {
         "export",
         Some(&fresh),
     )
-    .unwrap();
+    .unwrap()
+    .processed_urls;
 
     assert_eq!(
         processed.len(),

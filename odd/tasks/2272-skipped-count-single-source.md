@@ -38,3 +38,4 @@ por su propia API y la capa MCP sólo transportarlo.
 
 - L1: "adelante pero ten cuidado en saturar los recursos del sistema cuando ejecutas comandos pesados" — implementar #2272 tras el análisis de la sesión.
 - L2: Receta de build (obs #2279/#2294): seed frío (`no-seed`), builds seriales, `$(rustup which cargo)`, `env -u RUSTC_WRAPPER`, `CARGO_BUILD_JOBS=1`, cap de memoria `systemd-run --user --scope -p MemoryMax=2G`; nextest sin CPUQuota y con el bin del toolchain prepuesto al PATH.
+- L3: Incidente de toolchain (nueva variante de #2294): SIN direnv, el `rustc` que cargo invoca por PATH resuelve por los shims de mise, que instalaron rustc 1.65.0 en medio del build (`-Z unstable-options`/check-cfg falla). Corrección: preponer al PATH `$(dirname "$(rustup which cargo)")` ANTES de systemd-run, no basta `$(rustup which cargo)` para el cargo externo. Target propio borrado y rebuild limpio (artefactos mezclados de dos rustc).

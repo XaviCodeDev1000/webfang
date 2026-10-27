@@ -33,7 +33,7 @@ use tracing::field::{Field, Visit};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 
 use webfang_core::application::export_factory::{
-    process_results, process_results_with_chunks, ResumeContext,
+    jsonl_index_report, process_results, process_results_with_chunks, ResumeContext,
 };
 use webfang_core::domain::entities::ExportFormat;
 use webfang_core::domain::page_state::PageStatus;
@@ -229,6 +229,55 @@ fn the_plain_path_counts_every_damaged_line_and_completes() {
     assert!(
         counts.iter().all(|count| *count == DAMAGED_LINES),
         "every reported count must equal the number of damaged lines: {counts:?}"
+    );
+}
+
+// =========================================================================
+// 1b. The counts travel through the PUBLIC outcome/report (#2272)
+// =========================================================================
+
+/// #2272: `process_results` returns the count its own index computed, so
+/// callers transport the number instead of recomputing the line semantics.
+#[test]
+fn the_export_outcome_reports_the_skipped_lines() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let (_path, _seeded) = write_damaged_export(dir.path());
+
+    let outcome = process_results(
+        &[scraped("https://new.test/b", "B", "body of the new record")],
+        dir.path().to_path_buf(),
+        ExportFormat::Jsonl,
+        "export",
+        None,
+    )
+    .expect("the export must COMPLETE even with damaged lines");
+
+    let damaged_lines = usize::try_from(DAMAGED_LINES).expect("the count fits in usize");
+    assert_eq!(
+        outcome.skipped_non_utf8, damaged_lines,
+        "the outcome's count is the one the export's index computed"
+    );
+    assert_eq!(outcome.processed_urls.len(), 1);
+}
+
+/// #2272: the public report of the ONE reader — the surface the MCP layer
+/// transports for the `export_file` path, which does not open a session.
+#[test]
+fn the_public_jsonl_index_report_counts_the_damaged_lines() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let (path, _seeded) = write_damaged_export(dir.path());
+
+    let damaged_lines = usize::try_from(DAMAGED_LINES).expect("the count fits in usize");
+    assert_eq!(
+        jsonl_index_report(&path).skipped_non_utf8,
+        damaged_lines,
+        "the report reads the same bytes with the same line semantics"
+    );
+    // A file that does not exist has no damaged line (a first run).
+    assert_eq!(
+        jsonl_index_report(&dir.path().join("absent.jsonl")).skipped_non_utf8,
+        0,
+        "a missing export file reports zero skipped lines"
     );
 }
 
