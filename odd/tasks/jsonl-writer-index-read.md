@@ -43,3 +43,5 @@ Variante **(a)**: eliminar la lectura del writer. Evidencia:
   `21ea545a`. Merge de main sin conflictos antes de seguir.
 - L3: Golden set de intra-crate-lint regenerado en commit propio sobre el árbol combinado
   (solo shifts esperados).
+- L4: Verificación local GREEN (check/clippy workspace/fmt/doc, 128 unit + 34 integration
+  nextest, linter, `ci_fast_gate.sh` PASS=33 FAIL=0). PR **#2411** abierta (Closes #2393).
