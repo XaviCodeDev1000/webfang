@@ -144,6 +144,19 @@ impl<'a> CommitSession<'a> {
             .is_some_and(|t| t.is_cancelled())
     }
 
+    /// Consume the session into its export outcome (#2272): the URLs that
+    /// were driven plus the count of lines the index skipped. The count
+    /// travels BOTH in the structured summary log (the surface the operator
+    /// reads) and in the outcome (the surface callers transport).
+    fn finish(self, processed_urls: Vec<String>, summary: String) -> ExportOutcome {
+        let skipped_non_utf8 = self.skipped_non_utf8;
+        info!(total = processed_urls.len(), skipped_non_utf8, "{summary}");
+        ExportOutcome {
+            processed_urls,
+            skipped_non_utf8,
+        }
+    }
+
     /// Claim one `(url, content_hash)` append for this run. Returns `false`
     /// when the pair was already appended — the caller must skip the export
     /// append so the file stays idempotent on that key (#1215). Same URL with
@@ -561,13 +574,13 @@ fn fresh_discovered(
 /// were read, how many carried no checksum, and how many were skipped
 /// because they were not valid UTF-8 (#1812).
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct JsonlIndexReport {
+pub struct JsonlIndexReport {
     /// Non-empty lines read from the file.
-    pub(crate) lines: usize,
-    /// Lines that parsed as a JSON object but carried no [`CHECKSUM_FIELD`].
-    pub(crate) without_checksum: usize,
+    pub lines: usize,
+    /// Lines that parsed as a JSON object but carried no checksum field.
+    pub without_checksum: usize,
     /// Lines that were not valid UTF-8 and were skipped.
-    pub(crate) skipped_non_utf8: usize,
+    pub skipped_non_utf8: usize,
 }
 
 /// The [`CHECKSUM_FIELD`] index of an existing JSONL output file, plus the
@@ -738,6 +751,36 @@ fn build_content_hash_index(path: &std::path::Path) -> (HashSet<String>, JsonlIn
         "indexed output file for resume dedup"
     );
     (index.hashes, index.report)
+}
+
+/// Report of the ONE reader of an existing JSONL output file: how many
+/// non-empty lines it has, how many carry no checksum field, and how many
+/// were skipped for not being valid UTF-8.
+///
+/// This is the public surface for callers outside a commit session — the MCP
+/// layer transports the count instead of recomputing it with its own line
+/// semantics (#2272).
+///
+/// # Tolerant by policy (#1812)
+///
+/// An unreadable file proves nothing, but it must not abort: the caller gets
+/// the empty report and the I/O error is logged. Only a genuinely damaged
+/// count can be lost, and the export summary never lies about lines it did
+/// read.
+pub fn jsonl_index_report(path: &std::path::Path) -> JsonlIndexReport {
+    match read_jsonl_checksum_index(path) {
+        Ok(index) => index.report,
+        Err(e) => {
+            log_io_error_with_kind(
+                &e,
+                &path.display().to_string(),
+                "jsonl_resume_index",
+                None,
+                "could not read the output file to report the JSONL index; continuing with an empty report",
+            );
+            JsonlIndexReport::default()
+        },
+    }
 }
 
 /// Map an export-stage failure onto the SC6 taxonomy: item-data problems are
@@ -934,7 +977,7 @@ pub fn process_results(
     format: ExportFormat,
     filename: &str,
     ctx: Option<&ResumeContext<'_>>,
-) -> Result<Vec<String>, ExporterError> {
+) -> Result<ExportOutcome, ExporterError> {
     info!("Processing {} results for export", results.len());
 
     // Fail-fast on uncreatable output_dir (ENOTDIR through a regular file,
@@ -984,13 +1027,26 @@ pub fn process_results(
     }
     session.final_persist();
 
-    info!(
-        total = processed_urls.len(),
-        skipped_non_utf8 = session.skipped_non_utf8,
-        "✅ Export completado: {} documentos procesados",
-        processed_urls.len()
-    );
-    Ok(processed_urls)
+    let total = processed_urls.len();
+    Ok(session.finish(
+        processed_urls,
+        format!("✅ Export completado: {total} documentos procesados"),
+    ))
+}
+
+/// Result of a batch export ([`process_results`]): the URLs that were driven
+/// through the export plus the count of pre-existing JSONL lines the index
+/// skipped because they were not valid UTF-8.
+///
+/// The count comes from the ONE reader of the export file — the same number
+/// the export summary logs — so callers transport it instead of recomputing
+/// it (#2272).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportOutcome {
+    /// URLs whose items completed the drive-and-commit sequence.
+    pub processed_urls: Vec<String>,
+    /// Lines of the pre-existing output file skipped while indexing (#1812).
+    pub skipped_non_utf8: usize,
 }
 
 /// Get domain from URL
@@ -1161,7 +1217,7 @@ pub fn process_results_with_chunks(
     format: ExportFormat,
     filename: &str,
     ctx: Option<&ResumeContext<'_>>,
-) -> Result<Vec<String>, ExporterError> {
+) -> Result<ExportOutcome, ExporterError> {
     use sha2::{Digest, Sha256};
 
     info!("Processing {} cleaned chunks for export", chunks.len());
@@ -1228,13 +1284,11 @@ pub fn process_results_with_chunks(
     );
     session.final_persist();
 
-    info!(
-        total = processed_urls.len(),
-        skipped_non_utf8 = session.skipped_non_utf8,
-        "✅ AI-cleaned export completed: {} chunks processed",
-        processed_urls.len()
-    );
-    Ok(processed_urls)
+    let total = processed_urls.len();
+    Ok(session.finish(
+        processed_urls,
+        format!("✅ AI-cleaned export completed: {total} chunks processed"),
+    ))
 }
 
 #[cfg(test)]
@@ -1258,6 +1312,14 @@ mod tests {
             correlation_id: None,
             quality_hint: None,
         }
+    }
+
+    /// Export through the public port (fresh run, no resume) and return the
+    /// URLs it drove: the arrange shared by the outcome-shape tests.
+    fn export_urls(results: &[ScrapedContent], dir: &TempDir, format: ExportFormat) -> Vec<String> {
+        process_results(results, dir.path().to_path_buf(), format, "export", None)
+            .expect("the export succeeds")
+            .processed_urls
     }
 
     // =========================================================================
@@ -1317,14 +1379,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let results: Vec<ScrapedContent> = vec![];
 
-        let processed = process_results(
-            &results,
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&results, &temp_dir, ExportFormat::Jsonl);
 
         assert!(processed.is_empty());
     }
@@ -1372,14 +1427,7 @@ mod tests {
             "Content of page one",
         );
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 1);
         assert_eq!(processed[0], "https://example.com/page1");
@@ -1396,14 +1444,7 @@ mod tests {
             make_scraped_content("https://c.com/", "C", "Content C"),
         ];
 
-        let processed = process_results(
-            &contents,
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&contents, &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 3);
         // URLs get normalized through ValidUrl — check that all 3 are present
@@ -1419,14 +1460,7 @@ mod tests {
         let first = make_scraped_content("https://dup.test/a", "Dup", "same body text here");
         let second = make_scraped_content("https://dup.test/a", "Dup", "same body text here");
 
-        let processed = process_results(
-            &[first, second],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&[first, second], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(
             processed.len(),
@@ -1449,14 +1483,7 @@ mod tests {
         let first = make_scraped_content("https://dup.test/a", "Dup", "first body text here");
         let second = make_scraped_content("https://dup.test/a", "Dup", "second body text here");
 
-        let processed = process_results(
-            &[first, second],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&[first, second], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 2);
         let body = std::fs::read_to_string(temp_dir.path().join("export.jsonl")).unwrap();
@@ -1475,14 +1502,7 @@ mod tests {
         let first = make_scraped_content("https://mirror.test/a", "A", "shared body text here");
         let second = make_scraped_content("https://mirror.test/b", "B", "shared body text here");
 
-        let processed = process_results(
-            &[first, second],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&[first, second], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 2);
         let body = std::fs::read_to_string(temp_dir.path().join("export.jsonl")).unwrap();
@@ -1498,14 +1518,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let content = make_scraped_content("https://example.com", "Test", "Body");
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Vector,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Vector);
 
         assert_eq!(processed.len(), 1);
         assert!(temp_dir.path().join("export.json").exists());
@@ -1620,14 +1633,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let content = make_scraped_content("https://example.com", "Test", "Body");
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Auto,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Auto);
 
         assert_eq!(processed.len(), 1);
         // Default fallback creates .jsonl file
@@ -1641,14 +1647,7 @@ mod tests {
         std::fs::write(temp_dir.path().join("export.jsonl"), "").unwrap();
 
         let content = make_scraped_content("https://example.com", "Test", "Body");
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Auto,
-            "export",
-            None,
-        )
-        .unwrap();
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Auto);
 
         assert_eq!(processed.len(), 1);
         // Should have appended to the existing .jsonl file
@@ -1665,14 +1664,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let content = make_scraped_content("https://example.com/page", "Page", "Body");
 
-        let processed = process_results(
-            &[content],
-            temp_dir.path().to_path_buf(),
-            ExportFormat::Jsonl,
-            "export",
-            None, // legacy StateStore no longer drives export; RecordStore does (resume_gate_test)
-        )
-        .unwrap();
+        let processed = export_urls(&[content], &temp_dir, ExportFormat::Jsonl);
 
         assert_eq!(processed.len(), 1);
     }
@@ -1865,7 +1857,8 @@ mod tests {
             "export",
             Some(&ctx),
         )
-        .unwrap();
+        .unwrap()
+        .processed_urls;
         assert_eq!(processed.len(), 1, "the failed record must be re-driven");
 
         let records = store.load().unwrap();
@@ -2126,7 +2119,8 @@ mod tests {
                 "export",
                 Some(&resume_ctx),
             )
-            .unwrap();
+            .unwrap()
+            .processed_urls;
             assert_eq!(processed.len(), 2);
 
             let lines = jsonl_lines(dir.path(), "export");
@@ -2165,7 +2159,8 @@ mod tests {
                 "export",
                 Some(&ctx),
             )
-            .unwrap();
+            .unwrap()
+            .processed_urls;
 
             assert_eq!(processed.len(), 2);
             assert_eq!(

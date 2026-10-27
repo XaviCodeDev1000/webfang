@@ -172,6 +172,36 @@ async fn export_file_reports_the_skipped_non_utf8_lines() {
     );
 }
 
+/// #2272 (S3): the number the tool carries IS the core's number. The count
+/// the one application reader reports over the same pre-existing file must
+/// equal the one the result transports — the two figures cannot separate.
+#[tokio::test]
+async fn the_structured_count_equals_the_core_index_report() {
+    let out = RelTempDir::new("wf-out-equal");
+    let file = out.path().join(format!("{EXPORT_NAME}.jsonl"));
+    std::fs::write(&file, DAMAGED_EXPORT).expect("seed the damaged export file");
+
+    // The core's number for the pre-existing file, read BEFORE the export —
+    // the same snapshot the export's index is built from (#1812).
+    let core_count = u64::try_from(
+        webfang_core::application::export_factory::jsonl_index_report(&file).skipped_non_utf8,
+    )
+    .expect("the count fits in u64");
+    assert_eq!(core_count, 1, "the fixture is damaged in exactly one line");
+
+    let result = successful_tool_result(
+        "export_jsonl",
+        json!({ "output_dir": out.path().to_string_lossy(), "filename": EXPORT_NAME }),
+    )
+    .await;
+
+    assert_eq!(
+        skipped_count(&result),
+        Some(core_count),
+        "structuredContent must transport the core's count: {result}"
+    );
+}
+
 /// #2238 (S3): adding a field to a RESULT does not add a tool. The registry
 /// the client sees is still the 36-tool one that `stdio_handshake.rs` pins
 /// over the wire — this assertion is the in-process view of that same pin.
