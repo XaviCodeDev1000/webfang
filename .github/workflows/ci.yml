@@ -1102,7 +1102,7 @@ jobs:
           WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
       - name: Upload nextest JUnit report
-        # #2331: a test that passes on retry prints only a compact "TRY 2 PASS"
+        # #2387: a test that passes on retry prints only a compact "TRY 2 PASS"
         # line — the profile's output policy never shows attempt-1 output, so a
         # FLKY-FL is unexplainable from the log alone. The JUnit report
         # ([profile.ci.junit] in .config/nextest.toml) records every retry
@@ -1111,7 +1111,10 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-          name: nextest-junit-windows
+          # This job runs on ubuntu-latest; the flake evidence of #2387 lives on
+          # the platform lanes (test-crossplatform), which carry their own
+          # per-OS upload step below. The name must not claim a platform.
+          name: nextest-junit-tests-core
           path: target/nextest/ci/junit.xml
           if-no-files-found: warn
           retention-days: 14
@@ -1170,6 +1173,16 @@ jobs:
           cargo build -p webfang_cli --bin webfang --features adaptive-selectors,mcp,persistence,console,dev-tracing
       # Retry policy lives in .config/nextest.toml [profile.ci] (#2305).
       - run: cargo nextest run --all-features --profile ci
+      - name: Upload nextest JUnit report
+        # #2387: same diagnosability contract as test-core — the all-features
+        # lane's flaky conversions must carry their own attempt-1 output too.
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-all-features
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   # ============================================================================
   # TEST CROSSPLATFORM (ADVISORY SIGNAL IN PR) — XP-C-01 (#1608)
@@ -1283,6 +1296,20 @@ jobs:
         env:
           WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
+      - name: Upload nextest JUnit report
+        # #2387: this is the lane where the batch_test flake family actually
+        # reproduces (windows-latest and macos-latest: FLKY 2/3 with no
+        # attempt-1 output, and the 22.4s LEAK in the nightly). The JUnit
+        # records every retry attempt with its own output, so a red run here
+        # finally carries the evidence S1 of #2387 exists to produce. Per-OS
+        # artifact name: the matrix runs two jobs.
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-${{ matrix.os }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
       # #1834: the Windows console-control path was only ever COMPILED by this
       # lane, never EXERCISED — nobody drove a real CTRL_CLOSE_EVENT through
       # the handler, so the whole console path was unproven on the platform
@@ -2118,6 +2145,20 @@ jobs:
         run: |
           cargo nextest run --all-features --profile flake-nightly \
             -E 'not test(non2xx_browser_page_is_honest_error_exit_69)'
+      - name: Upload nextest JUnit report
+        # #2387: the nightly is where the spawn-latency LEAKs were measured
+        # (22.4s on batch_empty_file_exits_64 with retries=0). `failure()`
+        # cannot be used here: this job sets continue-on-error at the JOB
+        # level, which concludes the job success and makes step-level
+        # failure() unreliable — always() guarantees the artifact lands on a
+        # red run, and the file is ~KB on a green one.
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-flake-nightly
+          path: target/nextest/flake-nightly/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
       - name: Report flake-lane result
         if: always()
         run: |

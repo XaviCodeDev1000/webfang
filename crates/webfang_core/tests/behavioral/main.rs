@@ -21,7 +21,8 @@ mod common;
 // join the re-export for the same reason: a test that spawns the binary must be
 // able to bound the spawn.
 pub(crate) use crate::common::{
-    assert_spawn_within, cmd, redact_nondeterministic, BehavioralTest, SPAWN_LATENCY_BUDGET,
+    assert_spawn_within, cmd, redact_nondeterministic, std_cmd, BehavioralTest,
+    SPAWN_LATENCY_BUDGET,
 };
 
 use insta::assert_snapshot;
