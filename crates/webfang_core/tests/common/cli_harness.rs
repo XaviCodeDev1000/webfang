@@ -261,9 +261,12 @@ where
                 // #2387: kill the overrunning child so the worker's wait
                 // returns and the thread finishes — the abandoned thread of
                 // #1697 is exactly what nextest reported as LEAK. The join is
-                // bounded: the kill unblocks the wait, so by the time it
-                // returns the worker has reaped the child and exited. A join
-                // error means the worker panicked after the timeout, and its
+                // bounded by the kill UNBLOCKING the poll; it assumes the
+                // killed child is the last holder of its piped stdout/stderr
+                // (a grandchild inheriting the pipes would hold the reader
+                // threads open — neither current budget caller spawns
+                // subprocesses; #2387 review, resilience R4-1). A join error
+                // means the worker panicked after the timeout, and its
                 // verdict was already lost to the budget — the overrun itself
                 // is what the caller asked to know.
                 let pid = child.pid();
@@ -271,9 +274,9 @@ where
                     killed_pid = pid;
                     let _ = handle.join();
                 }
-                // No registered child → nothing to kill and nothing to unblock;
-                // the attempt is abandoned, the semantics the closure-only unit
-                // tests pin.
+                // No registered child, or one that already self-exited →
+                // nothing to unblock; the attempt is abandoned, the semantics
+                // the closure-only unit tests pin.
             },
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 return SpawnOutcome::Disconnected(attempt_no)
@@ -325,12 +328,21 @@ impl BudgetChild {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = cmd
+        let child = cmd
             .spawn()
             .map_err(|e| format!("could not spawn the binary: {e}"))?;
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+        // Register FIRST, then take the pipes through the slot: the budget
+        // owner may fire between spawn and registration, and everything after
+        // the registration is inside one lock. The residual window — spawn to
+        // register — is a few statements against a seconds-long budget.
         *self.lock_slot() = Some(child);
+        let (stdout, stderr) = {
+            let mut guard = self.lock_slot();
+            let registered = guard
+                .as_mut()
+                .expect("child was just registered into the slot");
+            (registered.stdout.take(), registered.stderr.take())
+        };
 
         // The pipes are drained on their own threads so a chatty child can
         // never fill the OS pipe buffer and block a process that would
@@ -352,11 +364,21 @@ impl BudgetChild {
 
         let status = loop {
             let next = match self.lock_slot().as_mut() {
-                // The slot is emptied only by the cleanup below; an empty slot
-                // means the child vanished — report instead of spinning.
-                Some(child) => child
-                    .try_wait()
-                    .map_err(|e| format!("could not poll the binary: {e}"))?,
+                // INVARIANT: the slot is Some for the whole poll — the worker
+                // registers before polling and empties it only in the cleanup
+                // below. The arm is a fail-loud guard, not a reachable state.
+                Some(child) => match child.try_wait() {
+                    Ok(next) => next,
+                    // A poll error must not leave the child registered with
+                    // its pipe readers blocked — that is the leaked-process
+                    // class this machinery exists to remove (#2387 review,
+                    // resilience R4-2). Kill, unregister, report.
+                    Err(e) => {
+                        let _ = child.kill();
+                        self.lock_slot().take();
+                        return Err(format!("could not poll the binary: {e}"));
+                    },
+                },
                 None => return Err("the binary vanished from the budget slot".to_owned()),
             };
             if let Some(status) = next {
@@ -378,16 +400,15 @@ impl BudgetChild {
         })
     }
 
-    /// Kill the child if one is registered. `false` also covers the
+    /// Kill the child if one is registered, reporting whether the kill was
+    /// actually DELIVERED — `Child::kill` errs on an already-exited child, so
+    /// `false` also covers a child that self-exited at the budget boundary
+    /// (the Overran panic then stays silent about the pid instead of claiming
+    /// a kill that never happened; #2387 review). `false` also covers the
     /// "attempt spawned nothing" case, which keeps the abandon semantics.
     fn kill(&self) -> bool {
         match self.lock_slot().as_mut() {
-            // `Err` only when the child already exited; the poll reports the
-            // real exit status either way.
-            Some(child) => {
-                let _ = child.kill();
-                true
-            },
+            Some(child) => child.kill().is_ok(),
             None => false,
         }
     }
