@@ -189,6 +189,10 @@ impl CpuExecutorPort for CpuBridge {
         };
         let inner = CpuBridge::dispatch_resource(self, payload);
         let (tx, rx) = oneshot::channel();
+        // Supervised: the handle is intentionally not stored — the oneshot
+        // receiver is the supervision surface: task death (panic or abort)
+        // closes `tx` and the receiver observes it as a channel error.
+        #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
             let mapped = match inner.await {
                 Ok(Ok(processed)) => Ok(processed.chunks),

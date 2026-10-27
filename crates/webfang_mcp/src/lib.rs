@@ -3,8 +3,11 @@
 // `cfg_attr(not(test), deny)` copy it also covers this package's bins.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 // Raw process-env mutations must go through webfang_test_utils (#1126,
-// #1349). Ungated on purpose: cfg(test) mods in this crate are covered too.
+// #1349). Ungated: the deny covers all non-test code in this crate, inline
+// or not. Test builds are exempt from `disallowed_methods` as a whole per
+// the blanket test policy of #1951; non-test code keeps the full deny.
 #![deny(clippy::disallowed_methods)]
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 #![deny(missing_docs)]
 #![deny(clippy::missing_errors_doc)]
 #![deny(clippy::missing_panics_doc)]

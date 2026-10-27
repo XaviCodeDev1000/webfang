@@ -460,6 +460,9 @@ impl Downloader for ChromiumoxideDownloader {
             // `HandlerGuard` aborts the pump on every non-`join` exit
             // (error `?` or async cancellation); dropping the `JoinHandle`
             // alone would only detach it (#1129).
+            // Supervised: `HandlerGuard` aborts the pump on every non-`join`
+            // exit (#1129); a detached pump is exactly what we forbid.
+            #[allow(clippy::disallowed_methods)]
             let handler_job = tokio::spawn(async move { while handler.next().await.is_some() {} });
             let guard = HandlerGuard(Some(handler_job));
 
