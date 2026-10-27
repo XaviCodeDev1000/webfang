@@ -2,10 +2,6 @@
 // this attribute is the test-only carve-out, preserving the semantics the old
 // per-crate `cfg_attr(not(test), deny)` copies had.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
-#![cfg_attr(not(test), deny(clippy::disallowed_types))]
-// Raw process-env mutations must go through webfang_test_utils (#1126,
-// #1349). Ungated on purpose: cfg(test) mods in this crate are covered too.
-#![deny(clippy::disallowed_methods)]
 // Explicit per docs-truthfulness audit (S5): these rustdoc lints are
 // allow-by-default, so CI's `-D warnings` never reaches them. Declare intent.
 #![allow(rustdoc::missing_crate_level_docs)]
@@ -38,6 +34,17 @@
 #![warn(clippy::style)]
 #![warn(clippy::complexity)]
 #![warn(clippy::perf)]
+// Specific lint levels go AFTER the group warns above, never before. A group
+// mention re-implies its members, and the LAST mention of a lint wins: with
+// the two denies below sitting before `warn(clippy::style)` (a group that
+// contains both `disallowed_types` and `disallowed_methods`) they were
+// silently reset to `warn` for the whole crate (#2392). The test-only
+// carve-out `#![cfg_attr(test, allow(clippy::disallowed_methods))]` (#2385)
+// must also land AFTER its deny, for the same rule.
+#![cfg_attr(not(test), deny(clippy::disallowed_types))]
+// Raw process-env mutations must go through webfang_test_utils (#1126,
+// #1349). Ungated on purpose: cfg(test) mods in this crate are covered too.
+#![deny(clippy::disallowed_methods)]
 #![deny(missing_docs)]
 #![warn(clippy::undocumented_unsafe_blocks)]
 #![allow(clippy::module_name_repetitions)]
