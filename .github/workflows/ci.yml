@@ -1169,9 +1169,12 @@ jobs:
       # The spec below is the one crates/webfang_core/tests/common/cli_harness.rs
       # derives from cfg!() — the configuration the CLI behavioral tests in
       # this lane expect. Keep it in sync with that derivation and with the
-      # nightly flake lane.
+      # nightly flake lane. `chromium` belongs to that set (#2264): the
+      # Chromium E2E only compiles under the feature, and before it joined the
+      # spec the test paid a fingerprint-divergent private build inside its own
+      # wall clock (TRY 1 FAIL 18.1 s -> TRY 2 PASS 2.8 s).
       - name: Pre-build test binary (helper spec)
-        run: cargo build -p webfang_cli --bin webfang --features adaptive-selectors,mcp,persistence,console,dev-tracing
+        run: cargo build -p webfang_cli --bin webfang --features adaptive-selectors,mcp,persistence,console,dev-tracing,chromium
       # Retry policy lives in .config/nextest.toml [profile.ci] (#2305).
       - run: cargo nextest run --all-features --profile ci
         env:
@@ -2107,11 +2110,13 @@ jobs:
   # ci-health observer only tracks gate-bearing conclusions) while the red job
   # stays visible in the run UI. Promotion of a fix is per-issue.
   #
-  # Known flakes QUARANTINED here (excluded with nextest -E until fixed):
-  #   * non2xx_browser_page_is_honest_error_exit_69 — Chromium E2E, cold-start
-  #     timeout (TRY 1 FAIL 18.1s -> TRY 2 PASS 2.8s, #2264). The assertion
-  #     itself is correct; the browser budget is the defect. PR lanes keep
-  #     running it under [profile.ci] retries.
+  # Known flakes QUARANTINED here (excluded with nextest -E until fixed): none.
+  #   * non2xx_browser_page_is_honest_error_exit_69 was quarantined for the
+  #     fingerprint-divergent private build inside its wall clock (TRY 1 FAIL
+  #     18.1s -> TRY 2 PASS 2.8s, #2264). Fixed by adding `chromium` to the
+  #     helper spec below (matching the cli_harness derivation), so the E2E
+  #     reuses the authoritative pre-built binary; it runs here again as the
+  #     fix's acceptance witness. The assertion itself was always correct.
   # Flipping the PR lanes to zero retries happens only after this lane has
   # been clean for a sustained period (#2286, deliberate follow-up).
   # ============================================================================
@@ -2139,13 +2144,11 @@ jobs:
       # charged to that test's own wall clock, straight into the 180s
       # slow-timeout.
       - name: Pre-build test binary (helper spec)
-        run: cargo build -p webfang_cli --bin webfang --features adaptive-selectors,mcp,persistence,console,dev-tracing
-      - name: Full suite with zero retries (known flakes excluded)
+        run: cargo build -p webfang_cli --bin webfang --features adaptive-selectors,mcp,persistence,console,dev-tracing,chromium
+      - name: Full suite with zero retries
         env:
           WEBFANG_TEST_PREBUILT_BIN: "1"
-        run: |
-          cargo nextest run --all-features --profile flake-nightly \
-            -E 'not test(non2xx_browser_page_is_honest_error_exit_69)'
+        run: cargo nextest run --all-features --profile flake-nightly
       - name: Upload nextest JUnit report
         # #2387: the nightly is where the spawn-latency LEAKs were measured
         # (22.4s on batch_empty_file_exits_64 with retries=0). `failure()`
