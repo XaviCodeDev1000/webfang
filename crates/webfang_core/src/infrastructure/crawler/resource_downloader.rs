@@ -390,6 +390,34 @@ mod tests {
         assert_eq!(semaphore.available_permits(), 50);
     }
 
+    /// The audit (#1828, PermitGuard panic safety) asked for `catch_unwind`
+    /// in the download path; unwinding already runs `Drop`, so the panic case
+    /// is the same release path as normal scope-drop. This test pins that
+    /// contract instead of adding production unwind plumbing to serve a test:
+    /// a scope that panics while holding units must restore the semaphore, or
+    /// one panicking download would starve the whole pool.
+    #[test]
+    fn a_panicking_scope_releases_its_permit() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(0));
+
+        let prev_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = PermitGuard::new(Arc::clone(&semaphore), 50);
+            panic!("download blew up while holding 50 units");
+        }));
+        std::panic::set_hook(prev_hook);
+
+        assert!(result.is_err(), "the scope must actually panic");
+        // Unwinding ran Drop: the pool admits acquisitions again.
+        assert_eq!(
+            semaphore.available_permits(),
+            50,
+            "the permit must be released by unwinding, not leaked"
+        );
+        assert!(semaphore.try_acquire_many(50).is_ok());
+    }
+
     #[test]
     fn test_download_config_default() {
         let config = ResourceDownloadConfig::default();
