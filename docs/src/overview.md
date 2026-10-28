@@ -21,8 +21,9 @@ alongside this book under `/api/<crate>/` (e.g. `/api/webfang_core/`).
 ## Installing
 
 WebFang ships **binaries only** — nothing is published to crates.io, so
-`cargo install webfang` cannot work. Every release publishes four archives
-(Linux x86_64/ARM64, macOS Apple Silicon, Windows x86_64) plus a
+`cargo install webfang` cannot work. Every release publishes three archives
+per platform — the CLI, the MCP HTTP server and the MCP stdio server — across
+Linux x86_64/ARM64, macOS Apple Silicon and Windows x86_64, plus a
 `SHA256SUMS.txt`. Intel macOS has no artifact by design. Start here:
 **[Installation & Uninstall](installation.md)**.
 

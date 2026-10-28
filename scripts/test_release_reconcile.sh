@@ -206,6 +206,22 @@ write_complete_assets() {
     webfang-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
     webfang-x86_64-pc-windows-msvc.zip:4567 \
     webfang-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+    webfang-mcp-x86_64-unknown-linux-gnu.tar.gz:1234 \
+    webfang-mcp-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-aarch64-unknown-linux-gnu.tar.gz:2345 \
+    webfang-mcp-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-aarch64-apple-darwin.tar.gz:3456 \
+    webfang-mcp-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+    webfang-mcp-x86_64-pc-windows-msvc.zip:4567 \
+    webfang-mcp-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+    webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz:1234 \
+    webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz:2345 \
+    webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-stdio-aarch64-apple-darwin.tar.gz:3456 \
+    webfang-mcp-stdio-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+    webfang-mcp-stdio-x86_64-pc-windows-msvc.zip:4567 \
+    webfang-mcp-stdio-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
     SHA256SUMS.txt:89 \
     SHA256SUMS.txt.sigstore.json:567 \
     webfang.spdx.json:1011 \
@@ -363,7 +379,7 @@ bytag_view="$(PATH="$BIN:$PATH" FAKE_STATE="$STATE" \
 check "fixture: by-tag embedded assets empty (incident 394502300)" "" "$bytag_view"
 byid_view="$(PATH="$BIN:$PATH" FAKE_STATE="$STATE" \
   gh api repos/owner/repo/releases/fixture-v9.9.9/assets --jq '.[].name')"
-check "fixture: by-id assets complete (7 assets + 7 bundles, sizes > 0)" "14" "$(jq -r 'length' <<<"$byid_view")"
+check "fixture: by-id assets complete (15 assets + 15 bundles, sizes > 0)" "30" "$(jq -r 'length' <<<"$byid_view")"
 check "fixture: every by-id asset has size > 0" "0" "$(jq '[.[]|select(.size<=0)]|length' <<<"$byid_view")"
 if run_fixture ensure-release.sh v9.9.9 >/dev/null 2>&1; then rc=0; else rc=$?; fi
 check "by-tag empty + by-id complete -> exit 0" "0" "$rc"
@@ -469,7 +485,7 @@ esac
 WF_LIST="$(awk '/RELEASE_EXPECTED_ASSETS: \|/{f=1;next} f&&/^[A-Za-z.#-]/{exit} f&&/^[[:space:]]*$/{next} f&&/^    /{sub(/^    /,"");print}' "$REPO_ROOT/.github/workflows/release.yml" | grep . | sort)"
 SC_LIST="$(sed -n '/^EXPECTED_ASSETS=(/,/^)/p' "$REPO_ROOT/scripts/ensure-release.sh" | grep -E '^  [a-zA-Z0-9]' | tr -d ' "' | sort)"
 check "wiring: release.yml inventory == ensure-release.sh inventory" "" "$(diff <(printf '%s\n' "$WF_LIST") <(printf '%s\n' "$SC_LIST") | grep . || true)"
-check "wiring: inventory is not empty on either side" "7 7" "$(printf '%s\n' "$WF_LIST" | grep -c .) $(printf '%s\n' "$SC_LIST" | grep -c .)"
+check "wiring: inventory is not empty on either side" "15 15" "$(printf '%s\n' "$WF_LIST" | grep -c .) $(printf '%s\n' "$SC_LIST" | grep -c .)"
 
 echo "test_release_reconcile: PASS=$PASS FAIL=$FAIL"
 if (( FAIL > 0 )); then

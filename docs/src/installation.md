@@ -29,19 +29,33 @@ If step 4 fails, go straight to
 
 ## 1. Pick your asset
 
-Every release publishes exactly four archives plus one checksum file. The
-asset name carries the **full Rust target triple** — there is no friendly OS
-alias and **no version in the name** (the version is in the tag/URL, not the
-file). The archive contains a **bare binary**: no install script, no LICENSE,
-no README inside.
+Every release publishes **twelve archives — three per platform** — plus one
+checksum file. The asset name carries the **full Rust target triple** — there
+is no friendly OS alias and **no version in the name** (the version is in the
+tag/URL, not the file). Each archive contains a **bare binary**: no install
+script, no LICENSE, no README inside.
 
-| Platform | Asset (inside the release) | Format |
+| Platform | CLI asset (inside the release) | Format |
 | :--- | :--- | :--- |
 | Linux x86_64 | `webfang-x86_64-unknown-linux-gnu.tar.gz` | `.tar.gz` |
 | Linux ARM64 | `webfang-aarch64-unknown-linux-gnu.tar.gz` | `.tar.gz` |
 | macOS Apple Silicon | `webfang-aarch64-apple-darwin.tar.gz` | `.tar.gz` |
 | Windows x86_64 | `webfang-x86_64-pc-windows-msvc.zip` | `.zip` |
 | Any platform | `SHA256SUMS.txt` | checksum manifest |
+
+The other two archives per platform hold the MCP servers — same targets, same
+format as the CLI archive for that platform:
+
+| Platform | HTTP server | stdio server |
+| :--- | :--- | :--- |
+| Linux x86_64 | `webfang-mcp-x86_64-unknown-linux-gnu.tar.gz` | `webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM64 | `webfang-mcp-aarch64-unknown-linux-gnu.tar.gz` | `webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon | `webfang-mcp-aarch64-apple-darwin.tar.gz` | `webfang-mcp-stdio-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `webfang-mcp-x86_64-pc-windows-msvc.zip` | `webfang-mcp-stdio-x86_64-pc-windows-msvc.zip` |
+
+The CLI archive never contains an MCP binary: `webfang-mcp` and
+`webfang-mcp-stdio` each have their own archive, because every archive holds
+exactly one binary.
 
 **There is no Intel macOS artifact.** `x86_64-apple-darwin` is deliberately
 not built. The original reason was ONNX-local (no x64 macOS prebuilt for
@@ -180,7 +194,7 @@ Notes:
 #### Intel macOS (unsupported)
 
 **No artifact exists for Intel macOS, and that is deliberate** — it is a
-decision, not a release gap, so do not go looking for a fourth `.tar.gz`.
+decision, not a release gap, so do not go looking for an Intel macOS archive among the assets.
 
 Building from source works on the normal developer path (Rust 1.91 toolchain,
 cmake for BoringSSL — see [from source](#from-source-developers)). The old
@@ -244,6 +258,47 @@ Notes:
 > Redistributable 2015-2022 (x64)** from Microsoft and re-run. Verify your
 > checksum first either way, so the two causes stay distinguishable.
 
+### MCP servers (from the release artifact)
+
+Two of the three archives per platform hold an MCP server. Both expose the
+same **36 tools**; what differs is how a client reaches them.
+
+| Binary | Transport | Use it when |
+| :--- | :--- | :--- |
+| `webfang-mcp` | Streamable HTTP, `127.0.0.1:8080/mcp` by default | a local service that several clients share over HTTP |
+| `webfang-mcp-stdio` | stdin/stdout (JSON-RPC) | a desktop client — Claude Desktop, OpenCode, Cline — spawns the server as a subprocess |
+
+Installing them is the CLI's recipe unchanged: same `SHA256SUMS.txt`
+verification, same extraction, same `PATH`. Only the asset name changes.
+
+**stdio.** There is nothing to start by hand — the client owns the process.
+Point its `command` at the installed binary; an **absolute path** is safest,
+because a desktop client usually does not inherit your shell's `PATH`:
+
+```bash
+webfang-mcp-stdio
+```
+
+**HTTP.** Run it as a local service:
+
+```bash
+webfang-mcp --allow-anonymous                       # loopback only, no token
+webfang-mcp --auth-token "$WEBFANG_MCP_AUTH_TOKEN"  # clients send Authorization: Bearer <token>
+webfang-mcp --allow-anonymous --bind 127.0.0.1:9090  # move it off the default port
+```
+
+`webfang-mcp` **refuses to start without either `--allow-anonymous` or
+`--auth-token`.** An unset credential used to mean "anyone who can reach the
+socket", so the token-less default is a hard error, not a warning.
+`--allow-anonymous` is a loopback affordance only: a routable bind still
+requires `--auth-token`, and the transport is plain HTTP, so terminate TLS in
+front of it before exposing it beyond localhost.
+
+Both binaries accept `--export-roots <dir>` (repeatable or comma-separated).
+Absolute `output_dir` / `checkpoint_dir` paths in a tool call are rejected
+unless they fall under a declared root — relative paths always work, so you
+only need this when a client passes absolute ones.
+
 ---
 
 ## Platform requirements
@@ -275,11 +330,12 @@ is runtime-configured, not compiled in — [migration guide](ai-onnx-migration.m
 | `chromium` feature | `--js-strategy full` is rejected at preflight (it needs a Chromium downloader). The default `static` strategy and the 3-layer `hybrid` strategy are unaffected. |
 | `console` feature | `tokio-console` is not available. Tracing via `--trace-file` is. |
 | `adaptive-selectors` feature | Adaptive selector learning is off. |
-| MCP server | The `webfang` CLI exposes no MCP flag. The MCP server lives in the separate `webfang_mcp` crate (`webfang-mcp`, `webfang-mcp-stdio`), which the release build never compiles — it is reachable from source only. See the [MCP section](https://github.com/XaviCodeDev1000/webfang#-mcp-server) in the README. |
+| MCP server | The `webfang` CLI exposes no MCP flag (`webfang --mcp` is an error). The servers are separate binaries in their own archives — see [MCP servers](#mcp-servers-from-the-release-artifact). |
 
 The `mcp` feature in that build command is inert: it is empty in
-`webfang_core` and gates no shipped code — the feature that matters is the
-`webfang_mcp` *crate*, which is not in the release. The former `ai` feature
+`webfang_core` and gates no shipped code. The `webfang_mcp` *crate* is what
+matters, and its two binaries ship as their own archives rather than linked
+into `webfang`. The former `ai` feature
 no longer exists (ADR-0004 paso 6): remote-embedding semantic cleaning ships
 in the default build with no ONNX/ort/hf-hub dependency and no model cache.
 
@@ -312,7 +368,7 @@ that says nothing about the real cause.
 
 ## Uninstall
 
-WebFang never removes anything for you. The binary itself is one file; the
+WebFang never removes anything for you. Each binary is one file; the
 **cache and output trees it creates are entirely your responsibility**.
 
 ### 1. Remove the binary
@@ -323,6 +379,11 @@ WebFang never removes anything for you. The binary itself is one file; the
 | Linux, `~/.local/bin` | `rm ~/.local/bin/webfang` |
 | macOS, `/usr/local/bin` | `sudo rm /usr/local/bin/webfang` |
 | Windows, `%USERPROFILE%\bin` | `Remove-Item "$env:USERPROFILE\bin\webfang.exe"` |
+
+If you also installed the MCP servers, they are removed the same way: the same
+directory, the same commands, with `webfang` replaced by `webfang-mcp` and
+`webfang-mcp-stdio` (`.exe` on Windows). They share no state of their own —
+the caches below are the only other thing a run leaves behind.
 
 ### 2. Remove the data
 

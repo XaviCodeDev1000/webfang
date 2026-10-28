@@ -847,6 +847,11 @@ jobs:
         run: bash scripts/test_dead_tests.sh
       - name: Archive reproducibility semantics harness
         run: bash scripts/test_archive_reproducibility.sh
+      # Semantics harness for the release smoke test (webfang#2428). The gate it
+      # covers runs only at release time, so without this nothing proves it fails
+      # for the right reason: short count, renamed tool, silent server.
+      - name: MCP stdio smoke semantics harness
+        run: bash scripts/test_smoke_mcp_stdio.sh
       # Semantics harness for the duplication ratchet (issue #1757, #516).
       # The guard decides the ratchet, and until this harness nothing in CI
       # asserted what it decides: it translated "I did not measure" into "0
