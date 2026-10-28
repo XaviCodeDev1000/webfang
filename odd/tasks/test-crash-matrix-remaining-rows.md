@@ -98,3 +98,55 @@ L2 — Estado verificado contra `main@0bbc8458` (análisis previo, en Engram
 partición de red y `PermitGuard` panic safety. Los paths citados por el issue (2026-10-04)
 derivaron: `bounded_sink.rs` está hoy en `application/crawler/`, y `resource_downloader.rs`
 en `infrastructure/crawler/`.
+
+L3 — **T1 (writer death): GREEN al primer corrimiento.** El contrato ya existe:
+`BoundedFileSink::finish` hace join del `JoinHandle` del writer y mapea el `JoinError` a
+`BoundedSinkError::Writer` — la rama estaba marcada `LCOV_EXCL defensive`, así que el test
+la cubre por primera vez y los marcadores se quitaron (el comentario ahora nombra el test
+que la pina). `abort()` sobre el handle vivo es determinista: el writer está idle en
+`rx.recv()` con el canal abierto y sin cancel, así que el join produce el JoinError
+cancelado. Se pinan además: capture tardío descartado sin acreditar, y segundo finish ⇒
+`AlreadyFinished`. Commit `89c787bd`.
+
+L4 — **T3 (PermitGuard): GREEN al primer corrimiento.** `std::panic::catch_unwind` +
+`AssertUnwindSafe` con hook de pánico silenciado y restituido; el semáforo arranca en 0
+disponibles y el guard sostiene 50 unidades: tras el unwind, `Drop` restaura las 50 y
+`try_acquire_many(50)` tiene que prosperar. Sin `catch_unwind` en producción. Commit
+`0cb29383`.
+
+L5 — **T2 (partición): dos rediseños, el segundo es el que quedó.** Primera versión:
+sitemap explícito estancado con `set_delay(600s)` + `--timeout-secs 1`. Pasó pero en
+**113s**: el fetch del sitemap corre por `SitemapParser`, cuyo cliente NO hereda
+`config.timeout_secs` (usa su default de 30s × reintentos) — el knob del operador solo
+llega a los probes de discovery (`build_discovery_client`), no al parser. Segunda versión
+(la commiteada): el peer estancado ES el seed del intento 1, con auto-descubrimiento
+(`--use-sitemap` sin `--sitemap-url`); los probes de discovery son wreq crudo sin wrapper
+de reintento y cada fallo de stage degrada al siguiente (`fetch_robots_sitemap` traga el
+error de red), así que la partición se observa honestamente como discovery que no encuentra
+nada: `SitemapNotFound`, run fallido, sin JSONL — en **7.2s**. Determinismo: un deadline de
+cliente de 1s no puede perder contra un hold de servidor de 600s. Intento 2 contra el
+server sano + resume sobre el mismo state dir + cuatro invariantes. Commit `3bfe3c01`.
+
+L6 — **El hallazgo incidental de L5: el parser de sitemap ignora `--timeout-secs`.** Es un
+hueco real de configuración (el operador achica el timeout y el fetch del sitemap no se
+entera), pero tocarlo es un cambio de PRODUCCIÓN — fuera del alcance aprobado (test-only).
+Queda anotado como candidato a issue; no se arregla aquí.
+
+L7 — **Defecto propio, commiteado y reparado: el edit que insertó la fila de partición
+consumió el bloque final de la fila `clean-ai` existente** (`wait_exit`,
+`assert_killed_by_sigkill` y el `resume_run_with` completo): la fila quedó SIGNAL → store,
+sin resume, y fallaba en 0.4s con `left: 0` — exactamente el síntoma que primero atribuí a
+un fallo ambiental preexistente (CI estaba verde en el mismo base). La atribución fue
+incorrecta: `git show origin/main:...` contra el commit mostró la fila mangueada DENTRO de
+`3bfe3c01`. La lección operativa: un edit cuyo `old_string` termina en la cola de una
+función existente puede consumirla; releer el diff completo (`git diff origin/main`) antes
+de commitear, no después. Reparación verbatim desde origin/main, commit `4eab5c83`, y las
+dos filas drain en verde (1.03s) tras reparar.
+
+L8 — **Verificación del lote** (targets tocados): módulos lib `bounded_sink` +
+`resource_downloader` 26/26; matriz de crash completa + `--retries 0` (resultado en el
+reporte final); gate completo `fmt --check` + `clippy --all-targets --all-features -D
+warnings -W cognitive_complexity -W too_many_lines` + `RUSTDOCFLAGS=-D warnings cargo doc`
++ `cargo check --workspace --all-features` (resultado en el reporte final). Ahorro de
+recursos: `cargo build --tests -p webfang_core` de warm-up una sola vez, corridas
+incrementales después; seed frío (`no-seed`), un solo target dir propio del worktree.
