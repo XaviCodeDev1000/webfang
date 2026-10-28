@@ -473,7 +473,7 @@
       "path": "crates/webfang_core/tests/common/cli_harness.rs",
       "crate": "webfang_core",
       "area": "cli",
-      "test_count": 6,
+      "test_count": 7,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
@@ -533,10 +533,19 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/compile_fail/batch_manager/zero_concurrency.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 0,
+      "ignored_count": 0,
+      "snapshot_usage": false,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/compile_fail/page_state.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 1,
+      "test_count": 2,
       "ignored_count": 0,
       "snapshot_usage": false,
       "tier": "integration_mock"
@@ -581,7 +590,7 @@
       "path": "crates/webfang_core/tests/config_default_contract_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 9,
+      "test_count": 10,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"
@@ -599,10 +608,10 @@
       "path": "crates/webfang_core/tests/crash_matrix_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 12,
+      "test_count": 13,
       "ignored_count": 0,
       "snapshot_usage": true,
-      "tier": "integration_mock"
+      "tier": "ai_model_semantic"
     },
     {
       "path": "crates/webfang_core/tests/crawl_error_exit_codes.rs",
@@ -704,6 +713,15 @@
       "tier": "ai_model_semantic"
     },
     {
+      "path": "crates/webfang_core/tests/export_already_committed_library_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 2,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/export_data_integrity_test.rs",
       "crate": "webfang_core",
       "area": "core",
@@ -716,7 +734,7 @@
       "path": "crates/webfang_core/tests/export_non_utf8_policy_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 5,
+      "test_count": 7,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
@@ -1328,7 +1346,7 @@
       "path": "crates/webfang_mcp/tests/mcp_export_skipped_count_test.rs",
       "crate": "webfang_mcp",
       "area": "mcp",
-      "test_count": 4,
+      "test_count": 5,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "mcp_contract"
@@ -1458,6 +1476,15 @@
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
+    },
+    {
+      "path": "crates/webfang_mcp/tests/panic_lints_contract_test.rs",
+      "crate": "webfang_mcp",
+      "area": "mcp",
+      "test_count": 3,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "mcp_contract"
     },
     {
       "path": "crates/webfang_mcp/tests/params_rejection_test.rs",
