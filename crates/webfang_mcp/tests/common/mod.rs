@@ -1,3 +1,7 @@
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+// This module is included by every MCP integration test binary.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 //! Shared MCP test harness — centralized server bootstrap + JSON-RPC helpers.
 //!
 //! Each integration test binary is standalone, so every test file that needs a

@@ -26,4 +26,5 @@ disallowed-types = [
 disallowed-methods = [
     { path = "std::env::set_var", reason = "raw env mutations bypass ENV_LOCK serialization — use webfang_test_utils (EnvGuard / env_set / env_remove / env_lock); see #1126, #1349" },
     { path = "std::env::remove_var", reason = "raw env mutations bypass ENV_LOCK serialization — use webfang_test_utils (EnvGuard / env_set / env_remove / env_lock); see #1126, #1349" },
+    { path = "tokio::spawn", reason = "unsupervised tasks die silently (discarded JoinError/JoinHandle) — every production call needs #[allow] naming its supervision mechanism (JoinSet drain, handle joined at shutdown); tests are exempt via cfg_attr/file-top allows; spawn_blocking stays sanctioned (CpuBridge). Both tokio::spawn and tokio::task::spawn match (same DefId); see #1951, #1941, #1943" },
 ]

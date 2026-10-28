@@ -253,24 +253,39 @@ test-ci-quick:
 wiki_output := home_dir() / "Documentos" / "obsidian" / "webfang" / "wiki.md"
 
 # Descarga la documentación combinada (narrativa + API rustdoc) generada en CI.
-# Todo el cómputo pesado (mdBook build/test/linkcheck + cargo doc + pandoc)
-# corre en GitHub Actions; localmente solo PULL del último run de main.
-# Requiere: gh CLI autenticado (gh auth login).
+# Todo el cómputo pesado (mdBook build/test/linkcheck + cargo doc +
+# rustdoc-markdown) corre en GitHub Actions; localmente solo PULL del último
+# run exitoso de main. Requiere: gh CLI autenticado (gh auth login).
 docs:
     @echo "📚 Descargando documentación generada en CI..."
-    @gh auth status >/dev/null 2>&1 || { echo "⚠️  Necesitás autenticarte: gh auth login"; exit 1; }
     @mkdir -p "$(dirname '{{wiki_output}}')"
-    # Siempre regenera: gh run download no sobrescribe un pull previo y falla
-    # con "file exists" si target/docs-llm ya existe.
-    @rm -rf target/docs-llm
-    @gh run download -R XaviCode1000/webfang -n webfang-docs-llm -D target/docs-llm
+    @# Sin guardia previa de `gh auth status`: consulta el keyring y da falsos
+    @# negativos transitorios aunque gh funcione; el fallo real ya lo nombra.
+    @RUN_ID=$(gh run list -R XaviCode1000/webfang --workflow docs.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId') \
+    || { echo "⚠️  gh run list falló — ¿token de gh? Probá: gh auth login"; exit 1; }; \
+    test -n "$RUN_ID" || { echo "⚠️  Sin runs exitosos de docs.yml en main"; exit 1; }; \
+    echo "   Run de main: $RUN_ID"; \
+    rm -rf target/docs-llm && \
+    gh run download -R XaviCode1000/webfang "$RUN_ID" -n webfang-docs-llm -D target/docs-llm
     @# El artifact puede tener el layout de directorio (post-#734) — acepto ambos.
     @FULL=target/docs-llm/webfang-docs-full.md; \
     test -f "$FULL" || FULL=target/docs-llm/webfang-docs-llm/webfang-docs-full.md; \
     test -f "$FULL" || FULL=target/docs-llm/webfang-docs-llm.md; \
     test -f "$FULL" || { echo "⚠️  No encontré webfang-docs-full.md en el artifacto"; exit 1; }; \
     cp "$FULL" "{{wiki_output}}"
-    @echo "✅ Documentación actualizada (desde CI, último run de main):"
+    @# Aviso de frescura: el header "Source commit:" del monolito (audit B30)
+    @# vs el HEAD local. Docs más nuevas que HEAD son el caso normal (main
+    @# adelantado localmente); solo se advierte cuando quedan atrás o divergen.
+    @ART_SHA=$(sed -n 's/^Source commit: //p' "{{wiki_output}}" | head -n1); \
+    HEAD_SHA=$(git rev-parse HEAD 2>/dev/null); \
+    if [ -n "$ART_SHA" ] && [ -n "$HEAD_SHA" ] && [ "$ART_SHA" != "$HEAD_SHA" ]; then \
+      if git merge-base --is-ancestor "$ART_SHA" "$HEAD_SHA" >/dev/null 2>&1; then \
+        echo "⚠️  La doc es del commit $(printf '%s\n' "$ART_SHA" | cut -c1-7), anterior a tu HEAD ($(printf '%s\n' "$HEAD_SHA" | cut -c1-7)): el CI puede no haber terminado para tus últimos commits."; \
+      elif ! git merge-base --is-ancestor "$HEAD_SHA" "$ART_SHA" >/dev/null 2>&1; then \
+        echo "⚠️  La doc ($(printf '%s\n' "$ART_SHA" | cut -c1-7)) y tu HEAD ($(printf '%s\n' "$HEAD_SHA" | cut -c1-7)) divergieron."; \
+      fi; \
+    fi
+    @echo "✅ Documentación actualizada (desde CI, último run exitoso de main):"
     @ls -lh "{{wiki_output}}" | awk '{print "  " $NF " (" $5 ")"}'
 
 # Preview local del mdBook (liviano, sin remoto): construye y sirve solo la

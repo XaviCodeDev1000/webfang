@@ -727,6 +727,9 @@ impl Engine {
     /// The loop never ends on its own, so its [`tokio::task::JoinHandle`] is kept on the
     /// engine and aborted in [`Self::shutdown`] — same lifecycle as
     /// `signal_handle` (#1941).
+    // Supervised: the JoinHandle is stored in `self.autoscale_handle` and
+    // aborted in `Self::shutdown` (#1941 lifecycle).
+    #[allow(clippy::disallowed_methods)]
     pub fn with_autoscale(mut self) -> Self {
         let level = Arc::new(SharedConcurrencyLevel::new());
         let level_clone = Arc::clone(&level);
@@ -880,6 +883,9 @@ impl Engine {
     /// cancel. The decision is the shared one ([`TerminationOutcome`]), the
     /// same one the CLI shutdown guard makes, and both sites say the same
     /// thing ([`TERMINATION_REGISTRATION_REJECTED`]) — #1835.
+    // Supervised: the returned JoinHandle is stored by the caller and
+    // aborted at shutdown — same lifecycle as `signal_handle` (#1941).
+    #[allow(clippy::disallowed_methods)]
     fn spawn_signal_handler(
         shutdown: ShutdownSignal,
         cancel: CancellationToken,

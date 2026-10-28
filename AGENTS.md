@@ -714,12 +714,14 @@ leave the `!` only in a surface the chosen strategy drops.
 
 **The same invariant is a required CI check (`breaking-surface`, #2328).** The job in
 `pr-validation.yml` runs on `pull_request` (PR head) and `merge_group` (queue entry), reads the
-merge method from the queue configuration (GraphQL) and pages every commit via REST — a marker on
-commit 101 counts. The decision matrix lives in `scripts/breaking_surface_lib.sh`, consumed by
-both the check and the local guard, so they cannot drift. Fail closed: unreadable metadata, zero
-commits, or an unreadable queue method is a red check. The local guard stays as defense in depth:
-CI closes the TOCTOU window and covers merges that bypass the script; the script keeps its
-refusal at the merge boundary.
+merge method from the tracked mirror `.github/merge-queue.json` (GITHUB_TOKEN cannot read the live
+queue configuration: GraphQL answers FORBIDDEN for integrations, #2412) and pages every commit via
+REST — a marker on commit 101 counts. The decision matrix lives in `scripts/breaking_surface_lib.sh`,
+consumed by both the check and the local guard, so they cannot drift. Fail closed: unreadable
+metadata, zero commits, or a method absent/unknown in the mirror is a red check. The local guard
+stays as defense in depth: CI closes the TOCTOU window and covers merges that bypass the script;
+the script keeps its refusal at the merge boundary and cross-checks the mirror against the LIVE
+configuration, refusing on divergence (reconcile the mirror then).
 
 **Hooks and verification:** the `pre-commit` and `pre-push` consult the review gate; on a fresh
 clone you must enable the wiring with `git config core.hooksPath scripts/githooks`. To wait

@@ -19,9 +19,12 @@
 # Fail-closed contract (never green by default):
 #   - the PR number cannot be resolved (the workflow step exits before us) or
 #     the PR metadata cannot be read / is incomplete / carries zero commits;
-#   - the base branch's merge-queue method cannot be read, is absent, or is an
-#     unknown method — the method decides WHICH surface is kept, so guessing
-#     one would judge the wrong surface;
+#   - the base branch's merge-queue method is not available in the tracked
+#     mirror (.github/merge-queue.json) or is an unknown method — the method
+#     decides WHICH surface is kept, so guessing one would judge the wrong
+#     surface. The mirror exists because GITHUB_TOKEN cannot read the live
+#     queue configuration (GraphQL answers FORBIDDEN on
+#     Repository.mergeQueue.configuration for integrations, #2412);
 #   - the commit list cannot be read (REST, paginated).
 #
 # Commit pagination: `gh pr view --json commits` truncates the GraphQL
@@ -52,9 +55,10 @@ Usage:
 
 The breaking-change invariant as a required CI check (#2328): the marker must
 live on the surface the merge strategy keeps. The strategy comes from the
-base branch's merge-queue configuration (GraphQL), never from a flag. Fail
-closed on unreadable/incomplete metadata, zero commits, or an unreadable
-queue method. See the header comment for the full contract.
+tracked mirror of the queue configuration (.github/merge-queue.json), never
+from a flag. Fail closed on unreadable/incomplete metadata, zero commits, or
+a method absent/unknown in the mirror. See the header comment for the full
+contract.
 EOF
 }
 
@@ -200,25 +204,20 @@ meta="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json title,headRefOid,baseRefNa
 base="$(printf '%s' "$meta" | jq -r '.baseRefName // ""')"
 [[ -n "$base" ]] || die "El PR #${PR_NUMBER} no reporta baseRefName."
 
-# --- queue merge method (GraphQL) -------------------------------------------
-# The queue owns the merge method; it decides WHICH surface the invariant
-# judges. Reading it instead of assuming SQUASH is the same rule
-# merge-when-green.sh applies in --queue mode (#2327). A REBASE queue keeps the
-# branch commits like MERGE does, so both map to the "merge" matrix.
-repo_owner="${REPO%%/*}"
-repo_name="${REPO#*/}"
-# shellcheck disable=SC2016  # $owner/$repo/$branch are GraphQL variables
-queue_query='query($owner:String!,$repo:String!,$branch:String!){repository(owner:$owner,name:$repo){mergeQueue(branch:$branch){configuration{mergeMethod}}}}'
-queue_method="$(gh api graphql \
-  -f query="$queue_query" \
-  -F owner="$repo_owner" -F repo="$repo_name" -F branch="$base" \
-  --jq '.data.repository.mergeQueue.configuration.mergeMethod // empty' 2>/dev/null)" \
-  || die "No se pudo leer la configuracion de la merge queue de '${base}' (gh/API)."
+# --- queue merge method (tracked mirror) -------------------------------------
+# GITHUB_TOKEN cannot read the live queue configuration: GraphQL answers
+# FORBIDDEN ("Resource not accessible by integration") on
+# Repository.mergeQueue.configuration for integrations (#2412). The method is
+# therefore mirrored in .github/merge-queue.json — tracked, auditable — and
+# scripts/merge-when-green.sh cross-checks the mirror against the LIVE
+# configuration at the merge boundary; a divergence refuses the merge there.
+mirror_file="${BREAKING_SURFACE_QUEUE_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.github/merge-queue.json}"
+queue_method="$(breaking_queue_method_from_mirror "$mirror_file" "$base")"
 case "$queue_method" in
   SQUASH) strategy="squash" ;;
   MERGE|REBASE) strategy="merge" ;;
   *)
-    die "El metodo de merge de la cola de '${base}' no se pudo determinar (vacío o desconocido: '${queue_method:-}'). Sin metodo conocido no se puede juzgar la superficie (fail closed)."
+    die "El metodo de merge de la cola de '${base}' no esta disponible en el espejo '${mirror_file}' (archivo ilegible, entrada ausente para la base, o metodo desconocido: '${queue_method:-}'). Sin metodo conocido no se puede juzgar la superficie (fail closed)."
     ;;
 esac
 
