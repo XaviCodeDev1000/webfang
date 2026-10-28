@@ -564,6 +564,10 @@ mod tests {
         fn embedding_dim(&self) -> usize {
             3
         }
+
+        fn model_id(&self) -> &str {
+            "stub-embedding"
+        }
     }
 
     /// Stub chunker: splits on newlines, one chunk per line.

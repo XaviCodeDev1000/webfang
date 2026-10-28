@@ -719,6 +719,10 @@ mod wiring_tests {
         fn embedding_dim(&self) -> usize {
             self.inner.vec.len()
         }
+
+        fn model_id(&self) -> &str {
+            "counting-embedder"
+        }
     }
 
     /// Pins the SHAPE of the Tier 2 wiring: an inspector is built only from a

@@ -811,6 +811,12 @@ impl EmbeddingPort for RemoteEmbeddingAdapter {
         self.embedding_dim()
     }
 
+    /// The provider-declared model name — exactly what every embeddings
+    /// request carries, so it is the identity a consumer can re-derive.
+    fn model_id(&self) -> &str {
+        &self.model
+    }
+
     /// Returns the concrete adapter for downcasting.
     ///
     /// Required, not optional: the trait default **panics**, and the CLI's
