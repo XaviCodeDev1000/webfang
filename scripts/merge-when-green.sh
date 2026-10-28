@@ -143,6 +143,17 @@
 # this script saves the human loop of checking back every few minutes.
 set -euo pipefail
 
+# The breaking-marker matrix (regexes, subject classifier, commit counter and
+# verdict function) lives in ONE place shared with the required CI check
+# `breaking-surface` (scripts/check_breaking_surface.sh, #2328): two copies of
+# a subtle matrix drift, and a drift re-opens exactly the #2078 hole. This
+# script keeps the messaging and the exit codes; the DECISION is the library's.
+# The queue-method mirror reader (#2412) lives in the same library and is
+# needed EARLY: the queue-mode cross-check reads the tracked mirror as soon as
+# the live method is validated, before the breaking-guard section below.
+# shellcheck source=scripts/breaking_surface_lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/breaking_surface_lib.sh"
+
 pr_number=""
 dry_run=0
 # Watcher deadline in seconds: flag --timeout wins over env
@@ -405,6 +416,18 @@ if [[ $queue_mode -eq 1 ]]; then
       exit 1
       ;;
   esac
+  # Mirror cross-check (#2412): the CI check judges the surface from the
+  # tracked mirror (.github/merge-queue.json) because GITHUB_TOKEN cannot read
+  # this configuration (GraphQL FORBIDDEN for integrations). A mirror that
+  # drifted from the live method would misjudge in CI, so the merge boundary
+  # reads BOTH and refuses on divergence — the human reconciles the mirror.
+  mirror_file="${BREAKING_SURFACE_QUEUE_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.github/merge-queue.json}"
+  mirror_method="$(breaking_queue_method_from_mirror "$mirror_file" "$base_branch")"
+  if [[ "$mirror_method" != "$queue_method" ]]; then
+    echo "error: the merge-queue method diverged: live='${queue_method}' mirror='${mirror_method:-<absent>}' (${mirror_file})." >&2
+    echo "       The CI check judges the surface from the mirror; reconcile .github/merge-queue.json with the live ruleset before merging." >&2
+    exit 1
+  fi
   if [[ -n "$strategy_explicit" && "$strategy_explicit" != "$queue_strategy" ]]; then
     echo "error: --queue uses the repository's merge method (${queue_method}); do not pass --${strategy_explicit}." >&2
     exit 1
@@ -440,8 +463,8 @@ fi
 # `breaking-surface` (scripts/check_breaking_surface.sh, #2328): two copies of
 # a subtle matrix drift, and a drift re-opens exactly the #2078 hole. This
 # script keeps the messaging and the exit codes; the DECISION is the library's.
-# shellcheck source=scripts/breaking_surface_lib.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/breaking_surface_lib.sh"
+# (The library is sourced at the top of the script: the queue-mode mirror
+# cross-check needs it before this section.)
 
 read_breaking_meta() {
   local raw

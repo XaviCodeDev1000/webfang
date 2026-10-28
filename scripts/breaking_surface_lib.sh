@@ -140,3 +140,19 @@ breaking_verdict() {
   fi
   printf 'ok'; return 0
 }
+
+# breaking_queue_method_from_mirror <mirror-file> <base> -> method (or empty)
+#
+# Reads the tracked mirror of the queue configuration (.github/merge-queue.json)
+# and prints the method recorded for <base>. Prints NOTHING when the file is
+# unreadable, invalid, or has no entry for <base>: the caller decides
+# fail-closed. Two consumers share this reader (the CI check and the local
+# guard) so they cannot drift; more than one entry for the same base prints
+# every match, which no caller's method case accepts — a duplicated base is
+# therefore a fail-closed outcome too, not a silent pick.
+breaking_queue_method_from_mirror() {
+  local mirror_file="$1" base="$2"
+  jq -r --arg base "$base" '
+    (.queues // [])[]? | select((.base // "") == $base) | (.method // "")
+  ' "$mirror_file" 2>/dev/null || true
+}

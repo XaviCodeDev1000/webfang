@@ -16,9 +16,14 @@
 #   4. The 100-commit cap: `gh pr view --json commits` truncates the GraphQL
 #      connection, so a marker on commit 101 used to be invisible. The REST
 #      read is paginated, and a marker on commit 101 must change the verdict.
-#   5. The queue merge method is READ (GraphQL), never assumed: SQUASH judges
-#      the squash surface, MERGE/REBASE the merge surface, and an unreadable
-#      or absent method is red (fail closed).
+#   5. The queue merge method comes from the tracked mirror
+#      (.github/merge-queue.json): GITHUB_TOKEN cannot read the live queue
+#      configuration (GraphQL answers FORBIDDEN for integrations, #2412).
+#      SQUASH judges the squash surface, MERGE/REBASE the merge surface, and
+#      an absent base, an unreadable mirror or an unknown method is red
+#      (fail closed). The local guard cross-checks the mirror against the
+#      LIVE configuration at the merge boundary (pinned in
+#      test_merge_when_green_queue.sh).
 #   6. The workflow wiring: the job exists, resolves the queue's synthetic ref
 #      the same way `validate` does, and the script is referenced.
 #
@@ -34,10 +39,10 @@ STATE="$WORK/state"
 mkdir -p "$BIN" "$STATE"
 
 # ─── Fake gh ────────────────────────────────────────────────────────────────
-# Serves exactly the three reads the check performs: `gh pr view --json
-# title,headRefOid,baseRefName`, the GraphQL mergeQueue configuration, and the
-# REST commit list. It applies --jq like the real gh, so the script's
-# projections are exercised verbatim.
+# Serves exactly the two reads the check performs: `gh pr view --json
+# title,headRefOid,baseRefName` and the REST commit list. The queue method
+# comes from the mirror fixture, not from gh (#2412). It applies --jq like the
+# real gh, so the script's projections are exercised verbatim.
 cat > "$BIN/gh" <<'FAKE'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -76,20 +81,6 @@ case "${1:-}" in
     shift
     [[ "${1:-}" == "--paginate" ]] && shift
     case "${1:-}" in
-      graphql)
-        [[ -f "$state/graphql-fail" ]] && { echo "gh: boom" >&2; exit 1; }
-        jqexpr=""
-        while [[ $# -gt 0 ]]; do
-          case "$1" in --jq) shift; jqexpr="${1:-}" ;; esac
-          shift
-        done
-        if [[ -f "$state/queue-absent" ]]; then
-          emit '{"data":{"repository":{"mergeQueue":null}}}' "$jqexpr"
-        else
-          method="$(cat "$state/queue-method")"
-          emit "{\"data\":{\"repository\":{\"mergeQueue\":{\"configuration\":{\"mergeMethod\":\"$method\"}}}}}" "$jqexpr"
-        fi
-        ;;
       repos/*/pulls/*/commits*)
         [[ -f "$state/rest-fail" ]] && { echo "gh: boom" >&2; exit 1; }
         [[ -f "$state/rest-empty" ]] && { printf '' >&1; exit 0; }
@@ -158,6 +149,7 @@ run_check() { # production mode against the fake gh
   RUN_RC=0
   RUN_OUT="$( cd "$REPO_ROOT" && \
     PATH="$BIN:$PATH" FAKE_STATE="$STATE" \
+    BREAKING_SURFACE_QUEUE_FILE="$STATE/queue-mirror.json" \
     PR_NUMBER=1 REPO=owner/repo GH_TOKEN=fake \
     bash scripts/check_breaking_surface.sh 2>&1 )" || RUN_RC=$?
 }
@@ -297,40 +289,55 @@ check_grep "the REST read is paginated" '[-]-paginate' \
 check_grep "the REST read requests full pages" 'per_page=100' \
   "$REPO_ROOT/scripts/check_breaking_surface.sh"
 
-# ─── 5. Production mode: the queue method is READ, never assumed ────────────
-printf 'SQUASH' > "$STATE/queue-method"
+# ─── 5. Production mode: the queue method comes from the tracked mirror ─────
+write_mirror() { # write_mirror <method> [<base>] — "" as method drops the main entry
+  if [[ -z "$1" ]]; then
+    printf '%s' '{"schema_version":1,"queues":[{"base":"release/9.9","method":"SQUASH"}]}' \
+      > "$STATE/queue-mirror.json"
+  else
+    jq -n --arg m "$1" --arg b "${2:-main}" \
+      '{schema_version: 1, queues: [{base: $b, method: $m}]}' > "$STATE/queue-mirror.json"
+  fi
+}
 write_pr_meta 'fix(cli)!: marcador solo en el titulo' '1111000000000000000000000000000000000000'
 write_rest "[$(rest_commit '07e81f8f0000' 'fix(cli): el aviso describe la retirada')]"
+write_mirror SQUASH
 run_check
-check "SQUASH queue + N=1 title-only -> red" "1" "$RUN_RC"
+check "SQUASH mirror + N=1 title-only -> red" "1" "$RUN_RC"
 check_contains "SQUASH verdict names the commit subject" "SUBJECT del commit" "$RUN_OUT"
 
 write_pr_meta 'chore(release): declarar la ruptura' '1111000000000000000000000000000000000000'
 write_rest "[$(rest_commit '437357e70000' 'chore(release)!: declarar la ruptura')]"
 run_check
-check "SQUASH queue + N=1 commit marker -> green" "0" "$RUN_RC"
+check "SQUASH mirror + N=1 commit marker -> green" "0" "$RUN_RC"
 
-printf 'MERGE' > "$STATE/queue-method"
+write_mirror MERGE
 run_check
-check "MERGE queue + N=1 commit marker -> green" "0" "$RUN_RC"
+check "MERGE mirror + N=1 commit marker -> green" "0" "$RUN_RC"
 
-printf 'REBASE' > "$STATE/queue-method"
+write_mirror REBASE
 write_pr_meta 'fix(cli)!: marcador solo en el titulo' '1111000000000000000000000000000000000000'
 write_rest "[$(rest_commit '07e81f8f0000' 'fix(cli): el aviso describe la retirada')]"
 run_check
-check "REBASE queue + N=1 title-only -> red (title is dropped too)" "1" "$RUN_RC"
+check "REBASE mirror + N=1 title-only -> red (title is dropped too)" "1" "$RUN_RC"
 check_contains "REBASE verdict says the merge discards the title" "DESCARTA" "$RUN_OUT"
 
-printf 'SQUASH' > "$STATE/queue-method"
-touch "$STATE/queue-absent"
+write_mirror SQUASH "release/9.9"
 run_check
-check "no merge queue on the base -> red (fail closed)" "1" "$RUN_RC"
-rm -f "$STATE/queue-absent"
+check "base absent from the mirror -> red (fail closed)" "1" "$RUN_RC"
+check_contains "absent base names the mirror file" "queue-mirror.json" "$RUN_OUT"
 
-touch "$STATE/graphql-fail"
+rm -f "$STATE/queue-mirror.json"
 run_check
-check "unreadable queue configuration -> red (fail closed)" "1" "$RUN_RC"
-rm -f "$STATE/graphql-fail"
+check "missing mirror -> red (fail closed)" "1" "$RUN_RC"
+
+printf 'not-json' > "$STATE/queue-mirror.json"
+run_check
+check "invalid mirror -> red (fail closed)" "1" "$RUN_RC"
+
+write_mirror FAST_FORWARD
+run_check
+check "unknown method in the mirror -> red (fail closed)" "1" "$RUN_RC"
 
 write_pr_meta 'chore(release): declarar la ruptura' '1111000000000000000000000000000000000000'
 write_rest "[$(rest_commit '437357e70000' 'chore(release)!: declarar la ruptura')]"
@@ -358,6 +365,15 @@ check_grep "the local guard sources the shared matrix" 'breaking_surface_lib.sh'
   "$REPO_ROOT/scripts/merge-when-green.sh"
 check_grep "the local guard decides through the verdict function" 'breaking_verdict' \
   "$REPO_ROOT/scripts/merge-when-green.sh"
+# The mirror reader is shared too: the check and the guard must consume the
+# same file through the same function (#2412), and the check must NOT call
+# GraphQL for the queue method (GITHUB_TOKEN is FORBIDDEN there).
+check_grep "the check reads the mirror through the shared reader" 'breaking_queue_method_from_mirror' \
+  "$REPO_ROOT/scripts/check_breaking_surface.sh"
+check_grep "the local guard reads the mirror through the shared reader" 'breaking_queue_method_from_mirror' \
+  "$REPO_ROOT/scripts/merge-when-green.sh"
+check_no_grep "the check does not read the queue via GraphQL" 'api graphql' \
+  "$REPO_ROOT/scripts/check_breaking_surface.sh"
 
 # ─── 7. The workflow wiring ─────────────────────────────────────────────────
 WF="$REPO_ROOT/.github/workflows/pr-validation.yml"
