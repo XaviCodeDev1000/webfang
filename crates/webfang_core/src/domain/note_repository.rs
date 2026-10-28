@@ -20,11 +20,17 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::domain::text_chunker::ByteSpan;
 use crate::domain::Sha256Hex;
 use crate::error::ScraperError;
 
 /// A boxed future for dyn-compatible async traits.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// One chunk of an [`NoteRepository::index_note_transactional`] batch: its
+/// text, the byte spans of the source it was cut from, and its optional
+/// embedding.
+pub type ChunkToPersist<'a> = (&'a str, &'a [ByteSpan], Option<&'a [f32]>);
 
 /// A stored note chunk with its embedding vector.
 ///
@@ -37,6 +43,10 @@ pub struct NoteChunkVector {
     pub content: String,
     /// Zero-based chunk index within the note.
     pub chunk_index: i64,
+    /// Byte spans of the source note this chunk was cut from, in order.
+    /// Empty for rows persisted before locators existed: the v1→v2 schema
+    /// migration keeps their `spans_json` column NULL.
+    pub spans: Vec<ByteSpan>,
     /// The embedding vector (384d for Granite models).
     pub embedding: Vec<f32>,
 }
@@ -108,10 +118,11 @@ pub trait NoteRepository: Send + Sync {
         mtime_secs: i64,
     ) -> BoxFuture<'a, Result<i64, ScraperError>>;
 
-    /// Save a chunk with its embedding for a previously saved note.
+    /// Save a chunk with its locators and embedding for a previously saved note.
     ///
     /// The `note_id` must reference an existing note (from [`save_note`](Self::save_note)).
-    /// Embeddings are serialized as little-endian `f32` BLOBs.
+    /// Embeddings are serialized as little-endian `f32` BLOBs; `spans` is
+    /// stored as JSON in `note_chunks.spans_json`.
     ///
     /// # Errors
     ///
@@ -122,6 +133,7 @@ pub trait NoteRepository: Send + Sync {
         note_id: i64,
         chunk_index: i64,
         content: &'a str,
+        spans: &'a [ByteSpan],
         embedding: Option<&'a [f32]>,
     ) -> BoxFuture<'a, Result<(), ScraperError>>;
 
@@ -135,9 +147,9 @@ pub trait NoteRepository: Send + Sync {
     /// batch fails after `save_note`, the whole operation rolls back instead
     /// of leaving an unsearchable "ghost" note (#577 follow-up: atomicity).
     ///
-    /// `chunks` is `[(text, embedding)]`. An empty `chunks` slice still
-    /// registers the note (so `sync_vault` won't re-index it) but writes no
-    /// chunk rows.
+    /// `chunks` is `[(text, spans, embedding)]`. An empty `chunks` slice
+    /// still registers the note (so `sync_vault` won't re-index it) but
+    /// writes no chunk rows.
     ///
     /// # Errors
     ///
@@ -148,7 +160,7 @@ pub trait NoteRepository: Send + Sync {
         path: &'a str,
         content_hash: &'a str,
         mtime_secs: i64,
-        chunks: &'a [(&'a str, Option<&'a [f32]>)],
+        chunks: &'a [ChunkToPersist<'a>],
     ) -> BoxFuture<'a, Result<i64, ScraperError>>;
 
     /// Load all chunk vectors for in-memory ranking.
@@ -219,6 +231,7 @@ mod tests {
             note_path: "vault/rust.md".to_owned(),
             content: "Rust is great".to_owned(),
             chunk_index: 0,
+            spans: Vec::new(),
             embedding: vec![0.1, 0.2, 0.3],
         };
         let debug = format!("{chunk:?}");

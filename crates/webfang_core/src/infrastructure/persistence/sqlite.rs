@@ -18,8 +18,11 @@ use std::pin::Pin;
 use deadpool_sqlite::{Config, Hook, HookError, Manager, Pool, Runtime};
 use rusqlite::Connection;
 
-use crate::domain::note_repository::{IndexedNoteMeta, NoteChunkVector, NoteRepository};
+use crate::domain::note_repository::{
+    ChunkToPersist, IndexedNoteMeta, NoteChunkVector, NoteRepository,
+};
 use crate::domain::repository::VectorRepository;
+use crate::domain::text_chunker::ByteSpan;
 use crate::domain::Sha256Hex;
 use crate::error::ScraperError;
 
@@ -72,6 +75,7 @@ CREATE TABLE IF NOT EXISTS note_chunks (\
     chunk_index INTEGER NOT NULL,\
     content TEXT NOT NULL,\
     embedding_vector BLOB,\
+    spans_json TEXT,\
     created_at TEXT\
 );\
 CREATE INDEX IF NOT EXISTS idx_note_chunks_note ON note_chunks(note_id);\
@@ -91,36 +95,46 @@ CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path);";
 /// on-disk 32-bit header slot: it travels with the file, needs no table, and no
 /// DDL can drop it.
 ///
-/// The gate is deliberately REFUSE, not migrate. There is no migration
-/// mechanism in this crate and inventing one is a design change, not a defect
-/// fix, so a database whose marker is not ours fails closed BEFORE any DDL
-/// runs — the file is never opened for writing by a build that does not
-/// understand it. The one tolerated case is `0`: a database written before the
-/// marker existed, or a fresh one. Its schema is by construction the one this
+/// The gate is REFUSE by default, with exactly one in-place migration: a
+/// database stamped `PREVIOUS_SCHEMA_VERSION` is upgraded to
+/// [`SCHEMA_VERSION`] before any DDL runs (see `migrate_to_current`). There
+/// was no migration mechanism before the locators column forced the first
+/// one; every future version bump must pair with its own migration step, and
+/// a database from any OTHER version fails closed BEFORE the DDL — the file
+/// is never opened for writing by a build that does not understand it. The
+/// one other tolerated case is `0`: a database written before the marker
+/// existed, or a fresh one. Its schema is by construction the one this
 /// module's DDL creates idempotently, so it is adopted rather than refused.
 ///
 /// Bump this only together with a migration, and only after that migration
 /// exists — a bump without one turns every existing database into a refusal.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
-/// Verify the on-disk schema marker, and stamp a fresh database.
+/// The schema version a database may carry when it still needs the
+/// v1→v2 migration (the `note_chunks.spans_json` locator column).
+const PREVIOUS_SCHEMA_VERSION: i64 = 1;
+
+/// Verify the on-disk schema marker, migrate the previous version, and stamp.
 ///
 /// `0` means unversioned — a brand-new file, or one written by a pre-marker
 /// build. Both carry the schema [`SCHEMA_DDL`] creates idempotently, so the
-/// marker is stamped and the caller proceeds. Any OTHER value is a database
-/// this build must not write to, and the call fails with a Spanish message
-/// naming both versions rather than corrupting rows it cannot interpret.
+/// marker is stamped and the caller proceeds (after the additive migration,
+/// which is a no-op on a truly fresh file). [`PREVIOUS_SCHEMA_VERSION`] is
+/// migrated in place first. Any OTHER value is a database this build must not
+/// write to, and the call fails with a Spanish message naming both versions
+/// rather than corrupting rows it cannot interpret.
 ///
 /// # Errors
 ///
-/// [`ScraperError::Persistence`] when the marker belongs to another schema
-/// version, or when the pragma cannot be read or written.
+/// [`ScraperError::Persistence`] when the marker belongs to a foreign schema
+/// version, when the migration fails, or when the pragma cannot be read or
+/// written.
 pub(crate) fn enforce_schema_version(conn: &Connection) -> Result<(), ScraperError> {
     let found: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(|e| ScraperError::persistence(format!("leer user_version: {e}")))?;
 
-    if found != 0 && found != SCHEMA_VERSION {
+    if found != 0 && found != PREVIOUS_SCHEMA_VERSION && found != SCHEMA_VERSION {
         return Err(ScraperError::persistence(format!(
             "base de datos con versión de esquema {found}, incompatible con la versión {SCHEMA_VERSION} \
              de webfang; actualizá webfang o usá una base de datos distinta \
@@ -132,11 +146,50 @@ pub(crate) fn enforce_schema_version(conn: &Connection) -> Result<(), ScraperErr
         return Ok(());
     }
 
+    if found == PREVIOUS_SCHEMA_VERSION {
+        migrate_to_current(conn)?;
+    }
+
     // `PRAGMA user_version` takes a literal, not a bound parameter. The value
     // is an `i64` const, so interpolation here cannot inject SQL — formatting
     // an integer is total.
     conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))
         .map_err(|e| ScraperError::persistence(format!("escribir user_version: {e}")))
+}
+
+/// Migrate a [`PREVIOUS_SCHEMA_VERSION`] database to [`SCHEMA_VERSION`] in
+/// place: add the `note_chunks.spans_json` locator column (additive `ALTER`,
+/// NULL for pre-existing rows — they keep ranking, they just carry no
+/// locators). Idempotent: the column is added only when the table exists and
+/// lacks it, so a partially migrated or already-migrated database is a no-op.
+///
+/// # Errors
+///
+/// [`ScraperError::Persistence`] when the DDL fails.
+fn migrate_to_current(conn: &Connection) -> Result<(), ScraperError> {
+    let table_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'note_chunks'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| ScraperError::persistence(format!("migración: leer sqlite_master: {e}")))?;
+    if table_exists == 0 {
+        return Ok(()); // fresh database: the DDL creates the column
+    }
+
+    let has_column: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('note_chunks') WHERE name = 'spans_json'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| ScraperError::persistence(format!("migración: leer columnas: {e}")))?;
+    if has_column == 0 {
+        conn.execute_batch("ALTER TABLE note_chunks ADD COLUMN spans_json TEXT;")
+            .map_err(|e| ScraperError::persistence(format!("migración v1→v2: {e}")))?;
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -532,20 +585,23 @@ impl NoteRepository for SqliteVectorRepository {
         note_id: i64,
         chunk_index: i64,
         content: &'a str,
+        spans: &'a [ByteSpan],
         embedding: Option<&'a [f32]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
         Box::pin(async move {
             let blob: Option<Vec<u8>> = embedding.map(f32_slice_to_bytes);
             let content = content.to_string();
+            let spans_json = serde_json::to_string(spans)
+                .map_err(|e| ScraperError::persistence(format!("serializar spans: {e}")))?;
 
             let conn = self.pool.get().await.map_err(|e| {
                 ScraperError::persistence(format!("obtener conexión del pool: {e}"))
             })?;
             conn.interact(move |c| {
                 c.execute(
-                    "INSERT INTO note_chunks (note_id, chunk_index, content, embedding_vector, created_at) \
-                     VALUES (?1, ?2, ?3, ?4, datetime('now'))",
-                    rusqlite::params![note_id, chunk_index, content, blob.as_deref()],
+                    "INSERT INTO note_chunks (note_id, chunk_index, content, embedding_vector, spans_json, created_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+                    rusqlite::params![note_id, chunk_index, content, blob.as_deref(), spans_json],
                 )
             })
             .await
@@ -560,15 +616,19 @@ impl NoteRepository for SqliteVectorRepository {
         path: &'a str,
         content_hash: &'a str,
         mtime_secs: i64,
-        chunks: &'a [(&'a str, Option<&'a [f32]>)],
+        chunks: &'a [ChunkToPersist<'a>],
     ) -> Pin<Box<dyn Future<Output = Result<i64, ScraperError>> + Send + 'a>> {
         Box::pin(async move {
             let path_owned = path.to_string();
             let hash_owned = content_hash.to_string();
-            let chunks_owned: Vec<(String, Option<Vec<u8>>)> = chunks
+            let chunks_owned: Vec<(String, String, Option<Vec<u8>>)> = chunks
                 .iter()
-                .map(|(text, emb)| (text.to_string(), emb.map(f32_slice_to_bytes)))
-                .collect();
+                .map(|(text, spans, emb)| {
+                    let spans_json = serde_json::to_string(*spans)
+                        .map_err(|e| ScraperError::persistence(format!("serializar spans: {e}")))?;
+                    Ok(((*text).to_string(), spans_json, emb.map(f32_slice_to_bytes)))
+                })
+                .collect::<Result<Vec<_>, ScraperError>>()?;
 
             let conn = self.pool.get().await.map_err(|e| {
                 ScraperError::persistence(format!("obtener conexión del pool: {e}"))
@@ -589,11 +649,11 @@ impl NoteRepository for SqliteVectorRepository {
                     rusqlite::params![&path_owned],
                     |row| row.get::<_, i64>(0),
                 )?;
-                for (i, (text, emb_blob)) in chunks_owned.into_iter().enumerate() {
+                for (i, (text, spans_json, emb_blob)) in chunks_owned.into_iter().enumerate() {
                     tx.execute(
-                        "INSERT INTO note_chunks (note_id, chunk_index, content, embedding_vector, created_at) \
-                         VALUES (?1, ?2, ?3, ?4, datetime('now'))",
-                        rusqlite::params![id, i as i64, &text, &emb_blob.as_deref()],
+                        "INSERT INTO note_chunks (note_id, chunk_index, content, embedding_vector, spans_json, created_at) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+                        rusqlite::params![id, i as i64, &text, &emb_blob.as_deref(), &spans_json],
                     )?;
                 }
                 tx.commit()?;
@@ -611,13 +671,14 @@ impl NoteRepository for SqliteVectorRepository {
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<NoteChunkVector>, ScraperError>> + Send + '_>> {
         Box::pin(async move {
+            type LoadedVectorRow = (String, String, i64, Option<String>, Vec<u8>);
             let conn = self.pool.get().await.map_err(|e| {
                 ScraperError::persistence(format!("obtener conexión del pool: {e}"))
             })?;
-            let rows: Vec<(String, String, i64, Vec<u8>)> = conn
+            let rows: Vec<LoadedVectorRow> = conn
                 .interact(|c| {
                     let mut stmt = c.prepare(
-                        "SELECT n.path, nc.content, nc.chunk_index, nc.embedding_vector \
+                        "SELECT n.path, nc.content, nc.chunk_index, nc.spans_json, nc.embedding_vector \
                          FROM note_chunks nc \
                          JOIN notes n ON n.id = nc.note_id \
                          WHERE nc.embedding_vector IS NOT NULL",
@@ -627,7 +688,8 @@ impl NoteRepository for SqliteVectorRepository {
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
-                            row.get::<_, Vec<u8>>(3)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Vec<u8>>(4)?,
                         ))
                     })?;
                     rows.collect::<Result<Vec<_>, _>>()
@@ -639,11 +701,22 @@ impl NoteRepository for SqliteVectorRepository {
                 .map_err(|e| ScraperError::persistence(format!("load_all_vectors: {e}")))?;
 
             let mut result = Vec::with_capacity(rows.len());
-            for (path, content, chunk_index, bytes) in rows {
+            for (path, content, chunk_index, spans_json, bytes) in rows {
+                // Locator provenance must be readable or the read fails: a
+                // corrupt spans_json aborts the load instead of ranking
+                // chunks with silently lost locators. NULL (pre-migration
+                // rows) means "no locators", not corruption.
+                let spans = match spans_json {
+                    Some(json) => serde_json::from_str::<Vec<ByteSpan>>(&json).map_err(|e| {
+                        ScraperError::persistence(format!("spans_json corrupto para {path}: {e}"))
+                    })?,
+                    None => Vec::new(),
+                };
                 result.push(NoteChunkVector {
                     note_path: path,
                     content,
                     chunk_index,
+                    spans,
                     embedding: bytes_to_f32_vec(&bytes)?,
                 });
             }
@@ -1001,6 +1074,79 @@ mod tests {
             drop(dir);
         }
 
+        /// A v1 database (pre-locators) is migrated in place: the note_chunks
+        /// table gains `spans_json` and the marker moves to the current
+        /// version, without touching existing rows. This is the one in-place
+        /// migration the version gate tolerates.
+        #[tokio::test]
+        async fn setup_schema_migrates_a_v1_database_to_the_current_marker() {
+            let dir = TempDir::new().expect("tempdir");
+            let db_path = dir.path().join("crawl.db");
+            let pool = create_pool(&db_path, 4).expect("create_pool");
+            {
+                let conn = pool.get().await.expect("get");
+                conn.interact(|c| {
+                    c.execute_batch(
+                        "CREATE TABLE notes (\
+                             id INTEGER PRIMARY KEY AUTOINCREMENT,\
+                             path TEXT UNIQUE NOT NULL,\
+                             content_hash TEXT NOT NULL,\
+                             mtime_secs INTEGER NOT NULL,\
+                             created_at TEXT,\
+                             updated_at TEXT);\
+                         CREATE TABLE note_chunks (\
+                             id INTEGER PRIMARY KEY AUTOINCREMENT,\
+                             note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,\
+                             chunk_index INTEGER NOT NULL,\
+                             content TEXT NOT NULL,\
+                             embedding_vector BLOB,\
+                             created_at TEXT);\
+                         INSERT INTO notes (path, content_hash, mtime_secs) \
+                             VALUES ('v1.md', 'hash-v1', 0);\
+                         INSERT INTO note_chunks (note_id, chunk_index, content) \
+                             VALUES (1, 0, 'v1 body');\
+                         PRAGMA user_version = 1;",
+                    )
+                })
+                .await
+                .expect("interact")
+                .expect("seed v1 database");
+            }
+
+            SqliteVectorRepository::setup_schema(&pool)
+                .await
+                .expect("a v1 database must migrate in place");
+            assert_eq!(
+                pragma_int(&pool, "user_version").await,
+                SCHEMA_VERSION,
+                "the marker must move to the current version"
+            );
+
+            // The migrated column is real — it accepts a locator write — and
+            // the v1 row survived the migration untouched.
+            let conn = pool.get().await.expect("get");
+            let (inserted, v1_rows): (i64, i64) = conn
+                .interact(|c| {
+                    c.execute(
+                        "INSERT INTO note_chunks (note_id, chunk_index, content, spans_json, created_at) \
+                         VALUES (1, 1, 'post-migration', '[{\"start\":0,\"end\":4}]', datetime('now'))",
+                        [],
+                    )?;
+                    c.query_row(
+                        "SELECT COUNT(*) FROM note_chunks WHERE content = 'v1 body'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map(|count| (1, count))
+                })
+                .await
+                .expect("interact")
+                .expect("post-migration probe");
+            assert_eq!(inserted, 1, "the new column must accept locator JSON");
+            assert_eq!(v1_rows, 1, "the pre-migration row must survive");
+            drop(dir);
+        }
+
         #[tokio::test]
         async fn test_setup_schema_creates_chunks_table() {
             let (_dir, pool) = fresh_pool(4).await;
@@ -1264,6 +1410,76 @@ mod tests {
                     "row for hash-c{i} must exist after concurrent writes"
                 );
             }
+        }
+
+        // ================================================================
+        // Note chunk locators (chunk-locators slice)
+        // ================================================================
+
+        /// Locator round-trip through the port: what the chunker located must
+        /// come back identical from `load_all_vectors`. A raw row written
+        /// without `spans_json` (the pre-migration shape) loads with empty
+        /// locators instead of failing the read.
+        #[tokio::test]
+        async fn note_chunks_round_trip_their_locators() {
+            let (_dir, repo) = fresh_repo(4).await;
+            let hash = "a".repeat(64);
+            let spans = vec![
+                ByteSpan::try_new(0, 5).expect("valid span"),
+                ByteSpan::try_new(9, 14).expect("valid span"),
+            ];
+            let emb = vec![0.1_f32, 0.2, 0.3, 0.4];
+            let chunks = [("# Nota", spans.as_slice(), Some(emb.as_slice()))];
+            repo.index_note_transactional("notes/a.md", &hash, 0, &chunks)
+                .await
+                .expect("index_note_transactional");
+
+            // Legacy row in the pre-locator shape: no spans_json at all.
+            let note_id: i64 = {
+                let conn = repo.pool().get().await.expect("get");
+                conn.interact(|c| {
+                    c.query_row(
+                        "SELECT id FROM notes WHERE path = 'notes/a.md'",
+                        [],
+                        |row| row.get(0),
+                    )
+                })
+                .await
+                .expect("interact")
+                .expect("note id")
+            };
+            {
+                let conn = repo.pool().get().await.expect("get");
+                conn.interact(move |c| {
+                    c.execute(
+                        "INSERT INTO note_chunks (note_id, chunk_index, content, embedding_vector, created_at) \
+                         VALUES (?1, 1, 'legacy', ?2, datetime('now'))",
+                        rusqlite::params![note_id, f32_slice_to_bytes(&emb)],
+                    )
+                })
+                .await
+                .expect("interact")
+                .expect("legacy insert");
+            }
+
+            let vectors = repo.load_all_vectors().await.expect("load vectors");
+            assert_eq!(vectors.len(), 2, "both chunks must load");
+            let migrated = vectors
+                .iter()
+                .find(|v| v.chunk_index == 0)
+                .expect("locator chunk");
+            assert_eq!(
+                migrated.spans, spans,
+                "locators must round-trip through the BLOB/JSON boundary exactly"
+            );
+            let legacy = vectors
+                .iter()
+                .find(|v| v.chunk_index == 1)
+                .expect("legacy chunk");
+            assert!(
+                legacy.spans.is_empty(),
+                "a pre-locator row means 'no locators', never corruption"
+            );
         }
     }
 }
