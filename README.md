@@ -5,8 +5,10 @@
 [![CI](https://github.com/XaviCodeDev1000/webfang/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCodeDev1000/webfang/actions)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.91+-orange)](https://rust-lang.org)
-[![Tests](https://img.shields.io/badge/tests-1%2C337+-green)](#testing)
-[![Miri](https://img.shields.io/badge/Miri-domain%2Bcore-passing-blue)](#memory-safety)
+<!-- The badges above are LIVE (shields.io reads the workflow) or static-but-checked
+     facts (license, MSRV). Static COUNTS are deliberately absent: a hand-written test or
+     Miri count drifts silently. scripts/check_docs_claims.sh fails on a new static
+     metric badge and cross-checks the MSRV badge against Cargo.toml. -->
 
 [Installation](#installation) · [Quick Start](#-quick-start) · [Uninstall](#uninstall) · [Architecture](#-architecture) · [Features](#-features) · [CLI Reference](#cli-reference) · [MCP Server](#mcp-server) · [Developer Guide](#developer-guide)
 
@@ -109,11 +111,12 @@ Output is saved to `output/` as Markdown by default.
 
 ## Architecture
 
-Clean Architecture with enforced dependency direction across 3 workspace crates (plus `webfang_test_utils`, a shared dev/test-support crate):
+Clean Architecture with enforced dependency direction across 5 workspace crates
+(3 de producción + `webfang_test_utils` y `webfang_benchmark`, de soporte):
 
 ```
-webfang_cli ──→ webfang_mcp ──→ webfang_core
-webfang_cli ──────────────────────→ webfang_core
+webfang_cli ──→ webfang_core
+webfang_mcp ──→ webfang_core
 ```
 
 | Crate | Purpose | Key Dependencies |
@@ -122,7 +125,9 @@ webfang_cli ──────────────────────�
 | `webfang_mcp` | MCP server for AI agents | rmcp |
 | `webfang_cli` | Binary entry point + CLI parsing | clap |
 
-**Dependency direction:** CLI → MCP → Core. No circular dependencies. The former `webfang_ai` crate (local ONNX) was removed in ADR-0004 paso 6 — see [docs/src/ai-onnx-migration.md](docs/src/ai-onnx-migration.md).
+**Dependency direction:** `cli → core` and `mcp → core`. `cli` does **not** depend on
+`mcp` — the two are siblings over `core`. Enforced by
+`scripts/check_dependency_direction.sh` in the `repo-guards` job. The former `webfang_ai` crate (local ONNX) was removed in ADR-0004 paso 6 — see [docs/src/ai-onnx-migration.md](docs/src/ai-onnx-migration.md).
 
 ---
 
@@ -401,9 +406,27 @@ cargo llvm-cov --all-features
 cargo +nightly miri test --lib
 ```
 
-**Test suite:** 1,337 tests across unit, integration, and behavioral layers.
+**Test suite:** the count is deliberately not written here — a hand-copied number drifts
+silently. Run `cargo nextest run --workspace` and read the `Summary` line; that output is
+the only accepted figure.
 
-**Miri status:** Domain + Core layers verified for Undefined Behavior. Infrastructure layer partially verified (servo_arc/btls FFI limitations documented).
+**Miri status:** the Miri lanes are **advisory**: scheduled-only (Monday 00:00 UTC),
+`continue-on-error`, and never a merge gate (`ci.yml` #1510). There is no "passing" badge
+because a static badge cannot express a per-run result. The four lanes are
+`domain`, `core`, `infra-fast` and `infra-slow`; read the conclusion of the last scheduled
+run, not this document:
+
+```bash
+gh run list --workflow=ci.yml --event schedule --limit 1 --json databaseId -q '.[0].databaseId' \
+  | xargs -I{} gh api "repos/XaviCodeDev1000/webfang/actions/runs/{}/jobs?per_page=100" \
+      --jq '.jobs[] | select(.name|test("Miri")) | [.name,.conclusion] | @tsv'
+```
+
+**Known Miri limitation (why a lane can be red on a healthy tree):** `servo_arc` (via
+`lol_html::rewrite_str`) trips Tree Borrows, whose rules are still experimental, and
+BoringSSL FFI / inline asm / recent syscalls cannot be interpreted at all. Those sites are
+gated per test with `#[cfg_attr(miri, ignore = "<reason>")]` — the reason names the
+mechanism, never a bare "unsupported".
 
 **Concurrency verification (DoD #507):** Miri valida las unidades lock-free puras (AtomicUsize counters, mpsc channel); la concurrencia de alto nivel se cubre con tests de integración que ejercitan CancellationToken/shutdown y backpressure (abort de stragglers, canales acotados).
 
@@ -444,7 +467,8 @@ codedb index .
 
 ### Architecture rules
 
-- **Dependency direction:** CLI → MCP → Core (never reverse)
+- **Dependency direction:** `cli → core` and `mcp → core`, never reverse. `cli` does not
+  depend on `mcp`; both are siblings over `core`.
 - **Port/Adapter pattern:** Domain defines traits, Infrastructure implements them
 - **Error types:** DomainError, InfraError → ScraperError (dual wrapping)
 - **User-facing errors:** Spanish. Internal logs: English.
