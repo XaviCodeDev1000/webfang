@@ -169,6 +169,9 @@ impl BoundedFileSink {
         let (tx, rx) = mpsc::channel(buffer);
         let backlog = Arc::new(Backlog::new(max_backlog_bytes));
         let cancel = CancellationToken::new();
+        // Supervised: the JoinHandle is stored in `Self.writer` and joined in
+        // `finish()`, which surfaces a JoinError as BoundedSinkError::Writer.
+        #[allow(clippy::disallowed_methods)]
         let writer = tokio::spawn(
             spool_writer(file, rx, Arc::clone(&backlog), cancel.clone()).in_current_span(),
         );

@@ -323,10 +323,10 @@ application/crawler/engine.rs	533	inline	crate::domain::persistence::Persistence
 application/crawler/engine.rs	534	inline	crate::domain::persistence::PersistenceMode::Resume
 application/crawler/engine.rs	561	inline	crate::domain::persistence::PersistenceMode
 application/crawler/engine.rs	706	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
-application/crawler/engine.rs	743	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
-application/crawler/engine.rs	745	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
-application/crawler/engine.rs	987	inline	crate::application::url_filter::is_allowed
-application/crawler/engine.rs	2046	inline	crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY::to_string
+application/crawler/engine.rs	746	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
+application/crawler/engine.rs	748	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
+application/crawler/engine.rs	993	inline	crate::application::url_filter::is_allowed
+application/crawler/engine.rs	2052	inline	crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY::to_string
 application/crawler/ports.rs	24	use	crate::application::crawler::collector::CrawlMessage
 application/crawler/ports.rs	24	use	crate::application::crawler::collector::ResultsCollector
 application/crawler/ports.rs	25	use	crate::application::pipeline::PipelineExecutor
@@ -1051,7 +1051,7 @@ cli/scrape_flow.rs	699	inline	crate::domain::UnknownProfileError
 cli/shutdown.rs	16	use	crate::application::crawler::engine::TERMINATION_REGISTRATION_REJECTED
 cli/shutdown.rs	16	use	crate::application::crawler::engine::TerminationOutcome
 cli/shutdown.rs	17	use	crate::application::crawler::ports::TerminationWait
-cli/shutdown.rs	116	inline	crate::infrastructure::platform::first_termination_event
+cli/shutdown.rs	119	inline	crate::infrastructure::platform::first_termination_event
 cli/spec_command.rs	29	use	crate::domain::options_spec
 cli/spec_command.rs	29	use	crate::domain::options_spec::OptionSpec
 cli/spec_command.rs	29	use	crate::domain::options_spec::ValueKind
@@ -1293,7 +1293,7 @@ infrastructure/axtree/mod.rs	25	use	crate::error::ScraperError
 infrastructure/axtree/mod.rs	31	use	crate::domain::axtree_port::CompactNode
 infrastructure/axtree/mod.rs	31	use	crate::domain::axtree_port::CompactSnapshot
 infrastructure/axtree/mod.rs	31	use	crate::domain::axtree_port::SnapshotFormat
-infrastructure/axtree/mod.rs	305	inline	crate::domain::axtree_port::compact
+infrastructure/axtree/mod.rs	308	inline	crate::domain::axtree_port::compact
 infrastructure/axtree/playwright.rs	10	use	crate::infrastructure::axtree::ax_value_str
 infrastructure/bridge.rs	9	use	crate::domain::content_processor::ContentProcessor
 infrastructure/bridge.rs	10	use	crate::domain::cpu_executor::CpuExecutorPort
