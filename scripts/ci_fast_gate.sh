@@ -396,6 +396,11 @@ EOF
   # drift; the CODE side is covered by the same guard in lane_fmt_and_guards.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Data-flow disclosure guard (#2241): the DOC side of the disclosure
+  # surface, mirroring the required `repo-guards` step of ci.yml — blocking,
+  # like the ai-providers guard above.
+  run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
+    bash scripts/check_data_flow_doc.sh
 }
 
 # collect_shell_files: print, one per line, the changed files that are shell.
@@ -592,6 +597,10 @@ EOF
   # and a local lane that stayed green would hide the drift until CI.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Data-flow disclosure guard (#2241): same blocking mirror, same reason —
+  # a `scripts/**` change can move the code the disclosure doc cites.
+  run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
+    bash scripts/check_data_flow_doc.sh
   # Release-pins harnesses (#2028): the release flow owns the bump of the docs
   # version pins, and these three pin the pieces that make that ownership real
   # — the WRITER (the exact inverse of the gate above), the ORCHESTRATOR (the
@@ -876,6 +885,11 @@ lane_fmt_and_guards() {
   # mirrors: required in CI, required here.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Data-flow disclosure guard (#2241): the CODE side of the same drift — a
+  # code PR that renames a cited symbol changes no markdown and never
+  # reaches lane_docs. Blocking, like the CI step it mirrors.
+  run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
+    bash scripts/check_data_flow_doc.sh
   # Issue #1614: the version-marker half of the MCP public-surface policy. The
   # other half (live schema vs the committed fixture) is a test and runs in the
   # cargo lanes; this one needs the base commit, which a test cannot see.
