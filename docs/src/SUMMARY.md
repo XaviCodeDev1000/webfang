@@ -3,6 +3,7 @@
 [Overview](overview.md)
 
 - [Installation & Uninstall](installation.md)
+- [Release Feature Matrix](release-feature-matrix.md)
 - [Debugging & Observability](debugging.md)
 - [Testing](testing.md)
 - [Troubleshooting](troubleshooting.md)

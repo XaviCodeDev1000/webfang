@@ -8,7 +8,8 @@ webfang` and nothing is published to crates.io — the release automation sets
 
 > [Releases](https://github.com/XaviCodeDev1000/webfang/releases) ·
 > [Troubleshooting](troubleshooting.md) ·
-> [CLI Reference](cli-reference.md)
+> [CLI Reference](cli-reference.md) ·
+> [Release Feature Matrix](release-feature-matrix.md)
 
 ---
 
@@ -319,25 +320,32 @@ to; build from source instead.
 
 ## What is *not* in the release binary
 
-The release build is `cargo build --release --locked --features mcp -p webfang_cli`.
-Two consequences worth knowing before you file a bug:
-(Note the `ai` feature of the pre-paso-6 releases is gone: semantic cleaning
-is runtime-configured, not compiled in — [migration guide](ai-onnx-migration.md).)
+The release build is **one invocation** that compiles the CLI and both MCP
+servers with **no capability features enabled**:
 
-| Missing from the release binary | Consequence |
+```bash
+cargo build --release --locked --features "webfang_cli/mcp" \
+  --target <target-triple> -p webfang_cli -p webfang_mcp --bins
+```
+
+The `mcp` feature of that command is inert (an explicit-empty marker): the
+`webfang` CLI carries **zero MCP code** — the servers are the separate
+`webfang-mcp` / `webfang-mcp-stdio` binaries in their own archives. (The
+former `ai` feature no longer exists at all, ADR-0004 paso 6: remote-embedding
+semantic cleaning ships in the default build —
+[migration guide](ai-onnx-migration.md).)
+
+The full capability-by-capability matrix — what each of the three binaries can
+do, and the flags that bring each capability back when building from source —
+lives in the [Release Feature Matrix](release-feature-matrix.md). The short
+version, before you file a bug:
+
+| Missing from the release binaries | Consequence |
 | :--- | :--- |
-| `persistence` feature | The SQLite checkpoint store is absent. File-based `--resume` state is unaffected. |
 | `chromium` feature | `--js-strategy full` is rejected at preflight (it needs a Chromium downloader). The default `static` strategy and the 3-layer `hybrid` strategy are unaffected. |
+| `persistence` feature | The SQLite checkpoint store is absent. File-based `--resume` state is unaffected. |
 | `console` feature | `tokio-console` is not available. Tracing via `--trace-file` is. |
-| `adaptive-selectors` feature | Adaptive selector learning is off. |
-| MCP server | The `webfang` CLI exposes no MCP flag (`webfang --mcp` is an error). The servers are separate binaries in their own archives — see [MCP servers](#mcp-servers-from-the-release-artifact). |
-
-The `mcp` feature in that build command is inert: it is empty in
-`webfang_core` and gates no shipped code. The `webfang_mcp` *crate* is what
-matters, and its two binaries ship as their own archives rather than linked
-into `webfang`. The former `ai` feature
-no longer exists (ADR-0004 paso 6): remote-embedding semantic cleaning ships
-in the default build with no ONNX/ort/hf-hub dependency and no model cache.
+| `adaptive-selectors` feature | Adaptive selector learning is off — its flags do not exist in this build. |
 
 ---
 
