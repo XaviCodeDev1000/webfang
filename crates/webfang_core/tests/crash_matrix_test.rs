@@ -26,12 +26,12 @@ use std::process::ExitStatus;
 use std::time::Duration;
 
 use common::cli_harness::{
-    mock_sitemap, send_signal, spawn_webfang_with, wait_exit, wait_for_page_fetches,
+    mock_sitemap, send_signal, spawn_webfang_with, std_cmd, wait_exit, wait_for_page_fetches,
     BehavioralTest, PAGE_DELAY,
 };
 use tempfile::TempDir;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, ResponseTemplate};
+use wiremock::matchers::{any, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use webfang_core::cli::crash_points::{
     DURING_CANCEL_DRAIN, MID_EXTRACTION, MID_FETCH, MID_JSONL_LINE, MID_STATE_FILE_WRITE,
@@ -692,19 +692,73 @@ async fn crash_during_cancel_drain_clean_ai_sigint_kills_then_recovers() {
     });
     wait_for_page_fetches(&t.server, 1).await;
     send_signal(&child, "INT", DURING_CANCEL_DRAIN);
-    let (crashed_status, crashed_stderr) = wait_exit(child, DURING_CANCEL_DRAIN);
-    assert_killed_by_sigkill(&crashed_status, &crashed_stderr);
+    assert_store_records_complete(state_dir.path());
+    assert_jsonl_exactly_once(&t);
+}
 
-    // Attempt 2: same state dir, crash env and signal removed, resume gate
-    // active — through the SAME cleaner, so a chunk flushed before the kill
-    // is promoted by flush proof instead of being re-exported raw.
-    resume_run_with(
-        &t,
-        state_dir.path(),
-        &sitemap_url,
-        &["--clean-ai"],
-        Some(&config_path),
+/// The partition row (#1828): a stalled peer, not a killed process.
+///
+/// `crash_mid_fetch_recovers_with_zero_loss` dies by SIGKILL; the audit named
+/// the OTHER mid-fetch failure class the matrix did not cover: the network
+/// partition, specifically during sitemap discovery. A partition is not a
+/// crash point — the process survives — so this row cannot use
+/// `WEBFANG_CRASH_AT` and asserts a different attempt-1 contract: discovery
+/// comes up empty, the run fails, and NO export is produced.
+///
+/// The partitioned peer is the attempt-1 seed host: a wiremock handler that
+/// holds every connection open for 10 minutes before answering. Discovery
+/// probes it with `--timeout-secs 1`, and a 1-second client deadline cannot
+/// lose a race against a 600-second server hold, so the row is deterministic
+/// without any wall-clock assertion. The probes are raw wreq requests with no
+/// retry wrapper, and a probe failure degrades one discovery stage at a time
+/// (robots.txt errors are swallowed, per `fetch_robots_sitemap`), so the
+/// partition is honestly observed as a discovery that finds nothing:
+/// `SitemapNotFound`, a failed run, and no JSONL — never a hang.
+///
+/// Attempt 2 runs against the healthy server (the partition healed), resumes
+/// over the SAME state dir, and the four global invariants hold: nothing the
+/// partition ate came back duplicated or missing.
+#[tokio::test]
+async fn sitemap_partition_stalls_discovery_then_recovery_resumes_with_zero_loss() {
+    let t = BehavioralTest::new().await;
+    let sitemap_url = mount_crash_fixture(&t).await;
+    let state_dir = TempDir::new().expect("state tempdir");
+
+    // The partitioned peer: it accepts connections but never answers in time.
+    let partitioned = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(600)))
+        .mount(&partitioned)
+        .await;
+
+    // Attempt 1: discovery against the stalled seed host. The export must
+    // never start: a partitioned run leaves no JSONL behind.
+    let partitioned_run = std_cmd()
+        .args([
+            "--resume",
+            "--url",
+            partitioned.uri().as_str(),
+            "--state-dir",
+        ])
+        .arg(state_dir.path())
+        .arg("--output")
+        .arg(t.out.path())
+        .args(["--use-sitemap", "--timeout-secs", "1", "--quiet"])
+        .output()
+        .expect("spawn partitioned run");
+    let partitioned_stderr = String::from_utf8_lossy(&partitioned_run.stderr).into_owned();
+    assert!(
+        !partitioned_run.status.success(),
+        "a partitioned discovery must fail the run, got clean exit; stderr: {partitioned_stderr}"
     );
+    assert!(
+        t.find_files("jsonl").is_empty(),
+        "a partitioned discovery must not produce an export"
+    );
+
+    // Attempt 2: the partition healed. Resume over the SAME state dir against
+    // the healthy sitemap and assert the four global invariants.
+    resume_run(&t, state_dir.path(), &sitemap_url);
 
     assert_store_records_complete(state_dir.path());
     assert_jsonl_exactly_once(&t);
