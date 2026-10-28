@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 // `--max-chars`: the AI chunk-size guard.
 //
 // `--max-chars` renders in EVERY cargo configuration (ADR-0004): it replaced a

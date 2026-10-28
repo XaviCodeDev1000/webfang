@@ -1,3 +1,10 @@
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)
+)]
+
 //! End-to-end test for channel plumbing: observer → channel → receiver.
 
 #[tokio::test]

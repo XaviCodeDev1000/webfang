@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Behavioral tests: `--dry-run` fail-fast (change `dry-run-fail-fast`).
 //!
 //! `--dry-run` is a preview: against a dead seed it MUST report reachability
@@ -16,8 +18,6 @@
 //! run -p webfang_core --test dry_run_fail_fast`. Without the variable the
 //! A/B test skips (early return) — attempt counts are still pinned by the
 //! single-attempt and explicit-knob tests, which need no reference binary.
-
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 #[path = "common/cli_harness.rs"]
 mod common;

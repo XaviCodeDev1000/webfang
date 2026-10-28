@@ -8,31 +8,40 @@
 #                   a DYNAMIC shard count (scripts/ci_mutant_shards.sh,
 #                   #2285): `cargo mutants --list --json --in-diff` measures
 #                   the diff's mutants (no compilation) and the matrix size
-#                   is min(16, ceil(count/8)) — ~8 mutants per shard keeps a
-#                   shard's wall time well under the 45-minute timeout given
-#                   the ~10-15 min BoringSSL base build, where ~20 mutants
-#                   per shard was the draw that hit the 90-minute wall
-#                   (#1436). Calibration knobs live in
+#                   is min(16, ceil(count/6)) — #2296 calibrated the draw
+#                   with a measured shard (run 40586006186: 6 mutants, 24
+#                   min of mutants, 2 of them hitting the --timeout=300
+#                   ceiling): the worst case is ~61 s build + 300 s test per
+#                   mutant, so 8 mutants/shard could exceed the 45-minute
+#                   shard timeout and 6 fits it (~40 min incl. ~3.5 min of
+#                   non-mutant overhead). Shard ids are 0-BASED: --shard k/N
+#                   requires k < N and slices the first ceil(count/N) mutants
+#                   onto shard 0 — the pre-#2296 1-based list made the last
+#                   matrix entry a CLI usage error (masked by
+#                   continue-on-error) and silently skipped partition 0.
+#                   Calibration knobs live in
 #                   scripts/ci_mutant_shards.sh (MUTANT_SHARD_SIZE,
 #                   MUTANT_SHARD_CAP); re-measure before tuning them. The
 #                   diff is built against the checked-out head's FIRST
 #                   PARENT, so an advanced base never counts other PRs' hunks
-#                   (a mismatching diff fails closed: cargo-mutants exit 5).
-#                   The required context name stays "cargo-mutants (PR
-#                   diff)": the aggregating job carries it and always
-#                   reports, even when no shard ran.
+#                   (an unusable diff fails closed: cargo-mutants exit 5 —
+#                   readable but mismatched or malformed; exit 6 — the diff
+#                   file itself cannot be read). The required context name
+#                   stays "cargo-mutants (PR diff)": the aggregating job
+#                   carries it and always reports, even when no shard ran.
   #   - mutants-weekly: weekly baseline over the full hot-path scope, split into
-  #                   96 deterministic shards (--shard k/96, --no-shuffle). The
-  #                   shards partition the 1477 hot-path mutants MEASURED on
-  #                   2026-10-22 with `cargo mutants --list` over the current
-  #                   scope — ~15.4 per shard, under the ~20-mutant per-shard draw
-  #                   at which 14 shards hit the 90-minute wall (#1436), so each
-  #                   job finishes well inside the timeout. Report-only.
-  #                   The previous 64-way split drew ~23.1 mutants per shard —
-  #                   ABOVE that wall draw — so #1844 rebalanced the matrix from
-  #                   64 to 96. The ~600 figure this header carried was an
-  #                   estimate inherited from before #1825 widened the scope
-  #                   (export_factory.rs + adapters/**): it was never measured.
+  #                   96 deterministic shards (--shard k/96, --no-shuffle, k
+  #                   0-based). The shards partition the 1477 hot-path mutants
+  #                   MEASURED on 2026-10-22 with `cargo mutants --list` over
+  #                   the current scope — ~15.4 per shard, under the ~20-mutant
+  #                   per-shard draw at which 14 shards hit the 90-minute wall
+  #                   (#1436), so each job finishes well inside the timeout.
+  #                   Report-only. The previous 64-way split drew ~23.1 mutants
+  #                   per shard — ABOVE that wall draw — so #1844 rebalanced the
+  #                   matrix from 64 to 96. The ~600 figure this header carried
+  #                   was an estimate inherited from before #1825 widened the
+  #                   scope (export_factory.rs + adapters/**): it was never
+  #                   measured.
 #   - report:        aggregates shard outcomes.json into a single summary.
 #
 # Fixed in this version (was broken):
@@ -254,8 +263,11 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      # 0-based shard ids (#2296): --shard k/96 requires 0 <= k < 96; the old
+      # 1..96 matrix made shard 96/96 a CLI usage error (masked by
+      # continue-on-error) and left partition 0 untested.
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1813 — `--adaptive-selectors` must fail closed on a non-adaptive build.
 //!
 //! The flag used to be a HIDDEN COMPATIBILITY PLACEHOLDER when the

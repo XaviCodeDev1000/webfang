@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for HttpClient
 //!
 //! All tests use wiremock for deterministic, network-free HTTP responses.

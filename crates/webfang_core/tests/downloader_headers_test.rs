@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration test: [`WreqDownloader`] populates `FetchedPage.headers`.
 //!
 //! Verifies the header-capture path added in the JsStrategy wiring (#303):

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Literal-IP SSRF rejection in the asset download chain (PI-1 / SEC F1).
 //!
 //! Asset URLs are extracted from caller-supplied HTML, so `ValidUrl`'s

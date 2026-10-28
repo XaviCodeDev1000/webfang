@@ -30,6 +30,12 @@
 #      merge boundary, so a title edit or a new push during the wait cannot
 #      slip a marker off the kept surface (#2081, #2320). A `BREAKING CHANGE:`
 #      footer alone does not satisfy the gate.
+#      DEFENSE IN DEPTH (#2328): the same invariant is also the required CI
+#      check `breaking-surface` (pr-validation.yml), evaluated on the PR head
+#      and on the merge_group entry — it closes the TOCTOU window between the
+#      merge-boundary re-validation and the actual enqueue/merge, and covers
+#      merges that never run this script (UI, plain `gh pr merge`). The matrix
+#      both consumers apply lives in scripts/breaking_surface_lib.sh.
 #   2. Reads the required status-check contexts from branch protection, then polls
 #      `gh pr checks --json name,bucket` until EVERY one of them has REPORTED with
 #      a terminal bucket, and all report `pass`. Waiting on
@@ -136,6 +142,17 @@
 # See: docs of Fase 0 measurement (AGENTS.md, project memory) — CI is ~8.5 min,
 # this script saves the human loop of checking back every few minutes.
 set -euo pipefail
+
+# The breaking-marker matrix (regexes, subject classifier, commit counter and
+# verdict function) lives in ONE place shared with the required CI check
+# `breaking-surface` (scripts/check_breaking_surface.sh, #2328): two copies of
+# a subtle matrix drift, and a drift re-opens exactly the #2078 hole. This
+# script keeps the messaging and the exit codes; the DECISION is the library's.
+# The queue-method mirror reader (#2412) lives in the same library and is
+# needed EARLY: the queue-mode cross-check reads the tracked mirror as soon as
+# the live method is validated, before the breaking-guard section below.
+# shellcheck source=scripts/breaking_surface_lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/breaking_surface_lib.sh"
 
 pr_number=""
 dry_run=0
@@ -399,6 +416,18 @@ if [[ $queue_mode -eq 1 ]]; then
       exit 1
       ;;
   esac
+  # Mirror cross-check (#2412): the CI check judges the surface from the
+  # tracked mirror (.github/merge-queue.json) because GITHUB_TOKEN cannot read
+  # this configuration (GraphQL FORBIDDEN for integrations). A mirror that
+  # drifted from the live method would misjudge in CI, so the merge boundary
+  # reads BOTH and refuses on divergence — the human reconciles the mirror.
+  mirror_file="${BREAKING_SURFACE_QUEUE_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../.github/merge-queue.json}"
+  mirror_method="$(breaking_queue_method_from_mirror "$mirror_file" "$base_branch")"
+  if [[ "$mirror_method" != "$queue_method" ]]; then
+    echo "error: the merge-queue method diverged: live='${queue_method}' mirror='${mirror_method:-<absent>}' (${mirror_file})." >&2
+    echo "       The CI check judges the surface from the mirror; reconcile .github/merge-queue.json with the live ruleset before merging." >&2
+    exit 1
+  fi
   if [[ -n "$strategy_explicit" && "$strategy_explicit" != "$queue_strategy" ]]; then
     echo "error: --queue uses the repository's merge method (${queue_method}); do not pass --${strategy_explicit}." >&2
     exit 1
@@ -429,24 +458,13 @@ fi
 # outside the kept surface is lost silently, so the guard refuses it instead of
 # warning (#2081, #2320).
 #
-# Canonical marker: `type!:` or `type(scope)!:`. `type!(scope):` is malformed:
-# it expresses the intent but release-plz does not parse it, so it is refused
-# with the canonical form. A `!` outside the header (prose) is not a marker. A
-# `BREAKING CHANGE:` footer alone is not accepted: this gate requires the `!`.
-canonical_subject_re='^[A-Za-z]+(\([^)]*\))?!:'
-footer_re='(?im)^BREAKING[ -]CHANGE:'
-
-# subject_kind <subject> -> canonical | malformed | none
-subject_kind() {
-  local subject="$1" header="${1%% *}"
-  if [[ "$header" =~ $canonical_subject_re ]]; then
-    printf 'canonical'
-  elif [[ "$header" == *'!'* ]]; then
-    printf 'malformed'
-  else
-    printf 'none'
-  fi
-}
+# The breaking-marker matrix (regexes, subject classifier, commit counter and
+# verdict function) lives in ONE place shared with the required CI check
+# `breaking-surface` (scripts/check_breaking_surface.sh, #2328): two copies of
+# a subtle matrix drift, and a drift re-opens exactly the #2078 hole. This
+# script keeps the messaging and the exit codes; the DECISION is the library's.
+# (The library is sourced at the top of the script: the queue-mode mirror
+# cross-check needs it before this section.)
 
 read_breaking_meta() {
   local raw
@@ -501,21 +519,7 @@ breaking_guard() {
   title_kind="$(subject_kind "$pr_title")"
   commits_json="$(printf '%s' "$meta" | jq -c '.commits // []')"
 
-  # shellcheck disable=SC2016  # $canon/$footer are jq variables passed with --arg
-  read -r n_commits n_canonical n_malformed n_footer < <(printf '%s' "$commits_json" | jq -r \
-    --arg canon "$canonical_subject_re" --arg footer "$footer_re" '
-      def header: (. // "") | split(" ")[0];
-      def canonical: header | test($canon);
-      def malformed: (header | test($canon) | not) and (header | contains("!"));
-      def footer: (. // "") | test($footer);
-      (. // []) as $c
-      | [
-          ($c | length),
-          ([$c[] | select((.messageHeadline // "") | canonical)] | length),
-          ([$c[] | select((.messageHeadline // "") | malformed)] | length),
-          ([$c[] | select((.messageBody // "") | footer)] | length)
-        ] | @tsv
-    ')
+  read -r n_commits n_canonical n_malformed n_footer < <(breaking_count_commits "$commits_json")
   # shellcheck disable=SC2016  # $canon/$footer are jq variables passed with --arg
   commit_rows="$(printf '%s' "$commits_json" | jq -r \
     --arg canon "$canonical_subject_re" --arg footer "$footer_re" '
@@ -532,49 +536,60 @@ breaking_guard() {
       | "         \(.oid[0:8])  \(.messageHeadline)\(if ((.messageBody // "") | footer) then " [footer]" else "" end)"
     ')"
 
-  if [[ "$merge_strategy" == "squash" ]]; then
-    if (( n_commits == 1 )); then
-      # Effective surface: the single commit subject. The title is discarded.
-      if (( n_canonical > 0 )); then
-        return 0
-      fi
-      if (( n_malformed > 0 )); then
+  local verdict
+  verdict="$(breaking_verdict "$merge_strategy" "$n_commits" "$title_kind" \
+    "$n_canonical" "$n_malformed" "$n_footer")"
+
+  # The verdict order in the library is the priority; every token is mapped —
+  # an unmapped token is a defect here, not a pass. The refusal texts are the
+  # same the #2320/#2327 harnesses pin.
+  case "$verdict" in
+    ok)
+      return 0
+      ;;
+    commit-malformed)
+      if [[ "$merge_strategy" == "squash" ]]; then
         refuse "the only commit's subject has a malformed breaking marker." \
           "       commits:" "${commit_rows}" \
           "       Use 'type!:' or 'type(scope)!:' (the '!' goes immediately before the colon)." \
           "       'type!(scope):' is not parsed by release-plz."
       fi
-      if (( n_footer > 0 )); then
+      refuse "the commit subjects declare a breaking change, but the marker is malformed." \
+        "       commits:" "${commit_rows}" \
+        "       Use 'type!:' or 'type(scope)!:' in a commit subject." \
+        "       A merge commit preserves the commits, but not a malformed marker."
+      ;;
+    commit-footer)
+      if [[ "$merge_strategy" == "squash" ]]; then
         refuse "the only commit declares the break only with a 'BREAKING CHANGE:' footer." \
           "       commits:" "${commit_rows}" \
           "       The gate requires the '!' in the effective subject: 'type!:' or 'type(scope)!:'." \
           "       A footer alone is not accepted."
       fi
-      if [[ "$title_kind" == "malformed" ]]; then
-        refuse "this PR's title has a malformed breaking marker, and a 1-commit squash keeps the COMMIT subject anyway." \
-          "       PR title: ${pr_title}" \
-          "       Use 'type!:' or 'type(scope)!:' in the commit subject." \
-          "       'type!(scope):' is not parsed by release-plz."
-      fi
-      if [[ "$title_kind" != "none" ]]; then
-        refuse "this PR declares a BREAKING change only in its title, but a 1-commit squash keeps the COMMIT subject, not the title." \
-          "       PR title: ${pr_title}" \
-          "       GitHub builds the squash subject from the single commit when the PR has one commit; the title is dropped." \
-          "       Put the '!' in the commit subject (amend the commit), or drop it from the title if the change is not breaking."
-      fi
-      return 0
-    fi
-    # 2+ commits: the PR title is the squash subject.
-    if [[ "$title_kind" == "canonical" ]]; then
-      return 0
-    fi
-    if [[ "$title_kind" == "malformed" ]]; then
+      refuse "the commits declare the break only with a 'BREAKING CHANGE:' footer." \
+        "       commits:" "${commit_rows}" \
+        "       The gate requires the '!' in a commit subject: 'type!:' or 'type(scope)!:'." \
+        "       A footer alone is not accepted."
+      ;;
+    title-malformed-n1)
+      refuse "this PR's title has a malformed breaking marker, and a 1-commit squash keeps the COMMIT subject anyway." \
+        "       PR title: ${pr_title}" \
+        "       Use 'type!:' or 'type(scope)!:' in the commit subject." \
+        "       'type!(scope):' is not parsed by release-plz."
+      ;;
+    title-only-n1)
+      refuse "this PR declares a BREAKING change only in its title, but a 1-commit squash keeps the COMMIT subject, not the title." \
+        "       PR title: ${pr_title}" \
+        "       GitHub builds the squash subject from the single commit when the PR has one commit; the title is dropped." \
+        "       Put the '!' in the commit subject (amend the commit), or drop it from the title if the change is not breaking."
+      ;;
+    title-malformed-n2)
       refuse "this PR has ${n_commits} commits, so the squash keeps the PR title, and the title's breaking marker is malformed." \
         "       PR title: ${pr_title}" \
         "       Use 'type!:' or 'type(scope)!:' in the PR title." \
         "       'type!(scope):' is not parsed by release-plz."
-    fi
-    if (( n_canonical > 0 || n_malformed > 0 || n_footer > 0 )); then
+      ;;
+    commit-only-squash)
       if [[ $queue_mode -eq 1 ]]; then
         refuse "this PR has ${n_commits} commits, so the squash keeps the PR TITLE, but the breaking marker lives only in the commits." \
           "       commits:" "${commit_rows}" \
@@ -584,32 +599,18 @@ breaking_guard() {
           "       commits:" "${commit_rows}" \
           "       Put the '!' in the PR title, or re-run with --merge to preserve the commits."
       fi
-    fi
-    return 0
-  fi
-
-  # MERGE: the branch commits survive and the PR title is discarded.
-  if (( n_canonical > 0 )); then
-    return 0
-  fi
-  if (( n_malformed > 0 )); then
-    refuse "the commit subjects declare a breaking change, but the marker is malformed." \
-      "       commits:" "${commit_rows}" \
-      "       Use 'type!:' or 'type(scope)!:' in a commit subject." \
-      "       A merge commit preserves the commits, but not a malformed marker."
-  fi
-  if (( n_footer > 0 )); then
-    refuse "the commits declare the break only with a 'BREAKING CHANGE:' footer." \
-      "       commits:" "${commit_rows}" \
-      "       The gate requires the '!' in a commit subject: 'type!:' or 'type(scope)!:'." \
-      "       A footer alone is not accepted."
-  fi
-  if [[ "$title_kind" != "none" ]]; then
-    refuse "this PR's only breaking marker is in its title, but a merge commit DISCARDS the PR title." \
-      "       PR title: ${pr_title}" \
-      "       Put the '!' in a commit subject; that is the only surface a merge commit keeps."
-  fi
-  return 0
+      ;;
+    title-only-merge)
+      refuse "this PR's only breaking marker is in its title, but a merge commit DISCARDS the PR title." \
+        "       PR title: ${pr_title}" \
+        "       Put the '!' in a commit subject; that is the only surface a merge commit keeps."
+      ;;
+    *)
+      # Fail closed: the matrix returned something this consumer does not know.
+      echo "error: unknown breaking-surface verdict '${verdict}' (library/consumer drift)." >&2
+      exit 4
+      ;;
+  esac
 }
 
 guard_meta="$(read_breaking_meta)"

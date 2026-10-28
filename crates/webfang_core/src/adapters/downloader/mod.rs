@@ -335,9 +335,14 @@ impl Downloader {
     ) {
         self.downloaded_urls.insert(url.clone(), cell);
         if self.asset_cache_capacity != usize::MAX {
-            if let Ok(mut order) = self.asset_cache_order.lock() {
-                order.push_new(url);
-            }
+            // A poisoned ledger still grants exclusive access, and recovering
+            // it keeps FIFO eviction working; skipping the push would leave the
+            // cache unbounded for the rest of the run.
+            let mut order = self
+                .asset_cache_order
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            order.push_new(url);
         }
         self.evict_over_capacity();
     }
@@ -352,9 +357,12 @@ impl Downloader {
         {
             return;
         }
-        let Ok(mut order) = self.asset_cache_order.lock() else {
-            return; // poisoned: keep serving, eviction is best-effort
-        };
+        // Recover rather than skip: the guard still grants exclusive access, and
+        // a poisoned ledger that stops evicting turns a bounded cache unbounded.
+        let mut order = self
+            .asset_cache_order
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Eviction classes:
         // - initialized cell -> evictable (normal FIFO victim),
         // - uninitialized + actively downloading (`in_flight_downloads`) ->
@@ -502,9 +510,13 @@ impl Downloader {
         // legacy path skips the ledger entirely: zero extra allocations, zero
         // mutex traffic, byte-identical behavior.
         if self.asset_cache_capacity != usize::MAX {
-            if let Ok(mut order) = self.asset_cache_order.lock() {
-                order.push_new(key.to_string());
-            }
+            // Same recovery as `register`: a poisoned ledger must not disable
+            // eviction for the rest of the run.
+            let mut order = self
+                .asset_cache_order
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            order.push_new(key.to_string());
         }
         self.evict_over_capacity();
 

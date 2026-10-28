@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for AX-tree DTOs, observability, and Spanish error
 //! messages.
 

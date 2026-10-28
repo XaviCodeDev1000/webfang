@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Exit code integration tests
 //!
 //! Verifies that the CLI returns correct exit codes for:

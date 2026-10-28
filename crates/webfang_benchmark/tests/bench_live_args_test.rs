@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Slice-2 `bench_live` argument validation (NFR-4): the CLI must refuse
 //! anything but an explicit `--target <firecrawl|crawl4ai>` plus at most the
 //! explicit opt-in flag, and must expose the parsed decision as data so the

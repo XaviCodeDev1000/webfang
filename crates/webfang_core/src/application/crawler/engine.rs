@@ -129,6 +129,15 @@ pub const TERMINATION_REGISTRATION_REJECTED: &str =
 /// hung worker.
 const SHUTDOWN_GRACE_SECS: u64 = 10;
 
+/// Drain grace after a FAILED loop (#2338).
+///
+/// A failed loop already ran `cancel_run()` (#2313) and carries its reason:
+/// responsive workers are unwinding and finish within this grace, and the
+/// wedged one was already declared hung — draining it again at the full
+/// [`worker_wait_bound`] doubles the failure latency for zero information.
+/// The failure is reported at detection + this grace, not detection + bound.
+const FAILED_RUN_DRAIN_GRACE: Duration = Duration::from_secs(1);
+
 /// Timeout-carrying phases a single worker pays before it can finish (#2313).
 ///
 /// A fetch is not one timeout: the connect has its own cap (10s in
@@ -194,15 +203,19 @@ struct PauseWatchdog {
 }
 
 impl PauseWatchdog {
-    /// Production thresholds: 5 min to alert, 30 min to give up.
-    ///
-    /// The ceiling matches the `global-timeout` of the `default` nextest
-    /// profile, so a run that would be killed by its own harness anyway
-    /// reports the reason first. Tests inject millisecond thresholds instead.
-    const PRODUCTION: Self = Self {
-        alert_after: Duration::from_secs(300),
-        give_up_after: Duration::from_secs(1800),
-    };
+    /// Derive the pause thresholds from the operator configuration (#2338):
+    /// a legitimately longer RAM-pressure ride-out raises
+    /// `pause_give_up_after_secs` instead of losing the crawl to a hardcoded
+    /// 30-minute ceiling. The defaults (300/1800) live on `CrawlerConfig`;
+    /// the 30-min give-up ceiling matches the `global-timeout` of the
+    /// `default` nextest profile, so a run that would be killed by its own
+    /// harness anyway reports the reason first.
+    fn from_config(config: &CrawlerConfig) -> Self {
+        Self {
+            alert_after: Duration::from_secs(config.pause_alert_after_secs),
+            give_up_after: Duration::from_secs(config.pause_give_up_after_secs),
+        }
+    }
 
     /// Classify a pause by how long it has lasted.
     fn verdict(&self, paused_for: Duration) -> PauseVerdict {
@@ -710,6 +723,9 @@ impl Engine {
     /// The loop never ends on its own, so its [`tokio::task::JoinHandle`] is kept on the
     /// engine and aborted in [`Self::shutdown`] — same lifecycle as
     /// `signal_handle` (#1941).
+    // Supervised: the JoinHandle is stored in `self.autoscale_handle` and
+    // aborted in `Self::shutdown` (#1941 lifecycle).
+    #[allow(clippy::disallowed_methods)]
     pub fn with_autoscale(mut self) -> Self {
         let level = Arc::new(SharedConcurrencyLevel::new());
         let level_clone = Arc::clone(&level);
@@ -863,6 +879,9 @@ impl Engine {
     /// cancel. The decision is the shared one ([`TerminationOutcome`]), the
     /// same one the CLI shutdown guard makes, and both sites say the same
     /// thing ([`TERMINATION_REGISTRATION_REJECTED`]) — #1835.
+    // Supervised: the returned JoinHandle is stored by the caller and
+    // aborted at shutdown — same lifecycle as `signal_handle` (#1941).
+    #[allow(clippy::disallowed_methods)]
     fn spawn_signal_handler(
         shutdown: ShutdownSignal,
         cancel: CancellationToken,
@@ -1008,8 +1027,9 @@ impl Engine {
         // Progress tracking start (issue #356 Fase 4)
         let start = std::time::Instant::now();
 
-        // Bound every worker wait (#509): the longest legitimate wait is a
-        // fetch (timeout_secs) or a rate-limit token (delay_ms), plus grace.
+        // Bound every worker wait (#509): rate-limit token + both fetch
+        // timeout phases + grace; the post-fetch pipeline rides on the grace
+        // (residual risk documented on `worker_wait_bound`, #2338).
         let worker_wait_bound = Self::worker_wait_bound(&config_clone);
 
         // A stall is captured here and reported after the drain.
@@ -1019,17 +1039,25 @@ impl Engine {
                 &task_ctx,
                 start,
                 worker_wait_bound,
-                PauseWatchdog::PRODUCTION,
+                PauseWatchdog::from_config(&config_clone),
             )
             .await;
 
         // Wait for remaining tasks — bounded, then abort stragglers, so a
-        // shutdown can never hang on a blocked worker (#509).
+        // shutdown can never hang on a blocked worker (#509). A FAILED loop
+        // gets only the short grace (#2338): `cancel_run` already fired and
+        // the failure reason is known, so the wedged worker must not cost a
+        // second full bound before the error surfaces.
+        let drain_bound = if loop_result.is_err() {
+            FAILED_RUN_DRAIN_GRACE
+        } else {
+            worker_wait_bound
+        };
         Self::drain_tasks(
             &mut tasks,
             &self.error_count,
             &self.error_breakdown,
-            worker_wait_bound,
+            drain_bound,
         )
         .await;
 
@@ -1039,7 +1067,11 @@ impl Engine {
         drop(task_ctx);
 
         // A stalled loop is a FAILED run (#2313); the checkpoint stays for resume.
-        loop_result?;
+        // #2338: the failure carries the results the crawl DID collect, so the
+        // caller can persist them instead of discarding completed work.
+        if let Err(loop_err) = loop_result {
+            return Err(self.fail_run_with_partials(loop_err).await);
+        }
 
         // Final checkpoint verdict: a fully-completed crawl (no shutdown, no
         // pending work left, not truncated by max_pages) deletes its
@@ -1061,11 +1093,9 @@ impl Engine {
 
         // Collect results via mpsc channel — now all Senders are dropped,
         // so the receiver worker will drain and terminate.
-        let collected_urls = std::mem::take(&mut self.collector).collect().await;
-        let total_pages = collected_urls.len();
-        let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
-
-        let breakdown = self.collect_error_breakdown();
+        let summary = self.collect_result_summary().await;
+        let total_pages = summary.total_pages;
+        let errors = summary.errors;
 
         // Structured crawl summary (issue #356 Fase 4, error breakdown #374)
         self.log_crawl_summary(total_pages, errors, start);
@@ -1087,12 +1117,48 @@ impl Engine {
             "crawl session closed"
         );
 
-        Ok(CrawlResult::new(
-            collected_urls,
-            total_pages,
-            errors,
-            breakdown,
-        ))
+        Ok(summary)
+    }
+
+    /// Snapshot the collector and the error counters into a [`CrawlResult`].
+    ///
+    /// Shared by the success tail of [`Self::run`] and
+    /// [`Self::fail_run_with_partials`]: the summary a caller sees must be
+    /// identical on both paths (#2338) — one extraction, one place.
+    ///
+    /// Callers must have released the task context first, so every collector
+    /// sender is gone and the mpsc drain terminates.
+    async fn collect_result_summary(&mut self) -> CrawlResult {
+        let collected_urls = std::mem::take(&mut self.collector).collect().await;
+        let total_pages = collected_urls.len();
+        let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
+        let breakdown = self.collect_error_breakdown();
+        CrawlResult::new(collected_urls, total_pages, errors, breakdown)
+    }
+
+    /// Collect what the run completed and wrap `err` so the partial results
+    /// travel with the failure (#2338).
+    ///
+    /// The caller already drained the worker set and dropped the task context
+    /// before this runs, so the collector's senders are gone and `collect()`
+    /// terminates. The run stays FAILED: the payload does not soften the class
+    /// (matrix row 34), and the checkpoint keeps for resume because the
+    /// session verdict after the loop never executes on this return.
+    ///
+    /// The summary event is deliberately NOT the canonical `crawl completed`
+    /// message — the benchmark aggregator keys on that message and a failed
+    /// run must not look like a completed one.
+    async fn fail_run_with_partials(&mut self, err: CrawlError) -> CrawlError {
+        let partial = self.collect_result_summary().await;
+        warn!(
+            collected = partial.total_pages,
+            reason = %err,
+            "crawl ended early — partial results travel with the failure"
+        );
+        CrawlError::PartialRun {
+            message: err.to_string(),
+            partial,
+        }
     }
 
     /// Load checkpoint state if resuming (visited, queued, banned domains and
@@ -1157,6 +1223,15 @@ impl Engine {
     /// Bound every worker wait (#509): the longest legitimate wait is one fetch
     /// — connect plus request, each with its own timeout — or a rate-limit
     /// token (delay_ms), plus grace.
+    ///
+    /// The worker lifecycle is rate-limit wait + fetch + post-fetch pipeline.
+    /// The first two arms are covered above; the pipeline is deliberately NOT
+    /// given its own additive allowance (#2338): it is CPU-bound
+    /// `spawn_blocking` work on an already-fetched body, normally far faster
+    /// than the grace, and inventing a pipeline constant without a
+    /// measurement would be fabrication. The documented residual risk: a
+    /// pipeline that runs longer than the grace is classified as a stall and
+    /// fails the run — surfaced as such by [`Self::stalled`], never silently.
     ///
     /// See [`FETCH_TIMEOUT_PHASES`] for why the fetch arm is multiplied rather
     /// than taken at face value.
@@ -2156,12 +2231,31 @@ mod tests {
         std::num::NonZeroUsize::new(n).expect("test literal is non-zero")
     }
 
+    /// Watchdog for the loop-level tests: thresholds far beyond any test
+    /// duration, so only an injected millisecond watchdog decides verdicts.
+    /// Run-time values live on `CrawlerConfig` (#2338).
+    const TEST_WATCHDOG: PauseWatchdog = PauseWatchdog {
+        alert_after: Duration::from_secs(300),
+        give_up_after: Duration::from_secs(1800),
+    };
+
     /// Test helper: a session-built engine — the only construction path
     /// since P6-2 slice 4. Mirrors the former direct `(config, true)`
     /// construction exactly: robots ignored via the transport, static
     /// strategy, default transport knobs, no injected ports.
     fn session_engine(config: CrawlerConfig) -> Engine {
-        Engine::from_session(pool_session(config, None, false)).expect("engine must build")
+        Engine::from_session(pool_session(config, None, false, None)).expect("engine must build")
+    }
+
+    /// Test helper: a session-built engine with an injected pipeline — the
+    /// seam a test wedges to hold a worker past its wait bound through a
+    /// real async await point (#2338).
+    fn session_engine_with_pipeline(
+        config: CrawlerConfig,
+        pipeline: Arc<PipelineExecutor>,
+    ) -> Engine {
+        Engine::from_session(pool_session(config, None, false, Some(pipeline)))
+            .expect("engine must build")
     }
     use super::*;
     use crate::domain::budget::detector::FixedDetector;
@@ -2574,6 +2668,7 @@ mod tests {
         config: CrawlerConfig,
         pool: Option<Arc<FakeSessionPort>>,
         session_pool_enabled: bool,
+        pipeline: Option<Arc<PipelineExecutor>>,
     ) -> CrawlSession {
         // #1439: identity is a REQUIRED builder part (no silent mint), so
         // the pool-wiring proof supplies its own standalone root. The label
@@ -2600,7 +2695,7 @@ mod tests {
                 session_pool: pool.map(|p| p as Arc<dyn SessionPort>),
                 downloader_factory: None,
                 content_sink: None,
-                pipeline: None,
+                pipeline,
             })
             .identity(crate::application::crawler::session::CrawlIdentity {
                 root: CorrelationId::new(),
@@ -2633,8 +2728,9 @@ mod tests {
             .build();
         let pool = Arc::new(FakeSessionPort::default());
 
-        let mut engine = Engine::from_session(pool_session(config, Some(Arc::clone(&pool)), false))
-            .expect("engine must build from a pooled session");
+        let mut engine =
+            Engine::from_session(pool_session(config, Some(Arc::clone(&pool)), false, None))
+                .expect("engine must build from a pooled session");
         let result = engine.run().await.expect("crawl must complete");
         engine.shutdown().await;
 
@@ -2658,8 +2754,8 @@ mod tests {
         let seed = Url::parse("https://example.com").expect("valid seed URL");
         let config = CrawlerConfig::builder(seed).max_depth(0).build();
 
-        let engine =
-            Engine::from_session(pool_session(config, None, true)).expect("engine must build");
+        let engine = Engine::from_session(pool_session(config, None, true, None))
+            .expect("engine must build");
 
         let owned = engine
             .session
@@ -3346,7 +3442,7 @@ mod tests {
                 &task_ctx,
                 std::time::Instant::now(),
                 Duration::from_secs(1),
-                PauseWatchdog::PRODUCTION,
+                TEST_WATCHDOG,
             )
             .await
             .expect("a budget exit is not a stall");
@@ -3430,7 +3526,7 @@ mod tests {
                 &task_ctx,
                 std::time::Instant::now(),
                 bound,
-                PauseWatchdog::PRODUCTION,
+                TEST_WATCHDOG,
             ),
         )
         .await
@@ -3445,6 +3541,156 @@ mod tests {
             engine.cancel_token.is_cancelled(),
             "a stalled run must cancel the workers it is about to abandon"
         );
+    }
+
+    use crate::application::pipeline::{PipelineStage, ScrapedItem, StageOutcome};
+    use std::future::Future;
+    use std::pin::Pin;
+
+    /// A pipeline stage that never completes — the async wedge: the worker
+    /// awaits `process` forever, the same production shape as a hung stage
+    /// that ignores its own timeout and the cancel token (#2313). Unlike a
+    /// sync block, a pending future stays abortable, so the drain contract
+    /// stays exercisable.
+    struct NeverStage;
+
+    impl PipelineStage for NeverStage {
+        fn name(&self) -> &str {
+            "never"
+        }
+
+        fn process(
+            &self,
+            _item: ScrapedItem,
+        ) -> Pin<Box<dyn Future<Output = StageOutcome> + Send + '_>> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    /// #2338 (strict-TDD RED): a run a wedged worker kills must surface
+    /// `CrawlError::PartialRun`, not a bare `Internal`, so the caller keeps
+    /// whatever the crawl completed instead of discarding it. Also pins the
+    /// other half of the #2313 contract at the `run()` level: the loop error
+    /// propagates — deleting the `loop_result?` turns this test red.
+    ///
+    /// The latency assertion pins the single-bound contract: the run ends at
+    /// loop detection + one short drain grace (~12s here), never the bound
+    /// twice — the old shape burned a second full 12s bound draining the
+    /// worker it had just declared wedged. The 20s ceiling keeps ~7s of
+    /// headroom over the 13s floor (CI-load tolerant) and still sits clearly
+    /// below the old 24s shape, so either regression flips the assertion.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stalled_run_returns_partial_results_in_the_error() {
+        let _entry_off = entry_off();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("<html><body>seed</body></html>"),
+            )
+            .mount(&server)
+            .await;
+        let seed = Url::parse(&format!("{}/", server.uri())).expect("seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .max_depth(0)
+            .max_pages(10)
+            .concurrency(nz(1))
+            .timeout_secs(1)
+            .ignore_robots(true)
+            .build();
+        let bound = Engine::worker_wait_bound(&config);
+        let mut executor = PipelineExecutor::new();
+        executor.add_stage(Box::new(NeverStage));
+        let mut engine = session_engine_with_pipeline(config, Arc::new(executor));
+
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(40), engine.run())
+            .await
+            .expect("a stalled run must end within its own bounds");
+        let elapsed = started.elapsed();
+        let err = result.expect_err("a wedged worker must fail the run");
+        assert!(
+            err.to_string().contains("crawl stalled"),
+            "the failure must name the stall, got: {err}"
+        );
+        let CrawlError::PartialRun { message, partial } = &err else {
+            panic!("the stall must travel as PartialRun so partial results survive, got: {err:?}");
+        };
+        assert!(
+            message.contains("crawl stalled"),
+            "the rendered reason must be preserved, got: {message}"
+        );
+        assert!(
+            partial.is_empty(),
+            "no page reaches the collector through the wedged pipeline"
+        );
+        assert!(
+            elapsed < Duration::from_secs(20),
+            "stall latency is one wait bound ({:?}) plus a short drain grace, never the bound twice; got {elapsed:?}",
+            bound
+        );
+    }
+
+    /// #2338: the partial payload is the summary a completed run would have
+    /// returned, truncated to what the collector already held — URLs, error
+    /// count and breakdown, with the rendered failure preserved verbatim.
+    #[tokio::test]
+    async fn fail_run_with_partials_carries_collected_urls() {
+        use crate::application::crawler::collector::CrawlMessage;
+        use crate::domain::DiscoveredUrl;
+
+        let seed = Url::parse("https://example.com").expect("valid seed URL");
+        let mut engine = session_engine(CrawlerConfig::builder(seed).build());
+        let collected = DiscoveredUrl::html(
+            Url::parse("https://example.com/page").expect("valid page URL"),
+            0,
+            Url::parse("https://example.com/").expect("valid parent URL"),
+        );
+        engine
+            .collector
+            .send(CrawlMessage::success(collected))
+            .await
+            .expect("collector channel must be open");
+
+        let err = engine
+            .fail_run_with_partials(CrawlError::Internal("crawl stalled: test".to_string()))
+            .await;
+
+        let CrawlError::PartialRun { message, partial } = err else {
+            panic!("the failure must carry the partials, got: {err:?}");
+        };
+        assert!(
+            message.contains("crawl stalled"),
+            "the rendered reason must be preserved, got: {message}"
+        );
+        assert_eq!(partial.total_pages, 1, "the collected page must survive");
+        assert_eq!(partial.urls.len(), 1);
+    }
+
+    /// #2338: `run()` derives the pause watchdog from the operator config —
+    /// raising `pause_give_up_after_secs` must reach the verdicts, not stay
+    /// behind the hardcoded 30-minute ceiling the tests still carry.
+    #[test]
+    fn pause_watchdog_comes_from_the_crawler_config() {
+        let seed = Url::parse("https://example.com").expect("valid seed URL");
+        let config = CrawlerConfig::builder(seed)
+            .pause_alert_after_secs(30)
+            .pause_give_up_after_secs(3600)
+            .build();
+
+        let watchdog = PauseWatchdog::from_config(&config);
+        assert_eq!(watchdog.alert_after, Duration::from_secs(30));
+        assert_eq!(watchdog.give_up_after, Duration::from_secs(3600));
+        assert!(
+            matches!(
+                watchdog.verdict(Duration::from_secs(3599)),
+                PauseVerdict::Report
+            ),
+            "a pause inside the raised ceiling is reported, never given up on"
+        );
+        assert!(matches!(
+            watchdog.verdict(Duration::from_secs(3600)),
+            PauseVerdict::GiveUp
+        ));
     }
 
     /// #2313: the shape of the four flaky tests — `max_depth(0)` empties the
@@ -3477,7 +3723,7 @@ mod tests {
                 &task_ctx,
                 std::time::Instant::now(),
                 Duration::from_secs(1),
-                PauseWatchdog::PRODUCTION,
+                TEST_WATCHDOG,
             ),
         )
         .await

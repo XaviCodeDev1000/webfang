@@ -35,6 +35,9 @@ impl ShutdownGuard {
     #[must_use]
     pub fn install() -> Self {
         let token = CancellationToken::new();
+        // Supervised: ShutdownGuard owns the handle and aborts the listener
+        // task on Drop (see the struct doc above).
+        #[allow(clippy::disallowed_methods)]
         let handle = tokio::spawn(wait_for_signal(token.clone()).in_current_span());
         Self { token, handle }
     }

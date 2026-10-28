@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Resume mode tests — StateStore persistence and filtering contracts.
 //!
 //! Tests `StateStore` (create, save, load) and `ExportState`

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! FR-5 / AC-4.1 / AC-5.2 groundwork — Markdown report generation with
 //! enforced tier labeling, verbatim assumption headers, and the ADR-B4
 //! two-block reproducibility contract (`<!-- volatile -->` sentinels).

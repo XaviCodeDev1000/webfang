@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use clap::Parser;
 use proptest::prelude::*;
 use std::path::{Path, PathBuf};

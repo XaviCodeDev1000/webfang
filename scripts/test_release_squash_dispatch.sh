@@ -42,8 +42,8 @@ mkdir -p "$BIN" "$STATE"
 # --jq), so the fixture must be a JSON array of {name, size} objects.
 # Audit B8: name + size are BOTH load-bearing — an asset present at size 0 is a
 # corrupt upload, not a complete release — and every asset needs its cosign
-# <asset>.sigstore.json bundle, so "complete" is the 7 canonical assets PLUS
-# their 7 bundles. A list of bare names cannot express any of that.
+# <asset>.sigstore.json bundle, so "complete" is the 15 canonical assets PLUS
+# their 15 bundles. A list of bare names cannot express any of that.
 # write_assets <file> name:size [name:size ...]
 write_assets() {
   local f="$1"; shift
@@ -69,6 +69,22 @@ write_complete_assets() {
     webfang-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
     webfang-x86_64-pc-windows-msvc.zip:4567 \
     webfang-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+    webfang-mcp-x86_64-unknown-linux-gnu.tar.gz:1234 \
+    webfang-mcp-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-aarch64-unknown-linux-gnu.tar.gz:2345 \
+    webfang-mcp-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-aarch64-apple-darwin.tar.gz:3456 \
+    webfang-mcp-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+    webfang-mcp-x86_64-pc-windows-msvc.zip:4567 \
+    webfang-mcp-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+    webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz:1234 \
+    webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz:2345 \
+    webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+    webfang-mcp-stdio-aarch64-apple-darwin.tar.gz:3456 \
+    webfang-mcp-stdio-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+    webfang-mcp-stdio-x86_64-pc-windows-msvc.zip:4567 \
+    webfang-mcp-stdio-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
     SHA256SUMS.txt:89 \
     SHA256SUMS.txt.sigstore.json:567 \
     webfang.spdx.json:1011 \

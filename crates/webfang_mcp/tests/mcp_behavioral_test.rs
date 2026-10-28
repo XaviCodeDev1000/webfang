@@ -1,3 +1,10 @@
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)
+)]
+
 //! MCP Server behavioral tests
 //!
 //! End-to-end tests that start the MCP server and verify HTTP-level behavior:

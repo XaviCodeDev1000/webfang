@@ -109,17 +109,34 @@ impl ConfigDefaults {
     /// `NotFound` is the ONLY silent degradation: it means "no config yet",
     /// which is the normal state of a fresh install. Every other reason the
     /// file is unusable — `PermissionDenied`, a path that is a directory,
-    /// invalid UTF-8, malformed TOML — logs a loud `error!` carrying the path
-    /// before falling back. Before #1659 a `let Ok(content) = … else { return
-    /// Self::default() }` swallowed all of them indistinguishably, so a
-    /// `config.toml` that was never read produced a run indistinguishable
+    /// invalid UTF-8, malformed TOML — warns on stderr with the reason
+    /// (Spanish, naming the path) before falling back, and additionally logs
+    /// a structured `error!`. Before #1659 a `let Ok(content) = … else {
+    /// return Self::default() }` swallowed all of them indistinguishably, so
+    /// a `config.toml` that was never read produced a run indistinguishable
     /// from one where it was.
+    ///
+    /// The stderr warning is not redundant with the tracing event (#2242):
+    /// the CLI loads the platform default BEFORE `init_logging_dual` installs
+    /// the subscriber, so the structured event alone would be silently
+    /// discarded. stderr reaches the operator at argv time, the same channel
+    /// the CLI's `warn_unreadable_state` uses; the tracing event stays for
+    /// every caller that already has a subscriber (the MCP daemon, the CLI's
+    /// later provider reloads). The two callers may both warn in one run —
+    /// the message is short and the file is equally unusable at both load
+    /// sites.
     pub fn load(path: &Path) -> Self {
         match Self::read_and_parse(path) {
             Ok(config) => config,
             // The benign case, and deliberately the only silent one.
             Err(ConfigLoadError::NotFound { .. }) => Self::default(),
             Err(e) => {
+                eprintln!(
+                    // The remediation line goes after a newline: `{e}` is
+                    // multi-line for the TOML variant (the parser's snippet).
+                    "Advertencia: {e}\nSe ignora el archivo y se continúa con los valores \
+                     predeterminados; corríjalo o elimínelo antes de reintentar."
+                );
                 tracing::error!(
                     path = %path.display(),
                     error = %e,
