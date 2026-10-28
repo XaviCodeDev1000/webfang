@@ -1019,12 +1019,24 @@ impl Container {
         }
 
         if let Some(ref path) = opts.elastic.output_vectors {
+            // #2429: every emitted record carries the model identity of the
+            // port this run embeds with, so vectors stay comparable across a
+            // result set. `with_vault_ports` runs before this wiring, so the
+            // port is already injected when a sink is requested.
+            let provenance = self.embedding_port.get().map(|port| {
+                crate::infrastructure::stream::EmbeddingProvenance {
+                    model_id: port.model_id().to_string(),
+                    embedding_dim: port.embedding_dim(),
+                }
+            });
             // #1118: the wire path is validated into a `SinkPath` at the
             // boundary. #1106: `StreamRepository::new` does create_dir_all +
             // File::create synchronously — same reasoning, off the executor.
             let sink_path = crate::infrastructure::stream::SinkPath::parse(path)?;
             let sink = tokio::task::spawn_blocking(move || {
-                crate::infrastructure::stream::StreamRepository::new(sink_path)
+                crate::infrastructure::stream::StreamRepository::new_with_provenance(
+                    sink_path, provenance,
+                )
             })
             .await
             .map_err(|e| {

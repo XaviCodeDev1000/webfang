@@ -87,6 +87,15 @@ pub trait EmbeddingPort: Send + Sync {
     /// Both supported models (Granite-97M and Granite-311M) return 384.
     fn embedding_dim(&self) -> usize;
 
+    /// Stable identifier of the model behind this port (e.g. `"granite-97m"`,
+    /// or the provider-declared model name for remote endpoints).
+    ///
+    /// This identity is what lands in exported [`crate::infrastructure::stream::VectorRecord`]
+    /// lines (#2429): without it, vectors produced by different models are
+    /// indistinguishable inside one store and similarity search returns
+    /// silently wrong neighbours after a model switch.
+    fn model_id(&self) -> &str;
+
     /// Returns a reference to the concrete implementation as `&dyn Any`,
     /// enabling downcasting for implementation-specific metrics.
     ///
@@ -215,6 +224,10 @@ mod tests {
             self.dim
         }
 
+        fn model_id(&self) -> &str {
+            "mock-embedder"
+        }
+
         fn as_any(&self) -> &dyn Any {
             self
         }
@@ -260,6 +273,17 @@ mod tests {
         fn assert_dyn_compatible(_: &dyn EmbeddingPort) {}
         let embedder = MockEmbedder { dim: 384 };
         assert_dyn_compatible(&embedder);
+    }
+
+    /// #2429: every port must be able to name the model that produces its
+    /// vectors — that identity is what lands in the exported `VectorRecord`.
+    #[test]
+    fn model_id_exposes_the_model_identity() {
+        let embedder = MockEmbedder { dim: 384 };
+        assert!(
+            !embedder.model_id().is_empty(),
+            "model_id must be non-empty"
+        );
     }
 
     /// The newtype hands back the SAME port it was built from, so a caller

@@ -395,6 +395,10 @@ mod tests {
             3
         }
 
+        fn model_id(&self) -> &str {
+            "fake-embedding"
+        }
+
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -425,6 +429,10 @@ mod tests {
 
         fn embedding_dim(&self) -> usize {
             3
+        }
+
+        fn model_id(&self) -> &str {
+            "mock-embedding"
         }
 
         fn as_any(&self) -> &dyn std::any::Any {

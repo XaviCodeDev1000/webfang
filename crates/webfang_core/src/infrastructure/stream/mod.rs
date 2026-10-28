@@ -12,11 +12,25 @@
 //! ```json
 //! {"url":"...","sha256_hex":"<64 hex>","title":null,
 //!  "chunk_text":"...","embedding":[0.01, … 384 floats …],
+//!  "embedding_model":"granite-97m","embedding_dim":384,"chunk_index":0,
 //!  "metadata":null,"timestamp":"2026-07-11T12:00:00Z"}
 //! ```
 //!
 //! The embedding array is the **raw 384-dim** vector (no rounding, no base64) so
 //! downstream RAG pipelines can ingest it directly.
+//!
+//! # Schema compatibility (#2429)
+//!
+//! `embedding_model`, `embedding_dim` and `chunk_index` are **additive
+//! optional fields** (`#[serde(default)]`): lines written before #2429 still
+//! deserialize, with the new fields reading as `null`. There is no format
+//! version bump. New writers always emit `chunk_index`, and emit
+//! `embedding_model`/`embedding_dim` whenever the run wired an embedding port
+//! into the container; a `null` there means "this run had
+//! no model identity available" and downstream consumers must treat such
+//! vectors as incomparable with any provenanced vector. A record whose
+//! `embedding.len()` contradicts its `embedding_dim` is rejected at both
+//! boundaries ([`VectorRecord::from_line`] on read, the sink on write).
 //!
 //! # Key decisions (T3-C design)
 //!
@@ -72,11 +86,67 @@ pub struct VectorRecord {
     /// Raw embedding vector (e.g. 384 floats for all-MiniLM-L6-v2). Empty only
     /// when the record would have been omitted (Q3).
     pub embedding: Vec<f32>,
+    /// Stable identifier of the model that produced `embedding` (#2429), or
+    /// `null` when the run had no model identity available. Vectors from
+    /// different models are never comparable: consumers must group by this
+    /// field before running similarity search.
+    #[serde(default)]
+    pub embedding_model: Option<String>,
+    /// Dimensionality declared for `embedding_model` (#2429), or `null`.
+    /// A record whose `embedding.len()` disagrees with this is rejected at
+    /// both the read ([`VectorRecord::from_line`]) and the write boundary.
+    #[serde(default)]
+    pub embedding_dim: Option<usize>,
+    /// Zero-based position of the chunk within its source document (#2429),
+    /// as handed to [`VectorRepository::save_chunk`] by the ingestion
+    /// pipeline. Lets a consumer reconstruct document order from an unordered
+    /// result set.
+    #[serde(default)]
+    pub chunk_index: Option<i64>,
     /// Optional arbitrary metadata (reserved for future use).
     #[serde(default)]
     pub metadata: Value,
     /// RFC3339 timestamp of emission.
     pub timestamp: String,
+}
+
+/// Model identity attached to every record a [`StreamRepository`] emits (#2429).
+///
+/// Captured once, at sink construction, from the container's
+/// [`EmbeddingPort`](crate::domain::embedding_port::EmbeddingPort): one run
+/// embeds with exactly one model, so the identity is a property of the sink,
+/// not of each chunk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddingProvenance {
+    /// Stable model identifier (e.g. `"granite-97m"`, or the
+    /// provider-declared model name for remote endpoints).
+    pub model_id: String,
+    /// Dimensionality the model emits. The sink rejects any vector whose
+    /// length disagrees with this.
+    pub embedding_dim: usize,
+}
+
+impl VectorRecord {
+    /// Parse and validate one JSONL line — the read boundary of the format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScraperError::Serialization`] for malformed JSON, and
+    /// [`ScraperError::Ingestion`] when a present `embedding_dim` disagrees
+    /// with `embedding.len()` (#2429): such a vector is silently unusable for
+    /// similarity search and must not enter a store.
+    pub fn from_line(line: &str) -> Result<Self, ScraperError> {
+        let record: Self = serde_json::from_str(line)?;
+        if let Some(dim) = record.embedding_dim {
+            if record.embedding.len() != dim {
+                return Err(ScraperError::Ingestion(format!(
+                    "el record declara embedding_dim {dim} pero su vector tiene {} dimensiones",
+                    record.embedding.len()
+                )));
+            }
+        }
+        Ok(record)
+    }
 }
 
 /// Where a [`StreamRepository`] writes (#1118).
@@ -141,6 +211,10 @@ pub struct StreamRepository {
     /// and read by [`VectorRepository::save_chunk`] (the chunk call only receives
     /// `resource_url`, not the title).
     titles: Arc<Mutex<HashMap<String, String>>>,
+    /// Model identity stamped into every emitted record (#2429). `None` when
+    /// the run wired no `EmbeddingPort` — records then carry `null`
+    /// provenance fields.
+    provenance: Option<Arc<EmbeddingProvenance>>,
     /// Injected clock for deterministic timestamps in tests.
     clock: Arc<dyn UtcClock>,
 }
@@ -169,6 +243,34 @@ impl StreamRepository {
     ///
     /// Returns [`ScraperError::Io`] if the file cannot be created.
     pub fn with_clock(path: SinkPath, clock: Arc<dyn UtcClock>) -> Result<Self, ScraperError> {
+        Self::with_clock_and_provenance(path, clock, None)
+    }
+
+    /// Open the JSONL sink stamping `provenance` into every record (#2429).
+    ///
+    /// One run embeds with exactly one model, so the identity is captured
+    /// once, here, from the container's `EmbeddingPort`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScraperError::Io`] if the file cannot be created.
+    pub fn new_with_provenance(
+        path: SinkPath,
+        provenance: Option<EmbeddingProvenance>,
+    ) -> Result<Self, ScraperError> {
+        Self::with_clock_and_provenance(path, Arc::new(SystemUtcClock), provenance)
+    }
+
+    /// Open the JSONL sink with an injected clock and record provenance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScraperError::Io`] if the file cannot be created.
+    pub fn with_clock_and_provenance(
+        path: SinkPath,
+        clock: Arc<dyn UtcClock>,
+        provenance: Option<EmbeddingProvenance>,
+    ) -> Result<Self, ScraperError> {
         let boxed: Box<dyn Write + Send> = match path {
             SinkPath::Stdout => Box::new(std::io::stdout()),
             SinkPath::File(file) => {
@@ -194,6 +296,7 @@ impl StreamRepository {
         Ok(Self {
             writer: Arc::new(Mutex::new(std::io::BufWriter::new(boxed))),
             titles: Arc::new(Mutex::new(HashMap::new())),
+            provenance: provenance.map(Arc::new),
             clock,
         })
     }
@@ -205,9 +308,19 @@ impl StreamRepository {
     /// The wrapping matches [`StreamRepository::new`] exactly.
     #[cfg(test)]
     pub(crate) fn from_writer(w: Box<dyn Write + Send>) -> Self {
+        Self::from_writer_with_provenance(w, None)
+    }
+
+    /// Build a sink over an arbitrary writer with record provenance (#2429).
+    #[cfg(test)]
+    pub(crate) fn from_writer_with_provenance(
+        w: Box<dyn Write + Send>,
+        provenance: Option<EmbeddingProvenance>,
+    ) -> Self {
         Self {
             writer: Arc::new(Mutex::new(std::io::BufWriter::new(w))),
             titles: Arc::new(Mutex::new(HashMap::new())),
+            provenance: provenance.map(Arc::new),
             clock: Arc::new(SystemUtcClock),
         }
     }
@@ -250,7 +363,7 @@ impl VectorRepository for StreamRepository {
         &'a self,
         id: &'a str,
         resource_url: &'a str,
-        _chunk_index: i64,
+        chunk_index: i64,
         content: &'a str,
         embedding: Option<&'a [f32]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
@@ -261,9 +374,27 @@ impl VectorRepository for StreamRepository {
             None => return Box::pin(async { Ok(()) }),
         };
 
+        // #2429: a vector whose length contradicts the sink's declared model
+        // dimension is silently unusable for similarity search — reject it
+        // here instead of writing an incomparable record.
+        if let Some(provenance) = &self.provenance {
+            if embedding.len() != provenance.embedding_dim {
+                return Box::pin(async move {
+                    Err(ScraperError::Ingestion(format!(
+                        "el chunk {chunk_index} de '{resource_url}' tiene un vector de {} dimensiones \
+                         pero el modelo '{}' declara {}",
+                        embedding.len(),
+                        provenance.model_id,
+                        provenance.embedding_dim
+                    )))
+                });
+            }
+        }
+
         let titles = Arc::clone(&self.titles);
         let writer = Arc::clone(&self.writer);
         let clock = Arc::clone(&self.clock);
+        let provenance = self.provenance.clone();
         let id = id.to_string();
         let resource_url = resource_url.to_string();
         let content = content.to_string();
@@ -297,6 +428,9 @@ impl VectorRepository for StreamRepository {
                     title,
                     chunk_text: content,
                     embedding,
+                    embedding_model: provenance.as_ref().map(|p| p.model_id.clone()),
+                    embedding_dim: provenance.as_ref().map(|p| p.embedding_dim),
+                    chunk_index: Some(chunk_index),
                     metadata: Value::Null,
                     timestamp: clock.now().to_rfc3339(),
                 };
@@ -658,5 +792,99 @@ mod tests {
             SinkPath::parse("out/vectors.jsonl"),
             Ok(SinkPath::File(_))
         ));
+    }
+
+    // ---- #2429: embedding provenance and chunk position -------------------
+
+    /// Sink over a temp file carrying fixed provenance (3-dim mock model).
+    fn provenance_sink(path: &str) -> StreamRepository {
+        StreamRepository::from_writer_with_provenance(
+            Box::new(std::fs::File::create(path).expect("temp file")),
+            Some(EmbeddingProvenance {
+                model_id: "granite-97m".to_string(),
+                embedding_dim: 3,
+            }),
+        )
+    }
+
+    /// Read back the single JSONL record written to `path`.
+    fn last_record(path: &str) -> VectorRecord {
+        let contents = std::fs::read_to_string(path).expect("read stream");
+        let line = contents.lines().next().expect("one JSONL line");
+        VectorRecord::from_line(line).expect("valid JSONL")
+    }
+
+    /// #2429: every emitted record must say which model produced its vector,
+    /// at which dimension, and where the chunk sat in the document — the
+    /// identity that makes vectors comparable across a result set.
+    #[tokio::test]
+    async fn record_carries_embedding_provenance_and_chunk_index() {
+        let tmp = tempfile::NamedTempFile::new().expect("temp file");
+        let path = tmp.path().to_string_lossy().to_string();
+        let repo = provenance_sink(&path);
+
+        repo.save_resource("https://example.com/p", "Page", HEX_A, 10)
+            .await
+            .expect("save_resource");
+        repo.save_chunk(
+            &format!("{HEX_A}-7"),
+            "https://example.com/p",
+            7,
+            "chunk body",
+            Some(&[0.1, 0.2, 0.3]),
+        )
+        .await
+        .expect("save_chunk");
+
+        let record = last_record(&path);
+        assert_eq!(record.embedding_model.as_deref(), Some("granite-97m"));
+        assert_eq!(record.embedding_dim, Some(3));
+        assert_eq!(record.chunk_index, Some(7));
+    }
+
+    /// #2429: a vector whose length disagrees with the declared model
+    /// dimension is silently unusable for similarity search — the sink must
+    /// reject it instead of writing an incomparable record.
+    #[tokio::test]
+    async fn sink_rejects_embedding_dim_mismatch() {
+        let tmp = tempfile::NamedTempFile::new().expect("temp file");
+        let path = tmp.path().to_string_lossy().to_string();
+        let repo = provenance_sink(&path);
+
+        let result = repo
+            .save_chunk(
+                &format!("{HEX_A}-0"),
+                "https://example.com/p",
+                0,
+                "chunk body",
+                Some(&[0.1, 0.2, 0.3, 0.4]),
+            )
+            .await;
+
+        assert!(result.is_err(), "dim mismatch must be rejected at the sink");
+    }
+
+    /// #2429: the read boundary rejects a record whose vector length
+    /// contradicts its declared `embedding_dim`.
+    #[test]
+    fn record_from_line_rejects_dim_mismatch() {
+        let line = format!(
+            r#"{{"url":"https://example.com","sha256_hex":"{HEX_A}","title":null,"chunk_text":"x","embedding":[0.1,0.2],"embedding_dim":3,"timestamp":"2026-01-01T00:00:00Z"}}"#
+        );
+        let err = VectorRecord::from_line(&line).expect_err("dim mismatch must be rejected");
+        assert!(matches!(err, ScraperError::Ingestion(_)), "got: {err:?}");
+    }
+
+    /// #2429: schema compatibility — records written before provenance
+    /// existed still deserialize; the new fields read as `None`.
+    #[test]
+    fn record_from_line_accepts_legacy_line_without_new_fields() {
+        let line = format!(
+            r#"{{"url":"https://example.com","sha256_hex":"{HEX_A}","title":null,"chunk_text":"x","embedding":[0.1],"timestamp":"2026-01-01T00:00:00Z"}}"#
+        );
+        let record = VectorRecord::from_line(&line).expect("legacy line must parse");
+        assert_eq!(record.embedding_model, None);
+        assert_eq!(record.embedding_dim, None);
+        assert_eq!(record.chunk_index, None);
     }
 }
