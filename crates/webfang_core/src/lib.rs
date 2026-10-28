@@ -43,8 +43,14 @@
 // must also land AFTER its deny, for the same rule.
 #![cfg_attr(not(test), deny(clippy::disallowed_types))]
 // Raw process-env mutations must go through webfang_test_utils (#1126,
-// #1349). Ungated on purpose: cfg(test) mods in this crate are covered too.
+// #1349). Ungated: the deny covers all non-test code in this crate, inline
+// or not. Test builds are exempt from `disallowed_methods` as a whole per
+// the blanket test policy of #1951; non-test code keeps the full deny.
 #![deny(clippy::disallowed_methods)]
+// Blanket test exemption for `disallowed_methods` (#1951), placed after its
+// deny per the same last-mention-wins rule. Covers the inline cfg(test)
+// spawn sites.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 #![deny(missing_docs)]
 #![warn(clippy::undocumented_unsafe_blocks)]
 #![allow(clippy::module_name_repetitions)]

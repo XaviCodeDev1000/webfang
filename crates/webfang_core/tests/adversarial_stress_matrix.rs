@@ -1,4 +1,9 @@
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)
+)]
 
 //! Adversarial stress matrix — Sprint 7-8 P1-conc Phase 3 (change
 //! `stabilization-concurrency-budget`, spec Group B).

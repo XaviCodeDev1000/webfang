@@ -67,10 +67,12 @@ reset_state() {
   printf '%s' '{"required_status_checks":{"checks":[{"context":"Validate PR metadata"},{"context":"cargo-mutants (PR diff)"},{"context":"CI Gate"}]}}' > "$STATE/protection.json"
   printf '%s' '[{"name":"Validate PR metadata","bucket":"pass"},{"name":"cargo-mutants (PR diff)","bucket":"pass"},{"name":"CI Gate","bucket":"pass"}]' > "$STATE/checks.json"
   printf '%s' '{"method":"MERGE"}' > "$STATE/method.json"
+  printf '%s' '{"schema_version":1,"queues":[{"base":"main","method":"MERGE"}]}' > "$STATE/mirror.json"
 }
 
 run_script() {
   env HOME="$WORK/home" TMPDIR="$WORK/tmp" PATH="$BIN:$PATH" FAKE_STATE="$STATE" \
+    BREAKING_SURFACE_QUEUE_FILE="$STATE/mirror.json" \
     bash "$REPO_ROOT/scripts/merge-when-green.sh" "$@" >"$STATE/out" 2>"$STATE/err"
   echo $?
 }
@@ -113,6 +115,7 @@ check "nothing was enqueued" test ! -f "$STATE/merge"
 
 reset_state
 printf '%s' '{"method":"SQUASH"}' > "$STATE/method.json"
+printf '%s' '{"schema_version":1,"queues":[{"base":"main","method":"SQUASH"}]}' > "$STATE/mirror.json"
 printf '%s' '[{"data":{"repository":{"pullRequest":{"state":"OPEN","isInMergeQueue":true,"mergeQueueEntry":{"state":"QUEUED"}}}}},{"data":{"repository":{"pullRequest":{"state":"MERGED","isInMergeQueue":false,"mergeQueueEntry":null}}}}]' > "$STATE/queue.json"
 rc="$(run_script 999 --queue --timeout=5)"
 check "SQUASH queue -> exit 0" test "$rc" = 0
@@ -120,15 +123,34 @@ check "SQUASH queue enqueued" test -f "$STATE/merge"
 
 reset_state
 printf '%s' '{"method":"SQUASH"}' > "$STATE/method.json"
+printf '%s' '{"schema_version":1,"queues":[{"base":"main","method":"SQUASH"}]}' > "$STATE/mirror.json"
 printf '%s' '[{"data":{"repository":{"pullRequest":{"state":"OPEN","isInMergeQueue":true,"mergeQueueEntry":{"state":"QUEUED"}}}}},{"data":{"repository":{"pullRequest":{"state":"MERGED","isInMergeQueue":false,"mergeQueueEntry":null}}}}]' > "$STATE/queue.json"
 rc="$(run_script 999 --queue --squash --timeout=5)"
 check "SQUASH queue + --squash -> exit 0" test "$rc" = 0
 
 reset_state
 printf '%s' '{"method":"SQUASH"}' > "$STATE/method.json"
+printf '%s' '{"schema_version":1,"queues":[{"base":"main","method":"SQUASH"}]}' > "$STATE/mirror.json"
 rc="$(run_script 999 --queue --merge --timeout=5)"
 check "SQUASH queue + --merge -> exit 1" test "$rc" = 1
 check "nothing was enqueued" test ! -f "$STATE/merge"
+
+# Mirror cross-check (#2412): the guard reads BOTH the live configuration and
+# the tracked mirror; a divergence refuses the merge (the CI check judges the
+# surface from the mirror, so drift would misjudge there).
+reset_state
+printf '%s' '{"schema_version":1,"queues":[{"base":"main","method":"SQUASH"}]}' > "$STATE/mirror.json"
+rc="$(run_script 999 --queue --timeout=5)"
+check "live MERGE vs mirror SQUASH diverged -> exit 1" test "$rc" = 1
+check "divergence names both methods" grep -q "live='MERGE' mirror='SQUASH'" "$STATE/err"
+check "divergence names the mirror file" grep -q "merge-queue.json" "$STATE/err"
+check "nothing was enqueued on divergence" test ! -f "$STATE/merge"
+
+reset_state
+rm -f "$STATE/mirror.json"
+rc="$(run_script 999 --queue --timeout=5)"
+check "missing mirror -> exit 1" test "$rc" = 1
+check "missing mirror names the file" grep -q "merge-queue.json" "$STATE/err"
 
 echo "test_merge_when_green_queue: FAIL=$fails"
 [[ $fails -eq 0 ]]
