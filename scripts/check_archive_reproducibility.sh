@@ -63,7 +63,15 @@
 # prevent: a green gate that certifies something it never measured.
 #
 # USAGE
-#   SOURCE_DATE_EPOCH=<unix-ts> bash scripts/check_archive_reproducibility.sh <archive> [archive ...]
+#   SOURCE_DATE_EPOCH=<unix-ts> bash scripts/check_archive_reproducibility.sh \
+#       [--expect-entry <archive>=<entry>]... <archive> [archive ...]
+#
+#   --expect-entry asserts that the archive's single entry IS the named file.
+#   Without it the guard only proves the container is well-formed, which says
+#   nothing about WHETHER the archive holds the binary its name promises — and
+#   since webfang#2428 ships one archive per binary from a single loop, a
+#   mis-paired (binary -> asset) tuple would ship a perfectly normalized archive
+#   containing the wrong executable, with every invariant green.
 #
 # Fail-closed: a missing SOURCE_DATE_EPOCH, a missing python3, an unreadable
 # archive, or a SOURCE_DATE_EPOCH the archive format cannot represent is a
@@ -89,7 +97,12 @@ produced release archive (sorted entries, uid/gid 0, no owner-name fields, mtime
 
 usage:
   bash scripts/check_archive_reproducibility.sh --help
-  SOURCE_DATE_EPOCH=<unix-ts> bash scripts/check_archive_reproducibility.sh <archive.tar.gz|archive.zip> [archive ...]
+  SOURCE_DATE_EPOCH=<unix-ts> bash scripts/check_archive_reproducibility.sh \
+      [--expect-entry <archive>=<entry>]... <archive.tar.gz|archive.zip> [archive ...]
+
+--expect-entry asserts that the archive's single entry is exactly <entry> (the
+bare file name, no directory prefix). Repeatable, one per archive. Omitting it
+checks the container only, never what the archive claims to contain.
 
 Fail-closed: a missing SOURCE_DATE_EPOCH, a missing python3, or an unreadable
 archive is a FAILURE, never a skip.
@@ -101,14 +114,45 @@ SCOPE section of this file.
 USAGE
 }
 
-case "${1:-}" in
-    -h|--help)
-        usage
-        exit 0
-        ;;
-esac
+ARCHIVES=()
+EXPECT_ARGS=()
 
-if [[ $# -lt 1 ]]; then
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --expect-entry)
+            # The archive NAME is a claim about the archive CONTENTS, and a
+            # claim nobody checks is a claim that drifts. One archive per binary
+            # (webfang#2428) makes the pairing a loop variable, so the cheap
+            # edit that swaps two tuples would otherwise ship a correctly
+            # normalized archive holding the wrong executable.
+            if [[ $# -lt 2 ]]; then
+                echo "::error::--expect-entry requiere <archive>=<entry>." >&2
+                exit 2
+            fi
+            EXPECT_ARGS+=("$2")
+            shift 2
+            ;;
+        --)
+            shift
+            ARCHIVES+=("$@")
+            break
+            ;;
+        -*)
+            echo "::error::opción desconocida '$1' (ver --help)." >&2
+            exit 2
+            ;;
+        *)
+            ARCHIVES+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ ${#ARCHIVES[@]} -lt 1 ]]; then
     usage
     exit 2
 fi
@@ -128,7 +172,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
-for archive in "$@"; do
+for archive in "${ARCHIVES[@]}"; do
     if [[ ! -f "$archive" ]]; then
         echo "::error::'$archive' no existe: no hay nada que comprobar."
         exit 1
@@ -139,7 +183,9 @@ done
 # One python3 invocation for every archive: a batch, so the summary below is a
 # single ordered report and the exit code covers the whole set.
 # ---------------------------------------------------------------------------
-python3 - "$SOURCE_DATE_EPOCH" "$@" <<'PY'
+# ${EXPECT_ARGS[@]+...} is the bash-3.2-safe expansion for a possibly empty
+# array under `set -u`; /bin/bash on the macOS runners is 3.2.
+python3 - "$SOURCE_DATE_EPOCH" "${ARCHIVES[@]}" -- ${EXPECT_ARGS[@]+"${EXPECT_ARGS[@]}"} <<'PY'
 import os
 import sys
 import tarfile
@@ -147,7 +193,26 @@ import time
 import zipfile
 
 epoch = int(sys.argv[1])
-archives = sys.argv[2:]
+
+# argv: <epoch> <archive>... -- <archive>=<entry>...
+# The separator is explicit so an archive path can never be mistaken for an
+# expectation, and so a caller that passes no expectations keeps the exact
+# argument shape this guard had before webfang#2428.
+_argv = sys.argv[2:]
+_split = _argv.index("--") if "--" in _argv else len(_argv)
+archives = _argv[:_split]
+expectations = {}
+for _pair in _argv[_split + 1:]:
+    _path, _sep, _entry = _pair.partition("=")
+    if not _sep or not _path or not _entry:
+        print("::error::--expect-entry '{}' is not <archive>=<entry>".format(_pair))
+        sys.exit(1)
+    if _path in expectations:
+        # Silently overwriting would leave the first expectation unasserted
+        # while the caller believes both were checked.
+        print("::error::--expect-entry names '{}' twice: the first expectation would never be asserted".format(_path))
+        sys.exit(1)
+    expectations[_path] = _entry
 
 DOS_EPOCH = 315532800
 failures = []
@@ -157,14 +222,23 @@ def fail(archive, message):
     failures.append((archive, message))
 
 
-def check_common_shape(archive, names):
-    """Ordering + single regular-file entry, shared by both formats."""
+def check_common_shape(archive, names, expected_entry=None):
+    """Ordering + single regular-file entry, shared by both formats.
+
+    `expected_entry` is the name the archive's own file name promises. It is
+    checked here rather than in a caller so both formats get it: a .zip and a
+    .tar.gz that hold the wrong binary are the same defect.
+    """
     if names != sorted(names):
         fail(archive, "entries are not in ascending byte order: {}".format(names))
     if len(names) != len(set(names)):
         fail(archive, "duplicate entry names: {}".format(names))
     if len(names) != 1:
         fail(archive, "expected exactly 1 entry, found {}: {}".format(len(names), names))
+    if expected_entry is not None and names and names[0] != expected_entry:
+        fail(archive, "expected the single entry to be {!r}, found {!r}: the archive name "
+                      "promises a binary the archive does not contain".format(
+                          expected_entry, names[0]))
     for name in names:
         if os.path.basename(name) != name:
             fail(archive, "entry is not at the archive root (a directory prefix "
@@ -207,7 +281,7 @@ def check_tar(archive):
         with tarfile.open(archive, "r:gz") as tar:
             members = tar.getmembers()
             names = [m.name for m in members]
-            check_common_shape(archive, names)
+            check_common_shape(archive, names, expectations.get(archive))
             for member in members:
                 if not member.isreg():
                     kind = "dir" if member.isdir() else ("symlink" if member.issym() else str(member.type))
@@ -239,7 +313,7 @@ def check_zip(archive):
                 fail(archive, "CRC mismatch on entry {}".format(broken))
             infos = zf.infolist()
             names = [i.filename for i in infos]
-            check_common_shape(archive, names)
+            check_common_shape(archive, names, expectations.get(archive))
             expected = None
             if epoch < DOS_EPOCH:
                 # The zip format stores a DOS date, whose epoch is 1980-01-01.
@@ -295,6 +369,14 @@ for path in archives:
     else:
         fail(path, "unrecognised archive extension; this guard knows .tar.gz/.tgz and .zip only")
 
+# An expectation naming an archive that is not in the checked set would never
+# be asserted, so it is a failure rather than a no-op: the caller believes it
+# proved something it did not.
+for path in expectations:
+    if path not in archives:
+        fail(path, "--expect-entry names an archive that is not being checked; "
+                   "the expectation would never be asserted")
+
 if failures:
     for archive, message in failures:
         print("::error::{}: {}".format(archive, message))
@@ -309,5 +391,7 @@ for path in archives:
         detail = "sorted entries, mtime~{} (DOS 2-second resolution, asserted), mode 0755, create_system=Unix, deflate".format(epoch)
     else:
         detail = "sorted entries, uid/gid 0, no owner names, mtime={}, gzip mtime 0".format(epoch)
+    if path in expectations:
+        detail += ", entry={}".format(expectations[path])
     print("reproducibility invariants OK: {} ({})".format(path, detail))
 PY

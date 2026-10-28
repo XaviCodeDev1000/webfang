@@ -19,7 +19,13 @@
 #      and still print a success line claiming `mtime~0` — an assertion that
 #      never ran, reported as verified;
 #   4. a missing SOURCE_DATE_EPOCH, a missing archive and an unrecognised
-#      extension all FAIL (there is no "cannot tell, so skip" path).
+#      extension all FAIL (there is no "cannot tell, so skip" path);
+#   5. --expect-entry PASSES when the archive holds the named entry and FAILS
+#      when it holds a different one, and an expectation naming an archive that
+#      is not being checked FAILS instead of silently never being asserted.
+#      Without that flag the guard proves the container is well-formed but says
+#      nothing about WHICH binary it carries (webfang#2428: one archive per
+#      binary, all produced by one loop).
 #
 # Usage: bash scripts/test_archive_reproducibility.sh
 
@@ -165,6 +171,64 @@ expect_fail "a missing archive fails" 1577836802 "$WORK/does-not-exist.zip" "no 
 
 printf 'not an archive\n' >"$WORK/unknown.bin"
 expect_fail "an unrecognised extension fails" 1577836802 "$WORK/unknown.bin" "unrecognised"
+
+# --- 5. --expect-entry asserts what the archive CLAIMS to contain ------------
+# NEGATION: the guard above proves the CONTAINER is well-formed, never that the
+# archive holds the binary its name promises. With one archive per binary
+# (webfang#2428) the pairing is a loop variable, so swapping two tuples would
+# ship a normalized archive with the wrong executable and stay green.
+expect_pass_args() { # <label> <epoch> <args...>
+  local label="$1" epoch="$2"
+  shift 2
+  OUT="$(SOURCE_DATE_EPOCH="$epoch" bash "$GATE" "$@" 2>&1)"
+  RC=$?
+  if [ "$RC" -eq 0 ]; then
+    ok "$label" "rc=0"
+  else
+    bad "$label" "expected PASS, got rc=$RC" "$OUT"
+  fi
+}
+
+expect_fail_args() { # <label> <epoch> <needle> <args...>
+  local label="$1" epoch="$2" needle="$3"
+  shift 3
+  OUT="$(SOURCE_DATE_EPOCH="$epoch" bash "$GATE" "$@" 2>&1)"
+  RC=$?
+  if [ "$RC" -eq 0 ]; then
+    bad "$label" "expected FAIL, got rc=0" "$OUT"
+    return
+  fi
+  if [ -n "$needle" ] && ! printf '%s' "$OUT" | grep -qiF "$needle"; then
+    bad "$label" "expected FAIL mentioning '$needle'" "$OUT"
+    return
+  fi
+  ok "$label" "rc=$RC"
+}
+
+expect_pass_args "matching --expect-entry passes (tar.gz)" 1577836800 \
+  --expect-entry "$WORK/good.tar.gz=webfang-linux-x86_64" "$WORK/good.tar.gz"
+expect_pass_args "matching --expect-entry passes (zip)" 1577836802 \
+  --expect-entry "$WORK/good.zip=webfang-linux-x86_64" "$WORK/good.zip"
+expect_pass_args "omitting --expect-entry keeps the old contract" 1577836800 \
+  "$WORK/good.tar.gz"
+
+expect_fail_args "mismatched --expect-entry fails (tar.gz)" 1577836800 \
+  "webfang-mcp-linux-x86_64" \
+  --expect-entry "$WORK/good.tar.gz=webfang-mcp-linux-x86_64" "$WORK/good.tar.gz"
+expect_fail_args "mismatched --expect-entry fails (zip)" 1577836802 \
+  "webfang-mcp-linux-x86_64" \
+  --expect-entry "$WORK/good.zip=webfang-mcp-linux-x86_64" "$WORK/good.zip"
+expect_fail_args "an expectation for an unchecked archive fails" 1577836800 \
+  "never be asserted" \
+  --expect-entry "$WORK/other.tar.gz=webfang" "$WORK/good.tar.gz"
+expect_fail_args "a malformed --expect-entry fails" 1577836800 \
+  "not <archive>=<entry>" \
+  --expect-entry "$WORK/good.tar.gz" "$WORK/good.tar.gz"
+expect_fail_args "a duplicated --expect-entry fails" 1577836800 \
+  "twice" \
+  --expect-entry "$WORK/good.tar.gz=webfang-linux-x86_64" \
+  --expect-entry "$WORK/good.tar.gz=webfang-mcp-linux-x86_64" \
+  "$WORK/good.tar.gz"
 
 echo
 echo "check_archive_reproducibility semantics harness: $passed passed, $failed failed"
