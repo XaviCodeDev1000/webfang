@@ -452,12 +452,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Only the smoke script and the public-surface fixture are read here, so
-      # the shallow clone is enough. Same validated commit as every other job.
+      # fetch-depth: 0 + fetch-tags: true, exactly like every other checkout in
+      # this workflow. scripts/check_release_dispatch.sh asserts that ALL of them
+      # carry full history and tags, because the L1 provenance gate needs git
+      # merge-base and release-plz-tags.sh --tag. "This job only reads one file,
+      # so a shallow clone is enough" is true about THIS job and false about the
+      # workflow-level invariant the guard enforces.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ needs.preflight.outputs.validated_commit }}
-          fetch-depth: 1
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
       - name: Download the CLI target's build artifact
