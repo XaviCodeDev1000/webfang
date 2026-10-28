@@ -55,24 +55,25 @@ complete-release fixture.
 - **R1 — build cost (MEASURED).** `webfang_cli/mcp` is an empty marker that
   forwards nothing, while `webfang_mcp` defaults to `webfang_core/mcp`. Two
   distinct feature sets mean two `webfang_core` fingerprints, so the crate is
-  compiled twice per target. Measured with `cargo check` (`-j 8`, dev profile,
-  so NO codegen — the cheapest possible probe):
+  compiled twice per target.
 
-  | invocation | wall time | compiles `webfang_core`? |
-  |---|---|---|
-  | `cargo check -p webfang_cli --features mcp` | 17.76 s | yes |
-  | `cargo check -p webfang_mcp --bins` | 11.60 s | **yes, again** |
+  **Clean-room experiment.** Each scenario used a FRESH `CARGO_TARGET_DIR`
+  (nothing cached, BoringSSL rebuilt from scratch), same source tree, `cargo
+  check -j 8`, dev profile so no codegen — the cheapest probe that still
+  exercises real feature resolution:
 
-  The second invocation spent 11.6 s of 11.6 s redoing work the first had
-  already done, and the target directory now holds two separate `webfang_core`
-  units (which is why both later single-package runs finish in under half a
-  second). In release with LTO and fat codegen units the same unit is far more
-  expensive than in `check`.
+  | scenario | invocations | wall time | `webfang_core` compiled |
+  |---|---|---|---|
+  | A — old shape | `-p webfang_cli --features mcp` then `-p webfang_mcp --bins` | 42.59 s + 15.46 s = **58 s** | **2×** |
+  | B — new shape | `--features webfang_cli/mcp -p webfang_cli -p webfang_mcp --bins` | **48.02 s** | **1×** |
 
-  Proposed fix, NOT applied and NOT measured (proving it needs a clean target
-  dir, which means a full BoringSSL rebuild): one invocation,
-  `cargo build ... -p webfang_cli -p webfang_mcp --features webfang_cli/mcp`,
-  so cargo unifies the feature set within a single resolution.
+  One invocation removes one full `webfang_core` unit and 10 s of the cold
+  build, in `check` with no codegen. In release the same crate is compiled with
+  LTO and `codegen-units = 1`, so the removed unit is far more expensive than
+  the number above suggests — that ratio was NOT measured, because a clean
+  four-target release build is not something this worktree pays for.
+
+  The fix is applied: `release.yml`'s build step is the scenario-B command.
 - **R2 — the binary list is transcribed three times** (strip, tar, zip).
 - **R3 — nothing asserts the shipped binaries were stripped.**
 
