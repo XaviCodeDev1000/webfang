@@ -260,6 +260,19 @@ pub enum SemanticError {
         /// Maximum allowed characters per chunk
         max: usize,
     },
+
+    /// Invalid chunk locator span
+    ///
+    /// Raised when a chunker implementation would build a byte span with
+    /// `start > end` — a programming bug in the implementation, never user
+    /// input. See [`crate::domain::text_chunker::ByteSpan`].
+    #[error("Rango de bytes inválido para el chunk: inicio {start} > fin {end}")]
+    InvalidSpan {
+        /// Byte offset where the span starts.
+        start: usize,
+        /// Byte offset where the span ends.
+        end: usize,
+    },
 }
 
 /// Result type alias using ScraperError as the error type.
@@ -632,7 +645,9 @@ impl SemanticError {
     pub const fn classify(&self) -> ErrorClass {
         match self {
             Self::Inference(_) => ErrorClass::InternalFatal,
-            Self::ChunkTooLarge { .. } | Self::Tokenize(_) => ErrorClass::DomainRecoverable,
+            Self::ChunkTooLarge { .. } | Self::Tokenize(_) | Self::InvalidSpan { .. } => {
+                ErrorClass::DomainRecoverable
+            },
         }
     }
 }

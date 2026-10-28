@@ -7,6 +7,13 @@ feature set, `ai mcp`), so flags, defaults, and `WEBFANG_*` environment
 variables always match reality. CI drift-checks the chapter against the binary
 on every doc run; regenerate locally with `just cli-doc-regen`.
 
+Every flag in this reference is compiled into the binary **you** are running.
+The release artifacts are built with no capability features, so
+feature-gated behavior (`--js-strategy full`, SQLite persistence, adaptive
+selectors, tokio-console) is absent or rejected there — the per-flag
+consequences are in the
+[Release Feature Matrix](release-feature-matrix.md).
+
 ## Quick start
 
 Scrape a single page by passing the URL positionally:
@@ -663,6 +670,9 @@ Options:
 
 `--js-strategy hybrid` fetches in three layers: **L1** is `wreq` (static
 HTTP), **L2** is the `obscura` subprocess, **L3** is Chromiumoxide.
+(`--js-strategy full` goes straight to L3 and is **rejected at preflight** by
+the release binaries, which carry no `chromium` feature —
+[Release Feature Matrix](release-feature-matrix.md).)
 
 **L2 is accepted as a cheap render** — webfang does **not** require
 obscura's `-stealth` build variant, so L2 carries no anti-WAF promise. That

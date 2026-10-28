@@ -1231,6 +1231,10 @@ impl webfang_core::domain::embedding_port::EmbeddingPort for FixedEmbeddingPort 
         Self::DIM
     }
 
+    fn model_id(&self) -> &str {
+        "fixed-embedding"
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

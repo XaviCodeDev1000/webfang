@@ -154,12 +154,12 @@ impl LlmExtractionService {
         let mut sub_chunks = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {
             for sub_chunk in self.chunker.chunk_text(&chunk.content)? {
-                if sub_chunk.len() > char_budget {
+                if sub_chunk.text().len() > char_budget {
                     return Err(ScraperError::Validation(format!(
                         "el fragmento {index} supera el presupuesto ({char_budget} caracteres)"
                     )));
                 }
-                sub_chunks.push(sub_chunk);
+                sub_chunks.push(sub_chunk.text().to_owned());
             }
         }
         Ok(sub_chunks)
@@ -408,7 +408,7 @@ mod service_tests {
     use crate::domain::http_error::HttpResult;
     use crate::domain::http_port::{HttpClientPort, HttpResponse};
     use crate::domain::llm_port::{LlmPort, LlmRequest, LlmResponse};
-    use crate::domain::text_chunker::TextChunker;
+    use crate::domain::text_chunker::{ByteSpan, TextChunk, TextChunker};
     use crate::domain::DocumentChunk;
     use crate::error::SemanticError;
     use serde_json::{json, Value};
@@ -491,11 +491,12 @@ mod service_tests {
     struct IdentityChunker;
 
     impl TextChunker for IdentityChunker {
-        fn chunk_text(&self, text: &str) -> std::result::Result<Vec<String>, SemanticError> {
+        fn chunk_text(&self, text: &str) -> std::result::Result<Vec<TextChunk>, SemanticError> {
             if text.is_empty() {
                 return Err(SemanticError::Tokenize("empty text".into()));
             }
-            Ok(vec![text.to_string()])
+            let span = ByteSpan::try_new(0, text.len()).expect("0..len is a valid byte span");
+            Ok(vec![TextChunk::new(text, vec![span])])
         }
     }
 

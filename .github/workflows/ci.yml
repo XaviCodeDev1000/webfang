@@ -547,6 +547,43 @@ jobs:
       # Offline, pure text over the checked-out tree: no cargo, no network.
       - name: Docs version pins wiring harness
         run: bash scripts/test_docs_version_pins_wiring.sh
+      # Docs claims gate (auditoría QA/QC 2026-10-24): README.md is the most
+      # read file in the repo and nothing read it. Measured drift at 15d4436:
+      # the Architecture diagram drew `webfang_cli ──→ webfang_mcp`, an edge
+      # no manifest has (AGENTS.md forbids it); a `tests-1,337` badge survived
+      # three months while `webfang_core --lib` alone ran 2,907 tests; and a
+      # `Miri-domain+core-passing` badge survived four consecutive red
+      # scheduled runs. Every one of those is machine-checkable: the gate
+      # compares the drawn edges against the crate manifests, bans static
+      # metric badges, cross-checks the MSRV badge against rust-version, and
+      # rejects the specific sentences that were proven false.
+      # Offline, pure text over the checked-out tree: no cargo, no network.
+      - name: Docs claims gate (README truth)
+        run: bash scripts/check_docs_claims.sh
+      # Semantics harness: proves the gate goes RED on the exact defects it
+      # exists for (phantom edge, missing production edge, static metric badge,
+      # MSRV drift, resurrected retired claim) and fails closed without a
+      # README. A docs gate that only ever sees a healthy README is no gate.
+      - name: Docs claims semantics harness
+        run: bash scripts/test_docs_claims.sh
+      # Wiring regression guard: the docs version-pin gate shipped inert for a
+      # whole release because no workflow invoked it. Same failure class here,
+      # so the edges are pinned by their own harness.
+      - name: Docs claims wiring harness
+        run: bash scripts/test_docs_claims_wiring.sh
+      # Test inventory drift (auditoría QA/QC 2026-10-24): docs/test-inventory.json
+      # is generated and committed, and nothing regenerated it — it described 163
+      # files and 1,131 tests while the tree had 173 files and the suite ran
+      # 4,835. A committed artifact no gate reads is a claim nobody watches.
+      - name: Test inventory drift gate
+        run: bash scripts/check_test_inventory.sh
+      # Semantics harness for the gate above: pins the pass case, the stale
+      # case (generator named in the remediation, diff printed), the restored-
+      # tree invariant, and the three fail-closed exits (missing artifact,
+      # missing producer, crashing producer). Same reason as every harness
+      # here: a gate that only ever runs green is decoration.
+      - name: Test inventory drift semantics harness
+        run: bash scripts/tests/test_check_test_inventory.sh
       # AI providers doc drift gate (#2136): docs/architecture/ai-providers-design.md
       # is a NORMATIVE spec cited by 13 code files, and it lives OUTSIDE the
       # mdBook — so no gate read it. That is how a signature that did not
@@ -602,6 +639,25 @@ jobs:
         run: bash scripts/check_data_flow_doc.sh
       - name: Data-flow disclosure semantics harness
         run: bash scripts/test_data_flow_doc.sh
+      # Release feature matrix gate (#2430): docs/src/release-feature-matrix.md
+      # answers "what can the binary I just downloaded do?" — capability by
+      # capability, per release artifact. That answer rots exactly when the
+      # [features] table of crates/webfang_cli/Cargo.toml changes, so this
+      # guard compares the doc's manifest block against that table: every
+      # feature key present once, `default` absent, and each kind matching
+      # how the feature is declared (capability vs explicit-empty marker —
+      # `mcp = []` must never read as a CLI capability). Lives in
+      # `repo-guards` like the other doc-drift guards: unfiltered, already a
+      # `needs:` of `gate` in both scopes.
+      - name: Release feature matrix gate (required, #2430)
+        # guard-required
+        run: bash scripts/check_release_feature_matrix.sh
+      # Semantics harness for the gate above — BLOCKING, like the gate step
+      # itself. One negative case per check (C1..C6) on mktemp fixtures, plus
+      # the wiring edges (ci.yml invocation, required marker, fast-gate
+      # mirror). Offline: no cargo, no network, no repo state touched.
+      - name: Release feature matrix semantics harness
+        run: bash scripts/test_release_feature_matrix.sh
       # The release flow OWNS the docs version pins (#2028), and these three
       # harnesses pin the pieces that make that ownership real: the WRITER
       # (scripts/bump_docs_version_pins.sh — the exact inverse of the gate

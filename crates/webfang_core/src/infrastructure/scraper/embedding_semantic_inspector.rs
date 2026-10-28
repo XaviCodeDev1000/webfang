@@ -292,6 +292,10 @@ mod tests {
         fn embedding_dim(&self) -> usize {
             self.fallback_dim
         }
+
+        fn model_id(&self) -> &str {
+            "mock-embedder"
+        }
     }
 
     fn context(target: &str, fragments: &[&str]) -> SemanticContext {
