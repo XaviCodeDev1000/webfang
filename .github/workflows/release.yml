@@ -20,12 +20,13 @@
 #   the `.sigstore.json` bundles published next to each asset.
 #
 # Job graph (each job holds the minimum permission its own steps need):
-#   preflight ──> build (matrix) ──> checksums ──┐
-#                                                 ├──> attest ──> sign ──┐
-#                                                 └───────────────────────┴──> publish
+#   preflight ──> build (matrix) ──> checksums ──> attest ──> sign ──┐
+#                        │                                            ├──> publish
+#                        └──> mcp-smoke ───────────────────────────────┘
 # `attest` needs `build` for the archives and `checksums` for the manifest;
 # `sign` needs `attest` so the SBOM and the notice bundle — produced there — are
-# signed too; `publish` needs `sign` so it has the bundles to verify.
+# signed too; `publish` needs `sign` so it has the bundles to verify, and
+# `mcp-smoke` so a binary that cannot answer `tools/list` never becomes a release.
 
 name: Release
 
@@ -50,8 +51,9 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
 
   # The canonical inventory of every asset a finished release MUST carry: the
-  # build matrix (4 archives), the checksums manifest, the SBOM and the notices
-  # bundle. The sign/verify/publish steps each check it explicitly before they
+  # build matrix (12 archives — the CLI, webfang-mcp and webfang-mcp-stdio, one
+  # binary per archive, 4 targets each), the checksums manifest, the SBOM and
+  # the notices bundle. The sign/verify/publish steps each check it explicitly before they
   # trust a glob-derived list — every `ls -1` output here is a list of what
   # EXISTS, so an asset that failed to build or download vanishes from the
   # checklist instead of failing it (audit B7: a release without
@@ -64,6 +66,14 @@ env:
     webfang-aarch64-unknown-linux-gnu.tar.gz
     webfang-aarch64-apple-darwin.tar.gz
     webfang-x86_64-pc-windows-msvc.zip
+    webfang-mcp-x86_64-unknown-linux-gnu.tar.gz
+    webfang-mcp-aarch64-unknown-linux-gnu.tar.gz
+    webfang-mcp-aarch64-apple-darwin.tar.gz
+    webfang-mcp-x86_64-pc-windows-msvc.zip
+    webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz
+    webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz
+    webfang-mcp-stdio-aarch64-apple-darwin.tar.gz
+    webfang-mcp-stdio-x86_64-pc-windows-msvc.zip
     SHA256SUMS.txt
     webfang.spdx.json
     THIRD_PARTY_NOTICES.txt
@@ -231,14 +241,28 @@ jobs:
         # target on `stable` leaves the pinned toolchain without it ->
         # E0463 "can't find crate for `core`". The @1.91.1 rev installs the
         # target on the SAME toolchain cargo resolves via the toolchain file.
-        run: cargo build --release --locked --features "mcp" --target ${{ matrix.target }} -p webfang_cli
+        # webfang#2428: ONE invocation builds the CLI and both MCP binaries, and
+        # that is load-bearing rather than tidy. `webfang_cli`'s `mcp` feature is
+        # an EXPLICIT EMPTY MARKER with no edge to `webfang_mcp`, so on its own
+        # `--features mcp` produced a binary with zero MCP code in it; and
+        # `webfang_mcp`'s default set enables `webfang_core/mcp` while
+        # `webfang_cli/mcp` forwards nothing, so a SECOND `-p webfang_mcp` call
+        # resolves a different feature set for `webfang_core` and cargo rebuilds
+        # it. Measured with `cargo check` (dev, no codegen — the cheapest
+        # probe): 17.76 s for the CLI leg, then 11.60 s to rebuild
+        # `webfang_core` alone on the MCP leg. Unified here, the feature sets
+        # merge and the crate is compiled once per target.
+        run: cargo build --release --locked --features "webfang_cli/mcp" --target ${{ matrix.target }} -p webfang_cli -p webfang_mcp --bins
 
-      - name: Strip binary (Linux/macOS)
+      - name: Strip binaries (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
+          set -euo pipefail
           # STRIP is set to the target-prefixed binutils only in the
           # cross job; native jobs fall back to host `strip`.
-          ${STRIP:-strip} target/${{ matrix.target }}/release/webfang
+          for bin in webfang webfang-mcp webfang-mcp-stdio; do
+            ${STRIP:-strip} "target/${{ matrix.target }}/release/$bin"
+          done
 
       # SC-04: reproducibility. SOURCE_DATE_EPOCH is derived from the COMMITTER
       # date of the VALIDATED commit — the one timestamp in this job that is a
@@ -311,14 +335,28 @@ jobs:
           # not about the clock — it guarantees the ORIGINAL FILE NAME is never
           # recorded, and -9 makes the compression level explicit instead of
           # leaving it to whichever default the runner image's gzip ships.
-          "$TAR" \
-            --sort=name \
-            --mtime="@$SOURCE_DATE_EPOCH" \
-            --owner=0 --group=0 \
-            --numeric-owner \
-            --format=gnu \
-            -cf - webfang \
-            | gzip -n -9 > "../../../webfang-$TARGET.tar.gz"
+          #
+          # ONE BINARY PER ARCHIVE (webfang#2428): scripts/check_archive_
+          # reproducibility.sh asserts that an archive holds EXACTLY ONE regular
+          # file entry, and that invariant is what makes the asserted container
+          # properties (uid/gid, owner names, mtime, entry order) legible in the
+          # first place. The MCP binaries therefore get their own archives
+          # instead of riding along inside the CLI one.
+          for pair in \
+            "webfang:webfang-$TARGET" \
+            "webfang-mcp:webfang-mcp-$TARGET" \
+            "webfang-mcp-stdio:webfang-mcp-stdio-$TARGET"; do
+            bin="${pair%%:*}"
+            asset="${pair##*:}"
+            "$TAR" \
+              --sort=name \
+              --mtime="@$SOURCE_DATE_EPOCH" \
+              --owner=0 --group=0 \
+              --numeric-owner \
+              --format=gnu \
+              -cf - "$bin" \
+              | gzip -n -9 > "../../../$asset.tar.gz"
+          done
 
       # SC-04: the Windows archive used to be built with `7z`, which is not a
       # pinned input of this repository, is not present on every runner image,
@@ -333,9 +371,17 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          bash scripts/make-deterministic-zip.sh \
-            "webfang-$TARGET.zip" \
-            "target/$TARGET/release/webfang.exe"
+          # Same one-binary-per-archive rule as the Unix branch above.
+          for pair in \
+            "webfang.exe:webfang-$TARGET" \
+            "webfang-mcp.exe:webfang-mcp-$TARGET" \
+            "webfang-mcp-stdio.exe:webfang-mcp-stdio-$TARGET"; do
+            bin="${pair%%:*}"
+            asset="${pair##*:}"
+            bash scripts/make-deterministic-zip.sh \
+              "$asset.zip" \
+              "target/$TARGET/release/$bin"
+          done
 
       # Assert the normalization invariants ON the artifact that is about to be
       # published. A regression in the steps above fails the release here rather
@@ -352,16 +398,99 @@ jobs:
           # needs no GitHub expression expansion inside a shell block — the same
           # rule the change-scope step was fixed for.
           if [ "$RUNNER_OS" = "Windows" ]; then
-            bash scripts/check_archive_reproducibility.sh "webfang-$TARGET.zip"
+            ext=zip
+            suffix=.exe
           else
-            bash scripts/check_archive_reproducibility.sh "webfang-$TARGET.tar.gz"
+            ext=tar.gz
+            suffix=
           fi
+          # Every archive this target produces is asserted, not just the CLI
+          # one: a normalized CLI archive sitting next to an unnormalized MCP
+          # archive would pass a single-file check while shipping the
+          # regression it is supposed to catch.
+          #
+          # --expect-entry is what makes the check about CONTENT, not just
+          # shape: three archives now come out of one loop, so a mis-paired
+          # (binary -> asset) tuple would otherwise ship a correctly normalized
+          # archive holding the wrong executable, with every invariant green.
+          bash scripts/check_archive_reproducibility.sh \
+            --expect-entry "webfang-$TARGET.$ext=webfang$suffix" \
+            --expect-entry "webfang-mcp-$TARGET.$ext=webfang-mcp$suffix" \
+            --expect-entry "webfang-mcp-stdio-$TARGET.$ext=webfang-mcp-stdio$suffix" \
+            "webfang-$TARGET.$ext" \
+            "webfang-mcp-$TARGET.$ext" \
+            "webfang-mcp-stdio-$TARGET.$ext"
 
       - name: Upload artifact
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
           name: webfang-${{ matrix.target }}
-          path: webfang-${{ matrix.target }}.*
+          # `webfang-*<target>.*`, not `webfang-<target>.*`: the MCP archives
+          # are named `webfang-mcp-<target>.*`, so the narrower glob would
+          # build them and then quietly leave them out of the artifact — the
+          # exact "built but never shipped" shape this issue is about.
+          path: webfang-*${{ matrix.target }}.*
+
+  # ============================================================================
+  # MCP SMOKE: the published artifact must actually answer tools/list
+  # ============================================================================
+  # webfang#2428 ships webfang-mcp-stdio as a release artifact. "The archive
+  # contains a file" is not "the file works": the four build legs prove the
+  # former and nothing proved the latter. This drives the EXTRACTED archive over
+  # JSON-RPC exactly as a desktop MCP client would, before anything is signed or
+  # published.
+  #
+  # Only the x86_64 Linux artifact is EXECUTED. aarch64 cannot run on an x86_64
+  # runner without qemu, and substituting the host build for the published
+  # artifact would certify a binary nobody downloads. The aarch64 and Windows
+  # MCP binaries are shape-checked only and never run, which is stated here
+  # because "smoke tested" must not be read as "all four targets executed".
+  mcp-smoke:
+    name: Smoke the published MCP binary
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Only the smoke script and the public-surface fixture are read here, so
+      # the shallow clone is enough. Same validated commit as every other job.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ needs.preflight.outputs.validated_commit }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download the CLI target's build artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: webfang-x86_64-unknown-linux-gnu
+          path: smoke
+
+      - name: Extract both MCP archives
+        run: |
+          set -euo pipefail
+          for asset in webfang-mcp webfang-mcp-stdio; do
+            tar xzf "smoke/${asset}-x86_64-unknown-linux-gnu.tar.gz" -C smoke
+            chmod +x "smoke/${asset}"
+          done
+
+      # The HTTP binary is not driven over the wire here — that needs a bound
+      # port and an auth decision — but `--version` proves the published
+      # artifact EXECUTES. Without this step a binary that cannot start at all
+      # still ships, which is the same "built but not working" class the stdio
+      # smoke closes for the other binary.
+      - name: HTTP binary starts
+        run: |
+          set -euo pipefail
+          timeout 30 smoke/webfang-mcp --version
+
+      - name: Drive tools/list over stdio
+        run: |
+          set -euo pipefail
+          # The script enforces its own per-read deadline, so a server that
+          # accepts the pipe and never answers fails on ITS terms rather than
+          # hanging the job. `timeout` is the outer belt, not the contract.
+          timeout 90 bash scripts/smoke-mcp-stdio.sh smoke/webfang-mcp-stdio
 
   # ============================================================================
   # CHECKSUMS: Generate SHA256 for all binaries
@@ -409,7 +538,7 @@ jobs:
   # ============================================================================
   attest:
     name: Attest provenance + SBOM
-    needs: [build, checksums, preflight]
+    needs: [build, checksums, mcp-smoke, preflight]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -618,7 +747,7 @@ jobs:
   # ============================================================================
   publish:
     name: L1 Publish + Release
-    needs: [build, checksums, preflight, sign]
+    needs: [build, checksums, mcp-smoke, preflight, sign]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -733,9 +862,11 @@ jobs:
             echo "| macOS Apple Silicon | \`webfang-aarch64-apple-darwin.tar.gz\` |"
             echo "| Windows x86_64 | \`webfang-x86_64-pc-windows-msvc.zip\` |"
             echo ""
+            echo "**Each platform also ships the MCP servers**, one binary per archive: \`webfang-mcp-<target>\` (Streamable HTTP) and \`webfang-mcp-stdio-<target>\` (stdio, for desktop clients that spawn the server). Both expose the same 36 tools. Install notes: <https://github.com/XaviCodeDev1000/webfang/blob/main/docs/src/installation.md#mcp-servers-from-the-release-artifact>"
+            echo ""
             echo "**There is no Intel macOS artifact** — the published targets are Linux x86_64, Linux ARM64, macOS Apple Silicon and Windows x86_64; Intel macOS is not in the list. Build from source (see the From source section below) if you need an Intel Mac build."
             echo ""
-            echo "Each archive holds a single bare binary (\`webfang.exe\` on Windows). Nothing installs it for you — extract it, make it executable, and put it on your PATH:"
+            echo "Every archive holds exactly ONE bare binary (\`webfang.exe\`, \`webfang-mcp.exe\` or \`webfang-mcp-stdio.exe\` on Windows). Nothing installs it for you — extract it, make it executable, and put it on your PATH:"
             echo ""
             echo '```bash'
             echo "# Linux / macOS"
@@ -760,12 +891,12 @@ jobs:
             echo '```bash'
             echo "git clone https://github.com/XaviCodeDev1000/webfang"
             echo "cd webfang"
-            echo 'cargo build --release --locked --features "mcp" -p webfang_cli'
+            echo 'cargo build --release --locked --features "webfang_cli/mcp" -p webfang_cli -p webfang_mcp --bins'
             echo '```'
             echo ""
             echo "## Verification"
             echo ""
-            echo "Verify the checksum of the archive you downloaded **before extracting it**. \`SHA256SUMS.txt\` lists all four archives. The command differs per platform: \`sha256sum\` is GNU coreutils and exists on neither stock macOS nor PowerShell."
+            echo "Verify the checksum of the archive you downloaded **before extracting it**. \`SHA256SUMS.txt\` lists all twelve archives. The command differs per platform: \`sha256sum\` is GNU coreutils and exists on neither stock macOS nor PowerShell."
             echo ""
             echo '```bash'
             echo "# Linux"

@@ -896,6 +896,9 @@ lane_fmt_and_guards() {
   # Release reconcile semantics harness (hermetic mktemp fixtures, no network).
   run_guard "release reconcile semantics harness" scripts/test_release_reconcile.sh \
     bash scripts/test_release_reconcile.sh
+  # MCP stdio smoke semantics harness (hermetic mktemp fixtures, no network).
+  run_guard "MCP stdio smoke semantics harness" scripts/test_smoke_mcp_stdio.sh \
+    bash scripts/test_smoke_mcp_stdio.sh
   # Release provenance L1 acceptance matrix (hermetic mktemp fixtures, no network).
   run_guard "release provenance L1 acceptance matrix" scripts/test_release_provenance.sh \
     bash scripts/test_release_provenance.sh

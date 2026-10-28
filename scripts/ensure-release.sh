@@ -68,6 +68,14 @@ EXPECTED_ASSETS=(
   webfang-aarch64-unknown-linux-gnu.tar.gz
   webfang-aarch64-apple-darwin.tar.gz
   webfang-x86_64-pc-windows-msvc.zip
+  webfang-mcp-x86_64-unknown-linux-gnu.tar.gz
+  webfang-mcp-aarch64-unknown-linux-gnu.tar.gz
+  webfang-mcp-aarch64-apple-darwin.tar.gz
+  webfang-mcp-x86_64-pc-windows-msvc.zip
+  webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz
+  webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz
+  webfang-mcp-stdio-aarch64-apple-darwin.tar.gz
+  webfang-mcp-stdio-x86_64-pc-windows-msvc.zip
   SHA256SUMS.txt
   webfang.spdx.json
   THIRD_PARTY_NOTICES.txt
