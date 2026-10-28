@@ -20,7 +20,7 @@ use tracing::{debug, info, instrument, warn};
 
 use crate::domain::embedding_port::{cosine_similarity_fail_closed, EmbeddingPort};
 use crate::domain::note_repository::{ChunkToPersist, NoteRepository, VaultNoteReader};
-use crate::domain::text_chunker::TextChunker;
+use crate::domain::text_chunker::{ByteSpan, TextChunker};
 use crate::error::ScraperError;
 
 /// A search result with relevance score and source metadata.
@@ -36,6 +36,10 @@ pub struct VaultSearchResult {
     pub chunk_index: i64,
     /// Heading context (if available from chunking metadata).
     pub heading: Option<String>,
+    /// Byte spans of the note this chunk was cut from, in order
+    /// (half-open `[start, end)`). Empty for chunks indexed before
+    /// locators existed.
+    pub spans: Vec<ByteSpan>,
 }
 
 /// Summary of a vault sync operation.
@@ -164,6 +168,7 @@ impl VaultSearchService {
                         score,
                         chunk_index: chunk.chunk_index,
                         heading: None, // TODO: extract from chunk metadata when NoteChunkVector carries it
+                        spans: chunk.spans,
                     }),
                     None => {
                         skipped += 1;
@@ -458,6 +463,7 @@ mod tests {
             score: 0.95,
             chunk_index: 0,
             heading: Some("Introduction".to_owned()),
+            spans: Vec::new(),
         };
         let debug = format!("{result:?}");
         assert!(debug.contains("vault/rust.md"));
@@ -538,6 +544,32 @@ mod tests {
             rendered.contains('5') && rendered.contains('3'),
             "mismatch must name stored and serving dims, got: {rendered}"
         );
+    }
+
+    #[tokio::test]
+    async fn search_results_carry_their_chunk_locators() {
+        // Locator read-side: a match must expose the byte ranges of the note
+        // it came from — what the index persists (#2451) is what the
+        // consumer sees, not less.
+        let repo = Arc::new(InMemoryNoteRepo::default());
+        repo.chunks.lock().unwrap().push(NoteChunkVector {
+            note_path: "vault/ok.md".to_owned(),
+            content: "matching model".to_owned(),
+            chunk_index: 0,
+            spans: vec![ByteSpan::try_new(3, 17).expect("valid span")],
+            embedding: vec![0.1, 0.2, 0.3],
+        });
+        let service = test_service(repo);
+
+        let results = service.search("query", 10).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].spans.len(),
+            1,
+            "the match must carry its persisted locators"
+        );
+        assert_eq!(results[0].spans[0].start(), 3);
+        assert_eq!(results[0].spans[0].end(), 17);
     }
 
     #[test]
