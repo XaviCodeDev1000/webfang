@@ -586,6 +586,25 @@ jobs:
       # harness above. Offline, mktemp fixtures only, no cargo and no network.
       - name: AI providers doc drift semantics harness
         run: bash scripts/test_ai_providers_doc.sh
+      # Release feature matrix gate (#2430): docs/src/release-feature-matrix.md
+      # answers "what can the binary I just downloaded do?" — capability by
+      # capability, per release artifact. That answer rots exactly when the
+      # [features] table of crates/webfang_cli/Cargo.toml changes, so this
+      # guard compares the doc's manifest block against that table: every
+      # feature key present once, `default` absent, and each kind matching
+      # how the feature is declared (capability vs explicit-empty marker —
+      # `mcp = []` must never read as a CLI capability). Lives in
+      # `repo-guards` like the other doc-drift guards: unfiltered, already a
+      # `needs:` of `gate` in both scopes.
+      - name: Release feature matrix gate (required, #2430)
+        # guard-required
+        run: bash scripts/check_release_feature_matrix.sh
+      # Semantics harness for the gate above — BLOCKING, like the gate step
+      # itself. One negative case per check (C1..C6) on mktemp fixtures, plus
+      # the wiring edges (ci.yml invocation, required marker, fast-gate
+      # mirror). Offline: no cargo, no network, no repo state touched.
+      - name: Release feature matrix semantics harness
+        run: bash scripts/test_release_feature_matrix.sh
       # The release flow OWNS the docs version pins (#2028), and these three
       # harnesses pin the pieces that make that ownership real: the WRITER
       # (scripts/bump_docs_version_pins.sh — the exact inverse of the gate
