@@ -19,7 +19,7 @@ use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
 use crate::domain::embedding_port::{cosine_similarity_fail_closed, EmbeddingPort};
-use crate::domain::note_repository::{NoteRepository, VaultNoteReader};
+use crate::domain::note_repository::{ChunkToPersist, NoteRepository, VaultNoteReader};
 use crate::domain::text_chunker::TextChunker;
 use crate::error::ScraperError;
 
@@ -228,36 +228,39 @@ impl VaultSearchService {
         mtime_secs: i64,
     ) -> Result<usize, ScraperError> {
         // Step 1: Chunk the markdown.
-        let chunk_texts = self
+        let chunks = self
             .chunker
             .chunk_text(content)
             .map_err(ScraperError::Semantic)?;
 
         // Step 2: Embed all chunks in a batch (skip when empty).
-        let embeddings = if chunk_texts.is_empty() {
+        let embeddings = if chunks.is_empty() {
             Vec::new()
         } else {
+            let texts: Vec<String> = chunks.iter().map(|c| c.text().to_owned()).collect();
             self.embedding
-                .embed_batch(&chunk_texts)
+                .embed_batch(&texts)
                 .await
                 .map_err(ScraperError::Semantic)?
         };
 
         // Step 3: Atomically register the note and persist every chunk in one
-        // transaction. Empty `chunk_texts` still registers the note so
-        // sync_vault won't re-index it on every run (#577 follow-up: atomicity).
-        let chunks_with_embeddings: Vec<(&str, Option<&[f32]>)> = chunk_texts
+        // transaction, locators included — the index keeps, per chunk, which
+        // byte ranges of the note it was cut from. Empty `chunks` still
+        // registers the note so sync_vault won't re-index it on every run
+        // (#577 follow-up: atomicity).
+        let chunks_with_embeddings: Vec<ChunkToPersist> = chunks
             .iter()
             .zip(embeddings.iter())
-            .map(|(text, emb)| (text.as_str(), Some(emb.as_slice())))
+            .map(|(chunk, emb)| (chunk.text(), chunk.spans(), Some(emb.as_slice())))
             .collect();
         let _note_id = self
             .repository
             .index_note_transactional(path, content_hash, mtime_secs, &chunks_with_embeddings)
             .await?;
 
-        debug!(path, chunks = chunk_texts.len(), "note indexed");
-        Ok(chunk_texts.len())
+        debug!(path, chunks = chunks.len(), "note indexed");
+        Ok(chunks.len())
     }
 
     /// Check whether a note needs re-indexing.
@@ -472,12 +475,14 @@ mod tests {
                 note_path: "vault/ok.md".to_owned(),
                 content: "matching model".to_owned(),
                 chunk_index: 0,
+                spans: Vec::new(),
                 embedding: vec![0.1, 0.2, 0.3],
             },
             NoteChunkVector {
                 note_path: "vault/stale.md".to_owned(),
                 content: "other model".to_owned(),
                 chunk_index: 0,
+                spans: Vec::new(),
                 embedding: vec![0.1, 0.2, 0.3, 0.4, 0.5],
             },
         ]);
@@ -504,12 +509,14 @@ mod tests {
                 note_path: "vault/a.md".to_owned(),
                 content: "old model".to_owned(),
                 chunk_index: 0,
+                spans: Vec::new(),
                 embedding: vec![0.1, 0.2, 0.3, 0.4, 0.5],
             },
             NoteChunkVector {
                 note_path: "vault/b.md".to_owned(),
                 content: "old model".to_owned(),
                 chunk_index: 0,
+                spans: Vec::new(),
                 embedding: vec![0.5, 0.4, 0.3, 0.2, 0.1],
             },
         ]);
@@ -542,9 +549,43 @@ mod tests {
         assert_eq!(summary.unchanged, 0);
     }
 
+    #[tokio::test]
+    async fn index_note_persists_chunk_locators() {
+        // The locator contract at the service seam: whatever the chunker
+        // located against the note content must reach the repository — the
+        // index records, per chunk, which bytes of the note it came from.
+        let repo = Arc::new(InMemoryNoteRepo::default());
+        let service = test_service(repo.clone());
+        let content = "# Nota\n\nCuerpo de la nota.";
+        let hash: String = "a".repeat(Sha256Hex::HEX_LEN);
+
+        let indexed = service
+            .index_note("notes/a.md", content, &hash, 0)
+            .await
+            .expect("index_note");
+        assert_eq!(indexed, 2, "two non-blank lines, two chunks");
+
+        let vectors = repo.load_all_vectors().await.expect("load vectors");
+        assert_eq!(vectors.len(), 2);
+        for vector in &vectors {
+            assert_eq!(
+                vector.spans.len(),
+                1,
+                "line chunks are single-span: {vector:?}"
+            );
+            let span = &vector.spans[0];
+            assert_eq!(
+                &content[span.start()..span.end()],
+                vector.content,
+                "each stored span must resolve against the note content"
+            );
+        }
+    }
+
     // --- Stub ports for sync_vault tests ---
 
     use crate::domain::note_repository::{IndexedNoteMeta, NoteChunkVector, VaultNote};
+    use crate::domain::text_chunker::{ByteSpan, TextChunk};
     use crate::domain::Sha256Hex;
     use crate::error::SemanticError;
     use std::future::Future;
@@ -570,16 +611,21 @@ mod tests {
         }
     }
 
-    /// Stub chunker: splits on newlines, one chunk per line.
+    /// Stub chunker: one chunk per non-blank line, span covering the raw line.
     struct StubChunker;
 
     impl TextChunker for StubChunker {
-        fn chunk_text(&self, text: &str) -> Result<Vec<String>, SemanticError> {
-            Ok(text
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .map(String::from)
-                .collect())
+        fn chunk_text(&self, text: &str) -> Result<Vec<TextChunk>, SemanticError> {
+            let mut chunks = Vec::new();
+            let mut offset = 0;
+            for line in text.split('\n') {
+                if !line.trim().is_empty() {
+                    let span = ByteSpan::try_new(offset, offset + line.len())?;
+                    chunks.push(TextChunk::new(line, vec![span]));
+                }
+                offset += line.len() + '\n'.len_utf8();
+            }
+            Ok(chunks)
         }
     }
 
@@ -624,6 +670,7 @@ mod tests {
             note_id: i64,
             chunk_index: i64,
             content: &'a str,
+            spans: &'a [ByteSpan],
             embedding: Option<&'a [f32]>,
         ) -> BoxFuture<'a, Result<(), ScraperError>> {
             Box::pin(async move {
@@ -632,6 +679,7 @@ mod tests {
                     note_path: String::new(),
                     content: content.to_owned(),
                     chunk_index,
+                    spans: spans.to_vec(),
                     embedding: embedding.unwrap_or_default().to_vec(),
                 });
                 Ok(())
@@ -643,7 +691,7 @@ mod tests {
             path: &'a str,
             content_hash: &'a str,
             mtime_secs: i64,
-            chunks: &'a [(&'a str, Option<&'a [f32]>)],
+            chunks: &'a [ChunkToPersist<'a>],
         ) -> BoxFuture<'a, Result<i64, ScraperError>> {
             Box::pin(async move {
                 let hash = Sha256Hex::try_from(content_hash)
@@ -665,11 +713,12 @@ mod tests {
                 };
                 drop(notes);
                 let mut stored = self.chunks.lock().unwrap();
-                for (i, (text, emb)) in chunks.iter().enumerate() {
+                for (i, (text, spans, emb)) in chunks.iter().enumerate() {
                     stored.push(NoteChunkVector {
                         note_path: String::new(),
                         content: text.to_string(),
                         chunk_index: i as i64,
+                        spans: (*spans).to_vec(),
                         embedding: emb.unwrap_or(&[]).to_vec(),
                     });
                 }
