@@ -79,6 +79,27 @@ Exactly-once export is enforced by two flush-proof mechanisms:
 A record whose OWN claim is unproven (hash not in index) always re-exports —
 the record's claim takes precedence over the fresh-content match.
 
+### CLI vs library reachability of `AlreadyCommitted` (#2326)
+
+The export gate's `ItemDecision::AlreadyCommitted` branch is a
+**library-level guarantee, not a CLI behavior** (decision registered on
+issue #2326). The CLI cannot reach it, as a measured chain: with `--resume`,
+`apply_resume_mode` (`cli/scrape_flow.rs`) drops every COMMITTED URL
+**before the crawl**, and a run whose whole list was committed exits as
+"nothing pending" (`resume_nothing_pending`, `cli/orchestrator.rs`) before
+the export phase starts — the gate never sees a fully-committed list from
+the CLI.
+
+Library consumers call `process_results` / `process_results_with_chunks`
+directly with their own `ResumeContext`, and for them the branch is real:
+a record proven `COMMITTED` through the reconciliation boundary is skipped
+before the body is read and before any line is appended. Its coverage lives
+at that level: `tests/export_already_committed_library_test.rs` pins the
+skip and the mixed batch, and
+`ai_cancelled_drain_with_every_chunk_already_committed_invents_nothing`
+pins the cancellation-drain cavity. The crash matrix deliberately has
+**no row** for it: no CLI crash can land there.
+
 ---
 
 ## v1 → v2 state migration
@@ -181,6 +202,12 @@ every item already `COMMITTED`, or a cleaning phase that stopped before
 producing a chunk — still observes the drain instead of exiting clean. That is
 what the `--clean-ai` row pins: the AI path's drain cannot depend on an item
 having been driven.
+
+The all-skipped-by-decision case itself (`ItemDecision::AlreadyCommitted`)
+has **no matrix row on purpose** (#2326, decision A — see the reachability
+subsection above): the CLI's crawl-level resume gate drops committed URLs
+before the export gate can see them. Its coverage lives at the library
+level (`tests/export_already_committed_library_test.rs`).
 
 The matrix lives in `crates/webfang_core/tests/crash_matrix_test.rs`: each
 row kills a real CLI child at the pinned point, reruns with `--resume`, and

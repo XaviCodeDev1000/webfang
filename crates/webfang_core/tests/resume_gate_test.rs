@@ -11,27 +11,17 @@
 //! Fresh-run semantics (A2): a new run always gets a fresh `run_id`; prior
 //! records are PRESERVED and remain queryable regardless of `--resume`.
 
+#[path = "common/mod.rs"]
+mod common;
+
 use std::collections::BTreeMap;
 
+use common::{committed_record, jsonl_lines};
 use tempfile::TempDir;
 use url::Url;
 use webfang_core::application::resume::{filter_committed, normalize_domain_key};
 use webfang_core::domain::page_state::PageStatus;
 use webfang_core::infrastructure::export::{DomainRecords, LastError, RawRecord, RecordStore};
-
-fn committed_record(url: &str) -> RawRecord {
-    RawRecord {
-        url: url.to_string(),
-        canonical_url: url.to_string(),
-        run_id: "018f3c1e-7a2b-4c0d-9e1f-2a3b4c5d6e7f".to_string(),
-        content_hash: Some("sha256:abc".to_string()),
-        attempts: 1,
-        status: PageStatus::Committed,
-        last_error: None,
-        output_location: Some("out/export.jsonl".to_string()),
-        updated_at: 1_760_000_000_000,
-    }
-}
 
 fn record_at(url: &str, status: PageStatus) -> RawRecord {
     let mut r = committed_record(url);
@@ -264,15 +254,6 @@ fn scraped(url: &str, content: &str) -> ScrapedContent {
         correlation_id: None,
         quality_hint: None,
     }
-}
-
-fn jsonl_lines(dir: &TempDir) -> usize {
-    let path = dir.path().join("export.jsonl");
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .count()
 }
 
 /// Export through the public port and return the URLs it drove: the arrange
