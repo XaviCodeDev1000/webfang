@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.1.0] - 2026-10-28
+
+
+### 🎉 Added
+
+- Byte-span locators in TextChunker and vault index ([#2451](https://github.com/XaviCodeDev1000/webfang/pull/2451))
+
+### 🔧 Fixed
+
+- VectorRecord carries embedding provenance and chunk position ([#2443](https://github.com/XaviCodeDev1000/webfang/pull/2443))
 ## [7.0.0] - 2026-10-28
 
 
