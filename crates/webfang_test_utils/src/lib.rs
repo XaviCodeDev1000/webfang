@@ -755,9 +755,11 @@ fn resolve_webfang_path(
 ///
 /// Local runs leave it unset, so the resolver keeps building on demand and
 /// never reuses a binary the current feature set did not produce. The
-/// pre-build in the lane MUST use the same feature set the tests expect: the
-/// crossplatform lane builds default features, exactly what this resolver
-/// builds.
+/// pre-build in the lane MUST use the feature set the tests expect: the
+/// default-feature lanes build `webfang_cli`'s defaults, and the
+/// `--all-features` lanes build the five features that
+/// `crates/webfang_core/tests/common/cli_harness.rs` forwards — the one
+/// configuration every CLI behavioral test in those lanes runs (#2337).
 pub const PREBUILT_BIN_ENV: &str = "WEBFANG_TEST_PREBUILT_BIN";
 
 /// Whether `PREBUILT_BIN_ENV`'s value is the declared marker.
