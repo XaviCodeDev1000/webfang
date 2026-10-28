@@ -4,7 +4,7 @@
 //! - Readability algorithm wrapper
 //! - Fallback text extraction
 //!
-//! DOM pre-pruning and author extraction moved to `domain::scraper_port`
+//! DOM pre-pruning and author extraction moved to `domain::html_extraction`
 //! (ADR-0012 sub-slice 3.D).
 //!
 //! Selector repair lives here on both tiers: Tier 1 is lexical

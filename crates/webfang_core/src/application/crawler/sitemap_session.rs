@@ -94,7 +94,6 @@ async fn crawl_with_sitemap_session_inner(
             downloader_factory: options.downloader_factory.clone(),
             content_sink: options.content_sink.clone(),
             pipeline: None,
-            output_stages: Vec::new(),
         })
         .identity(CrawlIdentity {
             root: correlation.clone(),

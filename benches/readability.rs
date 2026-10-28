@@ -1,7 +1,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use webfang_core::domain::scraper_port::dom_pruner;
+use webfang_core::domain::html_extraction::dom_pruner;
 use webfang_core::infrastructure::converter::html_cleaner::clean_html;
 use webfang_core::infrastructure::scraper::readability;
 
