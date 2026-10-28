@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.1] - 2026-10-28
+
+
+### 🔧 Fixed
+
+- VectorRecord carries embedding provenance and chunk position ([#2443](https://github.com/XaviCodeDev1000/webfang/pull/2443))
 ## [7.0.0] - 2026-10-28
 
 
