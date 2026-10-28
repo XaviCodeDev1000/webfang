@@ -658,11 +658,9 @@ mod tests {
 
     #[test]
     fn rate_limit_burst_flag_parses_through_clap() {
-        use clap::Parser as _;
-        let args = crate::cli::args::test_support::with_clap_env_cleared(|| {
-            crate::Args::try_parse_from(["webfang", "--rate-limit-burst", "9"])
-        })
-        .expect("valid flag combination");
+        let args =
+            crate::cli::args::test_support::parse_args_hermetic(&["--rate-limit-burst", "9"])
+                .expect("valid flag combination");
         assert_eq!(args.crawler.rate_limit_burst.as_deref(), Some("9"));
     }
 
