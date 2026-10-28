@@ -190,7 +190,11 @@ loom = { workspace = true }
 # Integration tests parse exported JSONL lines directly.
 serde_json = { workspace = true }
 
-# Compile-fail proof suite lives in a subdir; declare it explicitly.
+# Compile-fail proof suites live in subdirs; declare them explicitly.
+# Both suites run from ONE #[test] in tests/compile_fail/page_state.rs:
+# trybuild projects are keyed by the crate under test, so parallel runners
+# contend on the same build lock and flaky-result = "fail" kills the
+# second finisher (#2366).
 [[test]]
 name = "page_state"
 path = "tests/compile_fail/page_state.rs"

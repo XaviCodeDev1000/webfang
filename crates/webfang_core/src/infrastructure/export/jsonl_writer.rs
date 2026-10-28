@@ -8,9 +8,10 @@
 //! Lifecycle guarantees:
 //! - **Torn-tail recovery**: on start the file tail is scanned for a half-
 //!   written last line; invalid trailing bytes are truncated back to the last
-//!   valid newline (warn! carries both byte counts) and a content-hash index
-//!   ([`CHECKSUM_FIELD`] per line) is built from the surviving lines. The
-//!   recovery itself lives in the `tail_window` module.
+//!   valid newline (warn! carries both byte counts). The recovery itself lives
+//!   in the `tail_window` module. The writer never reads the file beyond that
+//!   tail: the checksum index of already-durable lines belongs to the
+//!   application's `CommitSession`, the ONE reader of the export file (#2393).
 //! - **Flush barrier**: [`JsonlSession::flush`] awaits a oneshot ack that the
 //!   writer sends only AFTER the OS-level flush returns \u2014 this ack IS the D3
 //!   step-1 durability barrier.
@@ -25,7 +26,6 @@
 
 #![deny(clippy::await_holding_lock)]
 
-use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::Path;
@@ -33,8 +33,6 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
-
-use super::CHECKSUM_FIELD;
 
 /// The torn-tail recovery (#2237): the bounded window that finds the LAST
 /// newline boundary of the export, and the recovery that consumes it.
@@ -93,19 +91,21 @@ impl JsonlSession {
     ///
     /// On start this performs, in order:
     /// 1. torn-tail scan + truncation of an invalid partial last line,
-    /// 2. content-hash index build from the surviving valid lines,
-    /// 3. garbage collection of stray `.tmp` siblings left by crashes,
-    /// 4. spawn of the dedicated writer thread.
+    /// 2. garbage collection of stray `.tmp` siblings left by crashes,
+    /// 3. spawn of the dedicated writer thread.
     ///
-    /// Returns the session plus the hash index of already-durable lines.
+    /// The session does NOT index the checksums of already-durable lines
+    /// (#2393): no append path needs them, and building the index costs a full
+    /// read of the output file on every open. The resume dedup index is the
+    /// application's `CommitSession` concern, built once per run through
+    /// `read_jsonl_checksum_index`.
     ///
     /// # Errors
     ///
     /// Returns any I/O error raised while opening, scanning, or truncating
     /// the output file.
-    pub fn open(path: &Path) -> io::Result<(Self, HashSet<String>)> {
+    pub fn open(path: &Path) -> io::Result<Self> {
         tail_window::recover_torn_tail(path)?;
-        let index = build_hash_index(path)?;
         gc_stray_tmp_siblings(path);
 
         let file = OpenOptions::new().create(true).append(true).open(path)?;
@@ -117,15 +117,12 @@ impl JsonlSession {
             .spawn(move || writer_loop(file, rx, exit_tx))
             .map_err(|e| io::Error::other(format!("failed to spawn JSONL writer: {e}")))?;
 
-        Ok((
-            Self {
-                shared: Arc::new(Shared {
-                    tx,
-                    exit: Mutex::new(Some(exit_rx)),
-                }),
-            },
-            index,
-        ))
+        Ok(Self {
+            shared: Arc::new(Shared {
+                tx,
+                exit: Mutex::new(Some(exit_rx)),
+            }),
+        })
     }
 
     /// Append newline-terminated raw bytes through the single writer.
@@ -217,39 +214,6 @@ fn closed_writer_error(_: tokio::sync::mpsc::error::SendError<LineMsg>) -> io::E
     io::Error::new(io::ErrorKind::BrokenPipe, "JSONL writer has exited")
 }
 
-/// Build the content-hash index ([`CHECKSUM_FIELD`] per line) from surviving
-/// valid lines \u2014 the same contract `CommitSession` uses for promotion.
-///
-/// A line that parses as a JSON object but carries no [`CHECKSUM_FIELD`] is the
-/// signature of a renamed writer: the old code skipped it, so a rename emptied
-/// the index and `--resume` re-drove every already-committed page with nothing
-/// in the logs to say why. Those lines are now counted and reported (#1617,
-/// D3), so the failure stays visible even when the compatibility test does not
-/// cover the exact file at hand.
-///
-/// The read is the application's
-/// [`read_jsonl_checksum_index`](crate::application::export_factory::read_jsonl_checksum_index):
-/// ONE reader for the export file, so this side and the application's
-/// `CommitSession` agree on what a line is. It is STREAMING (the file is never
-/// loaded whole) and it SKIPS a line that is not valid UTF-8 instead of
-/// failing the export — one damaged byte must not abort the whole export
-/// (#1812). The application layer owns the REPORTING of the skip: it is the
-/// layer that surfaces the count in the export summary, and this side reads
-/// the very same bytes a second time.
-fn build_hash_index(path: &Path) -> io::Result<HashSet<String>> {
-    let index = crate::application::export_factory::read_jsonl_checksum_index(path)?;
-    if index.report.without_checksum > 0 {
-        warn!(
-            lines_without_checksum = index.report.without_checksum,
-            indexed = index.hashes.len(),
-            field = CHECKSUM_FIELD,
-            path = %path.display(),
-            "JSONL lines carry no checksum field; resume dedup will re-drive them (writer/reader field-name mismatch?)"
-        );
-    }
-    Ok(index.hashes)
-}
-
 /// Remove stray `.tmp` siblings of this output left behind by crashes.
 ///
 /// Only files whose names start with THIS output's file name are touched,
@@ -324,31 +288,11 @@ mod tests {
     use super::*;
 
     // ------------------------------------------------------------------
-    // Open-time scan: the hash index, the clean file and the stray siblings.
-    // The TORN TAIL lives in `super::tail_window`, with its own tests.
+    // Open-time scan: the clean file and the stray siblings. The TORN TAIL
+    // lives in `super::tail_window`, with its own tests. The checksum index
+    // is the application's concern (#2393): its counting contract lives with
+    // `read_jsonl_checksum_index` in `application/export_factory.rs`.
     // ------------------------------------------------------------------
-
-    /// #1617 (D3): a line that parses as JSON but lacks [`CHECKSUM_FIELD`] is the
-    /// signature of a renamed writer. It must produce an EMPTY index (the
-    /// honest answer) AND be counted, so the emptiness is attributable in the
-    /// logs instead of looking like a clean file.
-    #[tokio::test]
-    async fn renamed_checksum_field_empties_the_index_instead_of_silently_filling_it() {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let path = dir.path().join("renamed.jsonl");
-        // Same shape as a real export line, with the field name changed.
-        let mut content = String::new();
-        for n in 1..=3 {
-            content.push_str(&format!("{{\"n\":{n},\"content_hash\":\"hash-{n}\"}}\n"));
-        }
-        fs::write(&path, &content).expect("seed renamed-writer file");
-
-        let (_session, index) = JsonlSession::open(&path).expect("open succeeds");
-        assert!(
-            index.is_empty(),
-            "no line carries CHECKSUM_FIELD, so no line may be indexed"
-        );
-    }
 
     #[tokio::test]
     async fn stray_tmp_siblings_are_garbage_collected_on_open() {
@@ -358,7 +302,7 @@ mod tests {
         let stray = dir.path().join("out.jsonl.tmp");
         fs::write(&stray, b"half-written").expect("stray tmp");
 
-        let (_session, _index) = JsonlSession::open(&path).expect("open");
+        let _session = JsonlSession::open(&path).expect("open");
 
         assert!(
             !stray.exists(),
@@ -374,7 +318,7 @@ mod tests {
     async fn concurrent_clones_produce_every_line_exactly_once() {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let path = dir.path().join("conc.jsonl");
-        let (session, _index) = JsonlSession::open(&path).expect("open");
+        let session = JsonlSession::open(&path).expect("open");
 
         let mut handles = Vec::new();
         for task in 0..8u32 {
@@ -404,7 +348,7 @@ mod tests {
     async fn close_drains_queued_appends_then_final_flushes() {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let path = dir.path().join("drain.jsonl");
-        let (session, _index) = JsonlSession::open(&path).expect("open");
+        let session = JsonlSession::open(&path).expect("open");
 
         for n in 0..50u32 {
             session
@@ -424,7 +368,7 @@ mod tests {
     async fn dropping_all_senders_drains_and_exits_cleanly() {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let path = dir.path().join("drop.jsonl");
-        let (session, _index) = JsonlSession::open(&path).expect("open");
+        let session = JsonlSession::open(&path).expect("open");
         let clone = session.clone();
 
         for n in 0..10u32 {
@@ -467,7 +411,7 @@ mod tests {
     async fn append_after_close_reports_closed_writer() {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let path = dir.path().join("closed.jsonl");
-        let (session, _index) = JsonlSession::open(&path).expect("open");
+        let session = JsonlSession::open(&path).expect("open");
         session.close().await.expect("first close ok");
 
         // At least one of send/close must surface the closed-writer state;
@@ -498,7 +442,7 @@ mod tests {
     async fn append_during_an_in_flight_flush_is_durable_after_the_next_flush() {
         let dir = tempfile::TempDir::new().expect("temp dir");
         let path = dir.path().join("barrier.jsonl");
-        let (session, _index) = JsonlSession::open(&path).expect("open");
+        let session = JsonlSession::open(&path).expect("open");
 
         session
             .append(&terminated(&valid_line(1)))

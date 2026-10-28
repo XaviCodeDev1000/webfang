@@ -15,16 +15,32 @@
 ## Installation
 
 WebFang is a **binaries-only** distribution. Nothing is published to crates.io,
-so `cargo install webfang` cannot work. Every release publishes four archives
-plus a checksum manifest, on [GitHub Releases](https://github.com/XaviCodeDev1000/webfang/releases/latest):
+so `cargo install webfang` cannot work. Every release publishes **twelve
+archives — three per platform** — plus a checksum manifest, on
+[GitHub Releases](https://github.com/XaviCodeDev1000/webfang/releases/latest):
 
-| Platform | Asset | Format |
+| Platform | CLI asset | Format |
 | :--- | :--- | :--- |
 | Linux x86_64 | `webfang-x86_64-unknown-linux-gnu.tar.gz` | `.tar.gz` |
 | Linux ARM64 | `webfang-aarch64-unknown-linux-gnu.tar.gz` | `.tar.gz` |
 | macOS Apple Silicon | `webfang-aarch64-apple-darwin.tar.gz` | `.tar.gz` |
 | Windows x86_64 | `webfang-x86_64-pc-windows-msvc.zip` | `.zip` |
 | Any | `SHA256SUMS.txt` | checksums |
+
+The MCP servers ship in the same release, one binary per archive, on the same
+four platforms and in the format that platform's CLI archive uses:
+
+| Platform | HTTP server | stdio server |
+| :--- | :--- | :--- |
+| Linux x86_64 | `webfang-mcp-x86_64-unknown-linux-gnu.tar.gz` | `webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM64 | `webfang-mcp-aarch64-unknown-linux-gnu.tar.gz` | `webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon | `webfang-mcp-aarch64-apple-darwin.tar.gz` | `webfang-mcp-stdio-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `webfang-mcp-x86_64-pc-windows-msvc.zip` | `webfang-mcp-stdio-x86_64-pc-windows-msvc.zip` |
+
+Download `webfang-<target>` for the CLI and `webfang-mcp-<target>` /
+`webfang-mcp-stdio-<target>` for MCP: the CLI archive holds only the CLI
+binary, never an MCP one. Install steps are identical — see
+[MCP servers](docs/src/installation.md#mcp-servers-from-the-release-artifact).
 
 **There is no Intel macOS artifact.** The release target list is unchanged
 and deliberately does not include `x86_64-apple-darwin` (historically, ONNX
@@ -276,14 +292,16 @@ webfang --help
 
 The MCP server provides **36 tools** across **9 categories** for AI agent integration.
 
-> **Note:** the `webfang` CLI does **not** expose a `--mcp` flag (running `webfang --mcp` fails with `error: unexpected argument '--mcp' found`). The MCP server lives in the `webfang_mcp` crate and is started via its examples below.
+> **Note:** the `webfang` CLI does **not** expose a `--mcp` flag (running `webfang --mcp` fails with `error: unexpected argument '--mcp' found`). The MCP servers are separate binaries, shipped as their own archives in every release: `webfang-mcp` (HTTP) and `webfang-mcp-stdio` (stdio). See [MCP servers (from the release artifact)](docs/src/installation.md#mcp-servers-from-the-release-artifact).
+
+From a source build:
 
 ```bash
 # HTTP mode (Streamable HTTP at http://127.0.0.1:8080/mcp)
-cargo run -p webfang_mcp --example mcp_server --features "mcp persistence"
+cargo run -p webfang_mcp --bin webfang-mcp --features persistence
 
 # stdio mode (for OpenCode, Claude Desktop, Cursor; JSON-RPC over stdin/stdout)
-cargo run -p webfang_mcp --example mcp_server_stdio --features "mcp persistence"
+cargo run -p webfang_mcp --bin webfang-mcp-stdio --features persistence
 ```
 
 | Category | Tools |
@@ -326,7 +344,7 @@ build feature.
 | Feature | Activates | In the release binary? |
 |---------|-----------|--------|
 | `default` (an **empty set** since #1813 T4) | Nothing — the old `images` + `documents` markers were emptied because they selected no capability | ✅ Yes, but it enables nothing |
-| `mcp` | The `webfang_mcp` crate's MCP server | ⚠️ The CLI's `mcp` feature gates no shipped code — the crate itself is not in the release. See [MCP Server](#-mcp-server) |
+| `mcp` | The `webfang_mcp` crate's MCP server | ⚠️ The CLI's `mcp` feature gates no shipped code. The servers ship as separate binaries in their own archives (`webfang-mcp`, `webfang-mcp-stdio`). See [MCP Server](#mcp-server) |
 | `persistence` | SQLite checkpoint store | ❌ No — `--features persistence` from source |
 | `chromium` | Headless Chrome for `--js-strategy full` (rejected at preflight without it) | ❌ No — `--features chromium` from source |
 | `adaptive-selectors` | Adaptive selector learning | ❌ No — from source |

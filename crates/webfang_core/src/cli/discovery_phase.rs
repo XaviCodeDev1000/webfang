@@ -28,7 +28,7 @@ use crate::domain::config::ScraperConfig;
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::persistence::PersistenceMode;
 use crate::domain::site::SitemapConfig;
-use crate::CrawlerConfig;
+use crate::{CrawlerConfig, CrawlerConfigBuilder};
 
 /// Resolve the CLI-projected sitemap pair into the domain boundary (#1190).
 ///
@@ -42,12 +42,18 @@ pub(crate) fn resolve_sitemap_projection(opts: &CrawlOptions) -> Result<SitemapC
         .map_err(|e| CliExit::ConfigError(e.to_string()))
 }
 
-/// Build a `CrawlerConfig` for URL discovery (shared by dry-run, prepare, and batch).
-pub(crate) fn build_crawler_config_for_discovery(
+/// The `CrawlerConfig` prefix shared by every CLI crawl path: seed URL, page
+/// budget, patterns, robots, the sitemap projection (#1190) and the network
+/// settings with the operator budget overrides.
+///
+/// Bug R2-1: every consumer runs the real crawl Engine, so the operator
+/// overrides must ride on the config or the Engine silently re-derives the
+/// auto tiers. Callers append their tier-specific tail (the batch path adds
+/// the budget-derived concurrency) and build.
+pub(crate) fn base_crawler_config_builder(
     opts: &CrawlOptions,
-    tls_emulation: wreq_util::Profile,
-) -> Result<CrawlerConfig, CliExit> {
-    let crawler_config = CrawlerConfig::builder(opts.url.as_url().clone())
+) -> Result<CrawlerConfigBuilder, CliExit> {
+    Ok(CrawlerConfig::builder(opts.url.as_url().clone())
         .max_pages(opts.crawl.max_pages)
         .max_depth(opts.crawl.max_depth)
         .include_patterns(opts.crawl.include_patterns.clone())
@@ -56,13 +62,17 @@ pub(crate) fn build_crawler_config_for_discovery(
         .sitemap(resolve_sitemap_projection(opts)?)
         .timeout_secs(opts.network.timeout_secs)
         .delay_ms(opts.network.delay_ms)
-        // Bug R2-1: recursive URL discovery runs the real crawl Engine, so
-        // the operator overrides must ride on the config or the Engine
-        // silently re-derives the auto tiers.
-        .budget_overrides(opts.budget_overrides)
+        .budget_overrides(opts.budget_overrides))
+}
+
+/// Build a `CrawlerConfig` for URL discovery (shared by dry-run, prepare, and batch).
+pub(crate) fn build_crawler_config_for_discovery(
+    opts: &CrawlOptions,
+    tls_emulation: wreq_util::Profile,
+) -> Result<CrawlerConfig, CliExit> {
+    Ok(base_crawler_config_builder(opts)?
         .tls_emulation(tls_emulation)
-        .build();
-    Ok(crawler_config)
+        .build())
 }
 
 /// Run sitemap discovery and map its terminal states to `CliExit` (#1439
@@ -105,6 +115,10 @@ pub(crate) async fn prepare_phase(
     // Discovery-captured bodies (F-05, #1229): filled by the DOM branch
     // below, reused by the scrape phase instead of refetching.
     let mut captured_pages: Vec<CapturedPage> = Vec::new();
+    // #2338: set when the discovery crawl ended early with partial results —
+    // travels on PrepareResult so the orchestrator reports the failure after
+    // the export.
+    let mut truncated_by: Option<String> = None;
     let urls_to_scrape = if opts.crawl.single_page {
         // F-35 (#1216): single-page mode never runs discovery, so the seed
         // pattern guard needs a patterns-only config — no TLS/sitemap
@@ -136,7 +150,7 @@ pub(crate) async fn prepare_phase(
             // Recursive BFS discovery respects max_depth/max_pages/robots/
             // patterns; the existing scrape_phase + export_phase still own
             // content extraction and on-disk output.
-            let (urls, pages) = discover_dom_with_capture(
+            let (urls, pages, truncated) = discover_dom_with_capture(
                 &crawler_config,
                 opts,
                 persistence_mode,
@@ -144,6 +158,7 @@ pub(crate) async fn prepare_phase(
             )
             .await?;
             captured_pages = pages;
+            truncated_by = truncated;
             urls
         };
 
@@ -226,6 +241,7 @@ pub(crate) async fn prepare_phase(
         scraper_config,
         shared_downloader,
         captured_pages,
+        truncated_by,
     })
 }
 
@@ -246,7 +262,7 @@ async fn discover_dom_with_capture(
     opts: &CrawlOptions,
     persistence_mode: &PersistenceMode,
     root_correlation: &domain::CorrelationId,
-) -> Result<(Vec<url::Url>, Vec<CapturedPage>), CliExit> {
+) -> Result<(Vec<url::Url>, Vec<CapturedPage>, Option<String>), CliExit> {
     let capture_sink = std::sync::Arc::new(InMemoryContentSink::new());
     let cfg = crawler_config.clone();
     // dry-run-fail-fast: the real DOM path keeps full operator retry
@@ -262,7 +278,10 @@ async fn discover_dom_with_capture(
     .await
     {
         Err(e) => Err(CliExit::NetworkError(format!("URL discovery failed: {e}"))),
-        Ok(output) => Ok((output.urls, output.pages)),
+        // #2338: a run the engine ended early still delivers its partial set —
+        // the reason rides along so the run is still reported as FAILED after
+        // the export writes the partial output.
+        Ok(output) => Ok((output.urls, output.pages, output.truncated_by)),
     }
 }
 
@@ -274,6 +293,10 @@ pub(crate) struct PrepareResult {
     /// reuses them instead of refetching. Empty for single-page, sitemap,
     /// and dry-run shapes.
     pub(crate) captured_pages: Vec<CapturedPage>,
+    /// The discovery crawl ended early with partial results (#2338): the
+    /// reason the orchestrator must report as a failure AFTER the export
+    /// wrote the partial output. `None` on a complete discovery.
+    pub(crate) truncated_by: Option<String>,
 }
 
 /// Plan the final scrape list from discovery output.
@@ -438,14 +461,17 @@ mod tests {
         );
     }
 
+    fn discovered_urls(paths: &[&str]) -> Vec<url::Url> {
+        paths
+            .iter()
+            .map(|p| url::Url::parse(&format!("https://example.com{p}")).unwrap())
+            .collect()
+    }
+
     #[test]
     fn plan_urls_dom_mode_prepends_seed() {
         let seed = url::Url::parse("https://example.com").unwrap();
-        let discovered = vec![
-            url::Url::parse("https://example.com/a").unwrap(),
-            url::Url::parse("https://example.com/b").unwrap(),
-            url::Url::parse("https://example.com/c").unwrap(),
-        ];
+        let discovered = discovered_urls(&["/a", "/b", "/c"]);
 
         let guard = permissive_guard(&seed);
         let result = plan_urls(false, false, seed.clone(), discovered.clone(), &guard);
@@ -459,10 +485,7 @@ mod tests {
     #[test]
     fn plan_urls_sitemap_mode_does_not_prepend_seed() {
         let seed = url::Url::parse("https://example.com").unwrap();
-        let discovered = vec![
-            url::Url::parse("https://example.com/a").unwrap(),
-            url::Url::parse("https://example.com/b").unwrap(),
-        ];
+        let discovered = discovered_urls(&["/a", "/b"]);
 
         let guard = permissive_guard(&seed);
         let result = plan_urls(false, true, seed, discovered.clone(), &guard);

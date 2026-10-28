@@ -1,3 +1,10 @@
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)
+)]
+
 //! Adversarial stress matrix — Sprint 7-8 P1-conc Phase 3 (change
 //! `stabilization-concurrency-budget`, spec Group B).
 //!
@@ -303,7 +310,7 @@ async fn midflight_cancellation_bounded_grace_and_no_permit_leak() {
     // Partial JSONL written before a cancel stays valid.
     let dir = tempfile::TempDir::new().expect("temp dir");
     let path = dir.path().join("partial.jsonl");
-    let (session, _hash_index) = JsonlSession::open(&path).expect("session opens");
+    let session = JsonlSession::open(&path).expect("session opens");
     for item in 0..25 {
         let line = format!(r#"{{"item":{item},"pre_cancel":true}}"#);
         let mut bytes = line.into_bytes();
@@ -467,7 +474,7 @@ async fn fan_in_one_hundred_by_ten_is_sha256_corruption_proof() {
 
     let dir = tempfile::TempDir::new().expect("temp dir");
     let path = dir.path().join("sc4_matrix.jsonl");
-    let (session, _hash_index) = JsonlSession::open(&path).expect("session opens");
+    let session = JsonlSession::open(&path).expect("session opens");
 
     let mut handles = Vec::with_capacity(TASKS as usize);
     for task in 0..TASKS {

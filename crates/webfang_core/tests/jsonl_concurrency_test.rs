@@ -1,3 +1,10 @@
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)
+)]
+
 //! SC4 — single-writer JSONL session concurrency proof (PR4).
 //!
 //! 100 tokio tasks × 10 items each share ONE [`JsonlSession`] (one writer
@@ -18,7 +25,7 @@ async fn one_hundred_tasks_share_one_session_without_corruption() {
     let dir = TempDir::new().expect("temp dir");
     let path = dir.path().join("sc4.jsonl");
 
-    let (session, _hash_index) = JsonlSession::open(&path).expect("session opens");
+    let session = JsonlSession::open(&path).expect("session opens");
 
     let mut handles = Vec::with_capacity(TASKS as usize);
     for task in 0..TASKS {

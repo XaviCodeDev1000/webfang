@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Benchmarks for link extraction and URL normalization
 //!
 //! These are hot-path functions called per-page during crawling.

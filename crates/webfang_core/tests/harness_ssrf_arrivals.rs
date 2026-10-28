@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1433 RC-4 net: arrival-after-refusal counts for SSRF.
 //!
 //! Pins that a refused hop costs no further requests, through the REAL

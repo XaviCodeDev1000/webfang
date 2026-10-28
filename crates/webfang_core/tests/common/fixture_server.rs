@@ -1,3 +1,7 @@
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+// This module is included by many test crates via common/mod.rs.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 //! #1433: deterministic request-counting fixture + arrival-spacing harness.
 //!
 //! The RC-4 net: externally-observable guarantees (request counts,

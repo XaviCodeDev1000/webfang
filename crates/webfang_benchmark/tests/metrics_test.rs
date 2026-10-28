@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! AC-3.1 / AC-3.2 — metric computation over parsed records.
 //! Percentile convention: nearest-rank, 1-based, NO interpolation (ADR-B3).
 //! Run: cargo nextest run -p webfang_benchmark --test metrics_test

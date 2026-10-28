@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Slice-2 live-run gate logic (NFR-4, C-3): Tier B execution is a binary-only,
 //! fail-closed path. A live run requires BOTH a non-empty provider API key in
 //! the environment AND an explicit CLI opt-in flag; anything less is the typed

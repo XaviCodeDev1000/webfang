@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! SIGKILL crash matrix harness (design D6, PR5a).
 //!
 //! One test per pinned crash point. Each row:
@@ -649,7 +651,9 @@ allow_loopback = true
 /// whole list was committed returns "nothing pending" before the export ever
 /// starts (orchestrator::resume_nothing_pending). The all-skipped drain is
 /// covered instead by the unit test
-/// ai_cancelled_drain_with_every_chunk_already_committed_invents_nothing;
+/// ai_cancelled_drain_with_every_chunk_already_committed_invents_nothing and,
+/// at the library level, by tests/export_already_committed_library_test.rs
+/// (#2326, decision A);
 /// what this row proves is the other half — a cancelled --clean-ai run with
 /// no chunks at all still reaches the drain instead of exiting clean.
 #[cfg(unix)]

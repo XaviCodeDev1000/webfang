@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use url::Url;
 use webfang_core::infrastructure::crawler::parse_sitemap;

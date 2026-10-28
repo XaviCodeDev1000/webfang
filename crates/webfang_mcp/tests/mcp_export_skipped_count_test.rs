@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! The MCP export result carries the count of lines skipped for not being
 //! UTF-8 (issue #2238).
 //!
@@ -167,6 +169,36 @@ async fn export_file_reports_the_skipped_non_utf8_lines() {
         skipped_count(&result),
         Some(1),
         "the result must carry the count of the skipped non-UTF-8 lines: {result}"
+    );
+}
+
+/// #2272 (S3): the number the tool carries IS the core's number. The count
+/// the one application reader reports over the same pre-existing file must
+/// equal the one the result transports — the two figures cannot separate.
+#[tokio::test]
+async fn the_structured_count_equals_the_core_index_report() {
+    let out = RelTempDir::new("wf-out-equal");
+    let file = out.path().join(format!("{EXPORT_NAME}.jsonl"));
+    std::fs::write(&file, DAMAGED_EXPORT).expect("seed the damaged export file");
+
+    // The core's number for the pre-existing file, read BEFORE the export —
+    // the same snapshot the export's index is built from (#1812).
+    let core_count = u64::try_from(
+        webfang_core::application::export_factory::jsonl_index_report(&file).skipped_non_utf8,
+    )
+    .expect("the count fits in u64");
+    assert_eq!(core_count, 1, "the fixture is damaged in exactly one line");
+
+    let result = successful_tool_result(
+        "export_jsonl",
+        json!({ "output_dir": out.path().to_string_lossy(), "filename": EXPORT_NAME }),
+    )
+    .await;
+
+    assert_eq!(
+        skipped_count(&result),
+        Some(core_count),
+        "structuredContent must transport the core's count: {result}"
     );
 }
 

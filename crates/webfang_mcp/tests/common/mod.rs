@@ -1,3 +1,7 @@
+// Test policy (#1951): tokio::spawn in tests is deliberate harness
+// concurrency — blanket exemption; production keeps per-site supervision.
+// This module is included by every MCP integration test binary.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 //! Shared MCP test harness — centralized server bootstrap + JSON-RPC helpers.
 //!
 //! Each integration test binary is standalone, so every test file that needs a
@@ -370,13 +374,27 @@ pub fn extract_json(body: &str) -> Option<Value> {
 /// run-to-run.
 ///
 /// Snapshots are authored on Linux and store `/` separators, while the host may
-/// render the same path with `\`. The separators are canonicalized only inside
-/// the path that follows each `[OUT_DIR]` marker, so an unrelated backslash in
-/// the payload — a regex in a diagnostic, an escaped literal — survives intact.
+/// render the same path with `\`. Payloads that carry the path inside
+/// serialized JSON escape each separator as `\\`, so both the raw and the
+/// escaped needle are redacted and doubled separators collapse.
 ///
-/// Payloads that carry the path inside serialized JSON escape each separator as
-/// `\\`, so both the raw and the escaped needle are redacted and doubled
-/// separators collapse.
+/// The contract, as three properties:
+///
+/// 1. **Global prefix substitution.** Every occurrence of the directory — raw
+///    and backslash-escaped — is replaced with `[OUT_DIR]` anywhere in the
+///    payload: a plain global string replace, not scoped to a recognized path
+///    span.
+/// 2. **Bounded separator canonicalization.** After each `[OUT_DIR]` marker,
+///    only the bounded run that follows it — up to the closing quote of a JSON
+///    string or the next whitespace, whichever comes first — has its
+///    separators canonicalized to `/`. An unrelated backslash elsewhere in the
+///    payload (a regex in a diagnostic, an escaped literal) survives intact.
+/// 3. **The bounded run is what keeps multi-segment paths correct.** A
+///    `[OUT_DIR]/images\71a5.png` tail canonicalizes to
+///    `[OUT_DIR]/images/71a5.png`; a whole-payload normalizer would instead
+///    rewrite those unrelated backslashes and corrupt them. Full-payload
+///    normalization is deliberately not done — document, do not rewrite
+///    (R1-1, review of #2303).
 pub fn redact_path(text: &str, dir: &std::path::Path) -> String {
     const MARKER: &str = "[OUT_DIR]";
 

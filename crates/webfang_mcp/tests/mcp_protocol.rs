@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP protocol integration tests.
 //!
 //! Tests handler construction, state initialization, semaphore backpressure,

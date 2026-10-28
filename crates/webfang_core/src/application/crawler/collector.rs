@@ -99,6 +99,9 @@ impl ResultsCollector {
 
         // Worker dedicado que posee el receiver y el Vec final
         let _counter_clone = Arc::clone(&counter);
+        // Supervised: the JoinHandle is stored in `ResultsCollector.handle`
+        // and joined in `collect()`, which returns the collected results.
+        #[allow(clippy::disallowed_methods)]
         let handle = tokio::spawn(
             async move {
                 let mut results = Vec::with_capacity(vec_capacity);

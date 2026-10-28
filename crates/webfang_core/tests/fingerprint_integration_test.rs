@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for FingerprintRepository — real I/O with temp dirs (#792 Slice B).
 //!
 //! Exercises upsert semantics, failure counting, and the no-op backend.

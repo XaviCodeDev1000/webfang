@@ -152,7 +152,8 @@ async fn run_standard_export(config: ExportConfig<'_>) -> Result<Vec<String>, Cl
         let ctx = resume_context(record_store.as_ref(), resume, cancel.as_ref());
         export_factory::process_results(&results, output_dir, export_format, "export", ctx.as_ref())
     });
-    await_blocking_export(handle, "scrape", export_format).await
+    let outcome = await_blocking_export(handle, "scrape", export_format).await?;
+    Ok(outcome.processed_urls)
 }
 
 /// AI semantic cleaning export path.
@@ -207,7 +208,8 @@ async fn run_ai_export(
             ctx.as_ref(),
         )
     });
-    await_blocking_export(handle, "AI-cleaned", export_format).await
+    let outcome = await_blocking_export(handle, "AI-cleaned", export_format).await?;
+    Ok(outcome.processed_urls)
 }
 
 /// Await a blocking-pool export handle and translate its outcome onto the CLI
@@ -218,13 +220,13 @@ async fn run_ai_export(
 /// `ExporterError` and `JoinError` onto `CliExit` with the Spanish
 /// user-facing wording. Extracted so both `run_*_export` paths stay inside
 /// the cognitive-complexity ratchet.
-async fn await_blocking_export(
-    handle: tokio::task::JoinHandle<Result<Vec<String>, crate::domain::exporter::ExporterError>>,
+async fn await_blocking_export<T>(
+    handle: tokio::task::JoinHandle<Result<T, crate::domain::exporter::ExporterError>>,
     stage: &'static str,
     format: ExportFormat,
-) -> Result<Vec<String>, CliExit> {
+) -> Result<T, CliExit> {
     match handle.await {
-        Ok(Ok(urls)) => Ok(urls),
+        Ok(Ok(value)) => Ok(value),
         Ok(Err(e)) => {
             warn!(error = %e, format = ?format, "export of {stage} results failed");
             Err(CliExit::IoError(e.to_string()))

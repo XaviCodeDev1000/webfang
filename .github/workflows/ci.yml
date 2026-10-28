@@ -143,6 +143,8 @@ jobs:
   # rust-toolchain.toml, or a changed .rs carrying a cfg/target marker. A
   # change without such a marker can still break Windows; that residual risk
   # is accepted here and falls to the scheduled full-scope run (nightly).
+  # #2342: that lane is no longer on the pull_request/merge_group path at all;
+  # the decision and its evidence live in its own block below.
   # ============================================================================
   change-scope:
     name: Plan
@@ -686,6 +688,13 @@ jobs:
       # network, no cargo, mktemp fixtures only.
       - name: Breaking-marker guard semantics harness
         run: bash scripts/test_merge_when_green_breaking.sh
+      # Breaking-surface CI guard harness (#2328). The required check
+      # `breaking-surface` (pr-validation.yml) applies the same matrix as the
+      # local merge-when-green guard, reads the queue merge method via GraphQL,
+      # and pages commits past the 100-cap of `gh pr view --json commits`.
+      # Offline: fixtures + fake `gh`, no network, no cargo, mktemp only.
+      - name: Breaking-surface guard semantics harness
+        run: bash scripts/test_breaking_surface.sh
       # Merged-state semantics harness (#1970). `merge-when-green.sh` read only
       # `mergeStateStatus`, and GitHub answers UNKNOWN for a CLOSED PR forever
       # (the mergeability of a closed PR is never computed): the script used to
@@ -838,6 +847,11 @@ jobs:
         run: bash scripts/test_dead_tests.sh
       - name: Archive reproducibility semantics harness
         run: bash scripts/test_archive_reproducibility.sh
+      # Semantics harness for the release smoke test (webfang#2428). The gate it
+      # covers runs only at release time, so without this nothing proves it fails
+      # for the right reason: short count, renamed tool, silent server.
+      - name: MCP stdio smoke semantics harness
+        run: bash scripts/test_smoke_mcp_stdio.sh
       # Semantics harness for the duplication ratchet (issue #1757, #516).
       # The guard decides the ratchet, and until this harness nothing in CI
       # asserted what it decides: it translated "I did not measure" into "0
@@ -1092,6 +1106,23 @@ jobs:
         env:
           WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
+      - name: Upload nextest JUnit report
+        # #2387: a test that passes on retry prints only a compact "TRY 2 PASS"
+        # line — the profile's output policy never shows attempt-1 output, so a
+        # FLKY-FL is unexplainable from the log alone. The JUnit report
+        # ([profile.ci.junit] in .config/nextest.toml) records every retry
+        # attempt with its own output as <flakyFailure>/<rerunFailure>. Upload
+        # it only when the job failed: green runs never need it.
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          # This job runs on ubuntu-latest; the flake evidence of #2387 lives on
+          # the platform lanes (test-crossplatform), which carry their own
+          # per-OS upload step below. The name must not claim a platform.
+          name: nextest-junit-tests-core
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   # ============================================================================
   # TIER 4: TEST FULL (4-6 minutes)
@@ -1145,6 +1176,16 @@ jobs:
       - run: cargo nextest run --all-features --profile ci
         env:
           WEBFANG_TEST_PREBUILT_BIN: "1"
+      - name: Upload nextest JUnit report
+        # #2387: same diagnosability contract as test-core — the all-features
+        # lane's flaky conversions must carry their own attempt-1 output too.
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-all-features
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   # ============================================================================
   # TEST CROSSPLATFORM (ADVISORY SIGNAL IN PR) — XP-C-01 (#1608)
@@ -1157,36 +1198,68 @@ jobs:
   # to observed failures. Advisory only — never in `gate` needs: the first
   # runs are EXPECTED to fail on Windows (fail-closed wizard identity,
   # signal semantics) and must not block merges. Promotion to required is a
-  # deliberate follow-up once the lane is green.
+  # deliberate follow-up once the lane is green — the concrete condition is
+  # the REVIEW entry below.
   # No extra tooling: release.yml already builds Windows (x86_64-pc-windows-msvc)
   # and macOS (aarch64-apple-darwin) with BoringSSL/mcp without installing
   # anything — cmake/NASM are preinstalled on GitHub runners.
   # No rust-cache (#1171): non-gate job, compiles cold — cache pool budget,
   # tokio-console-smoke precedent.
   #
-  # DECISION (#1633, revised by #2282): this lane STAYS GATING — deliberately
-  # NOT shielded, and the recorded reason is not "we forgot", it is the trade:
-  #   - it is absent from `gate`'s needs and from `notify`'s needs, so it never
-  #     blocks a merge through CI Gate; the only cost of its redness is the
-  #     red RUN conclusion on push/PR, and
-  #   - it is path-gated on needs_crossplatform (Cargo.toml/Cargo.lock,
-  #     build.rs, .cargo/**, rust-toolchain.toml, or a changed .rs carrying a
-  #     cfg/target marker). A platform change without such a marker can still
-  #     break Windows; that residual risk is accepted and falls to the
-  #     scheduled full-scope run (nightly), which sets
-  #     needs_crossplatform=true, and
-  #   - shielding it would buy silence, not green: the CI Health Observer
-  #     branches on the RUN conclusion, not on the jobs, so `continue-on-error`
-  #     removes the false alarm AND the only mechanism reporting its red jobs.
-  # The middle ground the issue names (shield + register as a known-RED-by-
-  # design lane with the `known-false-positive` label, W-03 style) lives in
-  # ci-health.yml, not here. Revisit with #1631 (the inventory of the real
-  # Windows/macOS failures) in the same transaction.
+  # DECISION (#2342, superseding the visibility trade of #1633/#2282): this
+  # lane runs on push, schedule and workflow_dispatch — NOT on pull_request or
+  # merge_group.
+  #
+  # #2282 kept it on the PR path deliberately: its redness cost only the run
+  # conclusion, because it is absent from `gate`'s needs and ci-health.yml
+  # branches on the RUN conclusion rather than shielding individual jobs. What
+  # changed is the NATURE of the red. Since #2306 makes a retried pass fail the
+  # job (`flaky-result = "fail"`, .config/nextest.toml), this lane goes red on
+  # `TRY 2 PASS`, and the flaking set MOVES between runs — the same commit
+  # failed with two disjoint sets (the `batch_*` pair in the original attempt;
+  # a 429 wall-clock test, a spawn-budget meta-test and the trybuild
+  # compile-fail in the re-run). A moving, environment-driven set cannot be
+  # declared known-flaky (#2342), and it is not attributable to the PR's diff,
+  # so on a PR the red carries no review signal while still marking every code
+  # PR failed.
+  #
+  # What is kept: it is still absent from `gate`'s needs, and it still runs
+  # path-gated on needs_crossplatform (Cargo.toml/Cargo.lock, build.rs,
+  # .cargo/**, rust-toolchain.toml, or a changed .rs carrying a cfg/target
+  # marker) on push to main, plus the scheduled full-scope run, which sets
+  # needs_crossplatform=true. What is lost: per-PR Windows/macOS execution;
+  # that residual risk is the accepted trade of #2342.
+  #
+  # Not decided here, tracked separately: the wall-clock tests that move the
+  # set (#2342) and #1631 (inventory of the real Windows/macOS failures). One
+  # of the three re-run flakes is already covered: `.config/nextest.toml`
+  # gives `illegal_page_transitions_fail_to_compile` 600s with
+  # terminate-after 1, so its 186.8s attempt sits inside the ceiling.
+  #
+  # REVIEW (#2333, 2026-10-26): promotion is NOT due — the lane still flakes
+  # chronically under flaky-result=fail. Measured on main run 40407265924
+  # (2026-10-26), AFTER the build-lock fixes #2336/#2345 removed the shared
+  # in-test cargo build: 2 FLKY-FL, both passing on TRY 2
+  # (batch_empty_stdin_exits_64 in 1.0s, crawl_js_strategy_respects_timeout_secs
+  # in 7.1s), and both ALREADY carrying their per-test spawn-latency
+  # mitigations (#1697 budget, clock-started-after-binary-resolve). Earlier
+  # evidence of the same class: PR #2325's three FLKY-FL (#2331, closed with
+  # two of these same tests still reproducing), #1766, #1697, #2302, #2276.
+  # Gating a lane that red would block merges on spawn-timing retries.
+  # EXIT CONDITION: promote `test-crossplatform` into `gate`'s needs only
+  # after 10 consecutive green windows-latest executions across push and
+  # nightly main runs. If a structural Windows cause is confirmed before
+  # that, fix the test — never a per-test flaky override (#2313 retires
+  # those). This entry is the tracking record; the promotion needs no
+  # separate issue to stay alive.
   # ============================================================================
   test-crossplatform:
     name: Tests (${{ matrix.os }})
     needs: [change-scope]
-    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_crossplatform == 'true' }}
+    # #2342: off the PR path — see the decision block above. `schedule` and
+    # `workflow_dispatch` resolve to full scope in scripts/ci_plan.sh, so
+    # needs_crossplatform is true there; on push it stays path-gated.
+    if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_crossplatform == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -1226,6 +1299,20 @@ jobs:
         env:
           WEBFANG_TEST_PREBUILT_BIN: "1"
         run: cargo nextest run --tests --profile ci
+      - name: Upload nextest JUnit report
+        # #2387: this is the lane where the batch_test flake family actually
+        # reproduces (windows-latest and macos-latest: FLKY 2/3 with no
+        # attempt-1 output, and the 22.4s LEAK in the nightly). The JUnit
+        # records every retry attempt with its own output, so a red run here
+        # finally carries the evidence S1 of #2387 exists to produce. Per-OS
+        # artifact name: the matrix runs two jobs.
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-${{ matrix.os }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
       # #1834: the Windows console-control path was only ever COMPILED by this
       # lane, never EXERCISED — nobody drove a real CTRL_CLOSE_EVENT through
       # the handler, so the whole console path was unproven on the platform
@@ -1557,7 +1644,15 @@ jobs:
     name: Feature matrix
     needs: [clippy]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 25 min is the measured worst case plus headroom, not a round number
+    # (#2332). Run 40197111976 / job 121180893990 (PR #2325, cold-ish cache):
+    # setup ~1m, "Feature matrix check" 7m03s, "Feature-gated test targets
+    # compile" 1m27s — the harness step was killed with only ~6m30 left and the
+    # job concluded `cancelled` (a job timeout cancels the whole run, #1512).
+    # Warm-cache main runs finish the same job in ~9m (step 1 ~2m40, harness
+    # ~5m09, job 121853846485). Worst observed sums to ~22m30 with the harness
+    # cap below; the remainder is headroom.
+    timeout-minutes: 25
     permissions:
       contents: read
     steps:
@@ -1586,8 +1681,11 @@ jobs:
       # Per-combo runtime probes: build + behavioral crawl + resume round-trip +
       # exit-contract gates (65) for default, no-default, chromium, mcp and full
       # feature sets. Advisory only (not in `gate` needs). The script
-      # rebuilds per combo, so the timeout is generous.
+      # rebuilds per combo (5 sequential builds): ~5m09 warm, so 12 covers the
+      # cold path while bounding a hang to a step failure instead of burning
+      # the whole job budget and cancelling the run (#1512, #2332).
       - name: Compatibility harness (per-combo probes)
+        timeout-minutes: 12
         run: bash scripts/check_compatibility.sh --ci-required
 
   # ============================================================================
@@ -1967,14 +2065,23 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          # Official nextest coverage setup: llvm-cov needs the LLVM tools.
+          components: llvm-tools-preview
       # no rust-cache (#1171): non-gate job, compiles cold — cache pool budget, benches.yml:55-60 precedent
-      # SC-11: pinned — see the nextest pin above for why an unpinned `tool:`
-      # floats an executable inside a SHA-pinned step.
+      # SC-11: both tools pinned; `tool:` accepts a comma-separated
+      # `name@version` list (same pattern as feature-matrix). 0.9.131 is the
+      # repository's nextest pin; `cargo llvm-cov nextest` needs it installed.
       - uses: taiki-e/install-action@166cdddc0349c6f3c1da17f66a8fc88ec3bc4dd5
         with:
-          tool: cargo-llvm-cov@0.9.1
+          tool: cargo-llvm-cov@0.9.1,nextest@0.9.131
+      # Coverage is informational: nextest parallelizes the test binaries. The
+      # `coverage` profile in .config/nextest.toml preserves the old `cargo
+      # test` test set (default-filter = "all()") and treats a retry-passed
+      # test as pass; the ci profile would otherwise exclude ai_integration and
+      # fail on flaky.
       - name: Generate coverage
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info -- --skip test_mcp
+        run: cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info --profile coverage -E 'not test(test_mcp)'
       - name: Report coverage
         run: |
           cargo llvm-cov report --lcov | tail -5
@@ -2039,6 +2146,20 @@ jobs:
         run: |
           cargo nextest run --all-features --profile flake-nightly \
             -E 'not test(non2xx_browser_page_is_honest_error_exit_69)'
+      - name: Upload nextest JUnit report
+        # #2387: the nightly is where the spawn-latency LEAKs were measured
+        # (22.4s on batch_empty_file_exits_64 with retries=0). `failure()`
+        # cannot be used here: this job sets continue-on-error at the JOB
+        # level, which concludes the job success and makes step-level
+        # failure() unreliable — always() guarantees the artifact lands on a
+        # red run, and the file is ~KB on a green one.
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: nextest-junit-flake-nightly
+          path: target/nextest/flake-nightly/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
       - name: Report flake-lane result
         if: always()
         run: |

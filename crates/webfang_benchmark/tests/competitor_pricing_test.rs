@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Slice-2 competitor pricing math (FR-4, design §4).
 //!
 //! Firecrawl maps public credit tiers into $/1k pages:

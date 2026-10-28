@@ -134,8 +134,9 @@ trap '[[ -n ${KEEP_FIXTURE:-} ]] || rm -rf "$FIXTURE"' EXIT
 build_fixture "$FIXTURE"
 
 # ---------------------------------------------------------------------------
-# 1. shard-count formula (#2285 S1/S2, provisional calibration): 8 per shard,
-#    cap 16, 0 mutants -> no shards.
+# 1. shard-count formula (#2285 S1/S2, calibrated in #2296): 6 per shard,
+#    cap 16, 0 mutants -> no shards. The boundaries follow the new size:
+#    6 -> 1 shard, 7 -> 2.
 # ---------------------------------------------------------------------------
 count_shards() {
   bash "$HELPER" shard-count "$1" 2>/dev/null | awk '/^shard_count=/{print}' | cut -d= -f2
@@ -152,23 +153,36 @@ expect_shards() { # <count> <expected-shard_count>
 }
 expect_shards 0 0
 expect_shards 1 1
-expect_shards 8 1
-expect_shards 9 2
-expect_shards 16 2
-expect_shards 17 3
-expect_shards 24 3
-expect_shards 25 4
-expect_shards 128 16
-# Cap: anything past 128 mutants must NOT produce more than 16 shards.
-expect_shards 129 16
+expect_shards 6 1
+expect_shards 7 2
+expect_shards 12 2
+expect_shards 13 3
+expect_shards 18 3
+expect_shards 19 4
+expect_shards 96 16
+# Cap: anything past 96 mutants must NOT produce more than 16 shards.
+expect_shards 97 16
 expect_shards 100000 16
 
 # The shard list agrees with the count (parseable JSON for the matrix).
 shards_line="$(bash "$HELPER" shard-count 10 2>/dev/null | awk '/^shards=/{print}')"
-if [[ "$shards_line" == "shards=[1,2]" ]]; then
-  pass "shards list for 10 mutants -> [1,2]"
+if [[ "$shards_line" == "shards=[0,1]" ]]; then
+  pass "shards list for 10 mutants -> [0,1]"
 else
-  fail "shards list for 10 mutants" "expected [shards=[1,2]], got [$shards_line]"
+  fail "shards list for 10 mutants" "expected [shards=[0,1]], got [$shards_line]"
+fi
+
+# The shard ids are 0-BASED (#2296): `cargo mutants --shard k/N` requires
+# 0 <= k < N and partitions by mutant index (slice: the first ceil(count/N)
+# on shard 0). Emitting 1..N (the pre-#2296 behavior) made the last matrix
+# entry a CLI usage error — masked by continue-on-error in CI — and left
+# partition 0 untested; observed live in run 40586006186 ("invalid value
+# '2/2' for '--shard <SHARD>': shard k must be less than n").
+zero_line="$(bash "$HELPER" shard-count 7 2>/dev/null | awk '/^shards=/{print}')"
+if [[ "$zero_line" == "shards=[0,1]" ]]; then
+  pass "shard ids are 0-based (7 mutants -> [0,1], not [1,2])"
+else
+  fail "0-based shard ids" "expected [shards=[0,1]], got [$zero_line]"
 fi
 
 # ---------------------------------------------------------------------------
@@ -248,10 +262,10 @@ else
   fail "shards count" "raw=[$raw_count] helper=[$helper_count] out=[$sh_out]"
 fi
 if printf '%s' "$sh_out" | grep -q '^shard_count=1$' \
-  && printf '%s' "$sh_out" | grep -q '^shards=\[1\]$'; then
+  && printf '%s' "$sh_out" | grep -q '^shards=\[0\]$'; then
   pass "shards sizes a single shard for the PR's small diff"
 else
-  fail "shards sizing" "expected shard_count=1 and shards=[1], got [$sh_out]"
+  fail "shards sizing" "expected shard_count=1 and shards=[0], got [$sh_out]"
 fi
 
 # ---------------------------------------------------------------------------
@@ -294,6 +308,70 @@ if [[ $wrong_rc -ne 0 ]] && grep -qi 'exited with code' "$FIXTURE/wrong.err" 2>/
   pass "diff whose new side mismatches the tree fails closed with the exit code"
 else
   fail "mismatched-new-side diff fail-closed" "rc=$wrong_rc err=[$(cat "$FIXTURE/wrong.err" 2>/dev/null)]"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Fail-closed on an UNREADABLE diff file (#2296 S1): cargo-mutants exit 6 —
+#    the file-level signature. Measured against 27.1.0 (#2296 empirical
+#    probes): exit 5 is a READABLE diff that is not usable (mismatched new
+#    side, malformed hunks); exit 6 is the diff PATH itself failing to open
+#    (missing, a directory, EACCES). The helper pre-checks `-f`, so the
+#    deterministic probe for the 6 branch is a file that exists but cannot
+#    be read: chmod 000 (the harness never runs as root, where EACCES
+#    would not fire).
+# ---------------------------------------------------------------------------
+(cd "$FIXTURE/work" && cp git.diff locked.diff && chmod 000 locked.diff) || true
+locked_rc=0
+(cd "$FIXTURE/work" && bash "$HELPER" shards locked.diff >/dev/null 2>"$FIXTURE/locked.err") || locked_rc=$?
+chmod 644 "$FIXTURE/work/locked.diff" 2>/dev/null || true
+if [[ $locked_rc -ne 0 ]] && grep -qi 'exited with code 6' "$FIXTURE/locked.err" 2>/dev/null; then
+  pass "unreadable diff file fails closed with cargo-mutants exit 6"
+else
+  fail "unreadable diff fail-closed" "rc=$locked_rc err=[$(cat "$FIXTURE/locked.err" 2>/dev/null)]"
+fi
+
+# ---------------------------------------------------------------------------
+# 7. The jq-derived count is validated before the matrix arithmetic
+#    (#2296 S1, native review R3-4): `shard-count` guards its argument, but
+#    the `shards` path computes its count with `jq 'length'` — jq returns
+#    the ABSOLUTE VALUE of a number, so a JSON document like `3.7` (or any
+#    non-integer, e.g. a future malformed tool output) would flow into
+#    emit_matrix's arithmetic unvalidated. The helper cannot force the real
+#    cargo-mutants to emit that, so this probe shadows `cargo` on PATH with
+#    a stub emitting valid-JSON `3.7`: the guard must fail closed with a
+#    named diagnostic, never a cryptic arithmetic abort or a sized matrix.
+# ---------------------------------------------------------------------------
+FAKE_BIN="$FIXTURE/fake-cargo-bin"
+mkdir -p "$FAKE_BIN"
+cat >"$FAKE_BIN/cargo" <<'STUB'
+#!/usr/bin/env bash
+# Fixture stub: emits a valid JSON document whose jq `length` is 3.7, the
+# smallest input that slips a non-integer past `jq 'length'`.
+printf '3.7\n'
+STUB
+chmod +x "$FAKE_BIN/cargo"
+guard_rc=0
+(cd "$FIXTURE/work" && PATH="$FAKE_BIN:$PATH" bash "$HELPER" shards git.diff \
+  >/dev/null 2>"$FIXTURE/guard.err") || guard_rc=$?
+if [[ $guard_rc -ne 0 ]] \
+  && grep -qi 'not a non-negative integer' "$FIXTURE/guard.err" 2>/dev/null; then
+  pass "a non-integer jq count fails closed with the named diagnostic"
+else
+  fail "jq count guard" "rc=$guard_rc err=[$(cat "$FIXTURE/guard.err" 2>/dev/null)]"
+fi
+# Control: the same stub emitting a legitimate count still sizes the matrix,
+# proving the guard sits in front of the arithmetic, not in front of cargo.
+cat >"$FAKE_BIN/cargo" <<'STUB'
+#!/usr/bin/env bash
+# Fixture stub: the same interface emitting a legitimate count.
+printf '["m1","m2"]\n'
+STUB
+ctrl_out="$(cd "$FIXTURE/work" && PATH="$FAKE_BIN:$PATH" bash "$HELPER" shards git.diff 2>/dev/null)"
+if printf '%s' "$ctrl_out" | grep -q '^mutant_count=2$' \
+  && printf '%s' "$ctrl_out" | grep -q '^shard_count=1$'; then
+  pass "an integer count from the same channel still sizes the matrix"
+else
+  fail "jq count guard control" "got [$ctrl_out]"
 fi
 
 printf 'test_ci_mutant_shards: PASS=%d FAIL=%d\n' "$PASS" "$FAIL"

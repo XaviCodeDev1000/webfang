@@ -2,7 +2,7 @@
 
 use crate::cmd;
 use crate::BehavioralTest;
-use crate::{assert_spawn_within, SPAWN_LATENCY_BUDGET};
+use crate::{assert_spawn_within, std_cmd, SPAWN_LATENCY_BUDGET};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -154,13 +154,15 @@ fn batch_empty_stdin_exits_64() {
     assert_spawn_within(
         SPAWN_LATENCY_BUDGET,
         "batch_empty_stdin_exits_64",
-        move || {
-            let output = cmd()
-                .arg("--batch")
-                .write_stdin("")
-                .timeout(Duration::from_secs(5))
-                .output()
-                .map_err(|e| format!("could not spawn the binary: {e}"))?;
+        move |child| {
+            // #2387: the attempt runs through `BudgetChild::output` so the
+            // harness can kill an overrunning spawn. stdin is `null` — an
+            // immediately-readable EOF, the exact input `.write_stdin("")`
+            // used to pipe — and the assert_cmd `.timeout(5s)` second net is
+            // gone: the budget itself now bounds AND terminates the attempt.
+            let mut command = std_cmd();
+            command.arg("--batch");
+            let output = child.output(command)?;
 
             if output.status.code() != Some(64) {
                 return Err(format!(
@@ -382,13 +384,13 @@ fn batch_empty_file_exits_64() {
     assert_spawn_within(
         SPAWN_LATENCY_BUDGET,
         "batch_empty_file_exits_64",
-        move || {
-            let output = cmd()
-                .arg("--batch-file")
-                .arg(&batch_file)
-                .timeout(Duration::from_secs(5))
-                .output()
-                .map_err(|e| format!("could not spawn the binary: {e}"))?;
+        move |child| {
+            // #2387: spawned through `BudgetChild::output` so the harness can
+            // kill an overrunning spawn; the assert_cmd `.timeout(5s)` second
+            // net is gone — the budget itself now bounds AND terminates it.
+            let mut command = std_cmd();
+            command.arg("--batch-file").arg(&batch_file);
+            let output = child.output(command)?;
 
             if output.status.code() != Some(64) {
                 return Err(format!(

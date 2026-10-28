@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! PR3 resume-gate contract tests (SC2, A2/E10).
 //!
 //! The gate in [`webfang_core::application::resume`] is THE single skip
@@ -9,27 +11,17 @@
 //! Fresh-run semantics (A2): a new run always gets a fresh `run_id`; prior
 //! records are PRESERVED and remain queryable regardless of `--resume`.
 
+#[path = "common/mod.rs"]
+mod common;
+
 use std::collections::BTreeMap;
 
+use common::{committed_record, jsonl_lines};
 use tempfile::TempDir;
 use url::Url;
 use webfang_core::application::resume::{filter_committed, normalize_domain_key};
 use webfang_core::domain::page_state::PageStatus;
 use webfang_core::infrastructure::export::{DomainRecords, LastError, RawRecord, RecordStore};
-
-fn committed_record(url: &str) -> RawRecord {
-    RawRecord {
-        url: url.to_string(),
-        canonical_url: url.to_string(),
-        run_id: "018f3c1e-7a2b-4c0d-9e1f-2a3b4c5d6e7f".to_string(),
-        content_hash: Some("sha256:abc".to_string()),
-        attempts: 1,
-        status: PageStatus::Committed,
-        last_error: None,
-        output_location: Some("out/export.jsonl".to_string()),
-        updated_at: 1_760_000_000_000,
-    }
-}
 
 fn record_at(url: &str, status: PageStatus) -> RawRecord {
     let mut r = committed_record(url);
@@ -264,13 +256,18 @@ fn scraped(url: &str, content: &str) -> ScrapedContent {
     }
 }
 
-fn jsonl_lines(dir: &TempDir) -> usize {
-    let path = dir.path().join("export.jsonl");
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .count()
+/// Export through the public port and return the URLs it drove: the arrange
+/// shared by the gate tests.
+fn export_urls(results: &[ScrapedContent], dir: &TempDir, ctx: &ResumeContext) -> Vec<String> {
+    process_results(
+        results,
+        dir.path().to_path_buf(),
+        ExportFormat::Jsonl,
+        "export",
+        Some(ctx),
+    )
+    .expect("export succeeds")
+    .processed_urls
 }
 
 /// Rewrite one persisted record's status (kill-window simulation: the crash
@@ -292,17 +289,14 @@ fn process_results_commits_every_item_through_the_checkpoint_sequence() {
     let ctx_store = store.clone();
     let ctx = ResumeContext::new(&ctx_store).with_resume(true);
 
-    let processed = process_results(
+    let processed = export_urls(
         &[
             scraped("https://commit.test/a", "alpha body"),
             scraped("https://commit.test/b", "beta body"),
         ],
-        dir.path().to_path_buf(),
-        ExportFormat::Jsonl,
-        "export",
-        Some(&ctx),
-    )
-    .expect("export succeeds");
+        &dir,
+        &ctx,
+    );
 
     assert_eq!(processed.len(), 2);
     assert_eq!(jsonl_lines(&dir), 2, "one flushed line per item");
@@ -336,14 +330,7 @@ fn second_resume_run_skips_committed_items_without_re_exporting() {
 
     let ctx_store2 = store.clone();
     let second = ResumeContext::new(&ctx_store2).with_resume(true);
-    let processed = process_results(
-        &results,
-        dir.path().to_path_buf(),
-        ExportFormat::Jsonl,
-        "export",
-        Some(&second),
-    )
-    .unwrap();
+    let processed = export_urls(&results, &dir, &second);
 
     assert!(processed.is_empty(), "nothing left to drive");
     assert_eq!(
@@ -490,17 +477,14 @@ fn item_failure_records_classified_error_and_crawl_continues() {
     let ctx_store = store.clone();
     let ctx = ResumeContext::new(&ctx_store).with_resume(true);
 
-    let processed = process_results(
+    let processed = export_urls(
         &[
             scraped("https://fail.test/good", "healthy body"),
             scraped("https://fail.test/bad", ""), // empty content fails validation
         ],
-        dir.path().to_path_buf(),
-        ExportFormat::Jsonl,
-        "export",
-        Some(&ctx),
-    )
-    .expect("item-level failures must not abort the export");
+        &dir,
+        &ctx,
+    );
 
     assert_eq!(processed.len(), 1, "only the healthy item exports");
     let records = store.load().unwrap();
@@ -542,14 +526,11 @@ fn fresh_run_without_resume_refetches_but_preserves_prior_records() {
     // New run WITHOUT --resume: everything re-fetches, old records stay.
     let ctx_store2 = store.clone();
     let fresh = ResumeContext::new(&ctx_store2).with_resume(false);
-    let processed = process_results(
+    let processed = export_urls(
         &[scraped("https://fresh.test/new", "new body")],
-        dir.path().to_path_buf(),
-        ExportFormat::Jsonl,
-        "export",
-        Some(&fresh),
-    )
-    .unwrap();
+        &dir,
+        &fresh,
+    );
 
     assert_eq!(processed.len(), 1);
     let records = store.load().unwrap();
@@ -582,14 +563,7 @@ fn fresh_run_re_drives_committed_urls_because_skip_gates_only_on_resume() {
 
     let ctx_store2 = store.clone();
     let fresh = ResumeContext::new(&ctx_store2).with_resume(false);
-    let processed = process_results(
-        &results,
-        dir.path().to_path_buf(),
-        ExportFormat::Jsonl,
-        "export",
-        Some(&fresh),
-    )
-    .unwrap();
+    let processed = export_urls(&results, &dir, &fresh);
 
     assert_eq!(
         processed.len(),

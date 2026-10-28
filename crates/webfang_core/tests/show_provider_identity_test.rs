@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #2106 — `show` and `doctor` must name what the run REALLY uses.
 //!
 //! The `[[model_profiles]]` layer describes the LOCAL ONNX models that

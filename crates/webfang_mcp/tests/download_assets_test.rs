@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP `download_assets` behavioral tests
 //!
 //! Proves the tool is wired into the real `AssetDownloaderPort` infrastructure

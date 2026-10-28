@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Regression tests for webfang's 4 HTML cleaning pipelines.
 //!
 //! These tests document the CURRENT correct behavior so future refactoring

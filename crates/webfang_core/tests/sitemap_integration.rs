@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for SitemapParser — real I/O with wiremock.
 //!
 //! Exercises `parse_from_url` end-to-end against a wiremock `MockServer`,

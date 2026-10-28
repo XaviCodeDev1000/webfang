@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Transport-level proof of the EC-08 reason slug and the EC-04
 //! success-shaped diagnostic channel (issue #1613, slice 5).
 //!

@@ -165,8 +165,9 @@ impl<'a> WebfangMetadata<'a> {
 pub struct JsonlExporter {
     config: ExporterConfig,
     /// Single-writer session (PR4, design D4): created lazily on first
-    /// write, ONE writer thread per run; owns torn-tail recovery, the
-    /// content-hash index, and the flush-ack barrier.
+    /// write, ONE writer thread per run; owns torn-tail recovery and the
+    /// flush-ack barrier. It does NOT index the output file's checksums
+    /// (#2393): the resume dedup index is the application's `CommitSession`.
     session: std::sync::OnceLock<super::jsonl_writer::JsonlSession>,
 }
 
@@ -174,8 +175,8 @@ impl JsonlExporter {
     /// Access the per-run single-writer session, creating it on first use.
     ///
     /// One session per RUN (the exporter instance lives for the run): its
-    /// open() performs torn-tail recovery + hash-index build + tmp GC before
-    /// any append of this run touches the file.
+    /// open() performs torn-tail recovery + tmp GC before any append of this
+    /// run touches the file.
     fn session(&self) -> ExportResult<&super::jsonl_writer::JsonlSession> {
         if let Some(session) = self.session.get() {
             return Ok(session);
@@ -184,7 +185,7 @@ impl JsonlExporter {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(ExporterError::DirectoryCreation)?;
         }
-        let (session, _hash_index) = super::jsonl_writer::JsonlSession::open(&path)
+        let session = super::jsonl_writer::JsonlSession::open(&path)
             .map_err(|e| ExporterError::WriteError(format!("{}: {}", path.display(), e)))?;
         let _ = self.session.set(session);
         self.session.get().ok_or_else(|| {
@@ -328,12 +329,7 @@ mod tests {
                 .expect("batch export must succeed");
         });
 
-        let closes: Vec<_> = records
-            .iter()
-            .filter(|r| r["record"] == "span_close" && r["span"] == "export_batch")
-            .collect();
-        assert_eq!(closes.len(), 1, "exactly one export_batch span");
-        let fields = closes[0]["span_fields"].as_object().expect("span_fields");
+        let fields = export_batch_span_fields(&records);
         assert_eq!(fields.get("outcome").and_then(|v| v.as_str()), Some("ok"));
         assert_eq!(
             fields.get("exporter").and_then(|v| v.as_str()),
@@ -369,12 +365,7 @@ mod tests {
             assert!(result.is_err(), "unwritable output must fail the batch");
         });
 
-        let closes: Vec<_> = records
-            .iter()
-            .filter(|r| r["record"] == "span_close" && r["span"] == "export_batch")
-            .collect();
-        assert_eq!(closes.len(), 1, "exactly one export_batch span");
-        let fields = closes[0]["span_fields"].as_object().expect("span_fields");
+        let fields = export_batch_span_fields(&records);
         assert_eq!(
             fields.get("outcome").and_then(|v| v.as_str()),
             Some("error")
@@ -385,22 +376,60 @@ mod tests {
         );
     }
 
-    fn create_test_chunk(title: &str) -> DocumentChunkValidated {
+    fn test_chunk(
+        url: &str,
+        title: &str,
+        content: &str,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> DocumentChunkValidated {
         use crate::domain::Validated;
         use chrono::Utc;
         use uuid::Uuid;
 
         crate::domain::DocumentChunkValidated {
             id: Uuid::new_v4(),
-            url: "https://example.com/test".to_string(),
+            url: url.to_string(),
             title: title.to_string(),
-            content: "Test content".to_string(),
-            metadata: std::collections::HashMap::new(),
+            content: content.to_string(),
+            metadata,
             timestamp: Utc::now(),
             embeddings: None,
             correlation_id: None,
             _state: std::marker::PhantomData::<Validated>,
         }
+    }
+
+    /// The default exporter-test chunk: fixed url/content, empty metadata.
+    fn create_test_chunk(title: &str) -> DocumentChunkValidated {
+        test_chunk(
+            "https://example.com/test",
+            title,
+            "Test content",
+            std::collections::HashMap::new(),
+        )
+    }
+
+    /// The `WebfangMetadata` JSON round-trip the `extra_metadata` assertions read.
+    fn metadata_json(chunk: &DocumentChunkValidated) -> serde_json::Value {
+        let metadata = WebfangMetadata::from_chunk(chunk);
+        let json = serde_json::to_string(&metadata).unwrap();
+        serde_json::from_str(&json).unwrap()
+    }
+
+    /// The single `export_batch` `span_close` record the trace must contain,
+    /// with its span fields; fails when the span is missing or duplicated.
+    fn export_batch_span_fields(
+        records: &[serde_json::Value],
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let closes: Vec<_> = records
+            .iter()
+            .filter(|r| r["record"] == "span_close" && r["span"] == "export_batch")
+            .collect();
+        assert_eq!(closes.len(), 1, "exactly one export_batch span");
+        closes[0]["span_fields"]
+            .as_object()
+            .expect("span_fields")
+            .clone()
     }
 
     #[test]
@@ -498,13 +527,14 @@ mod tests {
 
     /// #1617 (D3) — THE GATE for the pinned checksum field name.
     ///
-    /// `CHECKSUM_FIELD` is what `build_hash_index` and `CommitSession` read to
-    /// rebuild the resume dedup index; `serde(rename)` cannot take a const, so
-    /// the writer side has no compile-time link to it. This test is that link:
-    /// rename the struct field, or change the constant, and the emitted key
-    /// stops matching what the readers look for — which is precisely the
-    /// "rename silently empties the hash index" defect, caught here instead of
-    /// in production.
+    /// `CHECKSUM_FIELD` is what the application's `read_jsonl_checksum_index`
+    /// reads to rebuild the resume dedup index (#2393: the ONE reader — the
+    /// writer session no longer reads the file); `serde(rename)` cannot take a
+    /// const, so the writer side has no compile-time link to it. This test is
+    /// that link: rename the struct field, or change the constant, and the
+    /// emitted key stops matching what the reader looks for — which is
+    /// precisely the "rename silently empties the hash index" defect, caught
+    /// here instead of in production.
     #[test]
     fn serialized_uses_the_pinned_checksum_field_name() {
         let chunk = create_test_chunk("Checksum Field Test");
@@ -544,10 +574,7 @@ mod tests {
 
     #[test]
     fn test_webfang_metadata_v210_serialization_empty_metadata() {
-        let chunk = create_test_chunk("Empty Meta");
-        let metadata = WebfangMetadata::from_chunk(&chunk);
-        let json = serde_json::to_string(&metadata).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let value = metadata_json(&create_test_chunk("Empty Meta"));
 
         assert_eq!(value["metadata_version"], "2.1.0");
         // word_count and reading_time are computed from content when not in metadata
@@ -562,10 +589,6 @@ mod tests {
 
     #[test]
     fn test_webfang_metadata_v210_with_rich_metadata() {
-        use crate::domain::Validated;
-        use chrono::Utc;
-        use uuid::Uuid;
-
         let mut meta = std::collections::HashMap::new();
         meta.insert("word_count".to_string(), "42".to_string());
         meta.insert("reading_time".to_string(), "2".to_string());
@@ -575,21 +598,13 @@ mod tests {
         meta.insert("author".to_string(), "Jane Doe".to_string());
         meta.insert("excerpt".to_string(), "A summary".to_string());
 
-        let chunk = crate::domain::DocumentChunkValidated {
-            id: Uuid::new_v4(),
-            url: "https://example.com/rich".to_string(),
-            title: "Rich Metadata".to_string(),
-            content: "This is the main content body.".to_string(),
-            metadata: meta,
-            timestamp: Utc::now(),
-            embeddings: None,
-            correlation_id: None,
-            _state: std::marker::PhantomData::<Validated>,
-        };
-
-        let metadata = WebfangMetadata::from_chunk(&chunk);
-        let json = serde_json::to_string(&metadata).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let chunk = test_chunk(
+            "https://example.com/rich",
+            "Rich Metadata",
+            "This is the main content body.",
+            meta,
+        );
+        let value = metadata_json(&chunk);
 
         assert_eq!(value["metadata_version"], "2.1.0");
         assert_eq!(value["word_count"], 42);
@@ -605,21 +620,12 @@ mod tests {
 
     #[test]
     fn test_webfang_metadata_v210_computed_word_count() {
-        use crate::domain::Validated;
-        use chrono::Utc;
-        use uuid::Uuid;
-
-        let chunk = crate::domain::DocumentChunkValidated {
-            id: Uuid::new_v4(),
-            url: "https://example.com/auto".to_string(),
-            title: "Auto Word Count".to_string(),
-            content: "one two three four five".to_string(),
-            metadata: std::collections::HashMap::new(),
-            timestamp: Utc::now(),
-            embeddings: None,
-            correlation_id: None,
-            _state: std::marker::PhantomData::<Validated>,
-        };
+        let chunk = test_chunk(
+            "https://example.com/auto",
+            "Auto Word Count",
+            "one two three four five",
+            std::collections::HashMap::new(),
+        );
 
         let metadata = WebfangMetadata::from_chunk(&chunk);
         assert_eq!(metadata.word_count, Some(5));
@@ -630,10 +636,6 @@ mod tests {
     // on top of the origin repair in extraction.rs / scraper_service.rs).
     #[test]
     fn test_webfang_metadata_repairs_excerpt_with_author() {
-        use crate::domain::Validated;
-        use chrono::Utc;
-        use uuid::Uuid;
-
         let mut meta = std::collections::HashMap::new();
         meta.insert(
             "excerpt".to_string(),
@@ -641,21 +643,8 @@ mod tests {
         );
         meta.insert("author".to_string(), "Albert Einstein".to_string());
 
-        let chunk = crate::domain::DocumentChunkValidated {
-            id: Uuid::new_v4(),
-            url: "https://quotes.toscrape.com/".to_string(),
-            title: "Quotes".to_string(),
-            content: "content".to_string(),
-            metadata: meta,
-            timestamp: Utc::now(),
-            embeddings: None,
-            correlation_id: None,
-            _state: std::marker::PhantomData::<Validated>,
-        };
-
-        let metadata = WebfangMetadata::from_chunk(&chunk);
-        let json = serde_json::to_string(&metadata).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let chunk = test_chunk("https://quotes.toscrape.com/", "Quotes", "content", meta);
+        let value = metadata_json(&chunk);
         let extra = value["extra_metadata"].as_object().unwrap();
         assert_eq!(
             extra["excerpt"],
@@ -669,31 +658,14 @@ mod tests {
 
     #[test]
     fn test_webfang_metadata_repairs_excerpt_without_author_drops_fragment() {
-        use crate::domain::Validated;
-        use chrono::Utc;
-        use uuid::Uuid;
-
         let mut meta = std::collections::HashMap::new();
         meta.insert(
             "excerpt".to_string(),
             "…changing our thinking. by  (about)".to_string(),
         );
 
-        let chunk = crate::domain::DocumentChunkValidated {
-            id: Uuid::new_v4(),
-            url: "https://quotes.toscrape.com/".to_string(),
-            title: "Quotes".to_string(),
-            content: "content".to_string(),
-            metadata: meta,
-            timestamp: Utc::now(),
-            embeddings: None,
-            correlation_id: None,
-            _state: std::marker::PhantomData::<Validated>,
-        };
-
-        let metadata = WebfangMetadata::from_chunk(&chunk);
-        let json = serde_json::to_string(&metadata).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let chunk = test_chunk("https://quotes.toscrape.com/", "Quotes", "content", meta);
+        let value = metadata_json(&chunk);
         let extra = value["extra_metadata"].as_object().unwrap();
         assert_eq!(extra["excerpt"], "…changing our thinking.");
         assert!(!extra["excerpt"].as_str().unwrap().contains("by (about)"));
@@ -701,10 +673,6 @@ mod tests {
 
     #[test]
     fn test_webfang_metadata_leaves_clean_excerpt_alone() {
-        use crate::domain::Validated;
-        use chrono::Utc;
-        use uuid::Uuid;
-
         let mut meta = std::collections::HashMap::new();
         meta.insert(
             "excerpt".to_string(),
@@ -712,51 +680,21 @@ mod tests {
         );
         meta.insert("author".to_string(), "Jane Doe".to_string());
 
-        let chunk = crate::domain::DocumentChunkValidated {
-            id: Uuid::new_v4(),
-            url: "https://example.com/".to_string(),
-            title: "Test".to_string(),
-            content: "content".to_string(),
-            metadata: meta,
-            timestamp: Utc::now(),
-            embeddings: None,
-            correlation_id: None,
-            _state: std::marker::PhantomData::<Validated>,
-        };
-
-        let metadata = WebfangMetadata::from_chunk(&chunk);
-        let json = serde_json::to_string(&metadata).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let chunk = test_chunk("https://example.com/", "Test", "content", meta);
+        let value = metadata_json(&chunk);
         let extra = value["extra_metadata"].as_object().unwrap();
         assert_eq!(extra["excerpt"], "A clean excerpt without scars");
     }
 
     #[test]
     fn test_webfang_metadata_repairs_excerpt_idempotent() {
-        use crate::domain::Validated;
-        use chrono::Utc;
-        use uuid::Uuid;
-
         let mut meta = std::collections::HashMap::new();
         let repaired = "“…changing our thinking.” by Albert Einstein".to_string();
         meta.insert("excerpt".to_string(), repaired.clone());
         meta.insert("author".to_string(), "Albert Einstein".to_string());
 
-        let chunk = crate::domain::DocumentChunkValidated {
-            id: Uuid::new_v4(),
-            url: "https://quotes.toscrape.com/".to_string(),
-            title: "Quotes".to_string(),
-            content: "content".to_string(),
-            metadata: meta,
-            timestamp: Utc::now(),
-            embeddings: None,
-            correlation_id: None,
-            _state: std::marker::PhantomData::<Validated>,
-        };
-
-        let metadata = WebfangMetadata::from_chunk(&chunk);
-        let json = serde_json::to_string(&metadata).unwrap();
-        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let chunk = test_chunk("https://quotes.toscrape.com/", "Quotes", "content", meta);
+        let value = metadata_json(&chunk);
         let extra = value["extra_metadata"].as_object().unwrap();
         assert_eq!(extra["excerpt"], repaired);
     }
