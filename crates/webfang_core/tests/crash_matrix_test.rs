@@ -692,6 +692,20 @@ async fn crash_during_cancel_drain_clean_ai_sigint_kills_then_recovers() {
     });
     wait_for_page_fetches(&t.server, 1).await;
     send_signal(&child, "INT", DURING_CANCEL_DRAIN);
+    let (crashed_status, crashed_stderr) = wait_exit(child, DURING_CANCEL_DRAIN);
+    assert_killed_by_sigkill(&crashed_status, &crashed_stderr);
+
+    // Attempt 2: same state dir, crash env and signal removed, resume gate
+    // active — through the SAME cleaner, so a chunk flushed before the kill
+    // is promoted by flush proof instead of being re-exported raw.
+    resume_run_with(
+        &t,
+        state_dir.path(),
+        &sitemap_url,
+        &["--clean-ai"],
+        Some(&config_path),
+    );
+
     assert_store_records_complete(state_dir.path());
     assert_jsonl_exactly_once(&t);
 }
