@@ -27,6 +27,9 @@ pub mod output;
 // source and the UTF-8 console code page (#1808 — XP-S-02 / XP-K-03).
 pub mod platform;
 pub mod scraper;
+// Markdown chunker — the production `TextChunker` adapter used by the
+// vault-search path (paragraph-aware, character-budgeted).
+pub mod text_chunker;
 // Semantic cleaner over the erased `EmbeddingPort` (ADR-0004 paso 6) — replaces
 // the ONNX-tied implementation that lived in `webfang_ai`.
 pub mod semantic_cleaner;

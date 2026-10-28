@@ -85,7 +85,7 @@ pub fn detect_spa_content(
 ///    text that made the old raw-HTML-only detector answer "sufficient content"
 ///    while the scrape extracted almost nothing.
 /// 2. Readability on the cleaned HTML; on failure the two-step fallback:
-///    [`crate::domain::scraper_port::fallback::extract_text`] (htmd) and a
+///    [`crate::domain::html_extraction::fallback::extract_text`] (htmd) and a
 ///    second [`crate::domain::html_cleaner::clean_html`]
 ///    pass over the extracted text — byte-for-byte the funnel's own fallback.
 /// 3. [`detect_spa_content`] on the resulting text, with the ORIGINAL raw HTML
@@ -104,7 +104,7 @@ pub fn detect_spa_content(
 /// runs before the scrape, in place of a wrong cheap signal.
 pub fn predict_spa_status(url: &str, raw_html: &str) -> Option<SpaDetectionResult> {
     use crate::domain::html_cleaner::clean_html;
-    use crate::domain::scraper_port::{fallback, readability};
+    use crate::domain::html_extraction::{fallback, readability};
 
     let cleaned_html = clean_html(raw_html);
     let extracted_text = match readability::parse(&cleaned_html, Some(url)) {
@@ -350,7 +350,7 @@ mod tests {
         );
         // The pre-fix detector's input (raw htmd text) clears the 50-char
         // threshold: the exact false negative this test pins.
-        let raw_text = crate::domain::scraper_port::fallback::extract_text(&html);
+        let raw_text = crate::domain::html_extraction::fallback::extract_text(&html);
         assert!(
             raw_text.chars().count() >= MIN_CONTENT_CHARS,
             "fixture must defeat the old raw-HTML detector, got {} chars",

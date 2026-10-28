@@ -30,7 +30,7 @@ use crate::application::crawler::collector::ResultsCollector;
 use crate::application::crawler::content_sink::CrawlContentSink;
 use crate::application::crawler::crawl_task_ctx::CrawlTaskCtx;
 use crate::application::crawler::ports;
-use crate::application::pipeline::{OutputStage, PipelineExecutor};
+use crate::application::pipeline::PipelineExecutor;
 use crate::application::rate_limiter::SharedRateLimiter;
 use crate::domain::cookie_bridge::CookieBridge;
 use crate::domain::crawler_port::{RobotsPort, UrlQueuePort};
@@ -114,8 +114,6 @@ pub(crate) struct CrawlPorts {
     pub content_sink: Option<Arc<dyn CrawlContentSink>>,
     /// Item pipeline executor.
     pub pipeline: Option<Arc<PipelineExecutor>>,
-    /// Output stages receiving items after pipeline processing.
-    pub output_stages: Vec<Arc<Box<dyn OutputStage>>>,
 }
 
 /// Engine-owned execution handles consumed by [`CrawlSession::task_ctx`].
@@ -540,7 +538,6 @@ impl CrawlSession {
                     executor: Arc::clone(p),
                 }) as Arc<dyn ports::ContentPipeline>
             }),
-            output_stages: self.ports.output_stages.clone(),
         })
     }
 
@@ -661,7 +658,6 @@ mod tests {
             downloader_factory: None,
             content_sink: None,
             pipeline: None,
-            output_stages: Vec::new(),
         }
     }
 

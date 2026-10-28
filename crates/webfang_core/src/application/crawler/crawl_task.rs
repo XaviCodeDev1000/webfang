@@ -364,10 +364,7 @@ async fn run_pipeline(ctx: &CrawlTaskCtx, url_str: &str, response: &str, status_
         embeddings: None,
     };
     match pipeline.execute_pipeline(item).await {
-        StageOutcome::Continue(processed_item) => {
-            write_to_output_stages(ctx, &processed_item).await;
-            true
-        },
+        StageOutcome::Continue(_) => true,
         StageOutcome::Filtered { reason } => {
             debug!(url = %url_str, reason = %reason, "pipeline filtered item");
             false
@@ -391,27 +388,6 @@ async fn run_pipeline(ctx: &CrawlTaskCtx, url_str: &str, response: &str, status_
             );
             false
         },
-    }
-}
-
-/// Write a processed item to every configured output stage.
-///
-/// An output-stage failure must not crash the task (#865): it becomes an
-/// ERROR event carrying the classified [`ErrorClass`](crate::domain::error::ErrorClass) as a structured
-/// field so sink failures are observable without retry wiring (deferred
-/// to Sprint 7-8 per the error classification matrix).
-async fn write_to_output_stages(ctx: &CrawlTaskCtx, item: &ScrapedItem) {
-    for stage in &ctx.output_stages {
-        if let Err(e) = stage.write(item).await {
-            log_classified_error(
-                &e,
-                e.classify(),
-                &item.url,
-                stage.name(),
-                Some(&ctx.correlation_id),
-                "output stage write failed",
-            );
-        }
     }
 }
 
@@ -550,8 +526,6 @@ mod tests {
         ContentPipeline, CrawlResultCollector, FetchOutcome, LinkExtractorPort, PageFetcher,
         RobotsChecker,
     };
-    use crate::application::pipeline::stages::output::OutputError;
-    use crate::application::pipeline::OutputStage;
     use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
     use crate::domain::cookie_bridge::CookieBridge;
     use crate::domain::downloader_port::Cookie;
@@ -638,7 +612,6 @@ mod tests {
     }
 
     enum PipelineBehavior {
-        Continue,
         Filtered,
         Rejected(crate::domain::pipeline_item::RejectReason),
         Failed(crate::domain::error::ErrorClass),
@@ -651,11 +624,10 @@ mod tests {
     impl ContentPipeline for MockPipeline {
         fn execute_pipeline<'a>(
             &'a self,
-            item: ScrapedItem,
+            _item: ScrapedItem,
         ) -> Pin<Box<dyn Future<Output = StageOutcome> + Send + 'a>> {
             Box::pin(async move {
                 match &self.behavior {
-                    PipelineBehavior::Continue => StageOutcome::Continue(item),
                     PipelineBehavior::Filtered => StageOutcome::Filtered {
                         reason: crate::domain::pipeline_item::FilterReason::NonContentPath,
                     },
@@ -704,46 +676,6 @@ mod tests {
         fn report_failure(&self, _domain: &str, _session: SessionId, _status: u16) {}
     }
 
-    struct MockOutputStage {
-        written: Arc<Mutex<Vec<ScrapedItem>>>,
-    }
-
-    impl OutputStage for MockOutputStage {
-        fn name(&self) -> &str {
-            "mock_output"
-        }
-        fn write<'a>(
-            &'a self,
-            item: &'a ScrapedItem,
-        ) -> Pin<Box<dyn Future<Output = Result<(), OutputError>> + Send + 'a>> {
-            Box::pin(async move {
-                self.written
-                    .lock()
-                    .map_err(|e| OutputError::Backend(e.to_string()))?
-                    .push(item.clone());
-                Ok(())
-            })
-        }
-    }
-
-    /// Output stage whose writes always fail with a fixed backend error.
-    struct FailingOutputStage {
-        message: String,
-    }
-
-    impl OutputStage for FailingOutputStage {
-        fn name(&self) -> &str {
-            "failing_output"
-        }
-        fn write<'a>(
-            &'a self,
-            _item: &'a ScrapedItem,
-        ) -> Pin<Box<dyn Future<Output = Result<(), OutputError>> + Send + 'a>> {
-            let message = self.message.clone();
-            Box::pin(async move { Err(OutputError::Backend(message)) })
-        }
-    }
-
     // ── Test helpers ──
 
     struct TestCtxBuilder {
@@ -753,7 +685,6 @@ mod tests {
         pipeline: Option<Arc<dyn ContentPipeline>>,
         collector: Arc<dyn CrawlResultCollector>,
         session_pool: Option<Arc<dyn SessionPort>>,
-        output_stages: Vec<Arc<Box<dyn OutputStage>>>,
         rate_limiter: Option<SharedRateLimiter>,
         cancel_token: CancellationToken,
         ignore_robots: bool,
@@ -780,7 +711,6 @@ mod tests {
                 pipeline: None,
                 collector,
                 session_pool: None,
-                output_stages: Vec::new(),
                 rate_limiter: None,
                 cancel_token: CancellationToken::new(),
                 ignore_robots: false,
@@ -806,10 +736,6 @@ mod tests {
         }
         fn session_pool(mut self, sp: Arc<dyn SessionPort>) -> Self {
             self.session_pool = Some(sp);
-            self
-        }
-        fn output_stage(mut self, s: Arc<Box<dyn OutputStage>>) -> Self {
-            self.output_stages.push(s);
             self
         }
         fn rate_limiter(mut self, rl: SharedRateLimiter) -> Self {
@@ -866,7 +792,6 @@ mod tests {
                 fetcher: self.fetcher,
                 link_extractor: self.link_extractor,
                 pipeline: self.pipeline,
-                output_stages: self.output_stages,
                 content_sink: None,
             })
         }
@@ -1088,27 +1013,6 @@ mod tests {
     // ── Tests: pipeline ──
 
     #[tokio::test]
-    async fn test_pipeline_continue_runs_output_stages() {
-        let (collector, _) = mock_collector();
-        let written = Arc::new(Mutex::new(Vec::new()));
-        let stage: Arc<Box<dyn OutputStage>> = Arc::new(Box::new(MockOutputStage {
-            written: Arc::clone(&written),
-        }));
-        let ctx = TestCtxBuilder::new(collector)
-            .pipeline(Arc::new(MockPipeline {
-                behavior: PipelineBehavior::Continue,
-            }))
-            .output_stage(stage)
-            .build();
-
-        run_crawl_task(ctx, test_url("https://example.com/", 0))
-            .await
-            .expect("crawl should succeed");
-        let items = written.lock().expect("lock not poisoned");
-        assert_eq!(items.len(), 1);
-    }
-
-    #[tokio::test]
     async fn test_pipeline_skip_returns_early() {
         let (collector, sent) = mock_collector();
         let ctx = TestCtxBuilder::new(collector)
@@ -1165,39 +1069,6 @@ mod tests {
         assert!(
             out.contains("stage=pipeline"),
             "stage field must identify the pipeline: {out}"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_output_stage_failure_logged_with_class_and_does_not_crash() {
-        let (buf, _guard) = LogBuffer::capture();
-        let (collector, _) = mock_collector();
-        let stage: Arc<Box<dyn OutputStage>> = Arc::new(Box::new(FailingOutputStage {
-            message: "disk full".to_string(),
-        }));
-        let ctx = TestCtxBuilder::new(collector)
-            .pipeline(Arc::new(MockPipeline {
-                behavior: PipelineBehavior::Continue,
-            }))
-            .output_stage(stage)
-            .build();
-
-        // The task must NOT crash because an output sink failed.
-        let result = run_crawl_task(ctx, test_url("https://example.com/", 0)).await;
-        assert!(
-            result.is_ok(),
-            "output-stage failure must not abort the task"
-        );
-
-        let out = buf.text();
-        assert!(
-            out.contains("class=TransientRetriable"),
-            "output-stage failure must carry its ErrorClass as a structured field, got: {out}"
-        );
-        assert!(out.contains("ERROR"), "should be ERROR level: {out}");
-        assert!(
-            out.contains("failing_output"),
-            "the failing stage must be identifiable by name: {out}"
         );
     }
 
