@@ -3,6 +3,7 @@
 [Overview](overview.md)
 
 - [Installation & Uninstall](installation.md)
+- [Data Flow & Privacy](data-flow.md)
 - [Debugging & Observability](debugging.md)
 - [Testing](testing.md)
 - [Troubleshooting](troubleshooting.md)
