@@ -112,10 +112,22 @@ would ever download.
 - `bash scripts/test_release_reconcile.sh` → 35/0 and 24/0, exit 0.
 - `cargo check --release --locked --features "webfang_cli/mcp" -p webfang_cli
   -p webfang_mcp --bins -j 8` → the exact release-workflow invocation, cold,
-  exit 0 in 1m02s. This is the only cargo command run for the merged build; the
-  full release build (LTO, four targets) was not attempted here.
+  exit 0 in 1m02s. This is the only RELEASE-profile cargo command run for the
+  merged build; the full release build (LTO, four targets) was not attempted
+  here.
 - `actionlint .github/workflows/release.yml` → no findings beyond the three
   pre-existing SC2012 info warnings in the sign/publish `ls -1` blocks.
 - Dry-run of both archive loops against dummy binaries: names, guard acceptance
   and the negative control (swapped pair fails) all verified.
-- No `cargo build` was run anywhere in this worktree.
+- R1's two clean-room runs were `cargo check` under dedicated
+  `CARGO_TARGET_DIR`s outside the worktree, so the worktree's own `target/`
+  was never populated and a warm cache cannot be mistaken for the measurement.
+- CI on the pushed branch: `Repo guards` (the release hand-off gate, which
+  asserts that EVERY checkout in `release.yml` carries `fetch-depth: 0` and
+  `fetch-tags: true`) went red on the first push, because the new `mcp-smoke`
+  job used a shallow clone. Fixed on the same branch. The two checks still red
+  are not this change's: `Security Audit` fails on RUSTSEC-2026-0414
+  (pulldown-cmark 0.13.4, advisory published after `main`'s last green run;
+  #2433 patches it) and `breaking-surface` cannot read the merge-queue
+  configuration with the workflow's token (#2426 fixes the read). This branch
+  touches no manifest and no merge-queue code.
