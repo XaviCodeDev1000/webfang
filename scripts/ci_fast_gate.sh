@@ -586,13 +586,13 @@ EOF
   # exactly what a `scripts/**`-only change can break. It asserts that
   # `repo-guards` stays unfiltered and unconditional, that `gate` waits on it in
   # both scopes, and that both steps below are still wired into this block.
-  if grep -Eq '^(scripts/(check|test)_docs_(version_pins|claims)(_wiring)?\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+  if grep -Eq '^(scripts/check_docs_version_pins\.sh|scripts/test_docs_version_pins\.sh|scripts/test_docs_version_pins_wiring\.sh|scripts/check_docs_claims\.sh|scripts/test_docs_claims\.sh|scripts/test_docs_claims_wiring\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
     run_step "docs version pins semantics (offline)" bash scripts/test_docs_version_pins.sh
     run_step "docs version pins wiring (offline)" bash scripts/test_docs_version_pins_wiring.sh
     run_step "docs claims semantics (offline)" bash scripts/test_docs_claims.sh
     run_step "docs claims wiring (offline)" bash scripts/test_docs_claims_wiring.sh
   else
-    skip_step "docs version pins semantics" "no docs version pins files changed"
+    skip_step "docs claims gates" "no docs claims or version-pins files changed"
   fi
   # AI providers doc drift (#2136): the same blocking mirror the other two
   # lanes run, here for the lane that fires when `scripts/**` changed. A
