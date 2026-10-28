@@ -228,36 +228,37 @@ impl VaultSearchService {
         mtime_secs: i64,
     ) -> Result<usize, ScraperError> {
         // Step 1: Chunk the markdown.
-        let chunk_texts = self
+        let chunks = self
             .chunker
             .chunk_text(content)
             .map_err(ScraperError::Semantic)?;
 
         // Step 2: Embed all chunks in a batch (skip when empty).
-        let embeddings = if chunk_texts.is_empty() {
+        let embeddings = if chunks.is_empty() {
             Vec::new()
         } else {
+            let texts: Vec<String> = chunks.iter().map(|c| c.text().to_owned()).collect();
             self.embedding
-                .embed_batch(&chunk_texts)
+                .embed_batch(&texts)
                 .await
                 .map_err(ScraperError::Semantic)?
         };
 
         // Step 3: Atomically register the note and persist every chunk in one
-        // transaction. Empty `chunk_texts` still registers the note so
+        // transaction. Empty `chunks` still registers the note so
         // sync_vault won't re-index it on every run (#577 follow-up: atomicity).
-        let chunks_with_embeddings: Vec<(&str, Option<&[f32]>)> = chunk_texts
+        let chunks_with_embeddings: Vec<(&str, Option<&[f32]>)> = chunks
             .iter()
             .zip(embeddings.iter())
-            .map(|(text, emb)| (text.as_str(), Some(emb.as_slice())))
+            .map(|(chunk, emb)| (chunk.text(), Some(emb.as_slice())))
             .collect();
         let _note_id = self
             .repository
             .index_note_transactional(path, content_hash, mtime_secs, &chunks_with_embeddings)
             .await?;
 
-        debug!(path, chunks = chunk_texts.len(), "note indexed");
-        Ok(chunk_texts.len())
+        debug!(path, chunks = chunks.len(), "note indexed");
+        Ok(chunks.len())
     }
 
     /// Check whether a note needs re-indexing.
@@ -545,6 +546,7 @@ mod tests {
     // --- Stub ports for sync_vault tests ---
 
     use crate::domain::note_repository::{IndexedNoteMeta, NoteChunkVector, VaultNote};
+    use crate::domain::text_chunker::{ByteSpan, TextChunk};
     use crate::domain::Sha256Hex;
     use crate::error::SemanticError;
     use std::future::Future;
@@ -570,16 +572,21 @@ mod tests {
         }
     }
 
-    /// Stub chunker: splits on newlines, one chunk per line.
+    /// Stub chunker: one chunk per non-blank line, span covering the raw line.
     struct StubChunker;
 
     impl TextChunker for StubChunker {
-        fn chunk_text(&self, text: &str) -> Result<Vec<String>, SemanticError> {
-            Ok(text
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .map(String::from)
-                .collect())
+        fn chunk_text(&self, text: &str) -> Result<Vec<TextChunk>, SemanticError> {
+            let mut chunks = Vec::new();
+            let mut offset = 0;
+            for line in text.split('\n') {
+                if !line.trim().is_empty() {
+                    let span = ByteSpan::try_new(offset, offset + line.len())?;
+                    chunks.push(TextChunk::new(line, vec![span]));
+                }
+                offset += line.len() + '\n'.len_utf8();
+            }
+            Ok(chunks)
         }
     }
 
