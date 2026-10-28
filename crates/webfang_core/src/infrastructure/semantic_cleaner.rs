@@ -24,6 +24,7 @@ use crate::domain::embedding_port::EmbeddingPort;
 use crate::domain::entities::content::DocumentChunk;
 use crate::domain::semantic_cleaner::private::Sealed;
 use crate::domain::semantic_cleaner::SemanticCleaner;
+use crate::domain::text_chunker::{ByteSpan, TextChunk};
 use crate::error::SemanticError;
 
 /// Threshold at which filtering is reported as aggressive (>50 % discarded).
@@ -243,33 +244,66 @@ fn strip_html_tags(html: &str) -> String {
 /// A single paragraph longer than the budget cannot be split honestly, so it
 /// fails with [`SemanticError::ChunkTooLarge`] — the caller layer degrades
 /// the page instead of writing an unembeddable chunk.
-fn split_into_chunks(text: &str, max_chars: usize) -> Result<Vec<String>, SemanticError> {
-    let paragraphs: Vec<&str> = text
-        .split('\n')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
+///
+/// #2429 AC2: each chunk also carries the exact byte spans of its paragraphs
+/// inside `text` (half-open `[start, end)`, whitespace-trimmed boundaries) —
+/// the locator the vector sink stamps into every [`VectorRecord`].
+fn split_into_chunks(text: &str, max_chars: usize) -> Result<Vec<TextChunk>, SemanticError> {
+    // Paragraphs as trimmed `(start, end)` byte spans into `text`.
+    let mut paragraphs: Vec<(usize, usize)> = Vec::new();
+    let mut rest = text;
+    let mut offset = 0;
+    loop {
+        let line_start = offset;
+        let line = match rest.find('\n') {
+            Some(nl) => {
+                let line = &rest[..nl];
+                rest = &rest[nl + 1..];
+                offset += nl + 1;
+                line
+            },
+            None => {
+                let line = rest;
+                rest = "";
+                line
+            },
+        };
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            let start = line_start + (trimmed.as_ptr() as usize - line.as_ptr() as usize);
+            paragraphs.push((start, start + trimmed.len()));
+        }
+        if rest.is_empty() {
+            break;
+        }
+    }
 
-    let mut chunks: Vec<String> = Vec::new();
+    let mut chunks: Vec<TextChunk> = Vec::new();
     let mut current = String::new();
-    for paragraph in paragraphs {
+    let mut current_spans: Vec<ByteSpan> = Vec::new();
+    for (start, end) in paragraphs {
+        let paragraph = &text[start..end];
         if !current.is_empty() && current.len() + paragraph.len() + 1 > max_chars {
-            chunks.push(std::mem::take(&mut current));
+            chunks.push(TextChunk::new(
+                std::mem::take(&mut current),
+                std::mem::take(&mut current_spans),
+            ));
         }
         if !current.is_empty() {
             current.push('\n');
         }
         current.push_str(paragraph);
+        current_spans.push(ByteSpan::try_new(start, end)?);
     }
     if !current.is_empty() {
-        chunks.push(current);
+        chunks.push(TextChunk::new(current, current_spans));
     }
 
     for (chunk_id, chunk) in chunks.iter().enumerate() {
-        if chunk.len() > max_chars {
+        if chunk.text().len() > max_chars {
             return Err(SemanticError::ChunkTooLarge {
                 chunk_id: chunk_id.to_string(),
-                chars: chunk.len(),
+                chars: chunk.text().len(),
                 max: max_chars,
             });
         }
@@ -303,15 +337,19 @@ impl SemanticCleaner for SemanticCleanerImpl {
                 return Ok(Vec::new());
             }
 
-            let contents = split_into_chunks(&text, self.max_chars)?;
+            let chunks = split_into_chunks(&text, self.max_chars)?;
+            let contents: Vec<String> = chunks.iter().map(|c| c.text().to_string()).collect();
             let embeddings = self.embed_with_bisection(&contents).await?;
 
-            let chunks = contents
+            let doc_chunks = chunks
                 .into_iter()
-                .map(|content| DocumentChunk::new(Uuid::new_v4(), "", "", content))
+                .map(|chunk| {
+                    DocumentChunk::new(Uuid::new_v4(), "", "", chunk.text().to_string())
+                        .with_chunk_spans(chunk.spans().to_vec())
+                })
                 .collect::<Vec<_>>();
 
-            self.filter_by_relevance(url, chunks, embeddings)
+            self.filter_by_relevance(url, doc_chunks, embeddings)
         })
     }
 
@@ -486,16 +524,66 @@ mod tests {
         let chunks = split_into_chunks("First paragraph\nSecond paragraph", 1000)
             .expect("valid-sized text must chunk");
         assert_eq!(chunks.len(), 1, "paragraphs accumulate into one window");
-        assert_eq!(chunks[0], "First paragraph\nSecond paragraph");
+        assert_eq!(chunks[0].text(), "First paragraph\nSecond paragraph");
     }
 
     #[test]
     fn split_into_chunks_splits_when_budget_forces_flush() {
         let chunks = split_into_chunks("first\nsecond\nthird", 15).expect("chunks");
-        assert_eq!(
-            chunks,
-            vec!["first\nsecond".to_string(), "third".to_string()]
-        );
+        let texts: Vec<&str> = chunks.iter().map(|c| c.text()).collect();
+        assert_eq!(texts, vec!["first\nsecond", "third"]);
+    }
+
+    /// #2429 AC2: every chunk carries the exact byte spans it was cut from —
+    /// paragraphs trimmed, spans pointing at the trimmed region of the source
+    /// text, in order.
+    #[test]
+    fn split_into_chunks_tracks_byte_spans() {
+        let chunks = split_into_chunks("first\nsecond\nthird", 15).expect("chunks");
+        assert_eq!(chunks.len(), 2);
+
+        assert_eq!(chunks[0].text(), "first\nsecond");
+        assert_eq!(chunks[0].spans().len(), 2, "one span per paragraph");
+        assert_eq!(chunks[0].spans()[0].start(), 0);
+        assert_eq!(chunks[0].spans()[0].end(), 5);
+        assert_eq!(chunks[0].spans()[1].start(), 6);
+        assert_eq!(chunks[0].spans()[1].end(), 12);
+
+        assert_eq!(chunks[1].text(), "third");
+        assert_eq!(chunks[1].spans()[0].start(), 13);
+        assert_eq!(chunks[1].spans()[0].end(), 18);
+    }
+
+    /// #2429 AC2: trimmed whitespace must NOT be inside a paragraph span.
+    #[test]
+    fn split_into_chunks_spans_exclude_trimmed_whitespace() {
+        let chunks = split_into_chunks("alpha  \nbeta", 1000).expect("chunks");
+        assert_eq!(chunks[0].text(), "alpha\nbeta");
+        assert_eq!(chunks[0].spans()[0].start(), 0);
+        assert_eq!(chunks[0].spans()[0].end(), 5, "trailing spaces excluded");
+        assert_eq!(chunks[0].spans()[1].start(), 8);
+        assert_eq!(chunks[0].spans()[1].end(), 12);
+    }
+
+    /// #2429 AC2: `clean` attaches the chunk's byte spans to every
+    /// `DocumentChunk` it returns, so the locator survives into the sink.
+    #[tokio::test]
+    async fn clean_attaches_chunk_spans_to_document_chunks() {
+        let port = Arc::new(MockEmbeddingPort::new());
+        let cleaner = SemanticCleanerImpl::new(port, 1000, 0.3);
+        let html = "<p>First paragraph</p><p>Second paragraph</p>";
+        let chunks = cleaner.clean("https://example.com", html).await.unwrap();
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            let spans = chunk.chunk_spans.as_ref().expect("spans attached");
+            assert!(!spans.is_empty());
+            for pair in spans.windows(2) {
+                assert!(
+                    pair[0].end() <= pair[1].start(),
+                    "spans must be ordered and non-overlapping"
+                );
+            }
+        }
     }
 
     // ADR-0004 S8: one `embed_batch` call batch over total contents (never

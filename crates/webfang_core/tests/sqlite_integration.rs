@@ -119,6 +119,7 @@ async fn test_save_and_get_chunk_with_embedding() {
         0,
         "Hello world",
         Some(&embedding),
+        None,
     )
     .await
     .unwrap();
@@ -147,6 +148,7 @@ async fn test_save_chunk_without_embedding() {
         "https://example.com/doc2",
         0,
         "No embedding here",
+        None,
         None,
     )
     .await

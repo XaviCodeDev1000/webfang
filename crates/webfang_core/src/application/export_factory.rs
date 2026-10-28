@@ -2070,6 +2070,7 @@ mod tests {
                 embeddings: None,
                 correlation_id: None,
                 _state: std::marker::PhantomData,
+                chunk_spans: None,
             }
         }
 
