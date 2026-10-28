@@ -28,7 +28,7 @@ drift from the code.
 
 | Destination | When | What is sent | How to turn it off |
 | :--- | :--- | :--- | :--- |
-| The site being scraped | Every crawl/scrape | HTTP GET requests for the pages (and, with asset download, for images/documents) — standard browser-like fetches via the TLS-fingerprinted client | Omit the URL(s); scope with crawl flags |
+| The site being scraped | Every crawl/scrape | HTTP GET requests for the pages (and, with asset download, for images/documents) — browser-like fetches via the TLS-fingerprinted client, or by the real Chrome browser itself under `--js-strategy full` | Omit the URL(s); scope with crawl flags |
 | The operator-configured LLM endpoint (`POST {base_url}/chat/completions`) | `--extract-with-llm` | Extracted text chunks plus the extraction schema | Omit the flag; or configure no completion provider (exit 78 at startup) |
 | The operator-configured embeddings endpoint (`POST {base_url}/embeddings`) | `--clean-ai` (and the MCP `semantic_cleaner` tool) | Extracted text chunks (bounded by `--max-chars`) | `--offline`; or configure no embedding provider |
 
