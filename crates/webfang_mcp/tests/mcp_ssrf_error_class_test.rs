@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! MCP SSRF entry pre-check — error CLASS contract (issue #1613, slice 2, EC-03).
 //!
 //! `validate_url_no_ssrf` used to collapse five distinct failures into one

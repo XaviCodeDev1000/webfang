@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! HTML content extraction integration tests using shared fixtures.
 
 mod common;

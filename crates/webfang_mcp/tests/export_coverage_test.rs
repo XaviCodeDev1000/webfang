@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Export tools behavioral coverage — error paths (issue #450).
 //!
 //! End-to-end tests for the export tools that were only partially covered:

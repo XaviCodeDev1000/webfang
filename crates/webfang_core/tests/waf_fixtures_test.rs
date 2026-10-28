@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Behavioral fixture tests for context-aware WAF detection (TASK-09).
 //!
 //! Acceptance for REQ-WAF-02/03/04/05: each fixture is served over real HTTP

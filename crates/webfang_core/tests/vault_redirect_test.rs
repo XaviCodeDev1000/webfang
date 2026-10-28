@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Explicit `--vault` redirect + preflight conflict E2E tests (#762 slice 1).
 //!
 //! Reproduces the issue-762 audit scenario hermetically with wiremock — no

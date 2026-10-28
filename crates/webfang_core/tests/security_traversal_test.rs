@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Security: path-traversal containment for hostile filenames (batch 1).
 //!
 //! A malicious server controls `Content-Disposition` filenames and URL path

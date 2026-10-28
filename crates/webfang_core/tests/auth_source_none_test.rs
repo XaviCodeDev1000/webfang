@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! B1 — `AuthSource::None`: el endpoint sin credencial.
 //!
 //! ## Por qué es un test de integración y no unitario

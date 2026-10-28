@@ -181,6 +181,9 @@ where
         .await
         .map_err(|e| DownloadError::Internal(format!("Chrome launch failed: {e}")))?;
 
+    // Supervised: the handle is aborted in the deterministic finally below,
+    // which runs even on the timeout path.
+    #[allow(clippy::disallowed_methods)]
     let handler_job = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let result = async {

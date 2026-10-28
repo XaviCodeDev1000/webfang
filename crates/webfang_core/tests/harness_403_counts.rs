@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! #1433 RC-4 net: 403 rotated-request counts.
 //!
 //! Pins the externally-observable cost of the 403 recovery path through the

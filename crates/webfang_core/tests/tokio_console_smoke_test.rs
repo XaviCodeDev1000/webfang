@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Task 4.1 — Tokio-console smoke proof (change stabilization-concurrency-budget,
 //! design D3). Compiles/runs ONLY under `--features console` AND
 //! `RUSTFLAGS="--cfg tokio_unstable"`; everywhere else this target is an

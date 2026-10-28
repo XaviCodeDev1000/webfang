@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Regression probes for #1965 (A2 + A4 + invariants 1..4).
 //!
 //! Written as an independent probe — outside the crate, against the PUBLIC

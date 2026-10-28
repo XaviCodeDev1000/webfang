@@ -132,6 +132,15 @@ pub struct CrawlerConfig {
     /// and rate-limiter burst instead of being silently dropped (bug R2-1).
     /// The default reproduces the auto-derived numbers exactly.
     pub budget_overrides: BudgetOverrides,
+    /// Seconds an autoscale `Critical` pause may last before the engine
+    /// reports it once as a distinct event (#2313). Default 300.
+    pub pause_alert_after_secs: u64,
+    /// Seconds an autoscale `Critical` pause may last before the engine gives
+    /// up on the run (#2338). Configurable — the hardcoded 30 minutes ended a
+    /// legitimately longer RAM-pressure ride-out with an error. Default 1800,
+    /// still the ceiling a nextest run survives before its own harness kills
+    /// it; `build` clamps it to at least `pause_alert_after_secs`.
+    pub pause_give_up_after_secs: u64,
 }
 
 impl CrawlerConfig {
@@ -158,6 +167,8 @@ impl CrawlerConfig {
             ignore_robots: false,
             tls_emulation: Profile::Chrome145,
             budget_overrides: BudgetOverrides::default(),
+            pause_alert_after_secs: 300,
+            pause_give_up_after_secs: 1800,
         }
     }
 
@@ -212,6 +223,8 @@ pub struct CrawlerConfigBuilder {
     ignore_robots: bool,
     tls_emulation: Profile,
     budget_overrides: BudgetOverrides,
+    pause_alert_after_secs: u64,
+    pause_give_up_after_secs: u64,
 }
 
 impl CrawlerConfigBuilder {
@@ -231,6 +244,8 @@ impl CrawlerConfigBuilder {
             ignore_robots: false,
             tls_emulation: Profile::Chrome145,
             budget_overrides: BudgetOverrides::default(),
+            pause_alert_after_secs: 300,
+            pause_give_up_after_secs: 1800,
         }
     }
 
@@ -338,6 +353,22 @@ impl CrawlerConfigBuilder {
         self
     }
 
+    /// Set how long an autoscale `Critical` pause is tolerated silently
+    /// before the engine reports it (#2313).
+    pub fn pause_alert_after_secs(mut self, secs: u64) -> Self {
+        self.pause_alert_after_secs = secs;
+        self
+    }
+
+    /// Set how long an autoscale `Critical` pause is tolerated before the
+    /// engine gives up on the run (#2338). Clamped to at least the alert
+    /// threshold at `build` — a give-up earlier than the alert is a config
+    /// mistake the compiler cannot see.
+    pub fn pause_give_up_after_secs(mut self, secs: u64) -> Self {
+        self.pause_give_up_after_secs = secs;
+        self
+    }
+
     /// Build the final [`CrawlerConfig`], consuming this builder.
     ///
     /// No coercion lives here anymore (#1190): the sitemap mode arrives
@@ -359,6 +390,11 @@ impl CrawlerConfigBuilder {
             ignore_robots: self.ignore_robots,
             tls_emulation: self.tls_emulation,
             budget_overrides: self.budget_overrides,
+            pause_alert_after_secs: self.pause_alert_after_secs.max(1),
+            pause_give_up_after_secs: self
+                .pause_give_up_after_secs
+                .max(self.pause_alert_after_secs)
+                .max(1),
         }
     }
 }
@@ -414,6 +450,37 @@ mod tests {
         assert_eq!(config.tls_emulation, Profile::Chrome145);
         assert!(config.include_patterns.is_empty());
         assert!(config.exclude_patterns.is_empty());
+        // #2313/#2338 defaults: alert at 5 min, give up at 30 min.
+        assert_eq!(config.pause_alert_after_secs, 300);
+        assert_eq!(config.pause_give_up_after_secs, 1800);
+    }
+
+    // -- pause watchdog thresholds (#2313 / #2338) --
+
+    #[test]
+    fn pause_watchdog_thresholds_are_configurable() {
+        let seed = Url::parse("https://example.com").unwrap();
+        let config = CrawlerConfig::builder(seed)
+            .pause_alert_after_secs(30)
+            .pause_give_up_after_secs(3600)
+            .build();
+
+        assert_eq!(config.pause_alert_after_secs, 30);
+        assert_eq!(config.pause_give_up_after_secs, 3600);
+    }
+
+    #[test]
+    fn pause_give_up_never_builds_below_the_alert_threshold() {
+        let seed = Url::parse("https://example.com").unwrap();
+        let config = CrawlerConfig::builder(seed)
+            .pause_alert_after_secs(60)
+            .pause_give_up_after_secs(10)
+            .build();
+
+        assert_eq!(
+            config.pause_give_up_after_secs, 60,
+            "a give-up earlier than the alert would silence the alert forever"
+        );
     }
 
     // -- matches_include tests --

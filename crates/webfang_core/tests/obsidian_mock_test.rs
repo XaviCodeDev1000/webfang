@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration test for MockVault — verifies the test helper creates
 //! a valid Obsidian vault structure.
 

@@ -32,6 +32,11 @@ check "no live pulls?head lookup" bash -c '! grep -vE "^[[:space:]]*#" "$1" | gr
 check "topology reads refs from the resolved PR" grep -q 'gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName,baseRefName' "$WF"
 check "topology no longer reads merge_group.base_ref" bash -c '! grep -q "merge_group.base_ref" "$1"' _ "$WF"
 check "resolved PR is checked OPEN" grep -q 'if \[ "$state" != "OPEN" \]' "$WF"
+# #2328: the breaking-surface job resolves the PR the same way (its own
+# resolution step), so the synthetic-ref parse appears in BOTH steps.
+count="$(grep -cF 'gh-readonly-queue/.+/pr-([0-9]+)-' "$WF")"
+check "both resolution steps parse the synthetic queue ref (validate + breaking-surface)" test "$count" -ge 2
+check "breaking-surface job exists and names the required context" grep -q 'name: breaking-surface$' "$WF"
 
 check "mutants.yml triggers on merge_group" grep -q '^  merge_group:' "$MUT"
 # The inline three-dot branch diff is gone (#2285): the base of record is the

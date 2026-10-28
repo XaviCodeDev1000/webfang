@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests for checkpoint persistence — real I/O with temp dirs.
 //!
 //! Exercises save/load roundtrip, resume from checkpoint, corrupt file

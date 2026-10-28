@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Independent regression probes for #1965 (A5 + A6) and its two follow-ups
 //! (#2231, #2232): the "this network on this host" family 0.0.0.0/8 and the
 //! NAT64 Network-Specific Prefixes must be denied on EVERY path, and so must

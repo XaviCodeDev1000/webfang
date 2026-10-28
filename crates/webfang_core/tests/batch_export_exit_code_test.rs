@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Batch export failure must surface a non-zero exit code (#1820).
 //!
 //! `export_phase` returns a `CliExit`, but `run_batch` called it as a bare

@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Security & diagnostics tools behavioral coverage (issue #450).
 //!
 //! End-to-end tests for the WAF tools:

@@ -21,6 +21,7 @@
 //! BatchResult
 //! ```
 
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 use tokio_util::sync::CancellationToken;
@@ -45,14 +46,13 @@ pub struct BatchManager {
 impl BatchManager {
     /// Create a new batch manager with the given concurrency limit
     ///
-    /// `max_concurrent` is validated to be `> 0` by callers; `new` returns
-    /// `Self`, so the construction error cannot be propagated.
+    /// `max_concurrent` is typed [`NonZeroUsize`]: a zero limit would starve
+    /// the batch semaphore, so the invalid case cannot even be constructed
+    /// (#2355).
     #[must_use]
-    #[allow(clippy::expect_used)]
-    pub fn new(max_concurrent: usize) -> Self {
+    pub fn new(max_concurrent: NonZeroUsize) -> Self {
         Self {
-            processor: BatchProcessor::new(max_concurrent)
-                .expect("BatchManager requires max_concurrent > 0"),
+            processor: BatchProcessor::new_nonzero(max_concurrent),
             jobs: Vec::new(),
         }
     }
@@ -64,7 +64,11 @@ impl BatchManager {
     /// shape) made `--batch-concurrency` a no-op: each job held a single URL,
     /// the semaphore never contended, and jobs ran strictly sequentially
     /// (#653).
-    pub fn from_urls(urls: Vec<String>, config: CrawlerConfig, max_concurrent: usize) -> Self {
+    pub fn from_urls(
+        urls: Vec<String>,
+        config: CrawlerConfig,
+        max_concurrent: NonZeroUsize,
+    ) -> Self {
         let mut manager = Self::new(max_concurrent);
         if urls.is_empty() {
             return manager;
@@ -126,7 +130,7 @@ impl BatchManager {
     pub fn from_file(
         path: &Path,
         config: CrawlerConfig,
-        max_concurrent: usize,
+        max_concurrent: NonZeroUsize,
     ) -> Result<Self, std::io::Error> {
         let content = std::fs::read_to_string(path)?;
         let (urls, skipped) = Self::parse_url_lines(&content);
@@ -141,7 +145,7 @@ impl BatchManager {
     /// Returns [`std::io::Error`] if stdin cannot be read.
     pub fn from_stdin(
         config: CrawlerConfig,
-        max_concurrent: usize,
+        max_concurrent: NonZeroUsize,
     ) -> Result<Self, std::io::Error> {
         let mut content = String::new();
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut content)?;
@@ -303,13 +307,19 @@ mod tests {
         CrawlerConfig::new(Url::parse("https://example.com").unwrap())
     }
 
+    /// Test-side lift of a raw literal into the `NonZeroUsize` the batch
+    /// constructors now require (#2355).
+    fn nz(n: usize) -> NonZeroUsize {
+        NonZeroUsize::new(n).expect("test concurrency must be non-zero")
+    }
+
     #[test]
     fn test_manager_from_urls() {
         let urls = vec![
             "https://example.com".to_string(),
             "https://example.com/about".to_string(),
         ];
-        let manager = BatchManager::from_urls(urls, test_config(), 3);
+        let manager = BatchManager::from_urls(urls, test_config(), nz(3));
         // #653: every URL shares ONE job so the processor's semaphore governs
         // concurrency instead of the manager's sequential job loop.
         assert_eq!(manager.job_count(), 1);
@@ -370,7 +380,7 @@ https://example.com/blog
         let file_path = dir.join("urls.txt");
         std::fs::write(&file_path, "https://a.com\nhttps://b.com\n").unwrap();
 
-        let manager = BatchManager::from_file(&file_path, test_config(), 2).unwrap();
+        let manager = BatchManager::from_file(&file_path, test_config(), nz(2)).unwrap();
         assert_eq!(manager.job_count(), 1);
         assert_eq!(manager.url_count(), 2);
 
@@ -385,17 +395,17 @@ https://example.com/blog
             "https://a.com".to_string(),
             "https://b.com/page".to_string(),
         ];
-        let manager = BatchManager::from_urls(urls, test_config(), 2);
+        let manager = BatchManager::from_urls(urls, test_config(), nz(2));
         assert_eq!(manager.urls(), vec!["https://a.com", "https://b.com/page"]);
 
-        let empty = BatchManager::new(2);
+        let empty = BatchManager::new(nz(2));
         assert!(empty.urls().is_empty());
     }
 
     #[test]
     fn test_manager_statuses() {
         let urls = vec!["https://a.com".to_string()];
-        let manager = BatchManager::from_urls(urls, test_config(), 1);
+        let manager = BatchManager::from_urls(urls, test_config(), nz(1));
         let statuses = manager.statuses();
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].0, "batch-all");
@@ -404,7 +414,7 @@ https://example.com/blog
 
     #[tokio::test]
     async fn test_process_all_empty() {
-        let manager = BatchManager::new(3);
+        let manager = BatchManager::new(nz(3));
         let results = manager.process_all().await;
         assert!(results.is_empty());
     }
@@ -414,7 +424,7 @@ https://example.com/blog
         // Regression for #653: SIGINT/SIGTERM must stop the batch queue rather
         // than being ignored until the whole run finishes.
         let urls = vec!["https://a.com".to_string(), "https://b.com".to_string()];
-        let manager = BatchManager::from_urls(urls, test_config(), 2);
+        let manager = BatchManager::from_urls(urls, test_config(), nz(2));
 
         let cancel = CancellationToken::new();
         cancel.cancel();
@@ -428,7 +438,7 @@ https://example.com/blog
 
     #[tokio::test]
     async fn test_process_all_summary_empty() {
-        let manager = BatchManager::new(3);
+        let manager = BatchManager::new(nz(3));
         let summary = manager.process_all_summary().await;
         assert_eq!(summary.total_urls, 0);
         assert_eq!(summary.succeeded, 0);
@@ -443,7 +453,7 @@ https://example.com/blog
             vec!["https://example.com".to_string()],
             config,
         );
-        let manager = BatchManager::new(2).with_job(job);
+        let manager = BatchManager::new(nz(2)).with_job(job);
         assert_eq!(manager.job_count(), 1);
         assert_eq!(manager.statuses()[0].0, "custom-job");
     }

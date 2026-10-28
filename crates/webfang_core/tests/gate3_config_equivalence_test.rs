@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Gate 3 equivalence matrix — stabilization-config-normalization (#302).
 //!
 //! Proves orchestrator ruling 3: for EACH of the five field families

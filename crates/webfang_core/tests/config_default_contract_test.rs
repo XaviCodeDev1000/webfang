@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Behavioral tests: the config loader must never lie about what it read (#1659).
 //!
 //! Before #1659 `ConfigDefaults::load` degraded to defaults on EVERY IO error,
@@ -21,8 +23,6 @@
 //! - `permission_denied` is `#[cfg(unix)]`: the mode bits are the mechanism.
 //!   A privileged runner bypasses them, so that test asserts nothing rather
 //!   than asserting something the OS will not enforce.
-
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 #[path = "common/cli_harness.rs"]
 mod common;
@@ -164,6 +164,44 @@ async fn missing_platform_default_config_degrades_silently() {
         !stderr.contains("archivo de configuración"),
         "the benign missing-file case must stay silent, got:\n{stderr}"
     );
+}
+
+/// The degraded path #2242: a MALFORMED PLATFORM DEFAULT (no override) keeps
+/// running with defaults — exit 0, the #1659 policy — but the reason must
+/// reach the operator on stderr, naming the file. The structured
+/// `tracing::error!` alone is not enough: the platform default is loaded
+/// before the tracing subscriber exists, so the event is discarded.
+#[tokio::test]
+async fn malformed_platform_default_config_warns_and_degrades() {
+    let t = BehavioralTest::new().await;
+    mount_discovery(&t).await;
+
+    let tmp = tempfile::TempDir::new().expect("create temp config base");
+    let config_path = tmp.path().join("webfang").join("config.toml");
+    std::fs::create_dir_all(config_path.parent().expect("parent exists"))
+        .expect("create config dir");
+    std::fs::write(&config_path, "this is [[[ not valid toml").expect("write malformed TOML");
+
+    let out = t
+        .scraper_cmd()
+        .arg("--dry-run")
+        // Drop the harness override so the PLATFORM path is what gets read.
+        .env_remove("WEBFANG_CONFIG")
+        .env("XDG_CONFIG_HOME", tmp.path())
+        .output()
+        .expect("spawn webfang");
+
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a malformed platform default must keep degrading, not fail the run.\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("archivo de configuración"),
+        "the degraded default must warn on stderr naming the file, got:\n{stderr}"
+    );
+    assert_stderr_snapshot("default_config_is_malformed_warns", tmp.path(), &stderr);
 }
 
 // ---------------------------------------------------------------------------

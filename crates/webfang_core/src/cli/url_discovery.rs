@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use tracing::warn;
 use url::Url;
 
 use crate::application::crawl_options::CrawlOptions;
@@ -92,6 +93,13 @@ pub struct DiscoveryOutput {
     /// is ambiguous — a seed the SSRF guard refused, a genuinely linkless
     /// site, and a dead seed all look identical (#1381, #1443).
     pub errors: usize,
+    /// The crawl ended early but had already collected pages (#2338).
+    ///
+    /// `Some(reason)` when the Engine returned `CrawlError::PartialRun`: the
+    /// URLs and pages above are PARTIAL and the reason must still be reported
+    /// as a failure by the caller after the output is written. `None` on a
+    /// complete or outright-failed run.
+    pub truncated_by: Option<String>,
 }
 
 /// Retry-knob override for discovery (dry-run-fail-fast).
@@ -177,7 +185,24 @@ pub async fn discover_urls_unified(
         options.checkpoint_path = Some(cfg.dir.clone());
         options.checkpoint_interval = cfg.interval;
     }
-    let result = crawl_site_with_options(crawler_config, options, correlation).await?;
+    // #2338: a run the engine ended early (stall, unrecovered pause) still
+    // carries the results it collected — intercepted BEFORE the `?` converts
+    // the error, so the partial set flows to scrape/export like a complete
+    // one and the caller reports the failure AFTER the output is written.
+    let (result, truncated_by) = match crawl_site_with_options(crawler_config, options, correlation)
+        .await
+    {
+        Ok(result) => (result, None),
+        Err(crate::domain::CrawlError::PartialRun { message, partial }) => {
+            warn!(
+                collected = partial.total_pages,
+                reason = %message,
+                "crawl ended early — proceeding with partial results; the failure is reported after the export"
+            );
+            (partial, Some(message))
+        },
+        Err(e) => return Err(e.into()),
+    };
 
     let errors = result.errors;
     let urls: Vec<Url> = result.urls.into_iter().map(|d| d.url).collect();
@@ -194,6 +219,7 @@ pub async fn discover_urls_unified(
         urls,
         pages,
         errors,
+        truncated_by,
     })
 }
 

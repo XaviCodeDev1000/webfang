@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Obsidian tools behavioral coverage (issue #450).
 //!
 //! End-to-end tests for the three Obsidian integration tools:

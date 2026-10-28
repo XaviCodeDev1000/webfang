@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! Integration tests verifying shared fixtures are consumable.
 //!
 //! These tests confirm the `tests/common/` module works correctly

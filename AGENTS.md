@@ -73,6 +73,14 @@ What the compiler **cannot** catch. Everything else comes from the harness or th
 above.
 
 - **Never `.unwrap()` in production** — use `?`, `match` or `.context()`.
+- **A poisoned `std::sync::Mutex` is never fatal and never silent.** Recover the guard with
+  `PoisonError::into_inner()` — it still grants exclusive access — and keep going. Where the
+  function already returns `Result` and a recovered write could corrupt an output stream,
+  propagate it as a typed error instead (`infrastructure::stream` does this for the vector
+  sink). Two shapes are banned in production: `.lock().expect(..)`/`.unwrap()`, because one
+  panic turns into a process-wide outage, and `if let Ok(..) = mutex.lock()`, because it
+  silently drops the work. `MockClock` keeps its `expect`: a poisoned test clock is a test
+  bug, not runtime state.
 - **User-facing errors in Spanish; tracing fields and logs in English.**
 - **HTTP: always `wreq`, never `reqwest`** — TLS fingerprint impersonation for WAF evasion.
   An agent that suggests `reqwest` is wrong.
@@ -703,6 +711,17 @@ malformed (release-plz does not parse it) and a `BREAKING CHANGE:` footer alone 
 the gate; the script refuses both with exit 5. A merge commit (`--merge`, outside the queue)
 preserves commit markers but discards the title; it is an option, never a mandatory recipe. Never
 leave the `!` only in a surface the chosen strategy drops.
+
+**The same invariant is a required CI check (`breaking-surface`, #2328).** The job in
+`pr-validation.yml` runs on `pull_request` (PR head) and `merge_group` (queue entry), reads the
+merge method from the tracked mirror `.github/merge-queue.json` (GITHUB_TOKEN cannot read the live
+queue configuration: GraphQL answers FORBIDDEN for integrations, #2412) and pages every commit via
+REST — a marker on commit 101 counts. The decision matrix lives in `scripts/breaking_surface_lib.sh`,
+consumed by both the check and the local guard, so they cannot drift. Fail closed: unreadable
+metadata, zero commits, or a method absent/unknown in the mirror is a red check. The local guard
+stays as defense in depth: CI closes the TOCTOU window and covers merges that bypass the script;
+the script keeps its refusal at the merge boundary and cross-checks the mirror against the LIVE
+configuration, refusing on divergence (reconcile the mirror then).
 
 **Hooks and verification:** the `pre-commit` and `pre-push` consult the review gate; on a fresh
 clone you must enable the wiring with `git config core.hooksPath scripts/githooks`. To wait

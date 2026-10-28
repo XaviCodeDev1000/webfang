@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 //! End-to-end MCP parameter-validation rejection tests (issue #512, slice 2).
 //!
 //! Every test starts the real MCP server and invokes a tool over HTTP, then
