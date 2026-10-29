@@ -146,9 +146,10 @@ async fn batch_stdin_processes_urls() {
 ///
 /// Observed on `Tests (windows-latest)` for PR #1793 (run 37126785645): TRY 1
 /// and TRY 2 each ran past nextest's 180 s `terminate-after` as TMT, and TRY 3
-/// failed. The budget below bounds that at ~2x20 s instead, and the assertion
-/// — code 64 AND the message — is unchanged, so a genuine regression still
-/// fails and reports which half it got wrong.
+/// failed. The budget below bounds that at ~2x60 s instead (#2331 raised it
+/// from 20 s after both attempts overran under load on run 40407265924), and
+/// the assertion — code 64 AND the message — is unchanged, so a genuine
+/// regression still fails and reports which half it got wrong.
 #[test]
 fn batch_empty_stdin_exits_64() {
     assert_spawn_within(
@@ -372,9 +373,11 @@ async fn batch_file_processes_urls() {
 /// Runs under [`assert_spawn_within`] because this test carries the
 /// `windows-latest` spawn-latency flake: its `.timeout(5s)` was not honoured
 /// there and the first attempt burned nextest's whole 180 s `terminate-after`
-/// before the retry passed in 3 s. The budget below bounds that at ~2x20 s
-/// instead, and the assertion — code 64 AND the message — is unchanged, so a
-/// genuine regression still fails and reports which half it got wrong.
+/// before the retry passed in 3 s. The budget below bounds that at ~2x60 s
+/// instead (#2331 raised it from 20 s after both attempts overran under load
+/// on run 40407265924), and the assertion — code 64 AND the message — is
+/// unchanged, so a genuine regression still fails and reports which half it
+/// got wrong.
 #[test]
 fn batch_empty_file_exits_64() {
     let temp = TempDir::new().unwrap();

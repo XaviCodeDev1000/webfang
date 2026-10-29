@@ -178,11 +178,19 @@ pub(crate) fn cmd() -> Command {
 /// Wall-clock budget for one spawned-binary attempt whose real latency is
 /// milliseconds and whose failure mode is a hang (#1697).
 ///
-/// The observed healthy run on `windows-latest` takes 3.05 s, so this leaves
-/// a ~6x margin — wide enough that a loaded runner does not trip it, tight
-/// enough that a genuinely stuck attempt is abandoned long before nextest's
-/// 180 s `terminate-after`.
-pub(crate) const SPAWN_LATENCY_BUDGET: Duration = Duration::from_secs(20);
+/// 20 s (~6x the healthy run) proved too narrow to absorb a loaded runner:
+/// on run 40407265924 (2026-10-26) BOTH internal attempts of
+/// `batch_empty_stdin_exits_64` overran and the nextest retry pass converted
+/// into a red FLKY-FL (#2331). 60 s widens the two-attempt window to ~120 s
+/// while staying under the per-attempt ceilings a killed overrun must sit
+/// inside — the `default` profile's 180 s and the `ci` profile's 240 s — so a
+/// genuinely stuck attempt is still abandoned far before nextest's
+/// `terminate-after`.
+///
+/// The budget only bounds hangs. A real regression never depends on this
+/// number: a wrong exit code or message fails through the attempt's own
+/// assertion in under a second.
+pub(crate) const SPAWN_LATENCY_BUDGET: Duration = Duration::from_secs(60);
 
 /// #1697: run a spawned-binary assertion under a wall-clock budget THIS
 /// harness enforces, retrying once before it declares failure.
