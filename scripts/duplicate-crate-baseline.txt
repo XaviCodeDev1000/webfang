@@ -11,7 +11,7 @@
 # are not accidents at all. The intentional ones are documented in AGENTS.md
 # under "Crate version conflicts (DO NOT unify)":
 #   dashmap      5.x (via governor) + 6.x (direct) — both needed
-#   selectors    0.35 (legible) / 0.37 (lol_html) / 0.38 (scraper) — all three
+#   selectors    0.37 (lol_html) / 0.38 (scraper) — both deliberate
 #   windows-sys  five major versions pulled by winreg, ring, rustls, rustix, keyring
 # The rest are transitive collisions inside the dependency graph.
 #
@@ -41,6 +41,10 @@
 # lru (only wreq's 0.18.5), markup5ever_rcdom (only htmd's 0.38) and
 # xml5ever (gone entirely); html5ever stays duplicated via dom_query/legible,
 # htmd and scraper — a pre-existing collision, one consumer path fewer.
+# 2026-10-29 (issue #2514): legible 0.4.2 -> 0.5.1 (upstream dropped dom_query
+# and now builds on html5ever ^0.39); html5ever 0.36.1 left the graph and
+# legible's copy converged onto scraper's 0.39.0 — html5ever remains
+# duplicated via htmd 0.38 / legible+scraper 0.39; tendril converged on 0.5.
 alloc-no-stdlib
 alloc-stdlib
 base64
@@ -72,7 +76,6 @@ shlex
 # while hyper-util and tonic still hold socket2 0.5.10 until they bump their
 # tonics (major-major behind socket2 0.6, out of scope for a lock fix).
 syn
-tendril
 thiserror
 thiserror-impl
 toml
