@@ -342,6 +342,25 @@ jobs:
       # no cargo, no Miri, no build.
       - name: Miri lane invariants semantics harness
         run: bash scripts/test_miri_lane_invariants.sh
+      # Toolchain pin drift gate (#2475): the Rust version is declared twice and
+      # nothing related the two. rust-toolchain.toml carries it as text, while
+      # every workflow carries a `dtolnay/rust-toolchain@<sha>` whose version
+      # lives inside the action's own action.yml — invisible to `grep 1.91.1`.
+      # When #2310 bumped 1.88.0 -> 1.91.1 the release pin stayed on the old
+      # branch, the aarch64 cross target landed on the wrong toolchain, and
+      # v7.0.0 published no artifacts at all. A comment describing that trap is
+      # not a gate; this is. Offline and read-only: it parses the workflows.
+      - name: Toolchain pin drift gate
+        run: bash scripts/check_toolchain_drift.sh
+      # Semantics harness for the gate above (#2475): proves on mktemp fixtures
+      # that it fails on both drift shapes (targets: with no toolchain:, and a
+      # toolchain: that disagrees with the channel), that it passes on a
+      # coherent tree including the exempt nightly pins, and that it fails
+      # CLOSED on a missing channel, no workflow files, or zero toolchain
+      # steps. That last case is not hypothetical: the guard's first version
+      # hung forever there, because awk with no file arguments reads stdin.
+      - name: Toolchain pin drift semantics harness
+        run: bash scripts/test_toolchain_drift.sh
       # Semantics harness for the AI-attribution trailer check wired into
       # pr-validation.yml. Proves on fixtures that the release-plz co-author
       # PASSES (a blanket ban would break the release flow), that the Claude
@@ -1848,6 +1867,9 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
+          # Required by scripts/check_toolchain_drift.sh (#2475): a step that
+          # installs a target must name the toolchain it lands on.
+          toolchain: 1.91.1
           target: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
         with:
