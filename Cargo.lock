@@ -1558,6 +1558,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "dom_query"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fac5fca71e65e94cc718a6e2af65d6e0f9c6027751c2aa562fbb5087fda639bc"
+dependencies = [
+ "bit-set",
+ "cssparser 0.37.0",
+ "foldhash 0.2.0",
+ "html5ever 0.39.0",
+ "precomputed-hash",
+ "selectors 0.38.0",
+ "tendril",
+]
+
+[[package]]
 name = "dtoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2763,17 +2778,16 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "legible"
-version = "0.5.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1365098e73aae697c4d747782d2fd5b9bfa3d6a82f2a3f6070c2039053146e5"
+checksum = "4c1f98ecdbfc2350a51384cf7998b00e7651095e3e8dc882cd947533fb78d9e4"
 dependencies = [
- "html5ever 0.39.0",
- "memchr",
+ "dom_query",
+ "hashbrown 0.17.1",
+ "once_cell",
  "regex",
  "serde",
  "serde_json",
- "smallvec",
- "tendril",
  "thiserror 2.0.19",
  "url",
 ]

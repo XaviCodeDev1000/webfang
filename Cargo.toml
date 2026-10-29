@@ -37,7 +37,7 @@ wreq-util = { version = "3.0.0-rc.14", features = ["emulation"] }
 bytes = "1"
 
 # Content Extraction
-legible = "0.5"
+legible = "0.4"
 htmd = "0.5"
 strsim = "0.11"
 
