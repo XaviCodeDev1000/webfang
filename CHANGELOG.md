@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.2.1] - 2026-10-29
+
+
+### 🏗️ Architecture Improvements
+
+- Collapse HTML→Markdown onto a single MarkdownConverter port backed by htmd ([#2503](https://github.com/XaviCodeDev1000/webfang/pull/2503))
+
+### 📦 Dependencies
+
+- Update Cargo.lock dependencies
+
+### 🧪 Testing
+
+- Single-source the budget epilogue and pin the crawl timeout keyword ([#2516](https://github.com/XaviCodeDev1000/webfang/pull/2516))
 ## [7.2.0] - 2026-10-29
 
 

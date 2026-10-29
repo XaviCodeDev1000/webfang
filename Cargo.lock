@@ -5591,7 +5591,7 @@ dependencies = [
 
 [[package]]
 name = "webfang_benchmark"
-version = "7.2.0"
+version = "7.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -5609,7 +5609,7 @@ dependencies = [
 
 [[package]]
 name = "webfang_cli"
-version = "7.2.0"
+version = "7.2.1"
 dependencies = [
  "clap",
  "sha2 0.10.9",
@@ -5621,7 +5621,7 @@ dependencies = [
 
 [[package]]
 name = "webfang_core"
-version = "7.2.0"
+version = "7.2.1"
 dependencies = [
  "age",
  "ahash",
@@ -5702,7 +5702,7 @@ dependencies = [
 
 [[package]]
 name = "webfang_mcp"
-version = "7.2.0"
+version = "7.2.1"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -5733,7 +5733,7 @@ dependencies = [
 
 [[package]]
 name = "webfang_test_utils"
-version = "7.2.0"
+version = "7.2.1"
 dependencies = [
  "regex",
  "webfang_core",
