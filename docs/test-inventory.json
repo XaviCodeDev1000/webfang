@@ -473,7 +473,7 @@
       "path": "crates/webfang_core/tests/common/cli_harness.rs",
       "crate": "webfang_core",
       "area": "cli",
-      "test_count": 7,
+      "test_count": 8,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
