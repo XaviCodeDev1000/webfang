@@ -205,15 +205,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "astral-tl"
-version = "0.7.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d90933ffb0f97e2fc2e0de21da9d3f20597b804012d199843a6fe7c2810d28f3"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "async-compression"
 version = "0.4.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1427,33 +1418,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5a1c7113c831fec68cbd79cd8bf281a84e5b6943f51473dc266b0b88a6a017e"
 dependencies = [
  "html5ever 0.38.0",
- "markup5ever_rcdom 0.38.0+unofficial",
+ "markup5ever_rcdom",
  "phf",
-]
-
-[[package]]
-name = "html-escape"
-version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46c1ff2d1cbf39efe5af0900ced8a069b5e61557a17544eb0c4a50239937389e"
-
-[[package]]
-name = "html-to-markdown-rs"
-version = "2.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b44ff13ff909885d418b0c63d9a485382cdc1b3a3e016a100f8e79e5df934d21"
-dependencies = [
- "astral-tl",
- "base64 0.22.1",
- "html-escape",
- "html5ever 0.36.1",
- "lru 0.16.4",
- "markup5ever_rcdom 0.36.0+unofficial",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1986,15 +1952,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.16.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
-dependencies = [
- "hashbrown 0.16.1",
-]
-
-[[package]]
-name = "lru"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
@@ -2043,18 +2000,6 @@ dependencies = [
 
 [[package]]
 name = "markup5ever_rcdom"
-version = "0.36.0+unofficial"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e5fc8802e8797c0dfdd2ce5c21aa0aee21abbc7b3b18559100651b3352a7b63"
-dependencies = [
- "html5ever 0.36.1",
- "markup5ever 0.36.1",
- "tendril 0.4.3",
- "xml5ever 0.36.1",
-]
-
-[[package]]
-name = "markup5ever_rcdom"
 version = "0.38.0+unofficial"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "333171ccdf66e915257740d44e38ea5b1b19ce7b45d33cc35cb6f118fbd981ff"
@@ -2062,7 +2007,7 @@ dependencies = [
  "html5ever 0.38.0",
  "markup5ever 0.38.0",
  "tendril 0.5.1",
- "xml5ever 0.38.0",
+ "xml5ever",
 ]
 
 [[package]]
@@ -3836,7 +3781,7 @@ dependencies = [
 
 [[package]]
 name = "webfang_core"
-version = "6.0.0"
+version = "7.1.0"
 dependencies = [
  "age",
  "ahash",
@@ -3857,7 +3802,6 @@ dependencies = [
  "governor",
  "heck",
  "htmd",
- "html-to-markdown-rs",
  "indicatif",
  "keyring-core",
  "legible",
@@ -4296,7 +4240,7 @@ dependencies = [
  "httparse",
  "ipnet",
  "libc",
- "lru 0.18.5",
+ "lru",
  "percent-encoding",
  "pin-project-lite",
  "serde",
@@ -4374,16 +4318,6 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "zeroize",
-]
-
-[[package]]
-name = "xml5ever"
-version = "0.36.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f57dd51b88a4b9f99f9b55b136abb86210629d61c48117ddb87f567e51e66be7"
-dependencies = [
- "log",
- "markup5ever 0.36.1",
 ]
 
 [[package]]
