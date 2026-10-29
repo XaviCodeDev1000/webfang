@@ -417,24 +417,36 @@ fn batch_empty_file_exits_64() {
 // Batch timeout tests
 // ---------------------------------------------------------------------------
 
-/// A --batch-file with a slow endpoint and --timeout-secs 1 must exit 69 with
-/// the failed URL and the timeout keyword on stderr — the per-request timeout
-/// fires, not a hang.
+/// A --batch-file where one URL succeeds and one times out must report the
+/// failure WITHOUT discarding the success: the fast URL's .md is still
+/// written, the run exits 69 and stderr names the slow URL with the timeout
+/// keyword — the partial-failure half of the batch timeout contract (#2517).
 ///
-/// #2271: the assertion is the observable contract, never a wall clock. The
-/// mock delays its response 10 s, so a regression that ignored
-/// `--timeout-secs` would fetch SUCCESSFULLY and exit 0, flipping the
-/// exit-code assert on its own — no elapsed bound is needed to catch it, and
-/// the `elapsed < 25 s` bound this test used to carry is exactly what failed
-/// at 26.2 s on a loaded machine while the product was correct.
+/// #2271 anchor: this test used to pin "does not hang" with a wall clock
+/// (`elapsed < 25 s` — exactly what failed at 26.2 s on a loaded machine
+/// while the product was correct). #2498 removed the clock in favour of the
+/// observable contract, and #2517 gave this scenario its own property so the
+/// twin timeout tests stopped asserting the same thing
+/// (R2-twin-batch-timeout-tests): `batch_file_timeout_reports_failures` keeps
+/// the all-failures anchor, this one pins survival of the successful sibling.
 ///
-/// The attempt runs under [`assert_spawn_within_blocking`]: the shared budget is the
-/// only clock in the test, and an overrunning child is killed and reaped
-/// instead of being orphaned by a bare tokio timeout (#2387).
+/// The attempt runs under [`assert_spawn_within_blocking`]: the shared budget
+/// is the only clock in the test, and an overrunning child is killed and
+/// reaped instead of being orphaned by a bare tokio timeout (#2387).
 #[tokio::test]
 async fn batch_file_timeout_does_not_hang() {
     let t = BehavioralTest::new().await;
 
+    Mock::given(method("GET"))
+        .and(path("/fast"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "<html><body><article><h1>Fast</h1>\
+             <p>This fast article carries plenty of substantive text so it \
+             comfortably clears the fifty character minimum content guard.</p>\
+             </article></body></html>",
+        ))
+        .mount(&t.server)
+        .await;
     Mock::given(method("GET"))
         .and(path("/slow"))
         .respond_with(
@@ -445,9 +457,10 @@ async fn batch_file_timeout_does_not_hang() {
         .mount(&t.server)
         .await;
 
+    let uri = t.server.uri();
+    let slow_url = format!("{uri}/slow");
     let batch_file = t.out.path().join("urls.txt");
-    std::fs::write(&batch_file, format!("{}/slow\n", t.server.uri())).unwrap();
-    let slow_url = format!("{}/slow", t.server.uri());
+    std::fs::write(&batch_file, format!("{uri}/fast\n{slow_url}\n")).unwrap();
     let out_path = t.out.path().to_path_buf();
 
     assert_spawn_within_blocking(
@@ -466,9 +479,22 @@ async fn batch_file_timeout_does_not_hang() {
 
             if output.status.code() != Some(69) {
                 return Err(format!(
-                    "expected exit code 69 (partial/all failures), got {:?}; stderr: {}",
+                    "expected exit code 69 (partial batch failure), got {:?}; stderr: {}",
                     output.status.code(),
                     String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            // The survival contract (#2517): the fast URL's page is exported
+            // even though its sibling timed out — verified empirically before
+            // pinning. A content-poor fast page would instead fail
+            // ExtractionFailed and contribute to the all-items-failed
+            // exit-65 semantics, which is why the fixture carries real body
+            // text.
+            let md = md_files_by_relative_path(&out_path);
+            if !md.keys().any(|k| k.contains("fast")) {
+                return Err(format!(
+                    "the fast URL must still produce its .md after the sibling \
+                     timeout, got {md:?}"
                 ));
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
