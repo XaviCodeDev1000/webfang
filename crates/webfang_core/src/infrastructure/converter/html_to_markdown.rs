@@ -1,6 +1,6 @@
 //! HTML to Markdown conversion with a block-level source map.
 //!
-//! The engine is the [`HtmdConverter`](crate::infrastructure::converter::htmd_converter::HtmdConverter)
+//! The engine is the [`HtmdConverter`]
 //! adapter (the repo's single converter path): HTML boilerplate (nav, sidebar,
 //! SVG, scripts) is stripped before conversion for Obsidian-quality output.
 //! This module owns the annotated whole-document-plus-block-map machinery.
@@ -27,7 +27,7 @@ pub struct MarkdownBlock {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AnnotatedMarkdown {
     /// The converted markdown — byte-identical to
-    /// [`HtmdConverter::convert`](crate::infrastructure::converter::htmd_converter::HtmdConverter::convert)
+    /// [`MarkdownConverter::convert`](crate::domain::ports::MarkdownConverter::convert)
     /// output for the same input, on every path.
     pub markdown: String,
     /// One entry per top-level HTML block, in document order. Empty when the

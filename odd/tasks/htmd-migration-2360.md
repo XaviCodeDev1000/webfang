@@ -22,3 +22,6 @@ Branch: `chore/htmd-migration-2360` · Issue: #2360 (status:approved) · PR base
 ## Log
 
 - L1: Fase 4 assignment (2026-10-29): migrate #2360 now; builds via mbx, sequential, watch other agents.
+- L2: Commit 1 (refactor(infra)): port + adapter + rewire + fallback collapse. check/clippy/fmt green; 4841 tests, 0 failures, ZERO snapshot diffs (engines agree on every fixture; htmd per-block join reproduces whole-document).
+- L3: Commit 2 (chore(deps)): html-to-markdown-rs subtree out of the lock; lru→single 0.18.5, xml5ever gone, rcdom→single; RUSTSEC-2026-0253 ignore pruned; duplicate baseline ratcheted down 3 names; deny + advisory gates green. html5ever stays duplicated via dom_query/legible+htmd+scraper (pre-existing, issue predicted removal — partially wrong, documented).
+- L4: Commit 3 (docs): intra-doc link fixes (trait-method links go via the trait; explicit target redundant when the module imports the type). Gotcha: rustdoc ICEs under mbx cached doc runs — workspace doc gate green with real cargo.
