@@ -928,6 +928,15 @@ jobs:
       # run here too, or the meta-guard below reports an unwired harness.
       - name: Target isolation guard semantics harness
         run: bash scripts/tests/test_check_target_isolation.sh
+      # Windows-platform type-check guard (#1833). Same reasoning as the
+      # target-isolation harness above: only scripts/ci_fast_gate.sh ran it,
+      # and no workflow step runs the fast gate. The harness's case 1 (the
+      # fail-closed missing-target refusal) is hermetic everywhere; its
+      # compile cases (2-4) need the MSVC std target and SKIP loudly on
+      # runners without it, promoting automatically if a runner adds
+      # `rustup target add x86_64-pc-windows-msvc`.
+      - name: Windows platform type-check guard semantics harness
+        run: bash scripts/tests/test_check_windows_platform.sh
       # Meta-guard for the whole guard layer (#2056). The audit
       # AUDIT-SCRIPTS-FAIL-OPEN-20261018-222141 found 12 CRITICAL defects and
       # every one of them lived in a branch no test exercised: a `|| true` over

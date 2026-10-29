@@ -562,6 +562,18 @@ EOF
   else
     skip_step "target isolation guard semantics" "no target-guard files changed"
   fi
+  # Windows-platform check semantics (#1833): pins the guard's fail-closed
+  # missing-target refusal (a PATH-stubbed rustup, so the case itself is
+  # offline) and, where the MSVC std target is installed, the GREEN/RED/lint
+  # matrix against the real cfg(windows) module — the two #1810 defect
+  # classes no Linux cargo lane can see. Triggered by either the guard or its
+  # harness changing; cases 2-4 SKIP loudly on hosts without the target
+  # (`rustup target add x86_64-pc-windows-msvc` promotes them automatically).
+  if grep -Eq '^(scripts/check_windows_platform\.sh|scripts/tests/test_check_windows_platform\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "windows platform check semantics" bash scripts/tests/test_check_windows_platform.sh --offline
+  else
+    skip_step "windows platform check semantics" "no windows-platform guard files changed"
+  fi
   # Path-classifier regression harness (#1707; coverage for #1643): the
   # `$(...)` NUL-dropping capture collapsed a multi-file diff into one
   # pseudo-path, which could flip `run_code_jobs` false and cascade-skip every
@@ -1091,6 +1103,16 @@ lane_full() {
   run_step "pre-build webfang binary" cargo build -p webfang_cli --bin webfang --all-features
   run_step "nextest (workspace, all features)" cargo nextest run --workspace --all-features
   run_rustdoc_gate always
+  # #1833: the cfg(windows) arms are part of FULL's "nothing skipped" claim —
+  # but the check is a REAL-toolchain step (it must not run under the gate
+  # fixtures' cargo stubs), so it scopes to the platform modules like the
+  # code lane does instead of running unconditionally.
+  if grep -Eq '^crates/.*infrastructure/platform/' "$UNION_TMP" 2>/dev/null \
+    || grep -Eq '^scripts/(check_windows_platform|tests/test_check_windows_platform)\.sh$' "$UNION_TMP" 2>/dev/null; then
+    run_step "windows platform cross-target type-check" bash scripts/check_windows_platform.sh
+  else
+    skip_step "windows platform cross-target type-check" "no platform modules changed"
+  fi
   # Release provenance L1 behavioral tests (hermetic, no cargo needed)
   run_step "release provenance L1 tests" bash scripts/test_release_provenance.sh
 }
@@ -1127,6 +1149,16 @@ elif [[ "$code_changed" == "true" ]]; then
   echo "fast-gate lane: CODE (fmt + guards + targeted cargo)"
   lane_fmt_and_guards
   targeted_cargo
+  # #1833: the #[cfg(windows)] arms are invisible to every Linux cargo lane
+  # above — type-check them cross-target whenever the platform modules (or
+  # the guard itself) are part of the change set. A missing MSVC std target
+  # fails loudly naming `rustup target add x86_64-pc-windows-msvc`.
+  if grep -Eq '^crates/.*infrastructure/platform/' "$UNION_TMP" 2>/dev/null \
+    || grep -Eq '^scripts/(check_windows_platform|tests/test_check_windows_platform)\.sh$' "$UNION_TMP" 2>/dev/null; then
+    run_step "windows platform cross-target type-check" bash scripts/check_windows_platform.sh
+  else
+    skip_step "windows platform cross-target type-check" "no platform modules changed"
+  fi
   # Phase 4 (advisory only): regression naming convention check. Runs
   # outside run_step and can never fail the lane — findings are
   # ::notice::/NOTICE lines for the author.
