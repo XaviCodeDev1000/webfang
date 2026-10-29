@@ -504,6 +504,15 @@ async fn crawl_js_strategy_respects_timeout_secs() {
                     String::from_utf8_lossy(&output.stderr).trim()
                 ));
             }
+            // #2512 (R3-002): any non-success exit would satisfy the check
+            // above, so the timeout-specific detection also pins the product's
+            // own wording on stderr — the same contract the batch timeout
+            // siblings assert — without reintroducing any wall clock.
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let lowered = stderr.to_lowercase();
+            if !(lowered.contains("timeout") || lowered.contains("timed out")) {
+                return Err(format!("stderr should mention timeout, got: {stderr}"));
+            }
             Ok(())
         },
     )
