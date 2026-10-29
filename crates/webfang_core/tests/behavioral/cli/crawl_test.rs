@@ -2,7 +2,7 @@
 
 use crate::cmd;
 use crate::BehavioralTest;
-use crate::{assert_spawn_within, std_cmd, SPAWN_LATENCY_BUDGET};
+use crate::{assert_spawn_within_blocking, std_cmd, SPAWN_LATENCY_BUDGET};
 use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
@@ -448,7 +448,7 @@ async fn include_pattern_only_scrapes_matching_urls() {
 /// timeout) would fetch SUCCESSFULLY and exit 0, flipping the assert on its
 /// own. The `elapsed < 10 s` bound this test used to carry measured 7.1 s on
 /// the TRY 2 of a windows run — 2.9 s of headroom under load is exactly what
-/// flaked. The attempt runs under [`assert_spawn_within`]: the shared budget
+/// flaked. The attempt runs under [`assert_spawn_within_blocking`]: the shared budget
 /// is the only clock in the test, and an overrunning child is killed and
 /// reaped instead of being orphaned by a bare tokio timeout (#2387).
 #[tokio::test]
@@ -471,60 +471,43 @@ async fn crawl_js_strategy_respects_timeout_secs() {
 
     let out_path = t.out.path().to_path_buf();
 
-    // wiremock serves on this test's current-thread runtime, so the blocking
-    // budget machinery must wait on a blocking-pool thread — parking the
-    // runtime thread here would starve the mock server and the child's
-    // request would hang until the budget kills it.
-    tokio::task::spawn_blocking(move || {
-        assert_spawn_within(
-            SPAWN_LATENCY_BUDGET,
-            "crawl_js_strategy_respects_timeout_secs",
-            move |child| {
-                let mut command = std_cmd();
-                command
-                    .arg("--url")
-                    .arg(&slow_url)
-                    .arg("--sitemap-url")
-                    .arg(&sitemap_url)
-                    .arg("--use-sitemap")
-                    .arg("--js-strategy")
-                    .arg("static")
-                    .arg("--timeout-secs")
-                    .arg("2")
-                    // F-08 (#1231): timeouts retry, so pin the budget to keep
-                    // the run short — 2 attempts x 2s + backoff, far inside
-                    // the spawn budget the attempt runs under.
-                    .arg("--max-retries")
-                    .arg("1")
-                    .arg("--max-depth")
-                    .arg("0")
-                    .arg("--output")
-                    .arg(&out_path)
-                    .arg("--quiet");
-                let output = child.output(command)?;
+    assert_spawn_within_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "crawl_js_strategy_respects_timeout_secs",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--url")
+                .arg(&slow_url)
+                .arg("--sitemap-url")
+                .arg(&sitemap_url)
+                .arg("--use-sitemap")
+                .arg("--js-strategy")
+                .arg("static")
+                .arg("--timeout-secs")
+                .arg("2")
+                // F-08 (#1231): timeouts retry, so pin the budget to keep
+                // the run short — 2 attempts x 2s + backoff, far inside
+                // the spawn budget the attempt runs under.
+                .arg("--max-retries")
+                .arg("1")
+                .arg("--max-depth")
+                .arg("0")
+                .arg("--output")
+                .arg(&out_path)
+                .arg("--quiet");
+            let output = child.output(command)?;
 
-                if output.status.success() {
-                    return Err(format!(
-                        "request should have timed out, but command succeeded; stderr: {}",
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    ));
-                }
-                Ok(())
-            },
-        );
-    })
-    .await
-    .unwrap_or_else(|join_error| {
-        // `assert_spawn_within` panics with the measured latencies when both
-        // attempts overrun; resume that panic so the test fails with the
-        // budget's own diagnosis, not with a bare JoinError.
-        match join_error.try_into_panic() {
-            Ok(payload) => std::panic::resume_unwind(payload),
-            Err(join_error) => {
-                panic!("budget worker did not report a verdict: {join_error}")
-            },
-        }
-    });
+            if output.status.success() {
+                return Err(format!(
+                    "request should have timed out, but command succeeded; stderr: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Ok(())
+        },
+    )
+    .await;
 }
 
 /// Mount a two-level DOM scenario used by the `--max-depth` gating tests:

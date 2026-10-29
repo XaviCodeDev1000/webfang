@@ -236,6 +236,40 @@ where
     }
 }
 
+/// [`assert_spawn_within`] for async tests: the budgeted attempt runs on the
+/// blocking pool, and the budget's own panic diagnosis is resumed verbatim.
+///
+/// The blocking-pool placement is load-bearing, not cosmetic: an async
+/// behavioral test's wiremock server polls on the test's current-thread
+/// runtime, so waiting for the child on the runtime thread would starve the
+/// mock server and hang the child until the budget killed it. And because
+/// `assert_spawn_within` reports overruns by panicking, a flat
+/// `JoinHandle::await` would flatten that diagnosis into a bare `JoinError`;
+/// this resumes the original panic payload instead, and names a verdict-less
+/// worker as its own failure.
+///
+/// # Panics
+///
+/// Panics with the attempt's own verdict when it reports a failure, and with
+/// `assert_spawn_within`'s measured-latency diagnosis when both attempts
+/// overrun their budget.
+pub(crate) async fn assert_spawn_within_blocking<F>(
+    budget: Duration,
+    what: &'static str,
+    attempt: F,
+) where
+    F: Fn(&BudgetChild) -> Result<(), String> + Send + Sync + 'static,
+{
+    tokio::task::spawn_blocking(move || assert_spawn_within(budget, what, attempt))
+        .await
+        .unwrap_or_else(|join_error| match join_error.try_into_panic() {
+            Ok(payload) => std::panic::resume_unwind(payload),
+            Err(join_error) => {
+                panic!("budget worker did not report a verdict: {join_error}")
+            },
+        });
+}
+
 /// Sealed verdict of [`run_under_budget`], which [`assert_spawn_within`] turns
 /// into a panic.
 ///
@@ -1024,8 +1058,29 @@ pub(crate) fn assert_snapshot_plain(name: &str, value: impl Into<String>) {
 
 #[cfg(test)]
 mod spawn_latency_budget {
-    use super::{assert_spawn_within, run_under_budget, SpawnOutcome, SPAWN_LATENCY_BUDGET};
+    use super::{
+        assert_spawn_within, assert_spawn_within_blocking, run_under_budget, SpawnOutcome,
+        SPAWN_LATENCY_BUDGET,
+    };
     use std::time::{Duration, Instant};
+
+    /// The async wrapper must resume the budget's own panic payload: an
+    /// overrunning attempt surfaces the harness's measured-latency diagnosis
+    /// through `assert_spawn_within_blocking`, never a flattened `JoinError`.
+    /// Pinned with a tiny budget against a closure that sleeps far past it.
+    #[tokio::test]
+    #[should_panic(expected = "exceeded its 100ms budget on 2 consecutive attempts")]
+    async fn an_async_overrun_resumes_the_budget_diagnosis() {
+        assert_spawn_within_blocking(
+            Duration::from_millis(100),
+            "async_stuck_spawn",
+            move |_child| {
+                std::thread::sleep(Duration::from_millis(10 * 100));
+                Ok(())
+            },
+        )
+        .await;
+    }
 
     /// The property #1697 needs and that a healthy runner does not show by
     /// itself: an overrunning attempt is ABANDONED at its budget, not allowed
