@@ -33,7 +33,9 @@ if [[ "${1:-}" == "version" ]]; then
 fi
 if [[ "${1:-}" == "verify-blob" ]]; then
   printf '%s\n' "$*" >> "$FAKE_COSIGN_LOG"
-  exit 0
+  # 0 unless the case under test needs a rejection. A verifier that can only
+  # succeed cannot prove a failure path (webfang#2479).
+  exit "${FAKE_COSIGN_EXIT:-0}"
 fi
 exit 1
 FAKE
@@ -210,6 +212,41 @@ assert_fails "empty RELEASE_CERT_WORKFLOW_TRIGGER" \
   RELEASE_CERT_WORKFLOW_REF='refs/heads/main' \
   RELEASE_CERT_WORKFLOW_TRIGGER='' \
   COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" bash "$SCRIPT" "$ASSET"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The default's rejection must be actionable (webfang#2479). The tag-only
+# default is correct and stays: it is what makes forgetting the flags fail
+# closed. But a consumer holding a backstop-signed release gets cosign's bare
+# exit, with no way to learn that the ref, not the signature, is what failed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 18. Default identity + a rejection => the hint names the cause and the fix.
+out="$(env -u GITHUB_REPOSITORY -u RELEASE_CERT_IDENTITY_REGEXP \
+  -u RELEASE_CERT_WORKFLOW_REF -u RELEASE_CERT_WORKFLOW_TRIGGER \
+  COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" FAKE_COSIGN_EXIT=1 \
+  bash "$SCRIPT" "$ASSET" 2>&1 || true)"
+assert_contains "$out" "la identidad por defecto es TAG-ONLY"
+assert_contains "$out" "Signed Ref"
+assert_contains "$out" "--workflow-ref"
+assert_contains "$out" "--workflow-trigger"
+
+# 19. A pinned identity suppresses the hint: the rejection is then about the
+#     caller's own pin, and pointing at the default would be noise.
+out="$(env -u GITHUB_REPOSITORY \
+  COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" FAKE_COSIGN_EXIT=1 \
+  bash "$SCRIPT" --identity-regexp "$BRANCH_IDENTITY" \
+  --workflow-ref refs/heads/main --workflow-trigger workflow_dispatch "$ASSET" 2>&1 || true)"
+assert_not_contains "$out" "la identidad por defecto es TAG-ONLY"
+
+# 20. A missing bundle is a different failure and must NOT get the hint: the
+#     default's ref shape is not why an unsigned asset failed, and pointing a
+#     reader there sends them to the wrong cause.
+out="$(env -u GITHUB_REPOSITORY -u RELEASE_CERT_IDENTITY_REGEXP \
+  -u RELEASE_CERT_WORKFLOW_REF -u RELEASE_CERT_WORKFLOW_TRIGGER \
+  COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" \
+  bash "$SCRIPT" "$NO_BUNDLE" 2>&1 || true)"
+assert_contains "$out" "SIN FIRMAR"
+assert_not_contains "$out" "la identidad por defecto es TAG-ONLY"
 
 if [[ "$FAIL" -ne 0 ]]; then
   echo "release signature identity harness: $FAIL failure(s)" >&2

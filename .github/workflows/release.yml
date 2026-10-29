@@ -777,12 +777,49 @@ jobs:
     steps:
       # scripts/check_release_provenance.sh must exist in the workspace —
       # the L1.4 step runs it below. Checkout the VALIDATED commit so the
-      # gate bytes are the ones preflight approved (re-asserts L1.1).
+      # L1.4 bytes are the ones preflight approved (re-asserts L1.1).
+      #
+      # This checkout is the ARTIFACTS' tree, not the gate. The signature gate
+      # below deliberately does NOT run the verifier from here (webfang#2479).
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ needs.preflight.outputs.validated_commit }}
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
+
+      # The GATE is a policy decision and must be the CURRENT one, so it is
+      # checked out separately from the run's own ref.
+      #
+      # A workflow_dispatch executes this file from the default branch but
+      # checks out the tag, so `scripts/` in the workspace above is the TAG's
+      # code: any hardening merged after that tag would not apply — and the
+      # older the tag, the weaker the gate, on the one path that exists to
+      # recover an old tag. That is exactly how v7.0.0 was published with the
+      # pre-#2464 verifier while the workflow around it declared the fix.
+      #
+      # github.sha is the run's own ref: on a tag push it equals
+      # validated_commit (so nothing changes on the happy path), on a dispatch
+      # it is the default branch this file was read from. Only `scripts/` is
+      # taken, with no history: the verifier reads the historical allowlist
+      # sitting next to itself and needs nothing else. If a future verifier
+      # needs more, this checkout fails closed and says so.
+      #
+      # This is deliberately NOT self-provenance, and the preflight above still
+      # IS. Both are refusal gates, and a refusal gate must not get weaker as
+      # the tag gets older. Preflight asks "does this tag's own tree trust
+      # itself?" — running it from the tagged tree can only ever REFUSE, so a
+      # broken trust script in an old tag blocks its own recovery and nothing
+      # else. The signature gate would ADMIT on an older, weaker verifier: a
+      # tag cut before #2467 carries a verifier with no claim pinning, so
+      # running it from the tag is the one direction that lets an old tag pass
+      # a check today's code would refuse. That is why the tag keeps
+      # self-provenance for its provenance and not for its acceptance.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          path: gate
+          sparse-checkout: scripts
           persist-credentials: false
 
       - name: Download signed assets
@@ -859,7 +896,11 @@ jobs:
           for asset in "${assets[@]}"; do
             to_verify+=("artifacts/$asset")
           done
-          bash scripts/verify-release-signatures.sh "${to_verify[@]}"
+          # The verifier is the CURRENT one (`gate/`, the run's own ref), not
+          # the tag's copy in the workspace root. The assets are the tagged
+          # bytes; the decision to publish them is made by today's policy
+          # (webfang#2479). check_release_dispatch.sh check 18 enforces this.
+          bash gate/scripts/verify-release-signatures.sh "${to_verify[@]}"
 
       # L1.4 TOCTOU re-read: re-resolve the tag server-side and compare
       # against the validated commit from preflight. Any drift blocks.
@@ -974,7 +1015,7 @@ jobs:
             echo "cosign verify-blob --bundle webfang-x86_64-unknown-linux-gnu.tar.gz.sigstore.json --certificate-identity-regexp '^https://github\\.com/XaviCodeDev1000/webfang/\\.github/workflows/release\\.yml@refs/(heads|tags)/.+\$' --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-ref $GITHUB_REF --certificate-github-workflow-trigger $GITHUB_EVENT_NAME webfang-x86_64-unknown-linux-gnu.tar.gz"
             echo "\`\`\`"
             echo ""
-            echo "\`scripts/verify-release-signatures.sh\` in the repository runs exactly this over every published asset and prints the identity it used."
+            echo "\`scripts/verify-release-signatures.sh\` on \`main\` runs exactly this over every published asset and prints the identity it used. Use the script from \`main\`: the copy at an older tag predates the claim pinning and rejects these flags (webfang#2479)."
           } > /tmp/release-notes.md
           # The asset list is derived, not transcribed: a hardcoded second copy
           # of the matrix's target names would be free to drift, and a name that

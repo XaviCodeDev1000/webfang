@@ -64,6 +64,9 @@
 #
 # The default remains TAG-ONLY on purpose: a caller that pins no claims gets the
 # strict historical behaviour, so forgetting the new flags can only fail closed.
+# A consumer holding a dispatch-signed release gets an actionable rejection
+# rather than a bare cosign exit: it names the release's 'Signed Ref' row and
+# the two flags to pass (webfang#2479).
 #
 # The residual, stated instead of hidden: a caller that supplies a ref-SHAPE
 # identity (the `refs/(heads|tags)/` form) and NO claims has widened the gate to
@@ -163,6 +166,10 @@ USAGE
 
 IDENTITY_REGEXP=""
 IDENTITY_EXPLICIT=false
+# True only when the identity fell back to DEFAULT_IDENTITY_REGEXP. It changes
+# no gate behaviour; it decides whether a rejection gets the "this default is
+# tag-push only" hint instead of a bare cosign exit (webfang#2479).
+IDENTITY_IS_DEFAULT=false
 WORKFLOW_REF="${RELEASE_CERT_WORKFLOW_REF:-}"
 WORKFLOW_TRIGGER="${RELEASE_CERT_WORKFLOW_TRIGGER:-}"
 TAG=""
@@ -273,7 +280,12 @@ if [[ -n "$TAG" ]]; then
 fi
 
 if [[ -z "$IDENTITY_REGEXP" ]]; then
-    IDENTITY_REGEXP="${RELEASE_CERT_IDENTITY_REGEXP:-$DEFAULT_IDENTITY_REGEXP}"
+    if [[ -n "${RELEASE_CERT_IDENTITY_REGEXP:-}" ]]; then
+        IDENTITY_REGEXP="$RELEASE_CERT_IDENTITY_REGEXP"
+    else
+        IDENTITY_REGEXP="$DEFAULT_IDENTITY_REGEXP"
+        IDENTITY_IS_DEFAULT=true
+    fi
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -335,6 +347,11 @@ fi
 
 VERIFIED=0
 FAILED=0
+# Counted separately from FAILED: only a rejection by cosign can be an identity
+# mismatch. A missing asset or a missing bundle is a different failure, and
+# pointing those at the default's ref shape would send the reader to the wrong
+# cause (webfang#2479).
+REJECTED=0
 
 for asset in "${ASSETS[@]}"; do
     if [[ ! -f "$asset" ]]; then
@@ -368,11 +385,24 @@ for asset in "${ASSETS[@]}"; do
     else
         echo "::error::firma inválida, ausente en el log de transparencia, o de una identidad ajena: $asset. No se publica." >&2
         FAILED=$((FAILED + 1))
+        REJECTED=$((REJECTED + 1))
     fi
 done
 
 TOTAL=${#ASSETS[@]}
 echo "release signature verification: $VERIFIED/$TOTAL verified, $FAILED failed"
+
+# A rejection under the DEFAULT identity is almost always a dispatch-signed
+# release checked with a tag-only default. cosign's own message cannot say
+# that, so say it here: the remedy is two flags, never a weaker regexp
+# (webfang#2479). Suppressed when the caller pinned anything, because then the
+# rejection is about their pin and this hint would be noise.
+if [[ "$REJECTED" -ne 0 && "$IDENTITY_IS_DEFAULT" == "true" ]]; then
+    echo "::error::la identidad por defecto es TAG-ONLY (@refs/tags/vX.Y.Z): solo admite releases publicadas por tag push. Una release recuperada por el backstop dispatch se firmó en @refs/heads/<default-branch> y este default la rechaza por diseño — NO significa que la firma sea inválida. Leé la fila 'Signed Ref' de las notas del release y pasá la identidad de forma junto con los dos claims:"
+    echo "  bash scripts/verify-release-signatures.sh \\"
+    echo "    --identity-regexp '^https://github\\.com/<owner>/<repo>/\\.github/workflows/release\\.yml@refs/(heads|tags)/.+\$' \\"
+    echo "    --workflow-ref <ref de la fila Signed Ref> --workflow-trigger <trigger> <asset>"
+fi
 
 if [[ "$FAILED" -ne 0 ]]; then
     echo "::error::$FAILED de $TOTAL assets no superaron la verificación de firma. La release NO se crea: publicar un asset sin firma verificable sería exactamente el defecto que este guard existe para cerrar."

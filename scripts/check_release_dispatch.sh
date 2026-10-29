@@ -357,20 +357,37 @@ fi
 # or to the validated commit from preflight (build). Both satisfy L1.1 Identity:
 # the preflight resolves the tag, the build compiles the validated commit.
 # An unpinned checkout (ref: main, ref: branch) would compile unrelated code.
+#
+# One exception is legitimate and only in one shape: the publish job's GATE
+# checkout, which takes the verifier from the run's own ref (webfang#2479). It
+# must stay scripts-only (`sparse-checkout: scripts`) and at most one, so it
+# cannot become a second build input. Check 18 requires it to exist; this one
+# keeps it from turning into the unpinned checkout it replaces.
 # ─────────────────────────────────────────────────────────────────────────────
 CHECKOUTS="$(grep -cE '^[[:space:]]*(-[[:space:]]+)?uses: actions/checkout@' "$RELEASE_YML" || true)"
 # Valid pins: either the tag input OR the validated_commit output from preflight
 PINNED="$(grep -cE '^[[:space:]]*ref:[[:space:]]*.*(github\.event\.inputs\.tag|needs\.preflight\.outputs\.validated_commit)' "$RELEASE_YML" || true)"
+# The gate checkout: the run's own ref, and only ever for `scripts/`.
+GATE_CHECKOUTS="$(grep -cE '^[[:space:]]*ref:[[:space:]]*\$\{\{[[:space:]]*github\.sha[[:space:]]*\}\}[[:space:]]*$' "$RELEASE_YML" || true)"
+GATE_SCRIPTS_ONLY="$(grep -cE '^[[:space:]]*sparse-checkout:[[:space:]]*scripts[[:space:]]*$' "$RELEASE_YML" || true)"
 if [[ "$CHECKOUTS" -eq 0 ]]; then
   echo "::error::check_release_dispatch: release.yml has no 'uses: actions/checkout@' step — the guard can no longer verify the checkout pin. Update this guard if checkout moved to a composite action."
   step "release.yml: checkout pin" "UNVERIFIABLE"
   FAIL=1
-elif [[ "$PINNED" -lt "$CHECKOUTS" ]]; then
-  echo "::error::check_release_dispatch: release.yml has $CHECKOUTS checkout step(s) but only $PINNED pinned 'ref:'. Every checkout must pin to either the tag input or the validated_commit output. An unpinned checkout compiles the ref the run started from (a branch) and publishes those binaries under the tag."
-  step "release.yml: checkout pin $PINNED/$CHECKOUTS" "UNPINNED"
+elif [[ "$PINNED" -lt "$((CHECKOUTS - GATE_CHECKOUTS))" ]]; then
+  echo "::error::check_release_dispatch: release.yml has $CHECKOUTS checkout step(s), $GATE_CHECKOUTS of them the publish gate's github.sha, but only $PINNED pinned 'ref:'. Every checkout must pin to either the tag input or the validated_commit output, except the single scripts-only gate checkout. An unpinned checkout compiles the ref the run started from (a branch) and publishes those binaries under the tag."
+  step "release.yml: checkout pin $PINNED/$((CHECKOUTS - GATE_CHECKOUTS))" "UNPINNED"
+  FAIL=1
+elif [[ "$GATE_CHECKOUTS" -gt 1 ]]; then
+  echo "::error::check_release_dispatch: release.yml has $GATE_CHECKOUTS checkouts pinned to \${{ github.sha }}. Exactly one is allowed (the publish job's scripts-only gate); more than one means a second build input is taken from the run's ref instead of the validated commit."
+  step "release.yml: gate checkout count $GATE_CHECKOUTS" "AMBIGUOUS"
+  FAIL=1
+elif [[ "$GATE_CHECKOUTS" -eq 1 && "$GATE_SCRIPTS_ONLY" -ne 1 ]]; then
+  echo "::error::check_release_dispatch: the \${{ github.sha }} checkout must declare 'sparse-checkout: scripts'. A full checkout of the run's ref in the publish job could be used as a build input, which would compile the default branch and publish it under the tag — the exact defect check 8 exists to prevent."
+  step "release.yml: gate checkout is scripts-only" "MISSING"
   FAIL=1
 else
-  step "release.yml: all $CHECKOUTS checkouts pinned (tag or validated_commit)" "ok"
+  step "release.yml: all $CHECKOUTS checkouts pinned (tag, validated_commit, or the scripts-only gate)" "ok"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -514,6 +531,33 @@ if [[ "$PINS_REF" -ge 1 && "$PINS_TRIGGER" -ge 1 \
 else
   echo "::error::check_release_dispatch: release.yml's signature gate must pin the RUN, not only the workflow file — RELEASE_CERT_WORKFLOW_REF from \${{ github.ref }}, RELEASE_CERT_WORKFLOW_TRIGGER from \${{ github.event_name }}, with no tag-only identity regexp and no literal refs/heads/main. Without it a workflow_dispatch signs under @refs/heads/<default-branch> and the publish job rejects its own artifacts after every build, checksum, attestation and signature has succeeded (webfang#2464). That is the path the reconciliation sweep depends on, so the defect lands exactly when a release is already broken."
   step "release.yml: signature gate pins ref+trigger claims" "MISSING"
+  FAIL=1
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18. The publish gate must EXECUTE the current verifier, not the tag's copy.
+#     Check 17 asserts that the workflow DECLARES the claims. It cannot assert
+#     that the script which actually runs honours them, and on a dispatch those
+#     differ: the workflow file comes from the default branch while every
+#     scripts/ file comes from the tag, because the publish job checks out the
+#     validated commit. So the tag's verifier decided whether the tag may
+#     publish — the older the tag, the weaker the gate, on the one path that
+#     exists to recover an old tag. v7.0.0 was published that way: 15/15
+#     verified by the pre-#2464 verifier, while the workflow around it declared
+#     the fix (webfang#2479).
+#     The gate is a policy decision and must come from the run's own ref
+#     (github.sha); the artifacts stay the tagged bytes.
+# ─────────────────────────────────────────────────────────────────────────────
+PUBLISH_BLOCK="$(job_block "$RELEASE_YML" publish)"
+GATE_FROM_RUN="$(grep -cF "ref: \${{ github.sha }}" <<<"$PUBLISH_BLOCK" || true)"
+GATE_INVOKED="$(grep -cF 'bash gate/scripts/verify-release-signatures.sh' <<<"$PUBLISH_BLOCK" || true)"
+TAG_SCRIPTS_USED="$(grep -cF 'bash scripts/verify-release-signatures.sh' <<<"$PUBLISH_BLOCK" || true)"
+
+if [[ "$GATE_FROM_RUN" -ge 1 && "$GATE_INVOKED" -ge 1 && "$TAG_SCRIPTS_USED" -eq 0 ]]; then
+  step "release.yml: publish verifies with the run's own scripts" "ok"
+else
+  echo "::error::check_release_dispatch: release.yml's publish job must verify signatures with the verifier from the RUN's own ref — a checkout of \${{ github.sha }} and 'bash gate/scripts/verify-release-signatures.sh' — and must NOT run the tag's copy ('bash scripts/verify-release-signatures.sh'). The publish job checks out the validated (tagged) commit, so the tag's scripts are what execute: a workflow_dispatch of an old tag then applies that tag's gate, and every hardening merged since is silently skipped on exactly the path that exists to recover an old tag. v7.0.0 was published with the pre-#2464 verifier while the workflow declared the fix (webfang#2479)."
+  step "release.yml: publish verifies with the run's own scripts" "MISSING"
   FAIL=1
 fi
 

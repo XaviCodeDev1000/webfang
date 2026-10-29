@@ -411,6 +411,15 @@ jobs:
       # is removed: the shape that left v2.1.1 with a tag and no GitHub Release.
       - name: Release hand-off gate
         run: bash scripts/check_release_dispatch.sh
+      # Semantics harness for the publish gate's provenance (#2479): proves on
+      # mktemp fixtures that the hand-off gate REJECTS the shapes it exists to
+      # refuse — the verifier taken from the tag's tree, a gate checkout
+      # repointed at the validated commit, a gate checkout that is not
+      # scripts-only, and a second github.sha checkout. A guard whose teeth are
+      # untested is how v7.0.0 shipped verified by the tag's pre-#2464 verifier
+      # while the workflow declared the fix.
+      - name: Release dispatch gate semantics harness
+        run: bash scripts/test_release_dispatch_gate.sh
       # Semantics harness for the reconciliation path (#1484): proves on mktemp
       # fixtures that the dispatch is actually RETRIED, that a terminal failure is
       # loud and names the tag, and that the sweep never dispatches a human tag.
