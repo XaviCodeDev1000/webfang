@@ -72,6 +72,63 @@ job_block() {
   ' "$1"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Extract each `uses: actions/checkout@` step as its own block, terminated by a
+# `###CHECKOUT###` line. A block is the `uses:` line plus every line more deeply
+# indented than the step dash, up to the next step or a dedent. Block-scoped
+# checks matter (webfang#2486): a bare file-wide count of `sparse-checkout:`
+# or `fetch-depth: 0` is satisfied by a comment or by an unrelated checkout in
+# a different job, so the property must be read from the SAME checkout block.
+# ─────────────────────────────────────────────────────────────────────────────
+checkout_blocks() {
+  awk '
+    function flush() {
+      if (n > 0) { for (i = 1; i <= n; i++) print buf[i]; print "###CHECKOUT###" }
+    }
+    # A checkout step begins at a list item whose step is actions/checkout@.
+    # The block runs until the next step at the same or shallower indent, so the
+    # with:/ref:/fetch-depth:/sparse-checkout: keys stay bound to THIS checkout.
+    # (Indent is measured by the column of the first non-space char, not by
+    # RLENGTH of a leading-space match, which the local awk mis-reports.)
+    /^[[:space:]]*-[[:space:]]+uses:[[:space:]]*actions\/checkout@/ {
+      flush(); n = 0; in_block = 1
+      dash = match($0, /[^[:space:]]/)
+      buf[++n] = $0
+      next
+    }
+    in_block {
+      if ($0 ~ /^[[:space:]]*-[[:space:]]+/ && match($0, /[^[:space:]]/) <= dash) {
+        # A new step ends this checkout block. Only a checkout step starts a new
+        # block (handled by the first rule); a non-checkout step (rust-toolchain,
+        # upload-artifact, …) must NOT become a fake block, or the loop below
+        # would demand fetch-depth: 0 from it. Just close and drop it.
+        in_block = 0; flush(); n = 0
+        next
+      }
+      buf[++n] = $0
+    }
+    END { if (in_block) flush() }
+  ' "$1"
+}
+
+# The single publish-gate checkout: the block whose `ref:` is `${{ github.sha }}`.
+# Used to bind `sparse-checkout: scripts` to that exact block (check 8), not to a
+# file-wide count that an unrelated checkout could satisfy.
+gate_checkout_block() {
+  checkout_blocks "$1" | awk '
+    BEGIN { n = 0; has_sha = 0 }
+    /^###CHECKOUT###$/ {
+      if (has_sha) { saved_n = n; for (i = 1; i <= n; i++) saved[i] = buf[i] }
+      n = 0; has_sha = 0; next
+    }
+    {
+      buf[++n] = $0
+      if ($0 ~ /ref:[[:space:]]*\$\{\{[[:space:]]*github\.sha[[:space:]]*\}\}/) has_sha = 1
+    }
+    END { if (saved_n > 0) for (i = 1; i <= saved_n; i++) print saved[i] }
+  '
+}
+
 echo "check_release_dispatch: verifying the release hand-off invariant (L1 provenance)"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -369,7 +426,12 @@ CHECKOUTS="$(grep -cE '^[[:space:]]*(-[[:space:]]+)?uses: actions/checkout@' "$R
 PINNED="$(grep -cE '^[[:space:]]*ref:[[:space:]]*.*(github\.event\.inputs\.tag|needs\.preflight\.outputs\.validated_commit)' "$RELEASE_YML" || true)"
 # The gate checkout: the run's own ref, and only ever for `scripts/`.
 GATE_CHECKOUTS="$(grep -cE '^[[:space:]]*ref:[[:space:]]*\$\{\{[[:space:]]*github\.sha[[:space:]]*\}\}[[:space:]]*$' "$RELEASE_YML" || true)"
-GATE_SCRIPTS_ONLY="$(grep -cE '^[[:space:]]*sparse-checkout:[[:space:]]*scripts[[:space:]]*$' "$RELEASE_YML" || true)"
+# Bound to the gate block, not counted file-wide: a full (non-sparse) gate
+# checkout plus an unrelated 'sparse-checkout: scripts' elsewhere must be
+# REJECTED, and a stray comment mentioning it must not satisfy the check
+# (webfang#2486 fix for check 8).
+GATE_BLOCK="$(gate_checkout_block "$RELEASE_YML")"
+GATE_SCRIPTS_ONLY="$(grep -cE '^[[:space:]]*sparse-checkout:[[:space:]]*scripts[[:space:]]*$' <<<"$GATE_BLOCK" || true)"
 if [[ "$CHECKOUTS" -eq 0 ]]; then
   echo "::error::check_release_dispatch: release.yml has no 'uses: actions/checkout@' step — the guard can no longer verify the checkout pin. Update this guard if checkout moved to a composite action."
   step "release.yml: checkout pin" "UNVERIFIABLE"
@@ -464,14 +526,35 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 14. L1 Provenance: release.yml checkouts use fetch-depth: 0 + fetch-tags: true
-# ─────────────────────────────────────────────────────────────────────────────
-FETCH_DEPTH_0_COUNT="$(grep -cE 'fetch-depth:[[:space:]]*0' "$RELEASE_YML" || true)"
-FETCH_TAGS_COUNT="$(grep -cE 'fetch-tags:[[:space:]]*true' "$RELEASE_YML" || true)"
-if [[ "$FETCH_DEPTH_0_COUNT" -ge "$CHECKOUTS" && "$FETCH_TAGS_COUNT" -ge "$CHECKOUTS" ]]; then
-  step "release.yml: all $CHECKOUTS checkouts use fetch-depth: 0 + fetch-tags: true" "ok"
+# 14. L1 Provenance: every checkout EXCEPT the publish gate (the scripts-only
+# github.sha checkout) must bring full history + tags for git merge-base and
+# release-plz-tags.sh --tag. The requirement is bound to each checkout BLOCK,
+# so a comment that merely mentions fetch-depth: 0 (the prose at the gate
+# checkout) can neither satisfy nor break the check (webfang#2486 fix).
+missing_history=0
+cb=""
+while IFS= read -r line; do
+  if [[ "$line" == "###CHECKOUT###" ]]; then
+    [[ -z "$cb" ]] && { cb=""; continue; }
+    # The gate checkout is the one legitimate exception: scripts-only, no history.
+    if ! printf '%s
+' "$cb" | grep -vE '^[[:space:]]*#' | grep -E 'ref:[[:space:]]*\$\{\{[[:space:]]*github\.sha'; then
+      printf '%s
+' "$cb" | grep -vE '^[[:space:]]*#' | grep -E 'fetch-depth:[[:space:]]*0' || missing_history=1
+      printf '%s
+' "$cb" | grep -vE '^[[:space:]]*#' | grep -E 'fetch-tags:[[:space:]]*true' || missing_history=1
+    fi
+    cb=""
+  else
+    cb+="$line"$'
+'
+  fi
+done < <(checkout_blocks "$RELEASE_YML")
+
+if [[ "$missing_history" -eq 0 ]]; then
+  step "release.yml: all non-gate checkouts use fetch-depth: 0 + fetch-tags: true" "ok"
 else
-  echo "::error::check_release_dispatch: release.yml has $CHECKOUTS checkout(s) but only $FETCH_DEPTH_0_COUNT with fetch-depth: 0 and $FETCH_TAGS_COUNT with fetch-tags: true. L1 provenance requires full history + tags for git merge-base and release-plz-tags.sh --tag."
+  echo "::error::check_release_dispatch: a checkout in release.yml other than the publish gate's scripts-only github.sha checkout is missing 'fetch-depth: 0' or 'fetch-tags: true'. L1 provenance requires full history + tags for git merge-base and release-plz-tags.sh --tag. The requirement is bound to each checkout block, so a stray comment mentioning those keys can no longer satisfy it."
   step "release.yml: fetch-depth: 0 + fetch-tags: true" "MISSING"
   FAIL=1
 fi
@@ -549,9 +632,14 @@ fi
 #     (github.sha); the artifacts stay the tagged bytes.
 # ─────────────────────────────────────────────────────────────────────────────
 PUBLISH_BLOCK="$(job_block "$RELEASE_YML" publish)"
-GATE_FROM_RUN="$(grep -cF "ref: \${{ github.sha }}" <<<"$PUBLISH_BLOCK" || true)"
-GATE_INVOKED="$(grep -cF 'bash gate/scripts/verify-release-signatures.sh' <<<"$PUBLISH_BLOCK" || true)"
-TAG_SCRIPTS_USED="$(grep -cF 'bash scripts/verify-release-signatures.sh' <<<"$PUBLISH_BLOCK" || true)"
+GATE_FROM_RUN="$(printf '%s\n' "$PUBLISH_BLOCK" | grep -vE '^[[:space:]]*#' | grep -cF "ref: \${{ github.sha }}" || true)"
+# Read the verifier invocations from COMMAND LINES only — comment lines and echo
+# strings are excluded, so a comment that quotes either invocation can neither
+# satisfy nor fail the check (webfang#2486 fix for check 18). The publish job
+# already carries long explanatory comments, so this is not hypothetical.
+PUBLISH_CMDS="$(printf '%s\n' "$PUBLISH_BLOCK" | grep -vE '^[[:space:]]*#' | grep -vE '^[[:space:]]*echo[[:space:]]')"
+GATE_INVOKED="$(grep -cF 'bash gate/scripts/verify-release-signatures.sh' <<<"$PUBLISH_CMDS" || true)"
+TAG_SCRIPTS_USED="$(grep -cF 'bash scripts/verify-release-signatures.sh' <<<"$PUBLISH_CMDS" || true)"
 
 if [[ "$GATE_FROM_RUN" -ge 1 && "$GATE_INVOKED" -ge 1 && "$TAG_SCRIPTS_USED" -eq 0 ]]; then
   step "release.yml: publish verifies with the run's own scripts" "ok"

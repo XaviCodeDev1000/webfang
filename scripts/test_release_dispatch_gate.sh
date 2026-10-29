@@ -156,6 +156,63 @@ mutate "$D/.github/workflows/release.yml" \
   && expect_reject "$D" "two github.sha checkouts" \
        "checkouts pinned to \${{ github.sha }}"
 
+# 5b. A COMMENT quoting the tag's verifier must not flip a correct tree to a
+# rejection: comment lines are not command lines (webfang#2486 fix for check 18).
+# The old file-wide count treated the comment as a tag-verifier invocation.
+D="$(fixture verifier-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
+mutate "$D/.github/workflows/release.yml" \
+  's{(\n          ref: \$\{\{ github\.sha \}\}\n)}{$1          # reference only: bash scripts/verify-release-signatures.sh is the tag copy\n}m' \
+  "comment quoting the tag verifier on a correct tree" \
+  && expect_accept "$D" "comment quoting the tag verifier on a correct tree"
+
+# 5c. A FULL gate checkout plus an UNRELATED sparse-checkout: scripts elsewhere
+# must still be rejected: the sparse key is bound to the gate block, not counted
+# file-wide (webfang#2486 fix for check 8). The old code counted the unrelated
+# key and accepted.
+D="$(fixture gate-full-plus-sparse-elsewhere)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
+mutate "$D/.github/workflows/release.yml" \
+  's{^          sparse-checkout: scripts\n}{}mg; s{(\n          ref: \$\{\{ github\.event\.inputs\.tag \|\| github\.ref_name \}\}\n          fetch-tags: true\n)}{$1          sparse-checkout: scripts\n}m' \
+  "full gate checkout plus unrelated sparse-checkout elsewhere" \
+  && expect_reject "$D" "full gate checkout plus unrelated sparse-checkout elsewhere" \
+       "must declare 'sparse-checkout: scripts'"
+
+# 5d. A real checkout missing fetch-depth: 0 must be rejected even when a COMMENT
+# mentions fetch-depth: 0: the requirement is bound to the checkout blocks, not
+# to a file-wide grep (webfang#2486 fix for check 14). The old code let the
+# comment satisfy the count.
+D="$(fixture fetch-depth-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
+mutate "$D/.github/workflows/release.yml" \
+  's{^          fetch-depth: 0\n}{}m; s{(\n          ref: \$\{\{ github\.event\.inputs\.tag \|\| github\.ref_name \}\}\n          fetch-tags: true\n)}{$1          # fetch-depth: 0\n}m' \
+  "real checkout missing fetch-depth behind a comment" \
+  && expect_reject "$D" "real checkout missing fetch-depth behind a comment" \
+       "missing 'fetch-depth: 0'"
+
+# 5e. A COMMENT quoting the gate verifier must not rescue a tree that actually
+# runs the tag's verifier: the comment is not a command line (webfang#2486 fix
+# for check 18). The old code counted the comment as GATE_INVOKED and accepted.
+D="$(fixture tag-verifier-plus-gate-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
+mutate "$D/.github/workflows/release.yml" \
+  's{bash gate/scripts/verify-release-signatures\.sh}{bash scripts/verify-release-signatures.sh}; s{(\n          ref: \$\{\{ github\.sha \}\}\n)}{$1          # bash gate/scripts/verify-release-signatures.sh is what we intend\n}m' \
+  "tag verifier plus gate-form comment" \
+  && expect_reject "$D" "tag verifier plus gate-form comment" \
+       "must verify signatures with the verifier from the RUN"
+
+# 5f. A COMMENT quoting 'sparse-checkout: scripts' inside the gate block must not
+# satisfy check 8 (webfang#2486). The count regex is line-anchored
+# (^[[:space:]]*sparse-checkout:), so prose can never match it; this case pins
+# the property so the regex cannot later be loosened to an unanchored match
+# without failing the harness.
+D="$(fixture gate-sparse-behind-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
+mutate "$D/.github/workflows/release.yml" \
+  's{^          sparse-checkout: scripts\n}{}mg; s{(\n          ref: \$\{\{ github\.sha \}\}\n)}{$1          # sparse-checkout: scripts (reference only)\n}m' \
+  "gate sparse-checkout hidden behind a comment" \
+  && expect_reject "$D" "gate sparse-checkout hidden behind a comment" \
+       "must declare 'sparse-checkout: scripts'"
 # 6. A guard that fails WITHOUT ::error must still be a RECORDED failure, and the
 #    run must still reach its summary. Proven end to end: re-run this harness
 #    against a stub guard that exits 1 silently and assert that it (a) exits
