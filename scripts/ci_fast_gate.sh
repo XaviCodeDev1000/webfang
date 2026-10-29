@@ -396,6 +396,11 @@ EOF
   # drift; the CODE side is covered by the same guard in lane_fmt_and_guards.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Data-flow disclosure guard (#2241): the DOC side of the disclosure
+  # surface, mirroring the required `repo-guards` step of ci.yml — blocking,
+  # like the ai-providers guard above.
+  run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
+    bash scripts/check_data_flow_doc.sh
   # Docs claims gate (auditoría QA/QC 2026-10-24): README.md is the most-read
   # file in the repo and nothing read it. The Architecture diagram drew an edge
   # no manifest has, and two badges outlived the facts they described. This
@@ -608,6 +613,10 @@ EOF
   # and a local lane that stayed green would hide the drift until CI.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Data-flow disclosure guard (#2241): same blocking mirror, same reason —
+  # a `scripts/**` change can move the code the disclosure doc cites.
+  run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
+    bash scripts/check_data_flow_doc.sh
   # Release feature matrix (#2430): a `scripts/**` change can break the guard
   # itself, so the lane that fires on scripts changes runs it too. Blocking,
   # same reason as the two mirrors above.
@@ -897,6 +906,11 @@ lane_fmt_and_guards() {
   # mirrors: required in CI, required here.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Data-flow disclosure guard (#2241): the CODE side of the same drift — a
+  # code PR that renames a cited symbol changes no markdown and never
+  # reaches lane_docs. Blocking, like the CI step it mirrors.
+  run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
+    bash scripts/check_data_flow_doc.sh
   # Docs claims gate (auditoría QA/QC 2026-10-24): the code side of the same
   # drift. A dependency edge or an MSRV bump changes no markdown, so a lane
   # that only saw docs would miss it. Same guard as lane_docs, same block.

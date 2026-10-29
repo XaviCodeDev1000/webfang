@@ -3,6 +3,7 @@
 [Overview](overview.md)
 
 - [Installation & Uninstall](installation.md)
+- [Data Flow & Privacy](data-flow.md)
 - [Release Feature Matrix](release-feature-matrix.md)
 - [Debugging & Observability](debugging.md)
 - [Testing](testing.md)

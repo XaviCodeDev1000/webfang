@@ -632,6 +632,22 @@ jobs:
       # harness above. Offline, mktemp fixtures only, no cargo and no network.
       - name: AI providers doc drift semantics harness
         run: bash scripts/test_ai_providers_doc.sh
+      # Data-flow disclosure guard (#2241): docs/src/data-flow.md states what
+      # leaves the machine, the AI payload contract, the log/trace content
+      # policy and what is retained locally. Its embedded manifest is audited
+      # against the tree by scripts/check_data_flow_doc.sh — the same model
+      # as the AI-providers guard above — so a claim the code no longer backs
+      # reds this step instead of surviving in print.
+      #
+      # PHASE 2 (required), same reasoning as the AI-providers gate: the
+      # guard is fail-closed and the step does not absorb its failure. The
+      # `# guard-required` marker declares the phase in machine-readable
+      # form; the semantics harness below proves the guard can still fail.
+      - name: Data-flow disclosure guard (required, #2241)
+        # guard-required
+        run: bash scripts/check_data_flow_doc.sh
+      - name: Data-flow disclosure semantics harness
+        run: bash scripts/test_data_flow_doc.sh
       # Release feature matrix gate (#2430): docs/src/release-feature-matrix.md
       # answers "what can the binary I just downloaded do?" — capability by
       # capability, per release artifact. That answer rots exactly when the
