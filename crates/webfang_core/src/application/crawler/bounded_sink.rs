@@ -284,12 +284,13 @@ impl BoundedFileSink {
                 );
                 Ok(written)
             },
-            // LCOV_EXCL_START defensive: writer-join — a JoinError means the writer task panicked, a bug
+            // The writer task died (panic or abort): the JoinError must
+            // surface as a Writer failure, never as a successful flush —
+            // pinned by `a_dead_writer_makes_finish_report_the_failure`.
             Err(join_err) => {
                 error!(error = %join_err, "content spool writer task failed");
                 Err(BoundedSinkError::Writer(join_err.to_string()))
             },
-            // LCOV_EXCL_STOP
         }
     }
 
@@ -926,6 +927,52 @@ mod tests {
             );
             assert_eq!(drain(&sink).await.len(), captured, "round {round}");
         }
+    }
+
+    /// Writer death is a reported failure, not a silent flush. The audit
+    /// (#1828, writer death HIGH) noted that every other test in this module
+    /// covers cancellation and backpressure but none killed the writer.
+    /// Aborting the writer task makes `finish` join a dead task, and the
+    /// JoinError must surface as [`BoundedSinkError::Writer`] instead of an
+    /// `Ok` flush count: a run whose spool writer died must not be able to
+    /// report success (the "writer death invisible" contract note in
+    /// `crawl_result_repository`).
+    #[tokio::test]
+    async fn a_dead_writer_makes_finish_report_the_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sink = sink_in(&dir, 4).await;
+        sink.capture("https://example.com/a", "<p>a</p>");
+
+        // Kill the writer in place: the handle stays in the sink so `finish`
+        // is the one that joins it. `abort` registers the cancellation
+        // synchronously and the idle writer sits on `rx.recv()` with an open
+        // channel and no cancel, so the join deterministically yields the
+        // cancelled JoinError.
+        {
+            let guard = sink
+                .writer
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard
+                .as_ref()
+                .expect("the writer task is alive until finish joins it")
+                .abort();
+        }
+
+        let err = tokio::time::timeout(Duration::from_secs(10), sink.finish())
+            .await
+            .expect("a dead writer must not park finish")
+            .expect_err("a dead writer must fail finish");
+        assert!(matches!(err, BoundedSinkError::Writer(_)));
+
+        // The sink is closed; a late capture is discarded, never acknowledged.
+        let before = sink.captured();
+        sink.capture("https://example.com/late", "<p>late</p>");
+        assert_eq!(sink.captured(), before);
+
+        // And a second `finish` is the lifecycle error, not a fake flush.
+        let err = sink.finish().await.expect_err("second flush must fail");
+        assert!(matches!(err, BoundedSinkError::AlreadyFinished));
     }
 
     #[tokio::test]
