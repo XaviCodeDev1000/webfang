@@ -65,6 +65,8 @@ bash scripts/ci_fast_gate.sh
 scripts/merge-when-green.sh <PR>            # wait for green checks, then merge
 scripts/ci_status.sh <PR>                   # read-only summary
 scripts/ci_pr_overlap.sh <N1> <N2>          # disjoint files? (batch merge)
+scripts/check_windows_platform.sh           # type-check cfg(windows) arms cross-target
+                                            # (needs: rustup target add x86_64-pc-windows-msvc)
 ```
 
 ## 🚧 Project rules
@@ -73,6 +75,13 @@ What the compiler **cannot** catch. Everything else comes from the harness or th
 above.
 
 - **Never `.unwrap()` in production** — use `?`, `match` or `.context()`.
+- **`cfg(windows)` arms are invisible to every Linux gate.** `scripts/check_windows_platform.sh`
+  type-checks the platform modules for `x86_64-pc-windows-msvc` in a throwaway crate that
+  mirrors the workspace lint table; the fast gate runs it when `infrastructure/platform/`
+  changes, and any hand-touched `cfg(windows)` arm should run it too — the two #1810 defects
+  (a missing `use tracing::warn;` and bare `unsafe` under `unsafe_code = "deny"`) were exactly
+  this class. It needs only the target's std (no MSVC toolchain, no linking) and fails loudly
+  naming the `rustup target add` command when it is missing.
 - **A poisoned `std::sync::Mutex` is never fatal and never silent.** Recover the guard with
   `PoisonError::into_inner()` — it still grants exclusive access — and keep going. Where the
   function already returns `Result` and a recovered write could corrupt an output stream,
