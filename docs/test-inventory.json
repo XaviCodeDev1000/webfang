@@ -149,7 +149,7 @@
       "path": "crates/webfang_core/tests/args_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 30,
+      "test_count": 33,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
@@ -1095,6 +1095,15 @@
       "crate": "webfang_core",
       "area": "crawler",
       "test_count": 8,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
+      "path": "crates/webfang_core/tests/sitemap_fetch_timeout_test.rs",
+      "crate": "webfang_core",
+      "area": "crawler",
+      "test_count": 1,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"
