@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.2.0] - 2026-10-29
+
+
+### 🎉 Added
+
+- Emit chunk byte range in VectorRecord ([#2460](https://github.com/XaviCodeDev1000/webfang/pull/2460))
+- Vault search results expose the persisted chunk locators ([#2470](https://github.com/XaviCodeDev1000/webfang/pull/2470))
+
+### 🧪 Testing
+
+- Resolve the chromium binary through the shared harness ([#2264](https://github.com/XaviCodeDev1000/webfang/pull/2264)) ([#2463](https://github.com/XaviCodeDev1000/webfang/pull/2463))
 ## [7.1.0] - 2026-10-28
 
 
