@@ -1174,12 +1174,10 @@ domain/note_repository.rs	23	use	crate::domain::text_chunker::ByteSpan
 domain/note_repository.rs	24	use	crate::domain::Sha256Hex
 domain/note_repository.rs	25	use	crate::error::ScraperError
 domain/note_repository.rs	82	inline	crate::error::ScraperError
-domain/persistence.rs	29	use	crate::domain::entities::ExportState
-domain/persistence.rs	30	use	crate::domain::error::ErrorClass
-domain/persistence.rs	31	use	crate::domain::page_state::MIGRATED_V1_RUN_ID
-domain/persistence.rs	31	use	crate::domain::page_state::PageStatus
-domain/persistence.rs	31	use	crate::domain::page_state::PersistedRecord
-domain/persistence.rs	464	inline	crate::error::Result
+domain/persistence.rs	29	use	crate::domain::error::ErrorClass
+domain/persistence.rs	30	use	crate::domain::page_state::MIGRATED_V1_RUN_ID
+domain/persistence.rs	30	use	crate::domain::page_state::PageStatus
+domain/persistence.rs	30	use	crate::domain::page_state::PersistedRecord
 domain/ports.rs	20	use	crate::domain::downloader_port::Cookie
 domain/ports.rs	20	use	crate::domain::downloader_port::DownloadError
 domain/ports.rs	20	use	crate::domain::downloader_port::Downloader
@@ -1493,7 +1491,6 @@ infrastructure/export/state_store.rs	59	inline	crate::domain::paths::cache_base_
 infrastructure/export/state_store.rs	123	inline	crate::error::Result
 infrastructure/export/state_store.rs	183	inline	crate::error::Result
 infrastructure/export/state_store.rs	194	inline	crate::application::resume::preserve_pre_migration_backup
-infrastructure/export/state_store.rs	228	inline	crate::error::Result
 infrastructure/export/tail_window.rs	74	inline	crate::application::resume::preserve_abandoned_bytes
 infrastructure/export/tail_window.rs	94	inline	crate::application::resume::preserve_abandoned_bytes
 infrastructure/export/vector_exporter.rs	17	use	crate::domain::entities::DocumentChunkValidated

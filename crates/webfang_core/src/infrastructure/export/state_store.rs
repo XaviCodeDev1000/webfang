@@ -219,14 +219,12 @@ impl StateStore {
 
 /// Domain seam implementation (#1097): delegates to the inherent methods.
 /// No signature changes to the concrete; the version vocabulary
-/// ([`StateVersion::CURRENT`]) is owned by the domain.
+/// ([`StateVersion::CURRENT`]) is owned by the domain. The port surface is
+/// `get_state_path` alone (#2491): the inherent `load`/`load_or_default`
+/// remain on the concrete and are not part of the seam.
 impl StateStorePort for StateStore {
     fn get_state_path(&self) -> PathBuf {
         StateStore::get_state_path(self)
-    }
-
-    fn load(&self) -> crate::error::Result<ExportState> {
-        StateStore::load(self)
     }
 }
 
