@@ -804,6 +804,17 @@ jobs:
       # taken, with no history: the verifier reads the historical allowlist
       # sitting next to itself and needs nothing else. If a future verifier
       # needs more, this checkout fails closed and says so.
+      #
+      # This is deliberately NOT self-provenance, and the preflight above still
+      # IS. Both are refusal gates, and a refusal gate must not get weaker as
+      # the tag gets older. Preflight asks "does this tag's own tree trust
+      # itself?" — running it from the tagged tree can only ever REFUSE, so a
+      # broken trust script in an old tag blocks its own recovery and nothing
+      # else. The signature gate would ADMIT on an older, weaker verifier: a
+      # tag cut before #2467 carries a verifier with no claim pinning, so
+      # running it from the tag is the one direction that lets an old tag pass
+      # a check today's code would refuse. That is why the tag keeps
+      # self-provenance for its provenance and not for its acceptance.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           ref: ${{ github.sha }}
