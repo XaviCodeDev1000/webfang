@@ -15,6 +15,21 @@ pub use export::ExportArgs;
 pub use llm::LlmArgs;
 pub use obsidian::ObsidianArgs;
 
+/// Whether this value came from an operator decision rather than the spec's
+/// default, for any arg id.
+///
+/// THE provenance predicate for the arg modules: every "did somebody choose
+/// this?" question — `--max-chars`, `--threshold`, and `--timeout-secs`
+/// (#2490) — is answered here, so the meaning of "chosen" cannot drift
+/// between them. `clap::ArgMatches::value_source` is the only place that
+/// distinction exists.
+pub(crate) fn chosen_by_operator(m: &clap::ArgMatches, id: &str) -> bool {
+    matches!(
+        m.value_source(id),
+        Some(clap::parser::ValueSource::CommandLine) | Some(clap::parser::ValueSource::EnvVariable)
+    )
+}
+
 use crate::domain::ValidUrl;
 use clap::Parser;
 
@@ -540,6 +555,7 @@ impl From<Args> for crate::application::crawl_options::CrawlOptions {
                 concurrency: args.crawler.concurrency,
                 delay_ms: args.crawler.delay_ms,
                 timeout_secs: args.crawler.timeout_secs,
+                timeout_secs_explicit: args.crawler.timeout_secs_explicit,
                 max_retries: args.crawler.max_retries,
                 backoff_base_ms: args.crawler.backoff_base_ms,
                 backoff_max_ms: args.crawler.backoff_max_ms,

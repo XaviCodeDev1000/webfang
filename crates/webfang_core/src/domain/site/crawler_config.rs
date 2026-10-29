@@ -112,6 +112,14 @@ pub struct CrawlerConfig {
     pub user_agent: String,
     /// Timeout for each request in seconds
     pub timeout_secs: u64,
+    /// Whether [`Self::timeout_secs`] was operator-configured (`--timeout-secs`
+    /// / `WEBFANG_TIMEOUT_SECS`) rather than the spec default (#2490).
+    ///
+    /// Consumed by the sitemap discovery seam: the parser's fetch client
+    /// inherits the deadline only when the operator expressed one, because the
+    /// spec default is not an operator decision and would silently replace the
+    /// parser's own default on the no-flag path.
+    pub timeout_secs_explicit: bool,
     /// Sitemap discovery mode (FASE 3), resolved at the projection boundary
     /// (#1190): the raw `use_sitemap: bool` + `sitemap_url: Option<String>`
     /// pair is deleted — `false + Some(..)` can no longer be named, and an
@@ -163,6 +171,7 @@ impl CrawlerConfig {
             delay_ms: 500,                      // Hardware-aware: 500ms for HDD
             user_agent: "webfang/2.0.0 (High-Performance Extraction)".to_string(),
             timeout_secs: 30,
+            timeout_secs_explicit: false,
             sitemap: SitemapConfig::Disabled,
             ignore_robots: false,
             tls_emulation: Profile::Chrome145,
@@ -219,6 +228,7 @@ pub struct CrawlerConfigBuilder {
     delay_ms: u64,
     user_agent: String,
     timeout_secs: u64,
+    timeout_secs_explicit: bool,
     sitemap: SitemapConfig,
     ignore_robots: bool,
     tls_emulation: Profile,
@@ -240,6 +250,7 @@ impl CrawlerConfigBuilder {
             delay_ms: 500,
             user_agent: "webfang/2.0.0 (High-Performance Extraction)".to_string(),
             timeout_secs: 30,
+            timeout_secs_explicit: false,
             sitemap: SitemapConfig::Disabled,
             ignore_robots: false,
             tls_emulation: Profile::Chrome145,
@@ -310,6 +321,16 @@ impl CrawlerConfigBuilder {
     /// Set request timeout in seconds
     pub fn timeout_secs(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
+        self
+    }
+
+    /// Record whether the request timeout was operator-configured (#2490).
+    ///
+    /// The CLI projection sets this from the argv boundary's `value_source`
+    /// verdict; a config built without it keeps the sitemap parser's own
+    /// fetch default on the no-flag path.
+    pub fn timeout_secs_explicit(mut self, explicit: bool) -> Self {
+        self.timeout_secs_explicit = explicit;
         self
     }
 
@@ -386,6 +407,7 @@ impl CrawlerConfigBuilder {
             delay_ms: self.delay_ms,
             user_agent: self.user_agent,
             timeout_secs: self.timeout_secs.max(1),
+            timeout_secs_explicit: self.timeout_secs_explicit,
             sitemap: self.sitemap,
             ignore_robots: self.ignore_robots,
             tls_emulation: self.tls_emulation,

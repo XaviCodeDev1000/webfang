@@ -314,6 +314,17 @@ pub struct CrawlerArgs {
     /// Request timeout in seconds
     pub timeout_secs: u64,
 
+    /// Whether `timeout_secs` came from an operator (argv or
+    /// `WEBFANG_TIMEOUT_SECS`) rather than from the spec's default (#2490).
+    ///
+    /// Carried because the VALUE alone cannot tell an explicit
+    /// `--timeout-secs 30` from the default 30, and the sitemap fetch client
+    /// must inherit the operator's deadline only when the operator expressed
+    /// one — inheriting the spec default would silently replace the parser's
+    /// own default on the no-flag path. Same `value_source` distinction as
+    /// [`AiArgs::max_chars_explicit`](super::AiArgs::max_chars_explicit).
+    pub timeout_secs_explicit: bool,
+
     /// URL patterns to include (glob-style). Three modes:
     ///
     /// * Path: starts with `/` → matched against URL path, e.g. `/pricing`, `/admin/*`
@@ -439,6 +450,7 @@ impl clap::FromArgMatches for CrawlerArgs {
             trace_file: extract::opt(m, "trace_file"),
             max_depth: extract::value(m, "max_depth")?,
             timeout_secs: extract::value(m, "timeout_secs")?,
+            timeout_secs_explicit: super::chosen_by_operator(m, "timeout_secs"),
             include_patterns: extract::many(m, "include_patterns"),
             exclude_patterns: extract::many(m, "exclude_patterns"),
             asset_naming: extract::value(m, "asset_naming")?,

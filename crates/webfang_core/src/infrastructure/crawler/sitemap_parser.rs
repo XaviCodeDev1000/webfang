@@ -194,7 +194,7 @@ impl SitemapParser {
         config: SitemapConfig,
         tls_emulation: wreq_util::Profile,
     ) -> std::result::Result<Self, CrawlError> {
-        let http_client = Self::build_client(tls_emulation)?;
+        let http_client = Self::build_client(tls_emulation, config.timeout)?;
         let max_decompressed_size = config.max_decompressed_size;
         let memory_limit_mb = config.memory_limit_mb;
         Ok(Self {
@@ -214,22 +214,28 @@ impl SitemapParser {
 
     /// Build the sitemap fetch HTTP client for a given TLS/H2 profile.
     ///
-    /// The request and connect timeouts are pinned to 10s to preserve the
-    /// historical behavior of the previous hardcoded client (which set
-    /// `.timeout(10s)`); only the TLS/H2 profile is now configurable (#323).
-    /// The remaining settings (Chrome Client Hints, pool tuning, compression)
-    /// come from the shared factory defaults (#299).
+    /// `timeout` is the #2490 inheritance: `None` keeps the parser's private
+    /// default (10s request + 10s connect, the historical behavior of the
+    /// previous hardcoded client), `Some(d)` is the operator's `--timeout-secs`
+    /// inherited through `SitemapConfig` — each request is then bounded at `d`
+    /// with the #281 connect policy (connect capped at 10s). The remaining
+    /// settings (Chrome Client Hints, pool tuning, compression) come from the
+    /// shared factory defaults (#299).
     ///
     /// # Errors
     ///
     /// Returns `CrawlError::Internal` if the underlying client fails to build.
     fn build_client(
         tls_emulation: wreq_util::Profile,
+        timeout: Option<std::time::Duration>,
     ) -> std::result::Result<wreq::Client, CrawlError> {
+        let request_timeout = timeout.unwrap_or(std::time::Duration::from_secs(10));
+        let request_secs = request_timeout.as_secs();
         let http_config = crate::domain::http_config::HttpClientConfig {
             tls_emulation,
-            timeout_secs: 10,
-            connect_timeout_secs: 10,
+            timeout_secs: request_secs,
+            // #281 policy: connect timeout capped at 10s.
+            connect_timeout_secs: request_secs.min(10),
             ..Default::default()
         };
         crate::infrastructure::http::create_http_client_with_config(&http_config)
