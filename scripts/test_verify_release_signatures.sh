@@ -8,7 +8,9 @@
 #     allowlist, and refuses every new tag;
 #   - --tag cannot be combined with an explicit identity override;
 #   - a missing bundle, a missing cosign and an empty asset list fail closed;
-#   - the identity regexp actually reaches cosign, not just the log line.
+#   - the identity regexp actually reaches cosign, not just the log line;
+#   - the OIDC workflow-ref and workflow-trigger claims reach cosign when
+#     pinned, and the default invocation pins none of them (webfang#2464).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,6 +55,7 @@ pass() {
 
 run_strict() {
   env -u GITHUB_REPOSITORY -u RELEASE_CERT_IDENTITY_REGEXP \
+    -u RELEASE_CERT_WORKFLOW_REF -u RELEASE_CERT_WORKFLOW_TRIGGER \
     COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" \
     bash "$SCRIPT" "$@"
 }
@@ -133,6 +136,80 @@ assert_fails "empty asset list" run_strict
 assert_fails "missing cosign" \
   env -u GITHUB_REPOSITORY -u RELEASE_CERT_IDENTITY_REGEXP \
   COSIGN="$WORK/does-not-exist" bash "$SCRIPT" "$ASSET"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OIDC claim pinning (webfang#2464). The certificate identity alone cannot tell
+# a tag push from a default-branch dispatch: cosign reads the ref from the
+# ambient OIDC token, so a dispatch signs as `@refs/heads/<default-branch>` and
+# a tag-only identity rejects the pipeline's own output. The ref and the trigger
+# are pinned as CLAIMS instead: the identity regexp stays a statement about
+# WHICH workflow file, and the claims state WHICH run.
+# ─────────────────────────────────────────────────────────────────────────────
+BRANCH_IDENTITY='^https://github\.com/XaviCodeDev1000/webfang/\.github/workflows/release\.yml@refs/(heads|tags)/.+$'
+
+# 10. Pinned claims reach cosign, not just the log line.
+: > "$LOG"
+out="$(run_strict --identity-regexp "$BRANCH_IDENTITY" \
+  --workflow-ref refs/heads/main --workflow-trigger workflow_dispatch "$ASSET" 2>&1)"
+assert_contains "$(cat "$LOG")" "--certificate-github-workflow-ref refs/heads/main"
+assert_contains "$(cat "$LOG")" "--certificate-github-workflow-trigger workflow_dispatch"
+assert_contains "$out" "pinned workflow ref:      refs/heads/main"
+assert_contains "$out" "pinned workflow trigger:  workflow_dispatch"
+
+# 11. The default invocation pins NO claims: a tag push keeps the tag-only
+#     identity, and a claim nobody asked for is never silently accepted.
+: > "$LOG"
+run_strict "$ASSET" >/dev/null 2>&1
+assert_not_contains "$(cat "$LOG")" "--certificate-github-workflow-ref"
+assert_not_contains "$(cat "$LOG")" "--certificate-github-workflow-trigger"
+
+# 12. The env form is the one release.yml uses, and behaves identically.
+: > "$LOG"
+out="$(env -u GITHUB_REPOSITORY \
+  RELEASE_CERT_IDENTITY_REGEXP="$BRANCH_IDENTITY" \
+  RELEASE_CERT_WORKFLOW_REF='refs/tags/v7.1.0' \
+  RELEASE_CERT_WORKFLOW_TRIGGER='push' \
+  COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" bash "$SCRIPT" "$ASSET" 2>&1)"
+assert_contains "$(cat "$LOG")" "--certificate-github-workflow-ref refs/tags/v7.1.0"
+assert_contains "$(cat "$LOG")" "--certificate-github-workflow-trigger push"
+
+# 13. Half a pin is ambiguous: a pinned trigger with an unpinned ref (or the
+#     reverse) is the "I thought I constrained it" shape this guard refuses.
+assert_fails "workflow-ref without workflow-trigger" \
+  run_strict --identity-regexp "$BRANCH_IDENTITY" --workflow-ref refs/heads/main "$ASSET"
+assert_fails "workflow-trigger without workflow-ref" \
+  run_strict --identity-regexp "$BRANCH_IDENTITY" --workflow-trigger workflow_dispatch "$ASSET"
+
+# 14. Claims checked against the tag-only default would contradict them.
+#     Refuse up front instead of failing later inside cosign, where the reason
+#     for the rejection is invisible.
+assert_fails "claims with the tag-only default identity" \
+  run_strict --workflow-ref refs/heads/main --workflow-trigger workflow_dispatch "$ASSET"
+
+# 15. A ref that is not a git ref is a typo, not a pin.
+assert_fails "workflow-ref without the refs/ prefix" \
+  run_strict --identity-regexp "$BRANCH_IDENTITY" \
+  --workflow-ref main --workflow-trigger workflow_dispatch "$ASSET"
+
+# 16. --tag is the historical identity era; it cannot borrow claim pinning.
+assert_fails "--tag with claim pinning" \
+  run_strict --tag v5.0.0 --workflow-ref refs/tags/v5.0.0 --workflow-trigger push "$ASSET"
+
+# 17. A pin that is DEFINED BUT EMPTY is a misconfiguration, not an intent to
+#     skip the check. Reading it as "no pin" would silently downgrade the gate
+#     to a shape-only regexp — the exact widening this change exists to avoid.
+assert_fails "empty RELEASE_CERT_WORKFLOW_REF" \
+  env -u GITHUB_REPOSITORY \
+  RELEASE_CERT_IDENTITY_REGEXP="$BRANCH_IDENTITY" \
+  RELEASE_CERT_WORKFLOW_REF='' \
+  RELEASE_CERT_WORKFLOW_TRIGGER='workflow_dispatch' \
+  COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" bash "$SCRIPT" "$ASSET"
+assert_fails "empty RELEASE_CERT_WORKFLOW_TRIGGER" \
+  env -u GITHUB_REPOSITORY \
+  RELEASE_CERT_IDENTITY_REGEXP="$BRANCH_IDENTITY" \
+  RELEASE_CERT_WORKFLOW_REF='refs/heads/main' \
+  RELEASE_CERT_WORKFLOW_TRIGGER='' \
+  COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" bash "$SCRIPT" "$ASSET"
 
 if [[ "$FAIL" -ne 0 ]]; then
   echo "release signature identity harness: $FAIL failure(s)" >&2
