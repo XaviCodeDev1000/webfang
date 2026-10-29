@@ -1,54 +1,13 @@
-//! HTML to Markdown conversion
+//! HTML to Markdown conversion with a block-level source map.
 //!
-//! Uses html-to-markdown-rs crate for structure-preserving conversion.
-//! HTML boilerplate (nav, sidebar, SVG, scripts) is stripped before
-//! conversion for Obsidian-quality output.
+//! The engine is the [`HtmdConverter`]
+//! adapter (the repo's single converter path): HTML boilerplate (nav, sidebar,
+//! SVG, scripts) is stripped before conversion for Obsidian-quality output.
+//! This module owns the annotated whole-document-plus-block-map machinery.
 
 use crate::domain::text_chunker::ByteSpan;
-use html_to_markdown_rs::{convert, CodeBlockStyle, ConversionOptions, HeadingStyle};
+use crate::infrastructure::converter::htmd_converter::HtmdConverter;
 use tracing::warn;
-
-/// Convert HTML to well-structured Markdown.
-///
-/// Pipeline:
-/// 1. Remove boilerplate (scripts, nav, sidebar, SVG, page chrome)
-/// 2. Convert clean HTML → Markdown with ATX headings and fenced code blocks
-/// 3. Fall back to plain text if conversion fails
-///
-/// # Examples
-///
-/// ```
-/// use webfang_core::infrastructure::converter::html_to_markdown::convert_to_markdown;
-///
-/// let html = "<h1>Title</h1><p>Content</p>";
-/// let md = convert_to_markdown(html);
-/// assert!(md.contains("# Title"));
-/// ```
-pub fn convert_to_markdown(html: &str) -> String {
-    let cleaned = crate::infrastructure::converter::html_cleaner::clean_html(html);
-    convert_cleaned(&cleaned, html)
-}
-
-/// Steps 2–3 of the conversion pipeline, over already-clean HTML.
-///
-/// Shared by the whole-document path and the per-block path so both speak
-/// the exact same options and fallback. `original_html` feeds the text
-/// fallback (the fallback never sees per-block fragments).
-fn convert_cleaned(cleaned: &str, original_html: &str) -> String {
-    let options = ConversionOptions {
-        heading_style: HeadingStyle::Atx,
-        code_block_style: CodeBlockStyle::Backticks,
-        ..Default::default()
-    };
-
-    convert(cleaned, Some(options)).unwrap_or_else(|e| {
-        warn!(
-            error = %e,
-            "HTML to Markdown conversion failed; falling back to text extraction"
-        );
-        crate::infrastructure::scraper::fallback::extract_text(original_html)
-    })
-}
 
 /// One top-level HTML block's footprint in the converted markdown.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -67,7 +26,8 @@ pub struct MarkdownBlock {
 /// Whole-document markdown plus its block-level source map.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AnnotatedMarkdown {
-    /// The converted markdown — byte-identical to [`convert_to_markdown`]
+    /// The converted markdown — byte-identical to
+    /// [`MarkdownConverter::convert`](crate::domain::ports::MarkdownConverter::convert)
     /// output for the same input, on every path.
     pub markdown: String,
     /// One entry per top-level HTML block, in document order. Empty when the
@@ -81,15 +41,17 @@ pub struct AnnotatedMarkdown {
 /// original HTML" consumer composes with the chunker's spans
 /// (`chunk.spans` → markdown block → HTML element).
 ///
-/// The pipeline is the same as [`convert_to_markdown`]; the cleaned HTML is
-/// additionally split into top-level blocks, converted independently, and
-/// the per-block join is verified against the whole-document result before
-/// any map is reported. When the join diverges (inline flow that crosses
-/// block boundaries, conversion fallbacks), the result degrades to the
-/// whole-document markdown with an empty map.
+/// The pipeline is the single converter's; the cleaned HTML is additionally
+/// split into top-level blocks, converted independently through
+/// [`HtmdConverter::convert_cleaned`], and the per-block join is verified
+/// against the whole-document result before any map is reported. When the
+/// join diverges (inline flow that crosses block boundaries, conversion
+/// fallbacks), the result degrades to the whole-document markdown with an
+/// empty map.
 pub fn convert_to_markdown_annotated(html: &str) -> AnnotatedMarkdown {
     let cleaned = crate::infrastructure::converter::html_cleaner::clean_html(html);
-    let whole = convert_cleaned(&cleaned, html);
+    let converter = HtmdConverter;
+    let whole = converter.convert_cleaned(&cleaned, html);
 
     let Some(source_blocks) = split_top_level_blocks(&cleaned) else {
         return AnnotatedMarkdown {
@@ -103,7 +65,7 @@ pub fn convert_to_markdown_annotated(html: &str) -> AnnotatedMarkdown {
     for (html_index, (tag, fragment)) in source_blocks.into_iter().enumerate() {
         // Pieces carry the same trailing newline the converter emits for the
         // whole document; trimmed so the "\n\n" separator is the only one.
-        let piece = convert_cleaned(fragment, html);
+        let piece = converter.convert_cleaned(fragment, html);
         let piece = piece.trim_end();
         if piece.is_empty() {
             continue;
@@ -324,6 +286,13 @@ fn read_close_tag(html: &str, start: usize) -> Option<(String, usize)> {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
+    use crate::domain::ports::MarkdownConverter;
+
+    /// The whole-document conversion under test — the single converter path
+    /// (clean pre-pass + `htmd` + text fallback), exercised through the port.
+    fn convert_to_markdown(html: &str) -> String {
+        HtmdConverter.convert(html)
+    }
 
     /// The locator invariant at the conversion seam: when the per-block join
     /// reproduces the whole-document conversion, every block's span must cut

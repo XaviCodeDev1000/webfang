@@ -8,38 +8,25 @@
 //! - Rich metadata (word count, reading time, language)
 
 use crate::adapters::url_path::OutputPath;
+use crate::domain::ports::MarkdownConverter;
 use crate::domain::ScrapedContent;
 use crate::error::Result;
-use crate::infrastructure::converter::{html_to_markdown, obsidian, syntax_highlight};
+use crate::infrastructure::converter::{htmd_converter::HtmdConverter, obsidian, syntax_highlight};
 use crate::infrastructure::obsidian::ObsidianRichMetadata;
 use crate::infrastructure::output::frontmatter;
 use crate::OutputFormat;
 use std::path::Path;
 use tracing::warn;
 
-/// Convert HTML to Markdown using the best available converter.
+/// Convert HTML to Markdown through the repo's single converter path.
 ///
-/// Pipeline strategy:
-/// 1. Try `htmd` first (turndown-like, handles modern HTML well)
-/// 2. Fall back to `html_to_markdown` if htmd produces empty output or errors
-/// 3. If both fail, return the input as-is (shouldn't happen with valid HTML)
+/// Boilerplate (nav, scripts, page chrome) is stripped before conversion, so
+/// the exported markdown no longer carries page chrome text. A conversion
+/// failure degrades to plain text extraction inside the adapter; the
+/// previous multi-converter strategy (raw `htmd` first, cleaned converter as
+/// fallback) collapsed onto this path in #2360.
 fn convert_html_to_markdown(html: &str) -> String {
-    // Try htmd (turndown-inspired converter)
-    if let Ok(md) = htmd::convert(html) {
-        if !md.trim().is_empty() {
-            return md;
-        }
-    }
-
-    // Fallback to html_to_markdown
-    let fallback = html_to_markdown::convert_to_markdown(html);
-    if !fallback.trim().is_empty() {
-        return fallback;
-    }
-
-    // Last resort: return the HTML as-is
-    warn!("Both Markdown converters produced empty output, returning raw HTML");
-    html.to_string()
+    HtmdConverter.convert(html)
 }
 
 /// Configuration for Obsidian-compatible output.

@@ -37,6 +37,10 @@
 # 2026-10-26 (issue #2364): async-compression 0.4.51 pulls zstd 0.14.3 and
 # brotli 9.1.0; the six new names below are the intentional duplicates that
 # the zstd security fix introduces (see deny.toml).
+# 2026-10-29 (issue #2360): html-to-markdown-rs left the graph, converging
+# lru (only wreq's 0.18.5), markup5ever_rcdom (only htmd's 0.38) and
+# xml5ever (gone entirely); html5ever stays duplicated via dom_query/legible,
+# htmd and scraper — a pre-existing collision, one consumer path fewer.
 alloc-no-stdlib
 alloc-stdlib
 base64
@@ -54,9 +58,7 @@ foldhash
 getrandom
 hashbrown
 html5ever
-lru
 markup5ever
-markup5ever_rcdom
 r-efi
 rand
 rand_chacha
@@ -85,6 +87,5 @@ windows_i686_msvc
 windows_x86_64_gnu
 windows_x86_64_gnullvm
 windows_x86_64_msvc
-xml5ever
 zstd
 zstd-safe

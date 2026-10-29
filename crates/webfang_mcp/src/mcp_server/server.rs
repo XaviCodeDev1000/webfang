@@ -1210,9 +1210,10 @@ mod tests {
 
     #[test]
     fn test_convert_html_to_markdown_logic() {
+        use webfang_core::domain::ports::MarkdownConverter;
         let html = "<h1>Title</h1><p>Paragraph</p>";
         let md =
-            webfang_core::infrastructure::converter::html_to_markdown::convert_to_markdown(html);
+            webfang_core::infrastructure::converter::htmd_converter::HtmdConverter.convert(html);
         assert!(md.contains("Title"));
         assert!(md.contains("Paragraph"));
     }

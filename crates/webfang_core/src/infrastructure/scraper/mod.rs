@@ -2,10 +2,10 @@
 //!
 //! Contains the actual scraping logic:
 //! - Readability algorithm wrapper
-//! - Fallback text extraction
 //!
-//! DOM pre-pruning and author extraction moved to `domain::html_extraction`
-//! (ADR-0012 sub-slice 3.D).
+//! DOM pre-pruning, author extraction and fallback text extraction live in
+//! `domain::html_extraction` (ADR-0012 sub-slice 3.D; the fallback duplicate
+//! collapsed onto the domain helper in #2360).
 //!
 //! Selector repair lives here on both tiers: Tier 1 is lexical
 //! (`dom_inspector::DefaultDomInspector`), Tier 2 is embedding-backed
@@ -13,5 +13,4 @@
 
 pub mod dom_inspector;
 pub mod embedding_semantic_inspector;
-pub mod fallback;
 pub mod readability;
