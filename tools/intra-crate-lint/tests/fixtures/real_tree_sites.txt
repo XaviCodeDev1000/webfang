@@ -1303,7 +1303,7 @@ infrastructure/content_processing/mcp.rs	11	use	crate::infrastructure::converter
 infrastructure/content_processing/semantic.rs	11	use	crate::domain::content_processor::ContentProcessor
 infrastructure/converter/htmd_converter.rs	9	use	crate::domain::html_extraction::fallback
 infrastructure/converter/htmd_converter.rs	10	use	crate::domain::ports::MarkdownConverter
-infrastructure/converter/htmd_converter.rs	38	inline	crate::infrastructure::converter::html_cleaner::clean_html
+infrastructure/converter/htmd_converter.rs	42	inline	crate::infrastructure::converter::html_cleaner::clean_html
 infrastructure/converter/html_cleaner.rs	19	use	crate::domain::html_cleaner::clean_html
 infrastructure/converter/html_to_markdown.rs	8	use	crate::domain::text_chunker::ByteSpan
 infrastructure/converter/html_to_markdown.rs	9	use	crate::infrastructure::converter::htmd_converter::HtmdConverter
