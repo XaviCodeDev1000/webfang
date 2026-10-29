@@ -105,50 +105,26 @@ fn chrome_present_for_e2e() -> bool {
     })
 }
 
-/// Build a `chromium`-enabled `webfang` binary and return a PRIVATE copy of it.
+/// Resolve the `chromium`-enabled `webfang` binary and return a PRIVATE copy
+/// of it.
 ///
 /// The shared harness (`webfang_path()`) derives the binary's feature set from
-/// the test crate without `chromium`, so `--js-strategy full` in a harness-built
-/// binary would hit the feature stub instead of the real CDP downloader. This
-/// helper builds the binary with the feature active (same on-demand `cargo
-/// build` pattern the harness itself uses) and copies it out of the shared
-/// `target/` location: sibling tests rebuild the shared binary concurrently,
-/// and a pinned path into `target/debug/` could race a mid-run replacement.
+/// the test crate, and this test only compiles under
+/// `#[cfg(feature = "chromium")]` — so the derivation carries `chromium`
+/// whenever this helper exists, including the runner pre-build trusted through
+/// `WEBFANG_TEST_PREBUILT_BIN`. Resolving THROUGH the harness (instead of a
+/// private `cargo build --features chromium`) removes the nested compiler
+/// invocation from this test's wall clock: the private build's fingerprint
+/// diverged from the lane's pre-build, so the first attempt paid a rebuild and
+/// the retry ran warm — the TRY 1 FAIL 18.1 s -> TRY 2 PASS 2.8 s signature
+/// (#2264).
+///
+/// The copy out of the shared `target/` location is kept: sibling tests
+/// rebuild the shared binary concurrently, and a pinned path into
+/// `target/debug/` could race a mid-run replacement.
 #[cfg(feature = "chromium")]
 fn chromium_webfang_bin() -> std::path::PathBuf {
-    let cargo = option_env!("CARGO").unwrap_or("cargo");
-    let status = std::process::Command::new(cargo)
-        .args([
-            "build",
-            "-p",
-            "webfang_cli",
-            "--bin",
-            "webfang",
-            "--features",
-            "chromium",
-            "--quiet",
-        ])
-        .status()
-        .expect("spawn cargo to build the chromium-enabled webfang binary");
-    assert!(
-        status.success(),
-        "cargo build of the chromium-enabled webfang binary failed"
-    );
-    let built = match std::env::var("CARGO_TARGET_DIR") {
-        Ok(dir) => std::path::PathBuf::from(dir).join("debug").join("webfang"),
-        Err(_) => std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(|p| p.parent())
-            .expect("resolve workspace root")
-            .join("target")
-            .join("debug")
-            .join("webfang"),
-    };
-    assert!(
-        built.exists(),
-        "chromium-enabled binary missing at {}",
-        built.display()
-    );
+    let built = crate::common::webfang_path();
     let private_dir = std::env::temp_dir().join(format!("webfang-test-bin-{}", std::process::id()));
     std::fs::create_dir_all(&private_dir).expect("create private bin dir");
     let private = private_dir.join("webfang");

@@ -134,17 +134,33 @@ fn resolve_webfang_path() -> std::path::PathBuf {
     if cfg!(feature = "dev-tracing") {
         active_features.push("dev-tracing");
     }
+    // #2264: the Chromium E2E (`non2xx_browser_page_is_honest_error_exit_69`)
+    // only compiles under this feature and needs the real CDP downloader in
+    // the binary. Without this arm the runner pre-build (which mirrors this
+    // derivation) lacked the feature, and the E2E's own private build raced a
+    // divergent fingerprint inside its wall clock. The pre-build specs in
+    // .github/workflows/ci.yml (test-full and flake-detection) must carry
+    // `chromium` exactly when this arm can fire.
+    if cfg!(feature = "chromium") {
+        active_features.push("chromium");
+    }
     let features_arg;
     if !active_features.is_empty() {
         features_arg = active_features.join(",");
         build_args.push("--features");
         build_args.push(&features_arg);
     }
-    let status = std::process::Command::new(cargo)
+    let build_started = std::time::Instant::now();
+    let output = std::process::Command::new(cargo)
         .args(&build_args)
-        .status()
+        .output()
         .expect("spawn cargo to build webfang");
-    assert!(status.success(), "cargo build --bin webfang failed");
+    assert!(
+        output.status.success(),
+        "cargo build --bin webfang failed after {:?}; stderr:\n{}",
+        build_started.elapsed(),
+        String::from_utf8_lossy(&output.stderr)
+    );
     built
 }
 
