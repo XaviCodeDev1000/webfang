@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::domain::text_chunker::ByteSpan;
 use crate::domain::{CorrelationId, ValidUrl};
 
 use super::download::DownloadedAsset;
@@ -76,6 +77,7 @@ impl DocumentChunk<Draft> {
             metadata: HashMap::new(),
             timestamp: Utc::now(),
             embeddings: None,
+            chunk_spans: None,
             correlation_id: None,
             _state: PhantomData,
         }
@@ -100,6 +102,7 @@ impl DocumentChunk<Draft> {
             metadata: HashMap::new(),
             timestamp: Utc::now(),
             embeddings: None,
+            chunk_spans: None,
             correlation_id: None,
             _state: PhantomData,
         }
@@ -124,6 +127,7 @@ impl DocumentChunk<Draft> {
             metadata,
             timestamp: Utc::now(),
             embeddings: None,
+            chunk_spans: None,
             correlation_id: None,
             _state: PhantomData,
         }
@@ -237,6 +241,13 @@ pub struct DocumentChunk<S = Draft> {
     /// Populated by embedding pipeline after initial scrape
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embeddings: Option<Vec<f32>>,
+    /// Byte spans of this chunk inside the text the chunker segmented
+    /// (#2429 AC2), half-open `[start, end)`. `None` when the chunk has no
+    /// locator information (e.g. built from `ScrapedContent` directly, or the
+    /// CPU path): the offsets are against the chunker's input text, and the
+    /// raw-HTML mapping is the deferred Opción 3 of the chunk-locators ADR.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunk_spans: Option<Vec<ByteSpan>>,
     /// W3C TraceContext correlation ID for distributed tracing
     /// Optional - when present, enables request correlation across services
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,6 +296,7 @@ impl From<ScrapedContent> for DocumentChunk<Draft> {
             metadata,
             timestamp: Utc::now(),
             embeddings: None,
+            chunk_spans: None,
             correlation_id: scraped.correlation_id.map(|c| c.to_traceparent()),
             _state: PhantomData,
         }
@@ -337,6 +349,7 @@ impl DocumentChunk<Draft> {
             metadata,
             timestamp: Utc::now(),
             embeddings: None,
+            chunk_spans: None,
             correlation_id: correlation_id.map(|c| c.to_traceparent()),
             _state: PhantomData,
         }
@@ -358,6 +371,17 @@ impl DocumentChunk<Draft> {
     #[must_use]
     pub fn with_embeddings(mut self, embeddings: Vec<f32>) -> Self {
         self.embeddings = Some(embeddings);
+        self
+    }
+
+    /// Attach the byte spans this chunk was cut from (#2429 AC2).
+    ///
+    /// Called by chunkers that track offsets into their input text; the
+    /// offsets are against that input, not against any other representation
+    /// of the document.
+    #[must_use]
+    pub fn with_chunk_spans(mut self, spans: Vec<ByteSpan>) -> Self {
+        self.chunk_spans = Some(spans);
         self
     }
 
@@ -450,6 +474,7 @@ impl DocumentChunk<Draft> {
             metadata: self.metadata,
             timestamp: self.timestamp,
             embeddings: self.embeddings,
+            chunk_spans: self.chunk_spans,
             correlation_id: self.correlation_id,
             _state: PhantomData,
         })

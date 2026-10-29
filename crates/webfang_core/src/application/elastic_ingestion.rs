@@ -241,6 +241,7 @@ impl<R: VectorRepository + Send + Sync> ElasticIngestion<R> {
                     idx as i64,
                     &chunk.content,
                     chunk.embedding.as_deref(),
+                    chunk.spans.as_deref(),
                 )
                 .await?;
         }
@@ -369,6 +370,7 @@ impl<R: VectorRepository + Send + Sync> ElasticIngestion<R> {
             .map(|dc| ProcessedChunk {
                 content: dc.content,
                 embedding: dc.embeddings,
+                spans: dc.chunk_spans,
             })
             .collect())
     }
@@ -447,6 +449,8 @@ mod tests {
     #[cfg(not(miri))]
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    use crate::domain::text_chunker::ByteSpan;
+
     /// Shared in-memory state for the mock repo (Arc so the test keeps a handle
     /// after handing a clone to the orchestrator).
     #[derive(Default)]
@@ -455,8 +459,17 @@ mod tests {
         chunks: Vec<ChunkRecord>,
     }
 
-    /// In-memory chunk record: (id, resource_url, index, content, embedding).
-    type ChunkRecord = (String, String, i64, String, Option<Vec<f32>>);
+    /// In-memory chunk record: (id, resource_url, index, content, embedding,
+    /// spans). The spans field is what #2429 AC2 plumbs to the sink; the
+    /// mock records it so assertions can pin the transport.
+    type ChunkRecord = (
+        String,
+        String,
+        i64,
+        String,
+        Option<Vec<f32>>,
+        Option<Vec<ByteSpan>>,
+    );
 
     /// In-memory `VectorRepository` (the trait is NOT sealed, so the crate's
     /// test module can implement it — no SQLite needed for orchestrator unit tests).
@@ -493,6 +506,7 @@ mod tests {
             chunk_index: i64,
             content: &'a str,
             embedding: Option<&'a [f32]>,
+            spans: Option<&'a [ByteSpan]>,
         ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
             Box::pin(async move {
                 self.state
@@ -505,6 +519,7 @@ mod tests {
                         chunk_index,
                         content.to_string(),
                         embedding.map(|e| e.to_vec()),
+                        spans.map(|s| s.to_vec()),
                     ));
                 Ok(())
             })

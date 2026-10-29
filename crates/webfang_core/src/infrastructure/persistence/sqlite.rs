@@ -447,6 +447,7 @@ impl VectorRepository for SqliteVectorRepository {
         chunk_index: i64,
         content: &'a str,
         embedding: Option<&'a [f32]>,
+        _spans: Option<&'a [ByteSpan]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
         Box::pin(async move {
             // Pre-serialize the embedding to owned bytes: the `interact` closure must
@@ -1312,6 +1313,7 @@ mod tests {
                 0,
                 "hello world",
                 Some(&emb),
+                None,
             )
             .await
             .expect("save_chunk");
@@ -1334,6 +1336,7 @@ mod tests {
                 "https://example.com/n",
                 0,
                 "no vec here",
+                None,
                 None,
             )
             .await
