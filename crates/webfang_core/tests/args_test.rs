@@ -644,6 +644,51 @@ fn test_dom_preprune_env_var_false() {
     );
 }
 
+// ========================================================================
+// --timeout-secs operator provenance (#2490)
+// ========================================================================
+
+/// The `*_explicit` bit is the only carrier of "did the operator choose the
+/// timeout": the sitemap parser's fetch client inherits the deadline only when
+/// this is true, so each `value_source` branch is pinned at the argv boundary.
+#[test]
+fn timeout_secs_flag_is_reported_as_operator_chosen() {
+    clean_env();
+    let args = Args::try_parse_from([
+        "webfang",
+        "-u",
+        "https://example.com",
+        "--timeout-secs",
+        "5",
+    ])
+    .expect("valid args");
+    assert!(
+        args.crawler.timeout_secs_explicit,
+        "--timeout-secs on argv must mark the timeout operator-chosen"
+    );
+}
+
+#[test]
+fn default_timeout_secs_is_not_reported_as_operator_chosen() {
+    clean_env();
+    let args = Args::try_parse_from(["webfang", "-u", "https://example.com"]).expect("valid args");
+    assert!(
+        !args.crawler.timeout_secs_explicit,
+        "the spec default must NOT mark the timeout operator-chosen"
+    );
+}
+
+#[test]
+fn timeout_secs_env_is_reported_as_operator_chosen() {
+    clean_env();
+    let _guard = webfang_test_utils::EnvGuard::with(&[("WEBFANG_TIMEOUT_SECS", "5")]);
+    let args = Args::try_parse_from(["webfang", "-u", "https://example.com"]).expect("valid args");
+    assert!(
+        args.crawler.timeout_secs_explicit,
+        "WEBFANG_TIMEOUT_SECS is an operator decision, same as the flag"
+    );
+}
+
 fn assert_defaults_top_level(opts: &webfang_core::application::crawl_options::CrawlOptions) {
     // url defaults to example.com when None
     assert_eq!(opts.url.as_str(), "https://example.com/");
@@ -789,6 +834,7 @@ fn prop_crawler_args() -> CrawlerArgs {
         dry_run: false,
         max_depth: 0,
         timeout_secs: 1,
+        timeout_secs_explicit: false,
         include_patterns: vec![],
         exclude_patterns: vec![],
         max_retries: 0,

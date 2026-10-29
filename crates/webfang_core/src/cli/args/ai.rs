@@ -3,6 +3,8 @@
 //! Parsing stays derive-driven (`FromArgMatches`); command assembly is
 //! spec-built (ADR-002 slice 3); see `cli::spec_command`.
 
+use super::chosen_by_operator;
+
 /// Validate `--threshold`: must parse as `f32` in `0.0..=1.0`. The
 /// out-of-range check is a hard requirement (#759) — a `> 1.0` threshold
 /// would silently swallow every chunk, defeating the relevance filter.
@@ -204,20 +206,6 @@ pub struct PendingNotices {
     /// [`orphan_threshold_notice`] with this value. `None` when the operator
     /// chose `--threshold` / `WEBFANG_THRESHOLD` themselves.
     pub orphan_threshold: Option<f32>,
-}
-
-/// Whether this value came from an operator decision rather than the spec's
-/// default, for any arg id.
-///
-/// THE provenance predicate for this module: every "did somebody choose this?"
-/// question in `AiArgs` — `--max-chars`, `--threshold`, and the arg
-/// `touches_ai_surface` reads from the root matches — is answered here, so
-/// the meaning of "chosen" cannot drift between them.
-fn chosen_by_operator(m: &clap::ArgMatches, id: &str) -> bool {
-    matches!(
-        m.value_source(id),
-        Some(clap::parser::ValueSource::CommandLine) | Some(clap::parser::ValueSource::EnvVariable)
-    )
 }
 
 /// Did this run actually TOUCH the AI surface?

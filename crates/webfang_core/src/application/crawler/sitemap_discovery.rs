@@ -334,20 +334,28 @@ async fn discover_sitemap_url_for(
 /// [`crate::application::container::build_sitemap_parser`] (ADR-0012-B): the
 /// concrete `SitemapParser` is named only there; this layer receives it
 /// erased to the domain [`SitemapParserPort`].
+///
+/// #2490: the parser's fetch client inherits the deadline only when the
+/// OPERATOR configured one (`--timeout-secs` / `WEBFANG_TIMEOUT_SECS`). The
+/// spec default (30) is not an operator decision — threading it unconditionally
+/// would silently replace the parser's own 10 s default on the no-flag path,
+/// and an explicit `--timeout-secs 30` must stay distinguishable from the
+/// default (that distinction only exists at the argv boundary, hence the
+/// `*_explicit` bit riding `CrawlerConfig`).
 fn build_sitemap_parser(
     config: &CrawlerConfig,
     batch_size: usize,
 ) -> Result<Arc<dyn SitemapParserPort>, CrawlError> {
-    crate::application::container::build_sitemap_parser(
-        crate::domain::crawler_port::SitemapConfig::builder()
-            .gzip_enabled(true)
-            .max_depth(3)
-            .concurrency(5)
-            .batch_size(batch_size)
-            .pagination_enabled(true)
-            .build(),
-        config.tls_emulation,
-    )
+    let mut sitemap = crate::domain::crawler_port::SitemapConfig::builder()
+        .gzip_enabled(true)
+        .max_depth(3)
+        .concurrency(5)
+        .batch_size(batch_size)
+        .pagination_enabled(true);
+    if config.timeout_secs_explicit {
+        sitemap = sitemap.timeout(std::time::Duration::from_secs(config.timeout_secs));
+    }
+    crate::application::container::build_sitemap_parser(sitemap.build(), config.tls_emulation)
 }
 
 /// Parse a sitemap URL, mapping parse failures to a [`CrawlError`].

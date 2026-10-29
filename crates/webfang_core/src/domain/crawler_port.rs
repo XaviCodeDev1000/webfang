@@ -39,6 +39,7 @@ pub use resource_download::ResourceDownloadPort;
 pub use url_queue::UrlQueuePort;
 
 use futures::future::BoxFuture;
+use std::time::Duration;
 
 use crate::domain::CompressionType;
 
@@ -111,6 +112,14 @@ pub struct SitemapConfig {
     pub memory_limit_mb: usize,
     /// Enable crawl budget optimization (default: false)
     pub crawl_budget_enabled: bool,
+    /// Fetch deadline for the parser's HTTP client (#2490).
+    ///
+    /// `None` keeps the parser's own default (a 10 s request timeout, the
+    /// pre-#2490 behavior for every caller that does not configure one).
+    /// `Some(d)` is the operator's `--timeout-secs` inherited through the
+    /// discovery seam: the client then times each request at `d` and applies
+    /// the #281 connect policy (connect capped at 10 s).
+    pub timeout: Option<Duration>,
 }
 
 impl Default for SitemapConfig {
@@ -127,6 +136,7 @@ impl Default for SitemapConfig {
             url_validation_enabled: false,
             memory_limit_mb: 500,
             crawl_budget_enabled: false,
+            timeout: None,
         }
     }
 }
@@ -153,6 +163,7 @@ pub struct SitemapConfigBuilder {
     url_validation_enabled: bool,
     memory_limit_mb: usize,
     crawl_budget_enabled: bool,
+    timeout: Option<Duration>,
 }
 
 impl SitemapConfigBuilder {
@@ -222,6 +233,15 @@ impl SitemapConfigBuilder {
         self
     }
 
+    /// Set the fetch deadline for the parser's HTTP client (#2490).
+    ///
+    /// Unset, the parser keeps its own default; set, this is the operator's
+    /// `--timeout-secs` and the #281 connect cap applies on top.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
     /// Build the configuration
     #[must_use]
     pub fn build(self) -> SitemapConfig {
@@ -258,6 +278,7 @@ impl SitemapConfigBuilder {
                 self.memory_limit_mb
             },
             crawl_budget_enabled: self.crawl_budget_enabled,
+            timeout: self.timeout,
         }
     }
 }
