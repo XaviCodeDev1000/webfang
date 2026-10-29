@@ -534,7 +534,7 @@ claim  | crates/webfang_core/src/cli/llm_wire.rs | 97 | registry.resolve(id, Cap
 claim  | crates/webfang_core/src/cli/llm_wire.rs | 103 | registry.resolve_default_embedding()
 claim  | crates/webfang_core/src/cli/commands/doctor.rs | 59 | registry.resolve(id, Capability::Embedding)
 claim  | crates/webfang_core/src/cli/commands/doctor.rs | 70 | registry.resolve_default_embedding()
-claim  | crates/webfang_core/src/application/vault_search.rs | 66 | embedding: Arc<dyn EmbeddingPort>,
+claim  | crates/webfang_core/src/application/vault_search.rs | 70 | embedding: Arc<dyn EmbeddingPort>,
 # --- infraestructura LLM -----------------------------------------------------
 claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 113 | pub struct OpenAiCompatibleProvider {
 claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 129 | pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
