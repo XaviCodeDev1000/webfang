@@ -160,6 +160,7 @@ mutate "$D/.github/workflows/release.yml" \
 # rejection: comment lines are not command lines (webfang#2486 fix for check 18).
 # The old file-wide count treated the comment as a tag-verifier invocation.
 D="$(fixture verifier-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
 mutate "$D/.github/workflows/release.yml" \
   's{(\n          ref: \$\{\{ github\.sha \}\}\n)}{$1          # reference only: bash scripts/verify-release-signatures.sh is the tag copy\n}m' \
   "comment quoting the tag verifier on a correct tree" \
@@ -170,6 +171,7 @@ mutate "$D/.github/workflows/release.yml" \
 # file-wide (webfang#2486 fix for check 8). The old code counted the unrelated
 # key and accepted.
 D="$(fixture gate-full-plus-sparse-elsewhere)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
 mutate "$D/.github/workflows/release.yml" \
   's{^          sparse-checkout: scripts\n}{}mg; s{(\n          ref: \$\{\{ github\.event\.inputs\.tag \|\| github\.ref_name \}\}\n          fetch-tags: true\n)}{$1          sparse-checkout: scripts\n}m' \
   "full gate checkout plus unrelated sparse-checkout elsewhere" \
@@ -181,6 +183,7 @@ mutate "$D/.github/workflows/release.yml" \
 # to a file-wide grep (webfang#2486 fix for check 14). The old code let the
 # comment satisfy the count.
 D="$(fixture fetch-depth-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
 mutate "$D/.github/workflows/release.yml" \
   's{^          fetch-depth: 0\n}{}m; s{(\n          ref: \$\{\{ github\.event\.inputs\.tag \|\| github\.ref_name \}\}\n          fetch-tags: true\n)}{$1          # fetch-depth: 0\n}m' \
   "real checkout missing fetch-depth behind a comment" \
@@ -191,6 +194,7 @@ mutate "$D/.github/workflows/release.yml" \
 # runs the tag's verifier: the comment is not a command line (webfang#2486 fix
 # for check 18). The old code counted the comment as GATE_INVOKED and accepted.
 D="$(fixture tag-verifier-plus-gate-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
 mutate "$D/.github/workflows/release.yml" \
   's{bash gate/scripts/verify-release-signatures\.sh}{bash scripts/verify-release-signatures.sh}; s{(\n          ref: \$\{\{ github\.sha \}\}\n)}{$1          # bash gate/scripts/verify-release-signatures.sh is what we intend\n}m' \
   "tag verifier plus gate-form comment" \
@@ -203,6 +207,7 @@ mutate "$D/.github/workflows/release.yml" \
 # the property so the regex cannot later be loosened to an unanchored match
 # without failing the harness.
 D="$(fixture gate-sparse-behind-comment)"
+# shellcheck disable=SC2016  # the mutate pattern is perl-regex text, not shell
 mutate "$D/.github/workflows/release.yml" \
   's{^          sparse-checkout: scripts\n}{}mg; s{(\n          ref: \$\{\{ github\.sha \}\}\n)}{$1          # sparse-checkout: scripts (reference only)\n}m' \
   "gate sparse-checkout hidden behind a comment" \
