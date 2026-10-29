@@ -352,6 +352,7 @@ FAILED=0
 # pointing those at the default's ref shape would send the reader to the wrong
 # cause (webfang#2479).
 REJECTED=0
+REF_SHAPE_REJECTED=0
 
 for asset in "${ASSETS[@]}"; do
     if [[ ! -f "$asset" ]]; then
@@ -386,18 +387,32 @@ for asset in "${ASSETS[@]}"; do
         echo "::error::firma inválida, ausente en el log de transparencia, o de una identidad ajena: $asset. No se publica." >&2
         FAILED=$((FAILED + 1))
         REJECTED=$((REJECTED + 1))
+        # A rejection is only a ref/trigger-shape mismatch when the signature is
+        # itself sound: re-check with only the bundle + OIDC issuer and NO
+        # identity-regexp and NO workflow-ref/trigger. If THAT verifies, the
+        # signature is cryptographically valid and the only blocker was the
+        # identity/ref policy -- the "default is tag-only" hint is then honest.
+        # If even the bare check fails, the signature is genuinely invalid
+        # (corrupt / integrity / foreign identity) and must never be reassured
+        # (webfang#2487). The verdict is unchanged either way; only the message
+        # is gated on this evidence, not on "the caller used the default".
+        if "$COSIGN_BIN" verify-blob --bundle "$bundle" --certificate-oidc-issuer "$OIDC_ISSUER" "$asset" >/dev/null 2>&1; then
+            REF_SHAPE_REJECTED=1
+        fi
     fi
 done
 
 TOTAL=${#ASSETS[@]}
 echo "release signature verification: $VERIFIED/$TOTAL verified, $FAILED failed"
 
-# A rejection under the DEFAULT identity is almost always a dispatch-signed
-# release checked with a tag-only default. cosign's own message cannot say
-# that, so say it here: the remedy is two flags, never a weaker regexp
-# (webfang#2479). Suppressed when the caller pinned anything, because then the
-# rejection is about their pin and this hint would be noise.
-if [[ "$REJECTED" -ne 0 && "$IDENTITY_IS_DEFAULT" == "true" ]]; then
+# A rejection that is ONLY a ref/trigger-shape mismatch (evidence: the bare
+# bundle+issuer check above still verifies) under the DEFAULT identity is almost
+# always a dispatch-signed release checked with a tag-only default. cosign's own
+# message cannot say that, so say it here: the remedy is two flags, never a
+# weaker regexp (webfang#2479, webfang#2487). Suppressed when the caller pinned
+# anything (the rejection is then about their pin) and never shown for a
+# genuinely invalid signature (the relaxed check proved the signature is bad).
+if [[ "$REF_SHAPE_REJECTED" -eq 1 && "$IDENTITY_IS_DEFAULT" == "true" ]]; then
     echo "::error::la identidad por defecto es TAG-ONLY (@refs/tags/vX.Y.Z): solo admite releases publicadas por tag push. Una release recuperada por el backstop dispatch se firmó en @refs/heads/<default-branch> y este default la rechaza por diseño — NO significa que la firma sea inválida. Leé la fila 'Signed Ref' de las notas del release y pasá la identidad de forma junto con los dos claims:"
     echo "  bash scripts/verify-release-signatures.sh \\"
     echo "    --identity-regexp '^https://github\\.com/<owner>/<repo>/\\.github/workflows/release\\.yml@refs/(heads|tags)/.+\$' \\"

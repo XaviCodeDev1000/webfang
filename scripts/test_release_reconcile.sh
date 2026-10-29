@@ -477,6 +477,157 @@ case "$out" in
   *) check "verify: failed fetch never green-lights 'nothing to release'" "absent" "absent" ;;
 esac
 
+# ─── Eras: a release is judged by ITS era, not by today's inventory ───────
+#    webfang#2493: the expected inventory grew (bundles at v2.7.1, the MCP
+#    archives at v7.0.0), so judging an old release against today's list made a
+#    release that was complete on the day it shipped read as incomplete
+#    forever — 33 doomed dispatches a day. Each row below is one era, plus the
+#    floor: a tag whose tree the current pipeline cannot build is a PERMANENT
+#    gap, reported and never dispatched.
+ERA="$WORK/era-repo"
+git -C "$WORK" init -q era-repo
+git -C "$ERA" config user.email tester@example.com
+git -C "$ERA" config user.name tester
+git -C "$ERA" commit -q --allow-empty -m "chore: init"
+for t in v2.1.0 v2.5.0 v3.0.0 v7.0.0; do
+  git -C "$ERA" -c user.name='github-actions[bot]' -c user.email='bot@github.com' \
+    tag -a "$t" -m "chore: Release package webfang_core version ${t#v}"
+done
+mkdir -p "$ERA/scripts"
+cp "$REPO_ROOT/scripts/release-plz-tags.sh" \
+   "$REPO_ROOT/scripts/release-tag-trust.sh" \
+   "$REPO_ROOT/scripts/ensure-release.sh" \
+   "$REPO_ROOT/scripts/sweep-releases.sh" \
+   "$REPO_ROOT/scripts/reconcile-releases.sh" "$ERA/scripts/"
+
+run_in() {
+  local dir="$1" script="$2"
+  shift 2
+  ( cd "$dir" && \
+    PATH="$BIN:$PATH" \
+    FAKE_STATE="$STATE" \
+    GITHUB_REPOSITORY="owner/repo" \
+    RELEASE_DISPATCH_BACKOFF_SECONDS=0 \
+    bash "scripts/$script" "$@" )
+}
+
+# Pre-signing era: 4 CLI archives + the checksums manifest, no bundles.
+write_assets "$STATE/assets-v2.1.0" \
+  webfang-x86_64-unknown-linux-gnu.tar.gz:1234 \
+  webfang-aarch64-unknown-linux-gnu.tar.gz:2345 \
+  webfang-aarch64-apple-darwin.tar.gz:3456 \
+  webfang-x86_64-pc-windows-msvc.zip:4567 \
+  SHA256SUMS.txt:89
+# Signed era: the same 5 plus SBOM and notices, each with its bundle (14).
+write_assets "$STATE/assets-v3.0.0" \
+  webfang-x86_64-unknown-linux-gnu.tar.gz:1234 \
+  webfang-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-aarch64-unknown-linux-gnu.tar.gz:2345 \
+  webfang-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-aarch64-apple-darwin.tar.gz:3456 \
+  webfang-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+  webfang-x86_64-pc-windows-msvc.zip:4567 \
+  webfang-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+  SHA256SUMS.txt:89 \
+  SHA256SUMS.txt.sigstore.json:567 \
+  webfang.spdx.json:1011 \
+  webfang.spdx.json.sigstore.json:567 \
+  THIRD_PARTY_NOTICES.txt:1213 \
+  THIRD_PARTY_NOTICES.txt.sigstore.json:567
+write_assets "$STATE/assets-v7.0.0" \
+  webfang-x86_64-unknown-linux-gnu.tar.gz:1234 \
+  webfang-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-aarch64-unknown-linux-gnu.tar.gz:2345 \
+  webfang-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-aarch64-apple-darwin.tar.gz:3456 \
+  webfang-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+  webfang-x86_64-pc-windows-msvc.zip:4567 \
+  webfang-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+  webfang-mcp-x86_64-unknown-linux-gnu.tar.gz:1234 \
+  webfang-mcp-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-mcp-aarch64-unknown-linux-gnu.tar.gz:2345 \
+  webfang-mcp-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-mcp-aarch64-apple-darwin.tar.gz:3456 \
+  webfang-mcp-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+  webfang-mcp-x86_64-pc-windows-msvc.zip:4567 \
+  webfang-mcp-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+  webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz:1234 \
+  webfang-mcp-stdio-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz:2345 \
+  webfang-mcp-stdio-aarch64-unknown-linux-gnu.tar.gz.sigstore.json:567 \
+  webfang-mcp-stdio-aarch64-apple-darwin.tar.gz:3456 \
+  webfang-mcp-stdio-aarch64-apple-darwin.tar.gz.sigstore.json:567 \
+  webfang-mcp-stdio-x86_64-pc-windows-msvc.zip:4567 \
+  webfang-mcp-stdio-x86_64-pc-windows-msvc.zip.sigstore.json:567 \
+  SHA256SUMS.txt:89 \
+  SHA256SUMS.txt.sigstore.json:567 \
+  webfang.spdx.json:1011 \
+  webfang.spdx.json.sigstore.json:567 \
+  THIRD_PARTY_NOTICES.txt:1213 \
+  THIRD_PARTY_NOTICES.txt.sigstore.json:567
+
+# Each era's own inventory is complete for that era: no dispatch. Before the
+# fix every one of these rows dispatched, which is the 33-a-day noise.
+reset_state
+if out="$(run_in "$ERA" ensure-release.sh v2.1.0 2>&1)"; then rc=0; else rc=$?; fi
+check "pre-signing era: 5 assets -> complete (rc 0)" "0" "$rc"
+case "$out" in
+  *"already complete"*) check "pre-signing era: says already complete" "yes" "yes" ;;
+  *) check "pre-signing era: says already complete" "yes" "no" ;;
+esac
+if out="$(run_in "$ERA" ensure-release.sh v3.0.0 2>&1)"; then rc=0; else rc=$?; fi
+check "signed era: 7 assets + 7 bundles -> complete (rc 0)" "0" "$rc"
+case "$out" in
+  *"already complete"*) check "signed era: says already complete" "yes" "yes" ;;
+  *) check "signed era: says already complete" "yes" "no" ;;
+esac
+if out="$(run_in "$ERA" ensure-release.sh v7.0.0 2>&1)"; then rc=0; else rc=$?; fi
+check "current era: 15 assets + 15 bundles -> complete (rc 0)" "0" "$rc"
+check "era rows -> nothing dispatched" "" "$(dispatched | tr '\n' ' ' | sed 's/ $//')"
+
+# Below the rebuildable floor an incomplete Release is a PERMANENT gap: the
+# tree pins its own toolchain, so no dispatch can fill it. Left alone, named,
+# and NOT reported as complete.
+reset_state
+write_assets "$STATE/assets-v2.1.0" \
+  webfang-x86_64-unknown-linux-gnu.tar.gz:1234 \
+  webfang-aarch64-unknown-linux-gnu.tar.gz:2345 \
+  webfang-aarch64-apple-darwin.tar.gz:3456 \
+  webfang-x86_64-pc-windows-msvc.zip:4567
+if out="$(run_in "$ERA" ensure-release.sh v2.1.0 2>&1)"; then rc=0; else rc=$?; fi
+check "legacy tag incomplete -> exit 0 (not a failure of this run)" "0" "$rc"
+check "legacy tag incomplete -> NOT dispatched" "" "$(dispatched | tr '\n' ' ' | sed 's/ $//')"
+case "$out" in
+  *"cannot be rebuilt"*) check "legacy tag incomplete -> named a permanent gap" "yes" "yes" ;;
+  *) check "legacy tag incomplete -> named a permanent gap" "yes" "no" ;;
+esac
+
+# Same floor, no Release at all: 11 of the 33 daily dispatches were this shape.
+reset_state
+rm -f "$STATE/assets-v2.5.0"
+if out="$(run_in "$ERA" ensure-release.sh v2.5.0 2>&1)"; then rc=0; else rc=$?; fi
+check "legacy tag with no Release -> exit 0" "0" "$rc"
+check "legacy tag with no Release -> NOT dispatched" "" "$(dispatched | tr '\n' ' ' | sed 's/ $//')"
+
+# The floor must NOT become a blanket exemption: the current era stays strict,
+# and a missing bundle there is still dispatch-worthy (audit B8).
+reset_state
+write_assets "$STATE/assets-v7.0.0" \
+  webfang-x86_64-unknown-linux-gnu.tar.gz:1234 \
+  webfang-x86_64-unknown-linux-gnu.tar.gz.sigstore.json:567
+if out="$(run_in "$ERA" ensure-release.sh v7.0.0 2>&1)"; then rc=0; else rc=$?; fi
+check "current era missing assets -> still dispatched" "v7.0.0" "$(dispatched | tr '\n' ' ' | sed 's/ $//')"
+
+# The sweep must agree with the helper: legacy gaps are counted as gaps, not as
+# dispatches, and not as complete. Only the current-era tag is dispatched.
+reset_state
+if out="$(run_in "$ERA" reconcile-releases.sh 2>&1)"; then rc=0; else rc=$?; fi
+check "era sweep -> exit 0" "0" "$rc"
+check "era sweep -> dispatched only the current-era tag" "v7.0.0" "$(dispatched | tr '\n' ' ' | sed 's/ $//')"
+case "$out" in
+  *"permanent legacy gap"*) check "era sweep -> legacy gap is announced" "yes" "yes" ;;
+  *) check "era sweep -> legacy gap is announced" "yes" "no" ;;
+esac
 # ─── Wiring: the workflow inventory and the completeness probe must agree ───
 #    The single definition of "complete" lives twice on purpose: the workflow
 #    checklists (sign/verify/publish) and this probe (push path + sweep). If
