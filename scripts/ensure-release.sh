@@ -46,6 +46,20 @@
 # NO dispatch. A present-but-empty assets array on a resolvable id is
 # "incomplete", never "release missing".
 #
+# WHY COMPLETENESS IS JUDGED PER ERA (webfang#2493):
+# the expected inventory grew over time — keyless signing added a
+# <asset>.sigstore.json bundle for every asset, and the MCP archives were added
+# later still. Judging an old release against today's inventory calls a release
+# that was complete on the day it shipped "incomplete" forever, and the sweep
+# re-dispatched it daily: 33 doomed runs a day, 38 of the last 40 release.yml
+# runs red. A release is therefore judged against the inventory of ITS era; the
+# cut-overs are recorded below and measured against the published releases.
+#
+# A tag from before REBUILDABLE_FROM_TAG is not dispatched at all: its tree pins
+# its own toolchain, the current pipeline cannot build it, so an incomplete or
+# missing Release there is a PERMANENT gap. It is named, counted and left alone
+# — never silently called complete.
+#
 # Usage: ensure-release.sh <tag> [expected_sha]
 set -euo pipefail
 
@@ -60,8 +74,8 @@ fi
 # build matrix, the checksums manifest, the SBOM and the third-party notices
 # bundle (RELEASE_EXPECTED_ASSETS in .github/workflows/release.yml is the same
 # inventory, transcribed once there for the sign/verify/publish checklists).
-# This list is the single definition of "complete": the push path and the sweep
-# cannot disagree about it — and its wiring is enforced by the harness in
+# This is the CURRENT era's inventory: the push path and the sweep cannot
+# disagree about it — and its wiring is enforced by the harness in
 # scripts/test_release_reconcile.sh, which diffs both lists.
 EXPECTED_ASSETS=(
   webfang-x86_64-unknown-linux-gnu.tar.gz
@@ -80,13 +94,85 @@ EXPECTED_ASSETS=(
   webfang.spdx.json
   THIRD_PARTY_NOTICES.txt
 )
-# Every asset's cosign bundle is part of the attestation surface (release.yml
-# signs each asset and uploads <asset>.sigstore.json — audit B8): a release with
-# assets but no bundles is not complete either. Derived, never transcribed.
+# ─── Inventory eras: judge a release by ITS era, not by today's ──────────────
+# EXPECTED_ASSETS above is what the CURRENT pipeline publishes. Applying it to
+# history demands assets that did not exist when the release was cut, so a
+# release that was complete on the day it shipped reads as "incomplete"
+# forever (webfang#2493).
+#
+# The cut-overs are RECORDED and measured against the published releases, never
+# inferred from the release being judged: inferring "what it shipped" from
+# "what it has" makes the predicate vacuous.
+#
+#   v2.7.1  first release publishing a <asset>.sigstore.json bundle for every
+#           asset; v2.1.0-v2.4.1 ship 5 assets with no bundles at all.
+#   v7.0.0  first release publishing the webfang-mcp and webfang-mcp-stdio
+#           archives; v2.7.1-v6.0.0 ship 7 assets + 7 bundles (14).
+#
+# A tag older than every recorded era is judged against the OLDEST one. That is
+# the conservative direction: it can over-report a missing asset, never hide
+# one behind a shorter list.
+SIGNED_BUNDLES_FROM_TAG="v2.7.1"
+MCP_ASSETS_FROM_TAG="v7.0.0"
+
+# The oldest tag whose tree the CURRENT pipeline can rebuild — a property of the
+# workflow, recorded once. Every tag up to v6.0.0 pins channel = "1.88.0" in its
+# own rust-toolchain.toml, and rustup's toolchain-file override outranks the
+# toolchain the workflow installs, so the cross target lands where it never was
+# (E0463). v7.0.0 is the first tag pinning 1.91.1, the line release.yml installs.
+#
+# Below this floor an incomplete or missing Release is a PERMANENT gap: no
+# dispatch can fill it. The sweep reports it and leaves it alone; it is never
+# counted as complete.
+REBUILDABLE_FROM_TAG="v7.0.0"
+
+# Pre-signing era: the CLI archives and the checksums manifest. Written out
+# instead of "EXPECTED_ASSETS minus the newer names" so an asset added to the
+# current era can never leak backwards into the historical predicate.
+PRE_SIGNING_ERA_ASSETS=(
+  webfang-x86_64-unknown-linux-gnu.tar.gz
+  webfang-aarch64-unknown-linux-gnu.tar.gz
+  webfang-aarch64-apple-darwin.tar.gz
+  webfang-x86_64-pc-windows-msvc.zip
+  SHA256SUMS.txt
+)
+# Signed era: the same archives plus the SBOM and the notices bundle.
+SIGNED_ERA_ASSETS=(
+  "${PRE_SIGNING_ERA_ASSETS[@]}"
+  webfang.spdx.json
+  THIRD_PARTY_NOTICES.txt
+)
+
+# tag_at_or_after <tag> <floor> — semver ordering without git, so the predicate
+# works on any checkout and on a tag that is not an ancestor of HEAD.
+tag_at_or_after() {
+  [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" == "$2" ]]
+}
+
+# era_assets <tag> — the canonical assets of the tag's era, one per line.
+era_assets() {
+  local tag="$1"
+  if tag_at_or_after "$tag" "$MCP_ASSETS_FROM_TAG"; then
+    printf '%s\n' "${EXPECTED_ASSETS[@]}"
+  elif tag_at_or_after "$tag" "$SIGNED_BUNDLES_FROM_TAG"; then
+    printf '%s\n' "${SIGNED_ERA_ASSETS[@]}"
+  else
+    printf '%s\n' "${PRE_SIGNING_ERA_ASSETS[@]}"
+  fi
+}
+
+# required_asset_names <tag> — the era's assets, each with its cosign bundle
+# when the tag's era signed at all (release.yml uploads <asset>.sigstore.json
+# for every asset — audit B8: assets without bundles are not complete either).
 required_asset_names() {
-  for a in "${EXPECTED_ASSETS[@]}"; do
-    printf '%s\n%s\n' "$a" "$a.sigstore.json"
-  done
+  local tag="$1" a
+  while IFS= read -r a; do
+    if tag_at_or_after "$tag" "$SIGNED_BUNDLES_FROM_TAG"; then
+      printf '%s\n%s\n' "$a" "$a.sigstore.json"
+    else
+      printf '%s\n' "$a"
+    fi
+  done < <(era_assets "$tag")
 }
 
 # Capture the existence probe's stderr, so a 404 can be told apart from any
@@ -129,7 +215,7 @@ if release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
     elif [ "${asset_size[$req]}" -eq 0 ] 2>/dev/null; then
       empty+=("$req")
     fi
-  done < <(required_asset_names)
+  done < <(required_asset_names "$TAG")
   if [[ "${#missing[@]}" -gt 0 ]]; then
     echo "Release $TAG exists but is incomplete; missing: ${missing[*]}"
   elif [[ "${#empty[@]}" -gt 0 ]]; then
@@ -143,6 +229,17 @@ elif grep -q 'HTTP 404' "$API_ERR"; then
 else
   echo "::error::could not determine whether release $TAG exists: $(tr '\n' ' ' <"$API_ERR") - failing closed instead of dispatching on an unreadable API response (webfang#1535)." >&2
   exit 1
+fi
+
+# The release exists but is not complete for its era, or does not exist at all.
+# If the tag predates the rebuildable floor, no dispatch can change that: the
+# tree pins a toolchain this pipeline does not install, so the build dies with
+# E0463 and the release stays exactly as it is. Dispatching it 33 times a day is
+# the noise webfang#2493 removed. Say what it is and leave it alone — the sweep
+# counts this line as a permanent gap, never as a dispatch and never as success.
+if ! tag_at_or_after "$TAG" "$REBUILDABLE_FROM_TAG"; then
+  echo "Release $TAG cannot be rebuilt by the current pipeline: its tree predates $REBUILDABLE_FROM_TAG and pins its own toolchain, so this is a permanent gap, not a pending dispatch. Backfill it by hand if those artifacts are needed."
+  exit 0
 fi
 
 # Bounded retry with backoff. Three attempts covers a transient API failure
