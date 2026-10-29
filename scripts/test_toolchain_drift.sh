@@ -87,6 +87,9 @@ jobs:
         with:
           targets: aarch64-unknown-linux-gnu
 YAML
+# NEGATION: this is the v7.0.0 shape -- the action installed the 1.88.0 cross
+# target while cargo resolved 1.91.1 from the toolchain file, and every static
+# check stayed green because the step never named a toolchain at all.
 expect_fail "targets without toolchain fails" "$D" "without an explicit toolchain:"
 expect_fail "failure names file and line" "$D" ".github/workflows/bad.yml:"
 
@@ -102,6 +105,8 @@ jobs:
           toolchain: 1.88.0
           targets: aarch64-unknown-linux-gnu
 YAML
+# NEGATION: a step naming a version that disagrees with rust-toolchain.toml
+# restores the split source of truth this gate exists to collapse.
 expect_fail "toolchain mismatch fails" "$D" "rust-toolchain.toml declares [1.91.1]"
 
 # --- 4. nightly pins carry their own version and are exempt -----------------
@@ -129,10 +134,14 @@ jobs:
         with:
           toolchain: 1.91.1
 YAML
+# NEGATION: a toolchain file with no channel is unreadable, not consistent;
+# the gate must not report safety it never established.
 expect_fail "missing channel fails closed" "$D" "declares no"
 
 D="$(make_fixture no_workflows)"
 printf '[toolchain]\nchannel = "1.91.1"\n' > "$D/rust-toolchain.toml"
+# NEGATION: no workflows is the blind-tree case -- a skip here would read as
+# a pass and hide the pin entirely.
 expect_fail "no workflow files fails closed" "$D" "no workflow files found"
 
 D="$(make_fixture no_steps)"
@@ -143,6 +152,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
 YAML
+# NEGATION: zero toolchain steps means the pin cannot be located at all; the
+# vacuous pass is exactly what let the drift ship.
 expect_fail "zero toolchain steps fails closed" "$D" "found zero"
 
 echo
