@@ -4,9 +4,8 @@ use crate::cmd;
 use crate::BehavioralTest;
 use crate::{assert_spawn_within, std_cmd, SPAWN_LATENCY_BUDGET};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tempfile::TempDir;
-use tokio::time::timeout;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -418,8 +417,20 @@ fn batch_empty_file_exits_64() {
 // Batch timeout tests
 // ---------------------------------------------------------------------------
 
-/// A --batch-file with a slow endpoint and --timeout-secs 1 must exit 69
-/// and complete well under 25s (the per-request timeout fires, not a hang).
+/// A --batch-file with a slow endpoint and --timeout-secs 1 must exit 69 with
+/// the failed URL and the timeout keyword on stderr — the per-request timeout
+/// fires, not a hang.
+///
+/// #2271: the assertion is the observable contract, never a wall clock. The
+/// mock delays its response 10 s, so a regression that ignored
+/// `--timeout-secs` would fetch SUCCESSFULLY and exit 0, flipping the
+/// exit-code assert on its own — no elapsed bound is needed to catch it, and
+/// the `elapsed < 25 s` bound this test used to carry is exactly what failed
+/// at 26.2 s on a loaded machine while the product was correct.
+///
+/// The attempt runs under [`assert_spawn_within`]: the shared budget is the
+/// only clock in the test, and an overrunning child is killed and reaped
+/// instead of being orphaned by a bare tokio timeout (#2387).
 #[tokio::test]
 async fn batch_file_timeout_does_not_hang() {
     let t = BehavioralTest::new().await;
@@ -436,42 +447,69 @@ async fn batch_file_timeout_does_not_hang() {
 
     let batch_file = t.out.path().join("urls.txt");
     std::fs::write(&batch_file, format!("{}/slow\n", t.server.uri())).unwrap();
+    let slow_url = format!("{}/slow", t.server.uri());
+    let out_path = t.out.path().to_path_buf();
 
-    let start = Instant::now();
-    let output = timeout(
-        Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || {
-            cmd()
-                .arg("--batch-file")
-                .arg(&batch_file)
-                .arg("--timeout-secs")
-                .arg("1")
-                .arg("--output")
-                .arg(t.out.path())
-                .output()
-        }),
-    )
+    // wiremock serves on this test's current-thread runtime, so the blocking
+    // budget machinery must wait on a blocking-pool thread — parking the
+    // runtime thread here would starve the mock server and the child's
+    // request would hang until the budget kills it.
+    tokio::task::spawn_blocking(move || {
+        assert_spawn_within(
+            SPAWN_LATENCY_BUDGET,
+            "batch_file_timeout_does_not_hang",
+            move |child| {
+                let mut command = std_cmd();
+                command
+                    .arg("--batch-file")
+                    .arg(&batch_file)
+                    .arg("--timeout-secs")
+                    .arg("1")
+                    .arg("--output")
+                    .arg(&out_path);
+                let output = child.output(command)?;
+
+                if output.status.code() != Some(69) {
+                    return Err(format!(
+                        "expected exit code 69 (partial/all failures), got {:?}; stderr: {}",
+                        output.status.code(),
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    ));
+                }
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.contains(&slow_url) {
+                    return Err(format!(
+                        "stderr should contain the failed URL, got: {stderr}"
+                    ));
+                }
+                let lowered = stderr.to_lowercase();
+                if !(lowered.contains("timeout") || lowered.contains("timed out")) {
+                    return Err(format!("stderr should mention timeout, got: {stderr}"));
+                }
+                Ok(())
+            },
+        );
+    })
     .await
-    .expect("test must not hang — tokio::time::timeout fired")
-    .expect("task must not panic")
-    .expect("command must execute");
-
-    let elapsed = start.elapsed();
-
-    assert_eq!(
-        output.status.code(),
-        Some(69),
-        "expected exit code 69 (partial/all failures), got {:?}",
-        output.status.code()
-    );
-    assert!(
-        elapsed < Duration::from_secs(25),
-        "batch timeout test should complete in under 25s, took {elapsed:?}"
-    );
+    .unwrap_or_else(|join_error| {
+        // `assert_spawn_within` panics with the measured latencies when both
+        // attempts overrun; resume that panic so the test fails with the
+        // budget's own diagnosis, not with a bare JoinError.
+        match join_error.try_into_panic() {
+            Ok(payload) => std::panic::resume_unwind(payload),
+            Err(join_error) => {
+                panic!("budget worker did not report a verdict: {join_error}")
+            },
+        }
+    });
 }
 
 /// A --batch-file with a slow endpoint and --timeout-secs 1 must exit 69
 /// and stderr must contain the failed URL and a timeout keyword.
+///
+/// #2271 sibling conversion: same observable contract, same budget machinery,
+/// same reason — the bare tokio timeout this test used to carry was a clock
+/// that did not depend on the product and did not kill the child it abandoned.
 #[tokio::test]
 async fn batch_file_timeout_reports_failures() {
     let t = BehavioralTest::new().await;
@@ -489,41 +527,54 @@ async fn batch_file_timeout_reports_failures() {
     let batch_file = t.out.path().join("urls.txt");
     let slow_url = format!("{}/slow", t.server.uri());
     std::fs::write(&batch_file, format!("{slow_url}\n")).unwrap();
+    let out_path = t.out.path().to_path_buf();
 
-    let output = timeout(
-        Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || {
-            cmd()
-                .arg("--batch-file")
-                .arg(&batch_file)
-                .arg("--timeout-secs")
-                .arg("1")
-                .arg("--output")
-                .arg(t.out.path())
-                .output()
-        }),
-    )
+    // wiremock serves on this test's current-thread runtime, so the blocking
+    // budget machinery must wait on a blocking-pool thread (see the sibling
+    // `batch_file_timeout_does_not_hang`).
+    tokio::task::spawn_blocking(move || {
+        assert_spawn_within(
+            SPAWN_LATENCY_BUDGET,
+            "batch_file_timeout_reports_failures",
+            move |child| {
+                let mut command = std_cmd();
+                command
+                    .arg("--batch-file")
+                    .arg(&batch_file)
+                    .arg("--timeout-secs")
+                    .arg("1")
+                    .arg("--output")
+                    .arg(&out_path);
+                let output = child.output(command)?;
+
+                if output.status.code() != Some(69) {
+                    return Err(format!(
+                        "expected exit code 69, got {:?}",
+                        output.status.code()
+                    ));
+                }
+
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.contains(&slow_url) {
+                    return Err(format!(
+                        "stderr should contain the failed URL, got: {stderr}"
+                    ));
+                }
+                let lowered = stderr.to_lowercase();
+                if !(lowered.contains("timeout") || lowered.contains("timed out")) {
+                    return Err(format!("stderr should mention timeout, got: {stderr}"));
+                }
+                Ok(())
+            },
+        );
+    })
     .await
-    .expect("test must not hang")
-    .expect("task must not panic")
-    .expect("command must execute");
-
-    assert_eq!(
-        output.status.code(),
-        Some(69),
-        "expected exit code 69, got {:?}",
-        output.status.code()
-    );
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(&slow_url),
-        "stderr should contain the failed URL, got: {stderr}"
-    );
-    assert!(
-        stderr.to_lowercase().contains("timeout") || stderr.to_lowercase().contains("timed out"),
-        "stderr should mention timeout, got: {stderr}"
-    );
+    .unwrap_or_else(|join_error| match join_error.try_into_panic() {
+        Ok(payload) => std::panic::resume_unwind(payload),
+        Err(join_error) => {
+            panic!("budget worker did not report a verdict: {join_error}")
+        },
+    });
 }
 
 // ---------------------------------------------------------------------------
