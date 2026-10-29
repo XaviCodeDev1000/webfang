@@ -667,10 +667,21 @@ jobs:
   # the trust anchor is the public Rekor transparency log.
   #
   # The consequence, stated honestly: the signing identity is a WORKFLOW PATH,
-  # not a person. A consumer verifies
+  # not a person, and the `<ref>` in that path is whatever ref the RUN was based
+  # on. A tag push signs at
   #   https://github.com/XaviCodeDev1000/webfang/.github/workflows/release.yml@refs/tags/vX.Y.Z
-  # — which is a real, checkable boundary, and is pinned by the
-  # --certificate-identity-regexp in scripts/verify-release-signatures.sh.
+  # and a `workflow_dispatch` from the default branch — the sanctioned backstop
+  # and the reconciliation sweep — signs at `@refs/heads/<default-branch>`. Both
+  # are legitimate: the workflow file is the same one, and only the run's ref
+  # differs.
+  #
+  # So the boundary is pinned in two parts, and neither is a guess (#2464):
+  # `RELEASE_CERT_IDENTITY_REGEXP` states WHICH WORKFLOW FILE, and
+  # `RELEASE_CERT_WORKFLOW_REF` / `RELEASE_CERT_WORKFLOW_TRIGGER` state WHICH
+  # RUN, as exact equality against the certificate's own OIDC claims. A
+  # tag-only identity here is what made the recovery path unable to pass its own
+  # check: it signed as a branch and was rejected as not-a-tag, after every
+  # build, checksum, attestation and signature had already succeeded.
   #
   # SHA256SUMS.txt is signed like everything else, and that is the SC-15 fix: the
   # manifest is signed by a job that did not produce it, so it is evidence rather
@@ -804,9 +815,25 @@ jobs:
         env:
           # Stated here, at the point of use, so a reviewer reading this workflow
           # sees the identity that is being trusted. It is the release workflow
-          # of this repository at a VERSION TAG — not a branch, not another
-          # workflow, not another repository.
-          RELEASE_CERT_IDENTITY_REGEXP: '^https://github\.com/${{ github.repository }}/\.github/workflows/release\.yml@refs/tags/v[0-9].*$'
+          # of this repository — not another workflow, not another repository —
+          # and the ref is left as a SHAPE (`refs/heads/...` or `refs/tags/...`)
+          # because the run's ref legitimately differs between a tag push and a
+          # workflow_dispatch. WHICH run is pinned by the two claims below, as
+          # exact equality against the certificate itself, so widening the
+          # identity here cannot widen what the gate accepts (#2464).
+          RELEASE_CERT_IDENTITY_REGEXP: '^https://github\.com/${{ github.repository }}/\.github/workflows/release\.yml@refs/(heads|tags)/.+$'
+          # The run's own ref and event, asserted against the certificate's OIDC
+          # claims. On a tag push: `refs/tags/vX.Y.Z` + `push`. On the backstop
+          # dispatch: `refs/heads/<default-branch>` + `workflow_dispatch`. Read
+          # from the github context rather than written as a literal, so there is
+          # no branch name to rot — and so a bundle produced by a different run
+          # cannot be substituted into this one.
+          #
+          # The tag<->commit binding is NOT this step's job: L1 Provenance
+          # Preflight already asserts TAG^{commit} == EXPECTED_SHA ==
+          # COMMIT_VALIDATED == COMMIT_BUILT before a single byte is built.
+          RELEASE_CERT_WORKFLOW_REF: '${{ github.ref }}'
+          RELEASE_CERT_WORKFLOW_TRIGGER: '${{ github.event_name }}'
         run: |
           set -euo pipefail
           # Audit B7: verify the REQUIRED inventory explicitly — the glob that
@@ -937,6 +964,17 @@ jobs:
             echo "| Channel | ${{ needs.preflight.outputs.prerelease == 'true' && 'Release Candidate' || 'Stable' }} |"
             echo "| L1 Gate | \`check_release_provenance.sh preflight | ruleset | publish\` |"
             echo "| Ruleset | \`release-tags-immutable\` (update + deletion blocked) |"
+            echo "| Signed Ref | \`$GITHUB_REF\` (trigger: \`$GITHUB_EVENT_NAME\`) |"
+            echo ""
+            echo "## Signature Verification (keyless)"
+            echo ""
+            echo "Every archive, \`SHA256SUMS.txt\` and the SBOM carries a sibling \`.sigstore.json\` bundle, signed with cosign in keyless mode. The certificate identity is this repository's release workflow, and the ref this release was signed at is the Signed Ref above — both are pinned, so a bundle produced by any other run is rejected."
+            echo ""
+            echo "\`\`\`bash"
+            echo "cosign verify-blob --bundle webfang-x86_64-unknown-linux-gnu.tar.gz.sigstore.json --certificate-identity-regexp '^https://github\\.com/XaviCodeDev1000/webfang/\\.github/workflows/release\\.yml@refs/(heads|tags)/.+\$' --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-ref $GITHUB_REF --certificate-github-workflow-trigger $GITHUB_EVENT_NAME webfang-x86_64-unknown-linux-gnu.tar.gz"
+            echo "\`\`\`"
+            echo ""
+            echo "\`scripts/verify-release-signatures.sh\` in the repository runs exactly this over every published asset and prints the identity it used."
           } > /tmp/release-notes.md
           # The asset list is derived, not transcribed: a hardcoded second copy
           # of the matrix's target names would be free to drift, and a name that
