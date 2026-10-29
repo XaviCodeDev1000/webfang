@@ -197,6 +197,18 @@ mutate "$D/.github/workflows/release.yml" \
   && expect_reject "$D" "tag verifier plus gate-form comment" \
        "must verify signatures with the verifier from the RUN"
 
+# 5f. A COMMENT quoting 'sparse-checkout: scripts' inside the gate block must not
+# satisfy check 8 (webfang#2486). The count regex is line-anchored
+# (^[[:space:]]*sparse-checkout:), so prose can never match it; this case pins
+# the property so the regex cannot later be loosened to an unanchored match
+# without failing the harness.
+D="$(fixture gate-sparse-behind-comment)"
+mutate "$D/.github/workflows/release.yml" \
+  's{^          sparse-checkout: scripts\n}{}mg; s{(\n          ref: \$\{\{ github\.sha \}\}\n)}{$1          # sparse-checkout: scripts (reference only)\n}m' \
+  "gate sparse-checkout hidden behind a comment" \
+  && expect_reject "$D" "gate sparse-checkout hidden behind a comment" \
+       "must declare 'sparse-checkout: scripts'"
+
 # 6. A guard that fails WITHOUT ::error must still be a RECORDED failure, and the
 #    run must still reach its summary. Proven end to end: re-run this harness
 #    against a stub guard that exits 1 silently and assert that it (a) exits
