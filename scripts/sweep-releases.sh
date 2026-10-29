@@ -137,6 +137,7 @@ echo "Sweeping ${#tags[@]} release-plz tag(s): ${tags[*]}"
 failed=0
 dispatched=0
 already_complete=0
+legacy_gap=0
 for tag in "${tags[@]}"; do
   echo "--- $tag"
   # L1.1 Identity (Shape 2): a default-branch dispatch MUST carry expected_sha —
@@ -157,16 +158,37 @@ for tag in "${tags[@]}"; do
   printf '%s\n' "$entry_out"
   # Classify what ensure-release.sh decided, so "this run dispatched nothing"
   # can be reported as the visible skip it has to be. The counting is
-  # deliberately FAIL-SAFE: anything the helper says that is not the explicit
-  # "already complete" line is counted as a dispatch. A wording change in the
-  # helper can therefore only ever over-report, never hide a dispatch behind a
-  # green no-op — the failure this whole file exists to close.
+  # deliberately FAIL-SAFE: anything the helper says that is neither the
+  # explicit "already complete" line nor the explicit "cannot be rebuilt" line
+  # is counted as a dispatch. A wording change in the helper can therefore only
+  # ever over-report, never hide a dispatch behind a green no-op — the failure
+  # this whole file exists to close.
+  #
+  # "cannot be rebuilt" is the tag below the helper's rebuildable floor: its
+  # tree pins a toolchain this pipeline does not install, so no dispatch can
+  # fill it. Counting it as a dispatch would make every run look productive;
+  # counting it as complete would hide a missing artifact. It is its own
+  # outcome, reported and left alone (webfang#2493).
   if [[ "$entry_out" == *"already complete"* ]]; then
     already_complete=$((already_complete + 1))
+  elif [[ "$entry_out" == *"cannot be rebuilt"* ]]; then
+    legacy_gap=$((legacy_gap + 1))
   else
     dispatched=$((dispatched + 1))
   fi
 done
+
+# Legacy gaps are announced on EVERY run that has one, including a run that
+# dispatched something: a permanent gap must not disappear into a green
+# "complete" summary. It is a notice, not an error — nothing this run could do
+# would close it, and a red every day is the noise webfang#2493 removed.
+if (( legacy_gap > 0 )); then
+  echo "::notice title=Release dispatch::$legacy_gap trusted tag(s) predate the rebuildable floor and were NOT dispatched: their own rust-toolchain.toml overrides the toolchain this pipeline installs, so the Release or assets they lack are a permanent gap, not a pending build. Inspected: ${tags[*]}."
+  summary "### Release dispatch: $legacy_gap permanent legacy gap(s)
+$legacy_gap of ${#tags[@]} trusted tag(s) predate the rebuildable floor and were left alone.
+Their own rust-toolchain.toml overrides the toolchain this pipeline installs, so no dispatch can complete them.
+They are **not complete and not dispatched** — backfill by hand if those artifacts are needed."
+fi
 
 if (( failed > 0 )); then
   echo "::error::$failed release-plz tag(s) could not be reconciled and may have no binaries. See the ::error:: lines above." >&2
@@ -183,18 +205,18 @@ if (( dispatched == 0 )); then
   # an operator reading "Dispatch binary release: success" must be able to tell
   # that apart from a run that dispatched, so the no-op is announced, counted,
   # and written to the job summary. Visible skip, not a silent success.
-  echo "::notice title=Release dispatch::Nothing to publish: all ${#tags[@]} trusted release-plz tag(s) already carry a complete GitHub Release. Inspected: ${tags[*]}. This run performed no dispatch — an explicit skip, not a build."
+  echo "::notice title=Release dispatch::Nothing to publish: no trusted tag needs a dispatch ($already_complete already complete, $legacy_gap permanent legacy gap(s) left alone). Inspected: ${tags[*]}. This run performed no dispatch — an explicit skip, not a build."
   summary "### Release dispatch: skipped (nothing to publish)
 Inspected ${#tags[@]} trusted release-plz tag(s): ${tags[*]}
-All of them already carry a complete GitHub Release, so **no dispatch was made by this run**.
-This is an explicit skip, not a successful build."
+Already complete: $already_complete. Permanent legacy gaps left alone: $legacy_gap. Dispatched: 0.
+**No dispatch was made by this run** — an explicit skip, not a successful build."
   exit 0
 fi
 
-echo "Sweep complete: dispatched $dispatched tag(s); $already_complete already complete and left alone."
+echo "Sweep complete: dispatched $dispatched tag(s); $already_complete already complete and $legacy_gap permanent legacy gap(s) left alone."
 summary "### Release dispatch: complete
 Inspected ${#tags[@]} trusted release-plz tag(s): ${tags[*]}
-Dispatched: $dispatched. Already complete: $already_complete.
-Every trusted tag now carries a complete GitHub Release. The sweep is idempotent
+Dispatched: $dispatched. Already complete: $already_complete. Permanent legacy gaps: $legacy_gap.
+Every trusted tag that this pipeline can build now carries a complete GitHub Release. The sweep is idempotent
 (\`ensure-release.sh\` makes a complete Release a no-op), so it is safe to run on every push
 to main as well as on the daily #1484 schedule."
