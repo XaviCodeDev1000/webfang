@@ -23,6 +23,10 @@ impl HtmdConverter {
     /// `original_html` feeds the text fallback (the fallback never sees
     /// per-block fragments).
     pub fn convert_cleaned(&self, cleaned: &str, original_html: &str) -> String {
+        // A bare warn!, not log_scrape_error: that helper is for fetch paths
+        // and wants a url/correlation_id, which a pure converter by contract
+        // neither has nor may fabricate. The shape matches the pre-existing
+        // conversion-failure log this adapter replaces.
         htmd::convert(cleaned).unwrap_or_else(|e| {
             warn!(
                 error = %e,
