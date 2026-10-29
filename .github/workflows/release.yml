@@ -964,6 +964,17 @@ jobs:
             echo "| Channel | ${{ needs.preflight.outputs.prerelease == 'true' && 'Release Candidate' || 'Stable' }} |"
             echo "| L1 Gate | \`check_release_provenance.sh preflight | ruleset | publish\` |"
             echo "| Ruleset | \`release-tags-immutable\` (update + deletion blocked) |"
+            echo "| Signed Ref | \`$GITHUB_REF\` (trigger: \`$GITHUB_EVENT_NAME\`) |"
+            echo ""
+            echo "## Signature Verification (keyless)"
+            echo ""
+            echo "Every archive, \`SHA256SUMS.txt\` and the SBOM carries a sibling \`.sigstore.json\` bundle, signed with cosign in keyless mode. The certificate identity is this repository's release workflow, and the ref this release was signed at is the Signed Ref above — both are pinned, so a bundle produced by any other run is rejected."
+            echo ""
+            echo "\`\`\`bash"
+            echo "cosign verify-blob --bundle webfang-x86_64-unknown-linux-gnu.tar.gz.sigstore.json --certificate-identity-regexp '^https://github\\.com/XaviCodeDev1000/webfang/\\.github/workflows/release\\.yml@refs/(heads|tags)/.+\$' --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-ref $GITHUB_REF --certificate-github-workflow-trigger $GITHUB_EVENT_NAME webfang-x86_64-unknown-linux-gnu.tar.gz"
+            echo "\`\`\`"
+            echo ""
+            echo "\`scripts/verify-release-signatures.sh\` in the repository runs exactly this over every published asset and prints the identity it used."
           } > /tmp/release-notes.md
           # The asset list is derived, not transcribed: a hardcoded second copy
           # of the matrix's target names would be free to drift, and a name that
