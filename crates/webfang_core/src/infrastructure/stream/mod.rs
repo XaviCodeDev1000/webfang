@@ -13,6 +13,7 @@
 //! {"url":"...","sha256_hex":"<64 hex>","title":null,
 //!  "chunk_text":"...","embedding":[0.01, … 384 floats …],
 //!  "embedding_model":"granite-97m","embedding_dim":384,"chunk_index":0,
+//!  "byte_start":1024,"byte_end":4096,
 //!  "metadata":null,"timestamp":"2026-07-11T12:00:00Z"}
 //! ```
 //!
@@ -24,9 +25,11 @@
 //! `embedding_model`, `embedding_dim` and `chunk_index` are **additive
 //! optional fields** (`#[serde(default)]`): lines written before #2429 still
 //! deserialize, with the new fields reading as `null`. There is no format
-//! version bump. New writers always emit `chunk_index`, and emit
-//! `embedding_model`/`embedding_dim` whenever the run wired an embedding port
-//! into the container; a `null` there means "this run had
+//! version bump. New writers always emit `chunk_index` and `byte_start`/
+//! `byte_end` (the enclosing byte range of the chunk's spans in the text the
+//! chunker segmented; `null` when the run had no locator information), and
+//! emit `embedding_model`/`embedding_dim` whenever the run wired an embedding
+//! port into the container; a `null` there means "this run had
 //! no model identity available" and downstream consumers must treat such
 //! vectors as incomparable with any provenanced vector. A record whose
 //! `embedding.len()` contradicts its `embedding_dim` is rejected at both
@@ -58,6 +61,7 @@ use serde_json::Value;
 
 use crate::domain::clock::{SystemUtcClock, UtcClock};
 use crate::domain::repository::VectorRepository;
+use crate::domain::text_chunker::ByteSpan;
 use crate::domain::{Sha256Hex, ValidUrl};
 use crate::error::ScraperError;
 
@@ -103,6 +107,18 @@ pub struct VectorRecord {
     /// result set.
     #[serde(default)]
     pub chunk_index: Option<i64>,
+    /// First byte of the chunk's region inside the source document (#2429
+    /// AC2), half-open and paired with `byte_end`: the enclosing range of the
+    /// chunk's spans in the text the chunker segmented. `null` when the run
+    /// carried no locator information. Offsets are bytes (sliceable, UTF-8
+    /// safe), not chars — the same unit the `ByteSpan` contract uses.
+    #[serde(default)]
+    pub byte_start: Option<u64>,
+    /// Byte after the last byte of the chunk's region (#2429 AC2); paired
+    /// with `byte_start`. `from_line` rejects a range with `byte_start >
+    /// byte_end`, or exactly one of the two present.
+    #[serde(default)]
+    pub byte_end: Option<u64>,
     /// Optional arbitrary metadata (reserved for future use).
     #[serde(default)]
     pub metadata: Value,
@@ -133,8 +149,9 @@ impl VectorRecord {
     ///
     /// Returns [`ScraperError::Serialization`] for malformed JSON, and
     /// [`ScraperError::Ingestion`] when a present `embedding_dim` disagrees
-    /// with `embedding.len()` (#2429): such a vector is silently unusable for
-    /// similarity search and must not enter a store.
+    /// with `embedding.len()` (#2429), or when the byte range is inverted or
+    /// half-present (#2429 AC2): such a record cannot name a real region of
+    /// any document and must not enter a store.
     pub fn from_line(line: &str) -> Result<Self, ScraperError> {
         let record: Self = serde_json::from_str(line)?;
         if let Some(dim) = record.embedding_dim {
@@ -144,6 +161,20 @@ impl VectorRecord {
                     record.embedding.len()
                 )));
             }
+        }
+        match (record.byte_start, record.byte_end) {
+            (Some(start), Some(end)) if start > end => {
+                return Err(ScraperError::Ingestion(format!(
+                    "el record declara un rango de bytes invertido: byte_start {start} > byte_end {end}"
+                )));
+            },
+            (Some(_), None) | (None, Some(_)) => {
+                return Err(ScraperError::Ingestion(
+                    "el record debe declarar byte_start y byte_end juntos, o ninguno de los dos"
+                        .to_string(),
+                ));
+            },
+            _ => {},
         }
         Ok(record)
     }
@@ -366,6 +397,7 @@ impl VectorRepository for StreamRepository {
         chunk_index: i64,
         content: &'a str,
         embedding: Option<&'a [f32]>,
+        spans: Option<&'a [ByteSpan]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
         // Q3: without an embedding there is nothing to vectorize — omit the
         // record rather than emit a null/zero vector.
@@ -373,6 +405,15 @@ impl VectorRepository for StreamRepository {
             Some(e) => e.to_vec(),
             None => return Box::pin(async { Ok(()) }),
         };
+
+        // #2429 AC2: the record's byte range is the enclosing range of the
+        // chunk's spans (first span start, last span end). An empty span set
+        // carries no locator information — emitted as `null`, never as a
+        // fabricated 0.
+        let byte_range = spans.and_then(|s| match (s.first(), s.last()) {
+            (Some(first), Some(last)) => Some((first.start() as u64, last.end() as u64)),
+            _ => None,
+        });
 
         // #2429: a vector whose length contradicts the sink's declared model
         // dimension is silently unusable for similarity search — reject it
@@ -431,6 +472,8 @@ impl VectorRepository for StreamRepository {
                     embedding_model: provenance.as_ref().map(|p| p.model_id.clone()),
                     embedding_dim: provenance.as_ref().map(|p| p.embedding_dim),
                     chunk_index: Some(chunk_index),
+                    byte_start: byte_range.map(|r| r.0),
+                    byte_end: byte_range.map(|r| r.1),
                     metadata: Value::Null,
                     timestamp: clock.now().to_rfc3339(),
                 };
@@ -500,6 +543,7 @@ mod tests {
             0,
             "hello",
             None,
+            None,
         )
         .await
         .expect("save_chunk");
@@ -527,6 +571,7 @@ mod tests {
             0,
             "cleaned chunk text",
             Some(&embedding),
+            None,
         )
         .await
         .expect("save_chunk");
@@ -571,6 +616,7 @@ mod tests {
                 0,
                 "cleaned chunk text",
                 Some(&embedding),
+                None,
             )
             .await;
 
@@ -621,6 +667,7 @@ mod tests {
                 0,
                 "cleaned chunk text",
                 Some(&embedding),
+                None,
             )
             .await;
 
@@ -653,6 +700,7 @@ mod tests {
             0,
             "cleaned chunk text",
             Some(&embedding),
+            None,
         )
         .await
         .expect("save_chunk");
@@ -699,6 +747,7 @@ mod tests {
             0,
             "cleaned chunk text",
             Some(&vec![0.0f32; 384]),
+            None,
         )
         .await
         .expect("save_chunk");
@@ -745,6 +794,7 @@ mod tests {
                 0,
                 "x",
                 Some(&embedding),
+                None,
             )
             .await
             .expect_err("32-char fake hash must be rejected at the sink");
@@ -760,6 +810,7 @@ mod tests {
                 0,
                 "x",
                 Some(&embedding),
+                None,
             )
             .await
             .expect_err("data: URL must be rejected at the sink");
@@ -832,6 +883,7 @@ mod tests {
             7,
             "chunk body",
             Some(&[0.1, 0.2, 0.3]),
+            None,
         )
         .await
         .expect("save_chunk");
@@ -858,6 +910,7 @@ mod tests {
                 0,
                 "chunk body",
                 Some(&[0.1, 0.2, 0.3, 0.4]),
+                None,
             )
             .await;
 
@@ -886,5 +939,76 @@ mod tests {
         assert_eq!(record.embedding_model, None);
         assert_eq!(record.embedding_dim, None);
         assert_eq!(record.chunk_index, None);
+    }
+
+    // ---- #2429 slice 2: chunk byte range in the source document -----------
+
+    /// #2429 AC2: a record must say where the chunk sat in the source
+    /// document — the enclosing byte range of the chunk's spans.
+    #[tokio::test]
+    async fn record_carries_chunk_byte_range() {
+        let tmp = tempfile::NamedTempFile::new().expect("temp file");
+        let path = tmp.path().to_string_lossy().to_string();
+        let repo = provenance_sink(&path);
+
+        let spans = vec![
+            crate::domain::text_chunker::ByteSpan::try_new(100, 150).expect("valid span"),
+            crate::domain::text_chunker::ByteSpan::try_new(160, 220).expect("valid span"),
+        ];
+        repo.save_resource("https://example.com/p", "Page", HEX_A, 10)
+            .await
+            .expect("save_resource");
+        repo.save_chunk(
+            &format!("{HEX_A}-0"),
+            "https://example.com/p",
+            0,
+            "chunk body",
+            Some(&[0.1, 0.2, 0.3]),
+            Some(&spans),
+        )
+        .await
+        .expect("save_chunk");
+
+        let record = last_record(&path);
+        assert_eq!(record.byte_start, Some(100), "first span start");
+        assert_eq!(record.byte_end, Some(220), "last span end");
+    }
+
+    /// #2429 AC2: a chunk with no locator information emits the range as
+    /// `null` — absence is explicit, never a fabricated 0.
+    #[tokio::test]
+    async fn record_without_locator_emits_null_range() {
+        let tmp = tempfile::NamedTempFile::new().expect("temp file");
+        let path = tmp.path().to_string_lossy().to_string();
+        let repo = provenance_sink(&path);
+
+        repo.save_resource("https://example.com/p", "Page", HEX_A, 10)
+            .await
+            .expect("save_resource");
+        repo.save_chunk(
+            &format!("{HEX_A}-0"),
+            "https://example.com/p",
+            0,
+            "chunk body",
+            Some(&[0.1, 0.2, 0.3]),
+            None,
+        )
+        .await
+        .expect("save_chunk");
+
+        let record = last_record(&path);
+        assert_eq!(record.byte_start, None);
+        assert_eq!(record.byte_end, None);
+    }
+
+    /// #2429 AC2: the read boundary rejects a record whose byte range is
+    /// inverted — it cannot name a real region of any document.
+    #[test]
+    fn record_from_line_rejects_inverted_byte_range() {
+        let line = format!(
+            r#"{{"url":"https://example.com","sha256_hex":"{HEX_A}","title":null,"chunk_text":"x","embedding":[0.1],"byte_start":30,"byte_end":10,"timestamp":"2026-01-01T00:00:00Z"}}"#
+        );
+        let err = VectorRecord::from_line(&line).expect_err("inverted range must be rejected");
+        assert!(matches!(err, ScraperError::Ingestion(_)), "got: {err:?}");
     }
 }

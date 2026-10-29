@@ -492,6 +492,32 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 17. The publish job's signature gate must admit the ref it will actually see.
+#     cosign takes the certificate's SAN ref from the ambient OIDC token, so a
+#     workflow_dispatch run signs as @refs/heads/<default-branch> — and a
+#     tag-only identity then rejects the pipeline's own output on the ONLY
+#     recovery path, after every build has already succeeded (webfang#2464).
+#     The pin is two-part: the identity states WHICH WORKFLOW FILE, and the
+#     ref/trigger claims state WHICH RUN. Neither half may be a literal.
+# ─────────────────────────────────────────────────────────────────────────────
+PINS_REF="$(grep -cF 'RELEASE_CERT_WORKFLOW_REF:' "$RELEASE_YML" || true)"
+PINS_TRIGGER="$(grep -cF 'RELEASE_CERT_WORKFLOW_TRIGGER:' "$RELEASE_YML" || true)"
+REF_FROM_CONTEXT="$(grep -cF "RELEASE_CERT_WORKFLOW_REF: '\${{ github.ref }}'" "$RELEASE_YML" || true)"
+TRIGGER_FROM_CONTEXT="$(grep -cF "RELEASE_CERT_WORKFLOW_TRIGGER: '\${{ github.event_name }}'" "$RELEASE_YML" || true)"
+TAG_ONLY_IDENTITY="$(grep -cF 'release\.yml@refs/tags/v[0-9].*$' "$RELEASE_YML" || true)"
+HARDCODED_BRANCH="$(grep -cF 'refs/heads/main' "$RELEASE_YML" || true)"
+
+if [[ "$PINS_REF" -ge 1 && "$PINS_TRIGGER" -ge 1 \
+      && "$REF_FROM_CONTEXT" -ge 1 && "$TRIGGER_FROM_CONTEXT" -ge 1 \
+      && "$TAG_ONLY_IDENTITY" -eq 0 && "$HARDCODED_BRANCH" -eq 0 ]]; then
+  step "release.yml: signature gate pins ref+trigger claims" "ok"
+else
+  echo "::error::check_release_dispatch: release.yml's signature gate must pin the RUN, not only the workflow file — RELEASE_CERT_WORKFLOW_REF from \${{ github.ref }}, RELEASE_CERT_WORKFLOW_TRIGGER from \${{ github.event_name }}, with no tag-only identity regexp and no literal refs/heads/main. Without it a workflow_dispatch signs under @refs/heads/<default-branch> and the publish job rejects its own artifacts after every build, checksum, attestation and signature has succeeded (webfang#2464). That is the path the reconciliation sweep depends on, so the defect lands exactly when a release is already broken."
+  step "release.yml: signature gate pins ref+trigger claims" "MISSING"
+  FAIL=1
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Verdict
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ "$FAIL" -ne 0 ]]; then

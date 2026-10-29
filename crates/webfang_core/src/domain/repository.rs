@@ -20,6 +20,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::domain::text_chunker::ByteSpan;
 use crate::error::ScraperError;
 
 /// Domain trait for vector persistence (dependency inversion).
@@ -52,10 +53,15 @@ pub trait VectorRepository: Send + Sync {
         size_bytes: u64,
     ) -> Pin<Box<dyn Future<Output = Result<String, ScraperError>> + Send + 'a>>;
 
-    /// Save a chunk, optionally with its embedding vector.
+    /// Save a chunk, optionally with its embedding vector and locator spans.
     ///
     /// When `embedding` is `Some`, it is serialized to a little-endian `f32`
     /// BLOB; when `None`, the `embedding_vector` column is stored as SQL `NULL`.
+    ///
+    /// `spans` (#2429 AC2) are the byte ranges the chunk was cut from inside
+    /// the text the chunker segmented. Repositories that do not store
+    /// locators accept and ignore them — dropping them on the floor is the
+    /// caller's documented contract, never a silent data corruption.
     ///
     /// # Errors
     ///
@@ -68,6 +74,7 @@ pub trait VectorRepository: Send + Sync {
         chunk_index: i64,
         content: &'a str,
         embedding: Option<&'a [f32]>,
+        spans: Option<&'a [ByteSpan]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>>;
 
     /// Check whether a resource with this `content_hash` already exists.
@@ -127,8 +134,9 @@ impl<T: VectorRepository + ?Sized> VectorRepository for std::sync::Arc<T> {
         chunk_index: i64,
         content: &'a str,
         embedding: Option<&'a [f32]>,
+        spans: Option<&'a [ByteSpan]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
-        (**self).save_chunk(id, resource_url, chunk_index, content, embedding)
+        (**self).save_chunk(id, resource_url, chunk_index, content, embedding, spans)
     }
 
     fn resource_exists_by_hash<'a>(
@@ -237,6 +245,7 @@ impl VectorRepository for MultiVectorRepository {
         chunk_index: i64,
         content: &'a str,
         embedding: Option<&'a [f32]>,
+        spans: Option<&'a [ByteSpan]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
         Box::pin(async move {
             if self.repos.is_empty() {
@@ -248,7 +257,7 @@ impl VectorRepository for MultiVectorRepository {
             let mut first_err: Option<ScraperError> = None;
             for repo in &self.repos {
                 match repo
-                    .save_chunk(id, resource_url, chunk_index, content, embedding)
+                    .save_chunk(id, resource_url, chunk_index, content, embedding, spans)
                     .await
                 {
                     Ok(()) => any_ok = true,
@@ -385,6 +394,7 @@ mod tests {
             _chunk_index: i64,
             _content: &'a str,
             _embedding: Option<&'a [f32]>,
+            _spans: Option<&'a [ByteSpan]>,
         ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
             Box::pin(async move {
                 self.chunks.fetch_add(1, Ordering::SeqCst);
@@ -432,7 +442,7 @@ mod tests {
 
         multi.save_resource("u", "t", "hash", 1).await.unwrap();
         multi
-            .save_chunk("id", "u", 0, "c", Some(&[0.5]))
+            .save_chunk("id", "u", 0, "c", Some(&[0.5]), None)
             .await
             .unwrap();
 
@@ -455,7 +465,7 @@ mod tests {
         ]);
 
         assert!(multi
-            .save_chunk("id", "u", 0, "c", Some(&[0.5]))
+            .save_chunk("id", "u", 0, "c", Some(&[0.5]), None)
             .await
             .is_ok());
         assert!(multi.save_resource("u", "t", "h", 1).await.is_ok());
@@ -474,7 +484,7 @@ mod tests {
         let multi = MultiVectorRepository::new(vec![repo(&s1, &c1, true), repo(&s2, &c2, true)]);
 
         let err = multi
-            .save_chunk("id", "u", 0, "c", Some(&[0.5]))
+            .save_chunk("id", "u", 0, "c", Some(&[0.5]), None)
             .await
             .unwrap_err();
         assert!(matches!(err, ScraperError::Persistence(_)));

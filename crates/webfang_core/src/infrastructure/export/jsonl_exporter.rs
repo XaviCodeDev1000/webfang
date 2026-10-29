@@ -396,6 +396,7 @@ mod tests {
             embeddings: None,
             correlation_id: None,
             _state: std::marker::PhantomData::<Validated>,
+            chunk_spans: None,
         }
     }
 
@@ -734,6 +735,7 @@ mod tests {
             embeddings: None,
             correlation_id: None,
             _state: std::marker::PhantomData::<Validated>,
+            chunk_spans: None,
         };
 
         // Repeated serialization of one fixed chunk is byte-identical.

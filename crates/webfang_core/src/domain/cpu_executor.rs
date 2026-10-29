@@ -19,6 +19,7 @@
 //! the minimal async seam for the Tokio→Rayon crossing (ADR-0012-B §1.4).
 //! Do not read a green gate as "the domain layer is framework-free".
 
+use crate::domain::text_chunker::ByteSpan;
 use crate::error::ScraperError;
 use tokio::sync::oneshot;
 
@@ -35,6 +36,10 @@ pub struct ProcessedChunk {
     pub content: String,
     /// 384-dim embedding once ONNX inference is wired; `None` until then.
     pub embedding: Option<Vec<f32>>,
+    /// Byte spans of this chunk inside the text it was segmented from
+    /// (#2429 AC2). `None` for the CPU path, whose text extraction has no
+    /// span source — absence is explicit, never a fabricated 0.
+    pub spans: Option<Vec<ByteSpan>>,
 }
 
 /// Domain port for dispatching CPU-bound closures off the Tokio event loop.
@@ -95,6 +100,7 @@ mod tests {
             let _ = tx.send(Ok(vec![ProcessedChunk {
                 content: format!("{url}:{content}:{size}"),
                 embedding: None,
+                spans: None,
             }]));
             rx
         }

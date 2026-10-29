@@ -26,6 +26,7 @@ use webfang_core::domain::config::AutotuningConfig;
 use webfang_core::domain::cpu_executor::{CpuExecutorPort, ProcessedChunk};
 use webfang_core::domain::crawler_port::ResourceDownloadPort;
 use webfang_core::domain::repository::VectorRepository;
+use webfang_core::domain::text_chunker::ByteSpan;
 use webfang_core::error::ScraperError;
 use webfang_core::infrastructure::bridge::CpuBridge;
 use webfang_core::infrastructure::content_processing::AggressiveProcessor;
@@ -109,6 +110,7 @@ impl CpuExecutorPort for StubBridge {
         let _ = tx.send(Ok(vec![ProcessedChunk {
             content,
             embedding: None,
+            spans: None,
         }]));
         rx
     }
@@ -136,6 +138,7 @@ impl VectorRepository for StubRepo {
         _chunk_index: i64,
         _content: &'a str,
         _embedding: Option<&'a [f32]>,
+        _spans: Option<&'a [ByteSpan]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), ScraperError>> + Send + 'a>> {
         Box::pin(async move { Ok(()) })
     }

@@ -138,6 +138,7 @@ impl CpuBridge {
             let chunk = ProcessedChunk {
                 content: text,
                 embedding: None,
+                spans: None,
             };
             let metadata = serde_json::json!({
                 "size_bytes": size,
@@ -576,6 +577,7 @@ mod tests {
         let chunk = ProcessedChunk {
             content: "hi".to_string(),
             embedding: None,
+            spans: None,
         };
         let cloned = chunk.clone();
         assert_eq!(cloned.content, "hi");
