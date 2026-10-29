@@ -6,7 +6,9 @@
 //!
 //! The golden set is only meaningful for the tree it was measured on: a change
 //! to `crates/webfang_core/src` legitimately changes it, and the set is
-//! refreshed in the same commit that changes the tree.
+//! refreshed in the same commit that changes the tree. The writer that
+//! regenerates it is `scripts/refresh_real_tree_golden.sh`: run it from the
+//! repository root and commit its output together with the tree change.
 //!
 //! The property that makes the extractor worth its cost — it sees the sites
 //! the old awk scanner could not — is proved by a SYNTHETIC tree below, not by
@@ -36,6 +38,11 @@ fn golden_path() -> PathBuf {
         .join("real_tree_sites.txt")
 }
 
+/// The remedy the golden-mismatch asserts must name: until #2499 the refresh
+/// procedure lived nowhere in the tree, so a red differential test told the
+/// contributor WHAT changed without telling them HOW to reconcile it.
+const GOLDEN_REMEDY: &str = "refresh the golden set with `bash scripts/refresh_real_tree_golden.sh` from the repository root and commit it in the SAME commit that changes the tree";
+
 #[test]
 fn the_real_tree_parses_without_errors_and_matches_the_golden_set() {
     let root = real_tree_root();
@@ -62,9 +69,12 @@ fn the_real_tree_parses_without_errors_and_matches_the_golden_set() {
     assert_eq!(
         produced.lines().count(),
         golden.lines().count(),
-        "the number of sites changed"
+        "the number of sites changed — {GOLDEN_REMEDY}"
     );
-    assert_eq!(produced, golden, "the extracted sites changed");
+    assert_eq!(
+        produced, golden,
+        "the extracted sites changed — {GOLDEN_REMEDY}"
+    );
 }
 
 /// A module whose DOC COMMENT mentions `#[cfg(test)]` before the import.
