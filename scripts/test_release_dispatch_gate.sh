@@ -208,7 +208,6 @@ mutate "$D/.github/workflows/release.yml" \
   "gate sparse-checkout hidden behind a comment" \
   && expect_reject "$D" "gate sparse-checkout hidden behind a comment" \
        "must declare 'sparse-checkout: scripts'"
-
 # 6. A guard that fails WITHOUT ::error must still be a RECORDED failure, and the
 #    run must still reach its summary. Proven end to end: re-run this harness
 #    against a stub guard that exits 1 silently and assert that it (a) exits

@@ -304,6 +304,19 @@ jobs:
       # no repo state touched.
       - name: Intra-crate direction gate semantics harness
         run: bash scripts/test_intra_crate_direction.sh
+      # The golden set that real_tree.rs asserts is paired with the tree BY
+      # CONTRACT: refreshed in the same commit that changes
+      # crates/webfang_core/src. Until #2499 there was no writer for it and
+      # every contributor rediscovered the regeneration by hand from a red
+      # "Intra-crate lint tool tests" step (43 fixture commits in 30 days;
+      # #2178, #2381, #2353; a merge conflict on the fixture in #2338). This
+      # harness pins the writer's semantics: byte-identical regeneration from
+      # the extractor's stdout, idempotence, exclusive $INTRA_CRATE_LINT_BIN
+      # resolution, and fail-closed with the fixture intact on a broken build
+      # or a partial extraction. Hermetic: mktemp fixture repo, cargo STUBBED
+      # on PATH — no cargo, no network, never touches this repository.
+      - name: Real-tree golden writer semantics harness
+        run: bash scripts/test_refresh_real_tree_golden.sh
       # Regression guard for stabilization-sitemap-regression, re-based by #1328:
       # the ignored-test budget is a frozen baseline (32 rows in
       # docs/test-inventory.md — 26 test attributes + 6 doc/comment mentions),
