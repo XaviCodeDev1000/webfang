@@ -1304,8 +1304,10 @@ infrastructure/content_processing/mcp.rs	10	use	crate::domain::content_processor
 infrastructure/content_processing/mcp.rs	11	use	crate::infrastructure::converter::html_cleaner::clean_html
 infrastructure/content_processing/semantic.rs	11	use	crate::domain::content_processor::ContentProcessor
 infrastructure/converter/html_cleaner.rs	19	use	crate::domain::html_cleaner::clean_html
+infrastructure/converter/html_to_markdown.rs	7	use	crate::domain::text_chunker::ByteSpan
 infrastructure/converter/html_to_markdown.rs	28	inline	crate::infrastructure::converter::html_cleaner::clean_html
-infrastructure/converter/html_to_markdown.rs	42	inline	crate::infrastructure::scraper::fallback::extract_text
+infrastructure/converter/html_to_markdown.rs	49	inline	crate::infrastructure::scraper::fallback::extract_text
+infrastructure/converter/html_to_markdown.rs	91	inline	crate::infrastructure::converter::html_cleaner::clean_html
 infrastructure/converter/obsidian.rs	7	use	crate::domain::DownloadedAsset
 infrastructure/cpu_pool.rs	10	use	crate::error::ScraperError
 infrastructure/cpu_pool.rs	11	use	crate::infrastructure::autotuning::ElasticConfig
