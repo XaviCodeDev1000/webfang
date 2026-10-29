@@ -396,6 +396,20 @@ EOF
   # drift; the CODE side is covered by the same guard in lane_fmt_and_guards.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Docs claims gate (auditoría QA/QC 2026-10-24): README.md is the most-read
+  # file in the repo and nothing read it. The Architecture diagram drew an edge
+  # no manifest has, and two badges outlived the facts they described. This
+  # lane is where a markdown-only edit lands — exactly the edit that can
+  # reintroduce a false claim without touching a line of code.
+  run_guard "docs claims gate (README truth)" scripts/check_docs_claims.sh \
+    bash scripts/check_docs_claims.sh
+  # Release feature matrix (#2430): the DOC side of the drift — a manifest
+  # entry edited without touching Cargo.toml. Blocking, like the two doc↔code
+  # gates above: the CI step is required, so this mirror blocks too. The
+  # Cargo.toml side is covered by the same guard in lane_fmt_and_guards, and
+  # the scripts themselves by lane_ci.
+  run_guard "release feature matrix gate (#2430)" scripts/check_release_feature_matrix.sh \
+    bash scripts/check_release_feature_matrix.sh
 }
 
 # collect_shell_files: print, one per line, the changed files that are shell.
@@ -579,11 +593,13 @@ EOF
   # exactly what a `scripts/**`-only change can break. It asserts that
   # `repo-guards` stays unfiltered and unconditional, that `gate` waits on it in
   # both scopes, and that both steps below are still wired into this block.
-  if grep -Eq '^(scripts/check_docs_version_pins\.sh|scripts/test_docs_version_pins\.sh|scripts/test_docs_version_pins_wiring\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+  if grep -Eq '^(scripts/check_docs_version_pins\.sh|scripts/test_docs_version_pins\.sh|scripts/test_docs_version_pins_wiring\.sh|scripts/check_docs_claims\.sh|scripts/test_docs_claims\.sh|scripts/test_docs_claims_wiring\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
     run_step "docs version pins semantics (offline)" bash scripts/test_docs_version_pins.sh
     run_step "docs version pins wiring (offline)" bash scripts/test_docs_version_pins_wiring.sh
+    run_step "docs claims semantics (offline)" bash scripts/test_docs_claims.sh
+    run_step "docs claims wiring (offline)" bash scripts/test_docs_claims_wiring.sh
   else
-    skip_step "docs version pins semantics" "no docs version pins files changed"
+    skip_step "docs claims gates" "no docs claims or version-pins files changed"
   fi
   # AI providers doc drift (#2136): the same blocking mirror the other two
   # lanes run, here for the lane that fires when `scripts/**` changed. A
@@ -592,6 +608,11 @@ EOF
   # and a local lane that stayed green would hide the drift until CI.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Release feature matrix (#2430): a `scripts/**` change can break the guard
+  # itself, so the lane that fires on scripts changes runs it too. Blocking,
+  # same reason as the two mirrors above.
+  run_guard "release feature matrix gate (#2430)" scripts/check_release_feature_matrix.sh \
+    bash scripts/check_release_feature_matrix.sh
   # Release-pins harnesses (#2028): the release flow owns the bump of the docs
   # version pins, and these three pin the pieces that make that ownership real
   # — the WRITER (the exact inverse of the gate above), the ORCHESTRATOR (the
@@ -876,6 +897,17 @@ lane_fmt_and_guards() {
   # mirrors: required in CI, required here.
   run_guard "ai providers doc drift gate (#2136)" scripts/check_ai_providers_doc.sh \
     bash scripts/check_ai_providers_doc.sh
+  # Docs claims gate (auditoría QA/QC 2026-10-24): the code side of the same
+  # drift. A dependency edge or an MSRV bump changes no markdown, so a lane
+  # that only saw docs would miss it. Same guard as lane_docs, same block.
+  run_guard "docs claims gate (README truth)" scripts/check_docs_claims.sh \
+    bash scripts/check_docs_claims.sh
+  # Release feature matrix (#2430): the CODE side of the drift — a feature
+  # added, removed or re-typed in crates/webfang_cli/Cargo.toml without
+  # updating the doc's manifest block. Blocking, like every mirror of a
+  # required CI step.
+  run_guard "release feature matrix gate (#2430)" scripts/check_release_feature_matrix.sh \
+    bash scripts/check_release_feature_matrix.sh
   # Issue #1614: the version-marker half of the MCP public-surface policy. The
   # other half (live schema vs the committed fixture) is a test and runs in the
   # cargo lanes; this one needs the base commit, which a test cannot see.

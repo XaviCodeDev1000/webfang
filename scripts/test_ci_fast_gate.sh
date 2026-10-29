@@ -315,7 +315,7 @@ make_fixture() {
     test_release_pins_wiring.sh test_declare_pending_publication.sh \
     test_mcp_surface_wiring.sh test_merge_when_green_breaking.sh \
     test_ci_merge_when_green.sh test_apply_tag_ruleset.sh test_ci_metrics.sh \
-    test_ci_mutant_shards.sh; do
+    test_ci_mutant_shards.sh test_docs_claims.sh test_docs_claims_wiring.sh; do
     mkdir -p "$dir/scripts/$(dirname "$harness")"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$dir/scripts/$harness"
   done
