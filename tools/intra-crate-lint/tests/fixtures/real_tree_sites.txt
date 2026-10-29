@@ -674,6 +674,7 @@ application/vault_search.rs	21	use	crate::domain::embedding_port::cosine_similar
 application/vault_search.rs	22	use	crate::domain::note_repository::ChunkToPersist
 application/vault_search.rs	22	use	crate::domain::note_repository::NoteRepository
 application/vault_search.rs	22	use	crate::domain::note_repository::VaultNoteReader
+application/vault_search.rs	23	use	crate::domain::text_chunker::ByteSpan
 application/vault_search.rs	23	use	crate::domain::text_chunker::TextChunker
 application/vault_search.rs	24	use	crate::error::ScraperError
 cli/args/ai.rs	64	inline	crate::domain::options_spec::ai::MAX_CHARS::parse_uint
