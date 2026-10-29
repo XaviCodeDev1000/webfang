@@ -77,6 +77,9 @@ expect_fails_with() { # description, needle, command...
 [[ -f "$CHECK_SCRIPT" ]] || { echo "harness cannot find $CHECK_SCRIPT" >&2; exit 1; }
 
 # --- case 1: missing target fails loudly, naming the exact command ---------
+# NEGATION: a missing rustup target must never degrade into a silent skip —
+# the guard has to fail loudly naming the exact `rustup target add` fix (the
+# #1829 silent-fallback precedent this repo codified).
 # A stub rustup that reports only the host target, so the guard must refuse.
 # The module is a synthetic fixture, not the real one: this case must behave
 # identically in the gate's sandboxed fixtures (where crates/ is not copied)
@@ -115,6 +118,9 @@ expect_ok "real module -> exit 0 (shim resolves the cross-crate import)" \
   bash "$CHECK_SCRIPT"
 
 # --- case 3: compile error inside a cfg(windows) arm is caught -------------
+# NEGATION: pre-#1833 a compile error inside a cfg(windows) arm was invisible
+# to every Linux gate and only surfaced through the ~25-minute Windows CI
+# round trip — #1810's missing `use tracing::warn;` shipped exactly this way.
 FIXTURE="$(mktemp -d)"
 cp "$REAL_MODULE" "$FIXTURE/module_with_type_error.rs"
 cat >> "$FIXTURE/module_with_type_error.rs" <<'RS'
@@ -132,6 +138,10 @@ expect_fails_with \
   bash "$CHECK_SCRIPT" --module "$FIXTURE/module_with_type_error.rs"
 
 # --- case 4: the mirrored lint table denies bare unsafe --------------------
+# NEGATION: mirroring the workspace lint table is load-bearing — without it
+# the scratch crate compiles a bare `unsafe` the workspace's
+# `unsafe_code = "deny"` forbids, and #1810's second defect class ships
+# silently on every Windows-only path.
 cp "$REAL_MODULE" "$FIXTURE/module_with_bare_unsafe.rs"
 cat >> "$FIXTURE/module_with_bare_unsafe.rs" <<'RS'
 
