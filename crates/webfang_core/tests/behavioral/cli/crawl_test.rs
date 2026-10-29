@@ -2,8 +2,8 @@
 
 use crate::cmd;
 use crate::BehavioralTest;
-use std::time::{Duration, Instant};
-use tokio::time::timeout;
+use crate::{assert_spawn_within, std_cmd, SPAWN_LATENCY_BUDGET};
+use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
@@ -434,12 +434,23 @@ async fn include_pattern_only_scrapes_matching_urls() {
 /// Crawl mode with `--js-strategy static` must respect `--timeout-secs`.
 ///
 /// End-to-end guard for the user-visible contract behind issue #280: a crawl
-/// against a slow endpoint with `--timeout-secs 2` must fail fast (~2s), not
-/// hang on a hardcoded timeout. Uses `--use-sitemap` so URL discovery fetches
-/// the fast sitemap instead of DOM-scraping the slow seed (DOM discovery uses
-/// a legacy client with its own 30s timeout, unrelated to this contract).
-/// The engine-level fix (`Engine::with_js_strategy`) is covered directly by
+/// against a slow endpoint with `--timeout-secs 2` must fail through the
+/// per-request timeout, not hang on a hardcoded one. Uses `--use-sitemap` so
+/// URL discovery fetches the fast sitemap instead of DOM-scraping the slow
+/// seed (DOM discovery uses a legacy client with its own 30s timeout,
+/// unrelated to this contract). The engine-level fix
+/// (`Engine::with_js_strategy`) is covered directly by
 /// `tests/engine_js_strategy_timeout_test.rs`.
+///
+/// #2331: the assertion is the observable contract — a non-success exit —
+/// never a wall clock. The mock delays its response 10 s, so a regression
+/// that ignored `--timeout-secs` (falling back to the legacy 30 s client
+/// timeout) would fetch SUCCESSFULLY and exit 0, flipping the assert on its
+/// own. The `elapsed < 10 s` bound this test used to carry measured 7.1 s on
+/// the TRY 2 of a windows run — 2.9 s of headroom under load is exactly what
+/// flaked. The attempt runs under [`assert_spawn_within`]: the shared budget
+/// is the only clock in the test, and an overrunning child is killed and
+/// reaped instead of being orphaned by a bare tokio timeout (#2387).
 #[tokio::test]
 async fn crawl_js_strategy_respects_timeout_secs() {
     let t = BehavioralTest::new().await;
@@ -460,54 +471,60 @@ async fn crawl_js_strategy_respects_timeout_secs() {
 
     let out_path = t.out.path().to_path_buf();
 
-    // #2331/#1697: build the command — and therefore resolve the binary —
-    // BEFORE the clock starts. `cmd()` goes through `webfang_path()`, whose
-    // first call in a cold target dir shells out to `cargo build`; charging
-    // that compile to the 10 s contract below is what made this test flake on
-    // `windows-latest` under a loaded runner. The clock measures the CLI run,
-    // never the harness bootstrap.
-    let mut command = cmd();
-    command
-        .arg("--url")
-        .arg(&slow_url)
-        .arg("--sitemap-url")
-        .arg(&sitemap_url)
-        .arg("--use-sitemap")
-        .arg("--js-strategy")
-        .arg("static")
-        .arg("--timeout-secs")
-        .arg("2")
-        // F-08 (#1231): timeouts retry, so pin the budget to keep the
-        // measured contract the per-attempt timeout, not the retry
-        // backoff (default 3 retries × 2s + 1/2/4s backoff = exactly
-        // 15.0s — a dead heat with the 15s deadline below).
-        .arg("--max-retries")
-        .arg("1")
-        .arg("--max-depth")
-        .arg("0")
-        .arg("--output")
-        .arg(out_path)
-        .arg("--quiet");
+    // wiremock serves on this test's current-thread runtime, so the blocking
+    // budget machinery must wait on a blocking-pool thread — parking the
+    // runtime thread here would starve the mock server and the child's
+    // request would hang until the budget kills it.
+    tokio::task::spawn_blocking(move || {
+        assert_spawn_within(
+            SPAWN_LATENCY_BUDGET,
+            "crawl_js_strategy_respects_timeout_secs",
+            move |child| {
+                let mut command = std_cmd();
+                command
+                    .arg("--url")
+                    .arg(&slow_url)
+                    .arg("--sitemap-url")
+                    .arg(&sitemap_url)
+                    .arg("--use-sitemap")
+                    .arg("--js-strategy")
+                    .arg("static")
+                    .arg("--timeout-secs")
+                    .arg("2")
+                    // F-08 (#1231): timeouts retry, so pin the budget to keep
+                    // the run short — 2 attempts x 2s + backoff, far inside
+                    // the spawn budget the attempt runs under.
+                    .arg("--max-retries")
+                    .arg("1")
+                    .arg("--max-depth")
+                    .arg("0")
+                    .arg("--output")
+                    .arg(&out_path)
+                    .arg("--quiet");
+                let output = child.output(command)?;
 
-    let start = Instant::now();
-    let output = timeout(
-        Duration::from_secs(15),
-        tokio::task::spawn_blocking(move || command.output()),
-    )
+                if output.status.success() {
+                    return Err(format!(
+                        "request should have timed out, but command succeeded; stderr: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    ));
+                }
+                Ok(())
+            },
+        );
+    })
     .await
-    .expect("test must not hang")
-    .expect("task must not panic")
-    .expect("command must execute");
-
-    let elapsed = start.elapsed();
-    assert!(
-        elapsed < Duration::from_secs(10),
-        "JS strategy timeout test should exhaust 2 retries near 2s × 2 + backoff, took {elapsed:?}"
-    );
-    assert!(
-        !output.status.success(),
-        "request should have timed out, but command succeeded"
-    );
+    .unwrap_or_else(|join_error| {
+        // `assert_spawn_within` panics with the measured latencies when both
+        // attempts overrun; resume that panic so the test fails with the
+        // budget's own diagnosis, not with a bare JoinError.
+        match join_error.try_into_panic() {
+            Ok(payload) => std::panic::resume_unwind(payload),
+            Err(join_error) => {
+                panic!("budget worker did not report a verdict: {join_error}")
+            },
+        }
+    });
 }
 
 /// Mount a two-level DOM scenario used by the `--max-depth` gating tests:
