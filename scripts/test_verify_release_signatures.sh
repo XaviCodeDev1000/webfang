@@ -33,9 +33,24 @@ if [[ "${1:-}" == "version" ]]; then
 fi
 if [[ "${1:-}" == "verify-blob" ]]; then
   printf '%s\n' "$*" >> "$FAKE_COSIGN_LOG"
-  # 0 unless the case under test needs a rejection. A verifier that can only
-  # succeed cannot prove a failure path (webfang#2479).
-  exit "${FAKE_COSIGN_EXIT:-0}"
+  # Drive the two rejection classes the script now distinguishes (webfang#2487):
+  #   FAKE_COSIGN_EXIT         -> exit when --certificate-identity-regexp is
+  #                              present (the full, identity-constrained check).
+  #   FAKE_COSIGN_RELAXED_EXIT -> exit when it is absent (the bare issuer-only
+  #                              relaxed check proves the signature itself is
+  #                              sound, i.e. a ref/trigger-shape mismatch).
+  #                              Default 0 in both cases.
+  has_identity=0
+  for a in "$@"; do
+    if [[ "$a" == "--certificate-identity-regexp" ]]; then
+      has_identity=1
+    fi
+  done
+  if [[ "$has_identity" -eq 1 ]]; then
+    exit "${FAKE_COSIGN_EXIT:-0}"
+  else
+    exit "${FAKE_COSIGN_RELAXED_EXIT:-0}"
+  fi
 fi
 exit 1
 FAKE
@@ -229,6 +244,18 @@ assert_contains "$out" "la identidad por defecto es TAG-ONLY"
 assert_contains "$out" "Signed Ref"
 assert_contains "$out" "--workflow-ref"
 assert_contains "$out" "--workflow-trigger"
+
+# 18b. A rejection that is NOT a ref-shape mismatch (a genuinely invalid
+#      signature) must NOT be reassured with the default-identity hint.
+#      The relaxed bundle+issuer check also fails, so REF_SHAPE_REJECTED
+#      stays 0 and the hint is withheld (webfang#2487).
+out="$(env -u GITHUB_REPOSITORY -u RELEASE_CERT_IDENTITY_REGEXP \
+  -u RELEASE_CERT_WORKFLOW_REF -u RELEASE_CERT_WORKFLOW_TRIGGER \
+  COSIGN="$FAKE_COSIGN" FAKE_COSIGN_LOG="$LOG" \
+  FAKE_COSIGN_EXIT=1 FAKE_COSIGN_RELAXED_EXIT=1 \
+  bash "$SCRIPT" "$ASSET" 2>&1 || true)"
+assert_not_contains "$out" "la identidad por defecto es TAG-ONLY"
+assert_contains "$out" "firma inválida"
 
 # 19. A pinned identity suppresses the hint: the rejection is then about the
 #     caller's own pin, and pointing at the default would be noise.
