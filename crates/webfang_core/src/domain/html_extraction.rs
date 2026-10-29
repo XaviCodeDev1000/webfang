@@ -13,6 +13,11 @@ pub mod author_extractor;
 pub mod dom_pruner;
 
 /// Fallback text extraction (domain pure, htmd).
+///
+/// The repo's single basic extractor: `htmd` with a line-strip degradation.
+/// The former byte-identical copy in `infrastructure::scraper::fallback`
+/// was collapsed onto this function in #2360; the conversion adapter's
+/// failure path and the application extraction paths share it.
 pub mod fallback {
     /// Extract text without Readability (basic HTML stripping).
     #[must_use]
@@ -60,5 +65,43 @@ pub mod readability {
             byline: article.byline,
             published_time: article.published_time,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fallback::extract_text;
+
+    #[test]
+    fn extracts_text_from_valid_html() {
+        let html = r#"<html><body><p>Hello World</p></body></html>"#;
+        let result = extract_text(html);
+        assert!(result.contains("Hello World"));
+        assert!(!result.contains("<html>"));
+    }
+
+    #[test]
+    fn extracts_text_with_scripts_removed() {
+        let html = r#"
+            <html>
+                <head><script>var x = 1;</script></head>
+                <body><article>Main content here</article></body>
+            </html>
+        "#;
+        let result = extract_text(html);
+        assert!(result.contains("Main content"));
+        assert!(!result.contains("<script>"));
+    }
+
+    #[test]
+    fn empty_html_yields_empty_text() {
+        assert_eq!(extract_text(""), "");
+    }
+
+    #[test]
+    fn malformed_html_still_extracts_what_it_can() {
+        let html = "<div>Open div never closed<p>Paragraph";
+        // Should not crash, should extract what it can
+        assert!(!extract_text(html).is_empty());
     }
 }

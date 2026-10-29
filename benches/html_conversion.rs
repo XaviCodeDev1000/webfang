@@ -1,7 +1,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use webfang_core::infrastructure::converter::html_to_markdown::convert_to_markdown;
+use webfang_core::domain::ports::MarkdownConverter;
+use webfang_core::infrastructure::converter::htmd_converter::HtmdConverter;
 
 fn realistic_html() -> String {
     r#"<!DOCTYPE html>
@@ -133,7 +134,7 @@ fn bench_html_conversion(c: &mut Criterion) {
     group.throughput(Throughput::Bytes(size as u64));
     group.bench_function("convert_to_markdown", |b| {
         b.iter(|| {
-            let result = convert_to_markdown(black_box(&html));
+            let result = HtmdConverter.convert(black_box(&html));
             assert!(!result.is_empty());
             black_box(result)
         })
@@ -148,7 +149,7 @@ fn bench_html_conversion(c: &mut Criterion) {
     large_group.throughput(Throughput::Bytes(large_size as u64));
     large_group.bench_function("convert_large_document", |b| {
         b.iter(|| {
-            let result = convert_to_markdown(black_box(&large_html));
+            let result = HtmdConverter.convert(black_box(&large_html));
             assert!(!result.is_empty());
             black_box(result)
         })

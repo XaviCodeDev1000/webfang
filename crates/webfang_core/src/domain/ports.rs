@@ -10,6 +10,7 @@
 //! - [`AssetDownloaderPort`] — asset download abstraction
 //! - [`BinaryWriterPort`] — binary payload persistence abstraction
 //! - [`ProgressObserver`] — progress event reporting abstraction
+//! - [`MarkdownConverter`] — HTML → Markdown conversion abstraction
 //!
 //! The `HttpClientPort` trait and its `HttpResponse` DTO are defined in
 //! `domain::http_port` (the domain layer owns the contract). The production
@@ -113,6 +114,26 @@ pub trait ProgressObserver: Send + Sync {
         successful: usize,
         failed: usize,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+}
+
+/// Port trait for HTML → Markdown conversion.
+///
+/// The contract is total: a production converter never fails — it degrades to
+/// basic text extraction, so the caller always receives usable Markdown.
+/// Boilerplate removal (the `html_cleaner` pre-pass) is part of the contract:
+/// navigation, scripts and page chrome must not survive into the output.
+///
+/// The trait is dyn-compatible (no generics, no `async`) so it can be stored
+/// as `Arc<dyn MarkdownConverter>`. The production adapter is
+/// [`HtmdConverter`](crate::infrastructure::converter::htmd_converter::HtmdConverter);
+/// tests may inject simpler implementations.
+pub trait MarkdownConverter: Send + Sync {
+    /// Convert `html` (possibly carrying boilerplate) into Markdown.
+    ///
+    /// Deterministic and pure with respect to its input: same bytes in, same
+    /// bytes out, no I/O, no global state.
+    #[must_use]
+    fn convert(&self, html: &str) -> String;
 }
 
 #[cfg(test)]
