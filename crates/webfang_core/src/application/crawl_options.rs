@@ -193,6 +193,13 @@ pub struct NetworkOptions {
     pub delay_ms: u64,
     /// Request timeout in seconds.
     pub timeout_secs: u64,
+    /// Whether `timeout_secs` was operator-configured (`--timeout-secs` /
+    /// `WEBFANG_TIMEOUT_SECS`) rather than the spec default (#2490).
+    ///
+    /// The sitemap parser's fetch client inherits the deadline only when the
+    /// operator expressed one; the spec default must not silently replace the
+    /// parser's own default on the no-flag path.
+    pub timeout_secs_explicit: bool,
     /// Maximum number of retry attempts.
     pub max_retries: u32,
     /// Base delay for exponential backoff (ms).
@@ -368,6 +375,7 @@ impl Default for NetworkOptions {
             concurrency: ConcurrencyConfig::default(),
             delay_ms: 1000,
             timeout_secs: 30,
+            timeout_secs_explicit: false,
             max_retries: 3,
             backoff_base_ms: 1000,
             backoff_max_ms: 10000,
