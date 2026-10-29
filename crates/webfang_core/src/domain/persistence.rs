@@ -26,7 +26,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::entities::ExportState;
 use crate::domain::error::ErrorClass;
 use crate::domain::page_state::{PageStatus, PersistedRecord, MIGRATED_V1_RUN_ID};
 
@@ -443,9 +442,8 @@ pub trait RecordStorePort: Send + Sync {
 /// The live production surface of this port is
 /// [`get_state_path`](Self::get_state_path) alone: `record_store_bridge`
 /// (`cli::scrape_flow`) reads the state path to derive the directory and the
-/// domain of the v2 record store. [`load`](Self::load) is still declared but
-/// has no production caller — a candidate for a follow-up slice.
-/// `mark_processed`/`is_processed` are excluded — zero production callers.
+/// domain of the v2 record store. `mark_processed`/`is_processed`/`load` were
+/// pruned with zero production callers (#2243 and its follow-up #2491).
 ///
 /// Object safe: call sites hold `&dyn StateStorePort` or
 /// `Arc<dyn StateStorePort>`.
@@ -456,12 +454,6 @@ pub trait RecordStorePort: Send + Sync {
 pub trait StateStorePort: Send + Sync {
     /// Full path to the domain state JSON file.
     fn get_state_path(&self) -> PathBuf;
-
-    /// Load existing export state from disk.
-    ///
-    /// # Errors
-    /// [`crate::error::ScraperError`] if the file is missing or unparsable.
-    fn load(&self) -> crate::error::Result<ExportState>;
 }
 
 #[cfg(test)]

@@ -105,7 +105,9 @@ conversion, so the variant is not dead code.
 (`RecordStorePort::load_or_init`); `load_or_default` was never wired into
 resume.
 
-**Follow-up (out of this slice).** `load` stays declared on the port without
-production callers and remains a candidate for a follow-up slice. The `save`
-of the historical list belongs to the v2 seam (`RecordStorePort::save` /
-`RecordStore::save`), not to this port nor to the `StateStore` concrete.
+**Follow-up (landed, #2491).** `load` was pruned from the port with zero
+production callers; the seam surface is `get_state_path` alone. The inherent
+`load`/`load_or_default` stay on the `StateStore` concrete, out of the seam.
+The `save` of the historical list belongs to the v2 seam
+(`RecordStorePort::save` / `RecordStore::save`), not to this port nor to the
+`StateStore` concrete.
