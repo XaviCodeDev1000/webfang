@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.2.0] - 2026-10-29
+
+
+### 🎉 Added
+
+- Emit chunk byte range in VectorRecord ([#2460](https://github.com/XaviCodeDev1000/webfang/pull/2460))
+- Vault search results expose the persisted chunk locators ([#2470](https://github.com/XaviCodeDev1000/webfang/pull/2470))
+- Convert_html_to_markdown returns a block-level source map ([#2471](https://github.com/XaviCodeDev1000/webfang/pull/2471))
+
+### 🏗️ Architecture Improvements
+
+- Prune StateStorePort::load, the port surface is get_state_path alone ([#2492](https://github.com/XaviCodeDev1000/webfang/pull/2492))
+
+### 🧪 Testing
+
+- Resolve the chromium binary through the shared harness ([#2264](https://github.com/XaviCodeDev1000/webfang/pull/2264)) ([#2463](https://github.com/XaviCodeDev1000/webfang/pull/2463))
+- The three remaining crash-matrix rows — writer death, network partition, permit panic safety ([#2462](https://github.com/XaviCodeDev1000/webfang/pull/2462))
+- Assert observable contracts instead of wall clocks in the CLI timeout tests ([#2498](https://github.com/XaviCodeDev1000/webfang/pull/2498))
 ## [7.1.0] - 2026-10-28
 
 
