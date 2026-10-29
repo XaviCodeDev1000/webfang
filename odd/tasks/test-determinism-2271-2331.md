@@ -100,3 +100,33 @@ Branch: `test/test-determinism-2271-2331` · Worktree:
 - **E5** — S3 load discipline: every build went through mbx (cache hits on
   every invocation; 356-compilation reuse on clippy), builds strictly
   sequential, focused nextest filters only, seed `cold/no-seed` paid once.
+
+## Native review (RDD)
+
+- **R1** — Full 4-lens native review executed with user consent (granted via
+  the consent/v3 blocking prompt; risk evidence: `process_boundary` on the
+  harness). Lineage `review-d46f2a6dd7ea715d`, tier high, correction budget
+  200, contract `gentle-ai.review-integration/v2`, candidate = base-diff
+  against `origin/main` (4 files, 449 changed lines). Verdict: **approved**;
+  acknowledgement `gentle-ai.review-acknowledged/v1` burned the authority.
+- **R2** — Findings, all non-blocking (no correction opened, none reopens
+  the review): `R2-join-resume-epilogue-triplicated` (SUGGESTION, readability —
+  the `try_into_panic`/`resume_unwind` epilogue is pasted three times and
+  already drifting), `R2-twin-batch-timeout-tests` (SUGGESTION, readability —
+  the two converted batch timeout tests are now end-to-end twins with drifted
+  messages), `R3-002` (SUGGESTION, reliability, pre-existing — the crawl
+  non-success assert would pin the timeout contract harder with a stderr
+  keyword assert like the batch siblings), and `R3-001` (WARNING, reliability,
+  inferential — claims the crawl conversion charges a cold `cargo build` to
+  the 60 s budget; **rebutted on the record**: `run_under_budget` resolves
+  `webfang_path()` before the first `Instant::now()` (the `#1697` comment in
+  `tests/common/cli_harness.rs`), so a cold build is never inside any attempt
+  budget; the reviewer only saw the patch, which does not include that
+  unchanged harness body).
+- **R3** — Transport notes for future ZCode cycles: the provider blocked every
+  launch of the `review-*` subagent types (`request has been blocked due to
+  unusual activity`) while the identical content passed through
+  `general-purpose` carriers; and `review capture-result` for `claude-code`
+  (compiled transport `claude_prompt_carried`) refuses `--agent` combined with
+  `--input` — the capture is the same command with the exact collect tokens
+  **without** the `--agent` flag.
