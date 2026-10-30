@@ -37,3 +37,8 @@ Resolution: **declare proxy support unsupported, explicitly.**
 - L2: wreq code trace (see S#1, S#5). Open product question asked; no answer → proceeded with
   recommended smallest-safe slice (S#2). Guard-aware proxy support = future issue, not here.
 - L3: worktree `fix-proxy-posture` @ main 4433fc67; indexes OK; mission file created pre-write.
+- L4: DONE. RED observed (CLI scrape observable at the proxy: absolute-form GET, proxy's 404)
+  → `.no_proxy()` pinned at `DefaultSsrfGuard::secure_client*` → GREEN. Doctor posture line on
+  every run. Docs: data-flow.md "Proxy posture" + installation.md "Behind a corporate proxy?".
+  Gate: fmt --check, clippy -D warnings (all-features), rustdoc -D warnings, 305 affected tests
+  green. Commits: 0177f0a4 (RED), b6b8f521 (fix), 5a60d192 (doctor), 12138048 (docs).
