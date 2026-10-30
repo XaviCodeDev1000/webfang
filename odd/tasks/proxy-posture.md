@@ -42,3 +42,9 @@ Resolution: **declare proxy support unsupported, explicitly.**
   every run. Docs: data-flow.md "Proxy posture" + installation.md "Behind a corporate proxy?".
   Gate: fmt --check, clippy -D warnings (all-features), rustdoc -D warnings, 305 affected tests
   green. Commits: 0177f0a4 (RED), b6b8f521 (fix), 5a60d192 (doctor), 12138048 (docs).
+- L5: PR #2547 opened (type:bug, Closes #2500, metadata validation green).
+- L6 (DEFECT): first CI run failed "Repo guards / Intra-crate lint tool tests" — the real-tree
+  golden set (1654 → 1657 sites) must travel with the tree change; the local gate ran
+  check/clippy/fmt/nextest but NOT the repo-guards lane. Fixed on top: a2e26a52 (golden
+  refresh, verified green with `cargo test --test real_tree` in tools/intra-crate-lint).
+  Lesson: the fast gate's lane for src changes must include the intra-crate lint tests.
