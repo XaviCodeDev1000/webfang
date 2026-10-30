@@ -15,6 +15,7 @@ use crate::domain::{
 };
 use crate::error::{Result, ScraperError};
 use crate::infrastructure::observability::log_scrape_error;
+use std::collections::HashSet;
 use tracing::{debug, warn};
 
 use crate::application::adaptive_engine::AdaptiveSelectorEngine;
@@ -96,6 +97,113 @@ pub fn extract_with_selector(
         "<div id=\"selector-extracted\">{}</div>",
         matched.join("\n")
     ))
+}
+
+/// Serialize the elements matched by `selector` into one fragment.
+///
+/// Matches nested inside another match are dropped so each element is emitted
+/// once, and `href`/`src` are resolved against `base_url` — the two jobs
+/// Readability used to do implicitly for this path. Blocks are separated by a
+/// blank line, which is what makes `--selector h3` yield two paragraphs instead
+/// of two concatenated headings.
+///
+/// Returns `None` when the selector matches nothing.
+// Wired into the `--selector` path by the next commit of #2534; until then the
+// only callers are the tables below.
+#[allow(dead_code)]
+fn serialize_matches(
+    document: &scraper::Html,
+    selector: &scraper::Selector,
+    base_url: &url::Url,
+) -> Option<String> {
+    let matches: Vec<scraper::ElementRef<'_>> = document.select(selector).collect();
+    if matches.is_empty() {
+        return None;
+    }
+
+    // `ancestors()` starts at the parent, so a match never discards itself.
+    let selected: HashSet<_> = matches.iter().map(|element| element.id()).collect();
+    let blocks: Vec<String> = matches
+        .iter()
+        .filter(|element| {
+            !element
+                .ancestors()
+                .any(|ancestor| selected.contains(&ancestor.id()))
+        })
+        .map(scraper::ElementRef::html)
+        .collect();
+
+    let fragment = blocks.join("\n\n");
+    // `htmd::convert` parses with `parse_document`, so a row or cell fragment
+    // loses its tags at conversion time: the HTML5 parser drops `<tr>`/`<td>`
+    // outside a table context and the cells collapse into bare text. Restoring
+    // the synthetic ancestor here is the only place it can be restored — the
+    // converter cannot recover context the fragment never had.
+    let fragment = if matches
+        .first()
+        .is_some_and(|element| needs_table_context(element.value().name()))
+    {
+        format!("<table><tbody>{fragment}</tbody></table>")
+    } else {
+        fragment
+    };
+
+    Some(absolutize_urls(&fragment, base_url))
+}
+
+/// Whether a matched tag only means something inside a `<table>`.
+///
+/// `caption` is deliberately absent: it belongs outside `<tbody>`, so the
+/// synthetic wrapper below would be wrong for it.
+fn needs_table_context(tag: &str) -> bool {
+    matches!(tag, "tr" | "td" | "th" | "thead" | "tbody" | "tfoot")
+}
+
+/// Resolve `href`/`src` attributes in `fragment` against `base_url`.
+///
+/// Fragment-only links are left alone: rewriting `#top` into an absolute URL
+/// changes what the link means. Values `Url::join` cannot resolve keep their
+/// original text rather than losing the link, and a rewriter failure returns
+/// the fragment untouched — the fragment is never dropped on the floor.
+fn absolutize_urls(fragment: &str, base_url: &url::Url) -> String {
+    use lol_html::{element, RewriteStrSettings};
+
+    let settings = RewriteStrSettings {
+        element_content_handlers: vec![
+            element!("a[href]", |el| {
+                resolve_attr(el, "href", base_url);
+                Ok(())
+            }),
+            element!("img[src]", |el| {
+                resolve_attr(el, "src", base_url);
+                Ok(())
+            }),
+            element!("source[src]", |el| {
+                resolve_attr(el, "src", base_url);
+                Ok(())
+            }),
+            element!("video[poster]", |el| {
+                resolve_attr(el, "poster", base_url);
+                Ok(())
+            }),
+        ],
+        ..RewriteStrSettings::default()
+    };
+
+    lol_html::rewrite_str(fragment, settings).unwrap_or_else(|_| fragment.to_owned())
+}
+
+/// Rewrite one attribute in place when it resolves against `base_url`.
+fn resolve_attr(el: &mut lol_html::html_content::Element<'_, '_>, attr: &str, base_url: &url::Url) {
+    let Some(raw) = el.get_attribute(attr) else {
+        return;
+    };
+    if raw.starts_with('#') {
+        return;
+    }
+    if let Ok(resolved) = base_url.join(&raw) {
+        let _ = el.set_attribute(attr, resolved.as_str());
+    }
 }
 
 /// Emit the fallback warning and build a [`ExtractResult::Fallback`] carrying
@@ -636,5 +744,180 @@ mod tests {
             },
             other => panic!("expected ExtractionFailed, got: {other}"),
         }
+    }
+}
+
+/// #2534: the `--selector` fragment must be a function of the selector, not of
+/// Readability. These tables pin the serialization contract (HTML) and the
+/// Markdown the user actually receives (through the same converter the CLI
+/// writes with, `file_saver.rs`).
+#[cfg(test)]
+mod selector_serialization {
+    use super::*;
+    use crate::domain::ports::MarkdownConverter;
+    use crate::infrastructure::converter::htmd_converter::HtmdConverter;
+
+    const BASE: &str = "https://example.com/docs/page.html";
+
+    /// Pure serialization: what the fragment looks like before any converter.
+    struct HtmlCase {
+        name: &'static str,
+        html: &'static str,
+        selector: &'static str,
+        /// `None` means the selector matched nothing.
+        expected: Option<&'static str>,
+    }
+
+    #[test]
+    fn selector_fragment_html_table() {
+        let cases = [
+            HtmlCase {
+                name: "nested_div_emitted_once",
+                html: r#"<div class="outer"><div class="inner">x</div></div>"#,
+                selector: "div",
+                expected: Some(r#"<div class="outer"><div class="inner">x</div></div>"#),
+            },
+            HtmlCase {
+                name: "relative_href_and_img_src",
+                html: r#"<a href="/root">a</a><img src="img.png">"#,
+                selector: "a, img",
+                expected: Some(
+                    "<a href=\"https://example.com/root\">a</a>\n\n\
+                     <img src=\"https://example.com/docs/img.png\">",
+                ),
+            },
+            HtmlCase {
+                name: "unresolvable_schemes_untouched",
+                html: r##"<a href="mailto:a@b.co">m</a><a href="#top">t</a><a href="javascript:void(0)">j</a>"##,
+                selector: "a",
+                expected: Some(
+                    "<a href=\"mailto:a@b.co\">m</a>\n\n\
+                     <a href=\"#top\">t</a>\n\n\
+                     <a href=\"javascript:void(0)\">j</a>",
+                ),
+            },
+            HtmlCase {
+                name: "two_siblings_joined_by_blank_line",
+                html: "<p>one</p><p>two</p>",
+                selector: "p",
+                expected: Some("<p>one</p>\n\n<p>two</p>"),
+            },
+            HtmlCase {
+                name: "no_match_is_none",
+                html: "<p>x</p>",
+                selector: "blockquote",
+                expected: None,
+            },
+        ];
+
+        let base = url::Url::parse(BASE).expect("BASE is a valid absolute URL");
+        let mut failures = Vec::new();
+        for case in cases {
+            let document = scraper::Html::parse_document(case.html);
+            let selector = scraper::Selector::parse(case.selector)
+                .expect("every table selector is a valid CSS selector");
+            let actual = serialize_matches(&document, &selector, &base);
+            if actual.as_deref() != case.expected {
+                failures.push(format!(
+                    "case `{}`\n  expected: {:?}\n  actual:   {:?}",
+                    case.name, case.expected, actual
+                ));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} selector case(s) diverged:\n{}",
+            failures.len(),
+            failures.join("\n---\n")
+        );
+    }
+
+    /// What the user receives in the `.md`: fragment → the production converter.
+    struct MdCase {
+        name: &'static str,
+        html: &'static str,
+        selector: &'static str,
+        expected: &'static str,
+    }
+
+    #[test]
+    fn selector_fragment_markdown_table() {
+        let cases = [
+            MdCase {
+                name: "h3",
+                html: "<h3>Section</h3>",
+                selector: "h3",
+                expected: "### Section",
+            },
+            MdCase {
+                name: "table",
+                html: "<table><thead><tr><th>Name</th><th>Value</th></tr></thead>\
+                       <tbody><tr><td>Foo</td><td>42</td></tr></tbody></table>",
+                selector: "table",
+                // A real GFM table: the whole point of bypassing Readability.
+                expected: "| Name | Value |\n| ---- | ----- |\n| Foo  | 42    |",
+            },
+            MdCase {
+                name: "characterize_li_orphan_bullet",
+                html: "<li>one</li><li>two</li>",
+                selector: "li",
+                // Characterization: htmd falls back to a bullet when the parent
+                // is not <ol>, so an orphan <li> still renders as a list item.
+                expected: "*   one\n*   two",
+            },
+            MdCase {
+                name: "characterize_tr_inside_table",
+                html: "<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>",
+                selector: "tr",
+                // Characterization: the synthetic <table><tbody> keeps the cell
+                // boundary as a paragraph break, but htmd still emits no table
+                // (it needs a <thead> to build the header row).
+                expected: "a\n\nb",
+            },
+            MdCase {
+                name: "characterize_td_inside_table",
+                html: "<table><tbody><tr><td>a</td></tr></tbody></table>",
+                selector: "td",
+                // Characterization: a lone cell has no row to belong to.
+                expected: "a",
+            },
+            MdCase {
+                name: "characterize_strong_inline_separator",
+                html: "<strong>a</strong><strong>b</strong>",
+                selector: "strong",
+                // Characterization: HTML collapses the blank line between two
+                // inline matches into a space, so both end up in one paragraph.
+                expected: "**a** **b**",
+            },
+        ];
+
+        let base = url::Url::parse(BASE).expect("BASE is a valid absolute URL");
+        let converter = HtmdConverter;
+        let mut failures = Vec::new();
+        for case in cases {
+            let document = scraper::Html::parse_document(case.html);
+            let selector = scraper::Selector::parse(case.selector)
+                .expect("every table selector is a valid CSS selector");
+            let Some(fragment) = serialize_matches(&document, &selector, &base) else {
+                failures.push(format!(
+                    "case `{}` matched nothing — fixture is wrong, not the code",
+                    case.name
+                ));
+                continue;
+            };
+            let markdown = converter.convert(&fragment);
+            if markdown.trim() != case.expected {
+                failures.push(format!(
+                    "case `{}`\n  fragment: {fragment}\n  markdown:\n{markdown}",
+                    case.name
+                ));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} markdown case(s) diverged:\n{}",
+            failures.len(),
+            failures.join("\n---\n")
+        );
     }
 }
