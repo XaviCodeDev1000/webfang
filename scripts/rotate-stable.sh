@@ -170,7 +170,14 @@ CURRENT_STABLE="$(jq -r '.lines[] | select(.state=="STABLE") | .minor // empty' 
 # the declared set into awk removes the ordering dependency instead of hiding it
 # behind LC_ALL.
 PUBLISHED_MINORS="$(git tag --list 'v*' | sed 's/^v//' | grep -v -- '-' \
-  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | cut -d. -f1,2 | sort -u -V)"
+  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | cut -d. -f1,2 | sort -u -V || true)"
+# The `|| true` is not a shrug: the grep of an EMPTY tag stream exits 1, and
+# under `pipefail` that made the assignment fail and `set -e` killed the
+# script with NO message at all — a rotation that dies silently on a
+# repository without tags. No tags means no published minors, which is an
+# answer (the gap is empty), not a crash. The default mode never reaches
+# this line without a tag (the tag premise comes first), so this only
+# concerns the pending mode.
 GAP="$(printf '%s\n' "$PUBLISHED_MINORS" | awk \
   -v s="$CURRENT_STABLE" -v n="$NEW_MINOR" \
   -v declared="$(jq -r '.lines[].minor' "$SUPPORT_JSON" | tr '\n' ' ')" '
