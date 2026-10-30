@@ -28,11 +28,19 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Upper bound separating the two regimes: with the inheritance fixed, the
 /// parser's client times out at the configured 1 s per attempt and the
-/// parser's retry policy (3 attempts, 1 s + 2 s backoffs) exhausts in well
-/// under 10 s; with the bug, every attempt burns the parser's private default
-/// and the run measures minutes (#2490 measured 113 s). 15 s sits between the
-/// regimes with margin on both sides.
-const SITEMAP_FETCH_DEADLINE_BUDGET: Duration = Duration::from_secs(15);
+/// parser's retry policy (3 attempts, 1 s + 2 s backoffs) exhausts in ~8.5 s
+/// on a healthy runner; with the bug, every attempt burns the parser's
+/// private default and the run measures minutes (#2490 measured 113 s).
+///
+/// 60 s is the session's standard margin (~7x the healthy path). The original
+/// 15 s was 1.76x, and #2533's windows-latest FLKY-FL measured the healthy
+/// path consuming the entire budget on both consecutive attempts under runner
+/// load (latencies [15.02 s, 15.01 s]) — real work, not environment noise.
+/// Two 60 s attempts (120 s) stay under nextest's per-attempt ceilings
+/// (default 180 s, ci 240 s), and the budget still sits far below the buggy
+/// regime, so a regression keeps producing the clean `Overran` signal and no
+/// passing run is ever timed.
+const SITEMAP_FETCH_DEADLINE_BUDGET: Duration = Duration::from_secs(60);
 
 /// A peer partitioned at the sitemap fetch: it accepts every connection and
 /// holds it for 10 minutes before answering, so no client deadline can win a
