@@ -42,7 +42,9 @@ cluster: #2271, #2331, #2533; playbook = #2498).
 ## Log
 
 - L1: original request (S1–S4, verbatim in Specs).
-- L2: class audit complete (see table); Engram mirror saved.
-- L3: T1+T2+T3 implemented; engine test green, sitemap test green, harness suite green.
-- L4: full pre-commit gate green (check / clippy all-targets all-features / fmt --check / rustdoc -D warnings).
-- L5: PR #2537 opened (Closes #2533); nextest run on the touched targets green; CI queued.
+- L2: class audit complete (see table); Engram mirror saved. Exhaustiveness closed with codedb CLI search (`elapsed`, `Instant::now`) — the BM25 explorer pass had missed 4 candidates, all classified audited-OK.
+- L3: T1+T2+T3 implemented; affected targets 20/20 PASS (engine healthy path 4.08s, sitemap 6.26s).
+- L4: full pre-commit gate green (check / clippy all-targets all-features / fmt --check / rustdoc -D warnings). One fmt violation (long match arm) fixed and re-verified.
+- L5: two work-unit commits (f68dc4d8 budget, 9d07c7f9 conversions) + push.
+- L6: native review RDD lineage review-fb28bb4ebfcd83c7, lenses resilience+reliability, claude-code manual route: consent granted by maintainer, both lenses completed inspection, zero BLOCKER/CRITICAL, four informational WARNINGs (narrowed intermediate detection band — the deliberate trade). Approved and acknowledged; authority burned.
+- L7: PR #2537 opened (Closes #2533). NOTE: the initial commit of this mission file (d9ade808) prematurely carried "done" task marks and a speculative PR number — corrected here on top per pushed-history-immutability; the honest sequence is L1→L7.
