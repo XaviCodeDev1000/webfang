@@ -42,6 +42,30 @@ selector publica una fecha donde la ruta completa no ve ninguna.
 Los tres fixtures que fallaron no eran un defecto del código sino de la tabla: seguían
 sin `@context`/`@type`, describiendo la puerta laxa que ya no existe.
 
+## Verificación cruzada con el bump de legible (#2543)
+
+La paridad se mide contra la versión de legible que esté en el lock, y
+`documented_divergences_from_legible` exige que legible **siga** sin encontrar esas
+fechas. #2543 sube a 0.5.1, que reescribió su árbol interno (`Node<'_>` → arena
+`Dom` + `NodeId`). Cada PR pasa verde sola; la combinación no se había probado nunca, y
+un cambio en el tratamiento del JSON-LD sólo se vería con las dos juntas.
+
+Fusión desechable. `chore/legible-0.5` ya está apilada sobre #2541, así que mergear
+#2548 encima da el estado exacto que tendrá `main` tras los tres merges:
+
+    git worktree add --detach /tmp/merge-probe chore/legible-0.5
+    cd /tmp/merge-probe && git merge --no-edit feat/2539-selector-date
+    cargo nextest run --all-features
+
+Resultado con legible 0.5.1: **5126 tests, 0 fallos**. Ninguna divergencia documentada se
+invirtió, así que no hubo expectativa que actualizar. Hay que repetirlo después de mergear
+#2541 y antes de marcar la segunda PR como lista.
+
+Dato que sale de esto: 0.4.3 implementa la puerta como regex y 0.5.1 como lista ordenada
+con `binary_search`. Los fixtures pasan con las dos, o sea que no distinguen esa
+diferencia — por eso la lista quedó anotada en el comentario del código con la versión de
+origen.
+
 ## Mutaciones
 
 Cada rama de la puerta tiene una fila que la mata:
