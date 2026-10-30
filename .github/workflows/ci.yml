@@ -912,6 +912,9 @@ jobs:
       #   - test_eol_line.sh: declaring a line EOL writes the state and
       #     ANNOUNCES the branch deletion as a runbook step; the deletion is
       #     never a side effect of the rotation (#2531, option A).
+      #   - test_rotate_stable.sh: the rotation can run BEFORE the tag exists
+      #     (the pending mode), and the default mode still requires the
+      #     published tag.
       #   - test_seed_target_refusal.sh: a direct invocation of seed_target.sh
       #     cannot bypass the seed-store refusal.
       #   - test_target_isolation_envrc.sh: the .envrc ownership registry
@@ -922,6 +925,8 @@ jobs:
         run: bash scripts/test_cut_support_branch.sh
       - name: Support EOL semantics harness
         run: bash scripts/test_eol_line.sh
+      - name: Support rotation semantics harness
+        run: bash scripts/test_rotate_stable.sh
       - name: Seed target refusal semantics harness
         run: bash scripts/test_seed_target_refusal.sh
       - name: Target isolation envrc semantics harness
