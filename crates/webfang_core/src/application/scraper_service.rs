@@ -653,7 +653,9 @@ async fn build_scraped_content(
                 url: ValidUrl::try_from_url(url.clone())?,
                 excerpt: None,
                 author,
-                date: None,
+                // legible supplied published_time and this path skips legible;
+                // the date comes from the RAW document metadata (#2539).
+                date: crate::domain::html_extraction::date_extractor::extract_date(html),
                 html: Some(fragment),
                 assets,
                 correlation_id: Some(correlation.clone()),
