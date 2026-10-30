@@ -185,7 +185,7 @@ What differs from a run without a selector:
 | links | resolved by Readability | resolved against the page URL |
 | `title` | Readability's title | `<title>` of the full document |
 | `author` | byline, then document metadata | document metadata only |
-| `date` | `article:published_time` via Readability | empty — see #2539 |
+| `date` | `article:published_time` via Readability | document metadata: JSON-LD, `article:published_time`, microdata, `<time>` in an `<article>` |
 | `excerpt` | first paragraph or meta description | empty |
 
 Two details worth knowing:
@@ -194,6 +194,8 @@ Two details worth knowing:
   synthetic `<table><tbody>` around the fragment. A bare `<tr>` is not valid
   standalone HTML and loses its tags when converted, so this is the only case
   where the `html` field is not literally what the selector matched.
+- **The date** is the source string, trimmed — the same shape legible returns, so
+  the frontmatter never carries two date styles depending on the route.
 - **Tables without a `<th>`** degrade to one paragraph per cell instead of a
   Markdown table. Tables with a header row — with or without `<thead>` —
   convert correctly. Tracked in #2540.

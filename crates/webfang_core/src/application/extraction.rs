@@ -9,7 +9,9 @@ use crate::application::http_client::HttpClientPort;
 use crate::application::scraper_service::scrape_with_config;
 use crate::domain::config::ScraperConfig;
 use crate::domain::html_cleaner::clean_html;
-use crate::domain::html_extraction::{author_extractor, dom_pruner, fallback, readability};
+use crate::domain::html_extraction::{
+    author_extractor, date_extractor, dom_pruner, fallback, readability,
+};
 use crate::domain::{
     CorrelationId, DomInspectorPort, ExtractResult, ScrapedContent, SelectorErrorKind, ValidUrl,
 };
@@ -437,6 +439,9 @@ pub async fn extract_content(
         .await?;
         let document = scraper::Html::parse_document(html);
         let original_title = crate::application::scraper_service::extract_original_title(&document);
+        // Read from the RAW document: clean_html strips <script>, so JSON-LD
+        // never survives the cleaned HTML.
+        let date = date_extractor::extract_date_from_document(&document);
         // No byline: the fragment is not an article, so the author comes from
         // the document metadata (JSON-LD, meta tags, microdata).
         let author = author_extractor::extract_author(html, None);
@@ -449,9 +454,9 @@ pub async fn extract_content(
             // The user asked for elements, not an article: no excerpt.
             excerpt: None,
             author,
-            // Published time lived in legible's article; the selector path has
-            // no source for it yet (tracked as a follow-up).
-            date: None,
+            // legible supplied published_time and this path skips legible, so
+            // the date comes from document metadata instead (#2539).
+            date,
             html: Some(fragment),
             assets,
             correlation_id: Some(correlation_id.clone()),

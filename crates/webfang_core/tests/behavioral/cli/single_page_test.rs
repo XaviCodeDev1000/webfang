@@ -252,6 +252,38 @@ async fn selector_table_extracts_table() {
     assert_snapshot_redacted("selector_table_extracts_table", output.path(), &content);
 }
 
+
+/// #2539: the selector path skips legible, so the frontmatter date comes from
+/// document metadata instead of `published_time`. Asserted as a string, not a
+/// snapshot: the harness collapses `date:` to `[DATE]` before comparing.
+#[tokio::test]
+async fn selector_reads_publication_date_from_metadata() {
+    let server = MockServer::start().await;
+    let output = tempfile::TempDir::new().unwrap();
+
+    mount_html_page(
+        &server,
+        "<html><head><title>Dated Post</title>\
+         <meta property=\"article:published_time\" content=\"2026-03-04T10:00:00Z\">\
+         </head><body><article>\
+         <h1>Dated Post</h1>\
+         <p>Body text that the selector keeps and Readability never sees.</p>\
+         </article></body></html>",
+    )
+    .await;
+    run_selector_cmd(&server, &output, Some("article"));
+
+    let content = read_first_md(&output);
+    assert!(
+        content.contains("date: 2026-03-04T10:00:00Z"),
+        "selector path must resolve the date from metadata, got:\n{content}"
+    );
+    assert!(
+        !content.contains("excerpt:"),
+        "the selector path still emits no excerpt, got:\n{content}"
+    );
+}
+
 /// #2534: a table WITH a header row survives the selector path as a real
 /// Markdown table. The sibling above uses a headerless table, where htmd has no
 /// column names to build the header from and falls back to cell text — that

@@ -44,7 +44,7 @@ pub const SELECTOR: OptionSpec = OptionSpec {
     env: Some("WEBFANG_SELECTOR"),
     default: Some(DefaultValue::Str("body")),
     help: "Matched elements become the content directly (no main-content cleanup); \
-           title comes from the whole document, date and excerpt stay empty",
+           title and date come from the whole document, excerpt stays empty",
     heading: Some("Target"),
     kind: ValueKind::Text,
     visible_aliases: &[],

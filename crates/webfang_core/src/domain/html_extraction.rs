@@ -8,6 +8,7 @@
 
 /// Multi-strategy author extraction (domain pure, `scraper` + `serde_json`).
 pub mod author_extractor;
+pub mod date_extractor;
 
 /// DOM pre-pruning pass to drop invisible/empty nodes before Readability.
 pub mod dom_pruner;
