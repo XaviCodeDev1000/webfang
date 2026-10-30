@@ -28,6 +28,22 @@
 #     (`v2-14-0`) is REPORTED instead of being filtered away by the filter
 #     that excludes the candidates.
 #
+# TWO IN-FLIGHT WINDOWS, AND NOTHING ELSE
+# A release declares what it is about to publish BEFORE the tag exists, so
+# this gate has to recognize two sanctioned states — and only those two:
+#   - PENDING PUBLICATION: a declared `latest` exactly one patch ahead of
+#     the newest published patch of its own minor, with no tag of its own
+#     (the sanctioned patch bump);
+#   - PENDING ROTATION: the declared STABLE is the IMMEDIATE successor of
+#     the newest published minor, its predecessor is the one declared
+#     MAINTENANCE line, and the new line declares exactly X.Y.0 with no
+#     published patch of its own (the Release PR of a minor release, before
+#     the tag it will publish is cut).
+# Both are NOTEs, never silence: the run says which window it accepted.
+# Every other mismatch keeps failing exactly as before — a gap in the chain,
+# a missing MAINTENANCE predecessor, a declaration behind the published tag,
+# a line whose minor has no published patch at all.
+#
 # SCOPES (both, by default)
 #   --scope=declared    JSON self-consistency + SUPPORT.md render drift.
 #                       Needs no git tags, fully deterministic, green today:
@@ -72,6 +88,7 @@ ERRORS=0
 DECLARED_STABLE=""
 NEWEST_TAG=""
 UNREGISTERED=""
+PENDING_ROTATION=""
 
 # The title is what the check summary shows above the message, so it names the
 # file and the source of truth instead of repeating "support drift".
@@ -277,6 +294,74 @@ published_minors() {
   published_patch_tags | cut -d. -f1,2 | sort -u -V
 }
 
+# minor_is_successor <candidate> <predecessor>: true when `candidate` is the
+# IMMEDIATE successor of `predecessor` in the X.Y support-line order.
+#
+# Same major: the minor number advances by exactly one. A major bump: the
+# candidate opens the new major at .0 — 2.13 -> 3.0 is the shape release-plz
+# produces when the workspace moves to a new major, and 3.1 is NOT the
+# successor of 2.13 (3.0 would be missing).
+#
+# The comparison is NUMERIC in base 10, so 2.9 -> 2.10 is a real increment and
+# never a lexical accident.
+minor_is_successor() {
+  local candidate="$1" predecessor="$2"
+  [[ "$candidate"   =~ ^[0-9]+\.[0-9]+$ ]] || return 1
+  [[ "$predecessor" =~ ^[0-9]+\.[0-9]+$ ]] || return 1
+  local c_major c_minor p_major p_minor
+  IFS='.' read -r c_major c_minor <<<"$candidate"
+  IFS='.' read -r p_major p_minor <<<"$predecessor"
+  if (( 10#$c_major == 10#$p_major )); then
+    (( 10#$c_minor == 10#$p_minor + 1 ))
+    return
+  fi
+  (( 10#$c_major == 10#$p_major + 1 && 10#$c_minor == 0 ))
+}
+
+# pending_rotation <stable> <newest_published>: true when the declaration is
+# the sanctioned in-flight window of a MINOR release.
+#
+# A minor release publishes its tag only AFTER the Release PR merges, so the
+# Release PR carries the new support window while the tag is still absent.
+# The window is as narrow as the state allows:
+#   - the declared STABLE is the IMMEDIATE successor of the newest published
+#     minor (a rotation that skips a minor is not this window);
+#   - the predecessor is the ONE declared MAINTENANCE line (a complete
+#     rotation demotes it before the new STABLE appears);
+#   - the new line declares exactly X.Y.0 — a minor release, not a patch;
+#   - the new line has NO published patch of its own yet.
+#
+# Everything around it keeps failing exactly as before: a declaration behind
+# the published tag, a gap in the chain, a missing MAINTENANCE predecessor and
+# a line whose minor has no published patch at all are still errors.
+pending_rotation() {
+  local stable="$1" newest="$2"
+  [[ -n "$stable" && -n "$newest" ]] || return 1
+  minor_is_successor "$stable" "$newest" || return 1
+
+  # The new line declares exactly X.Y.0.
+  local declared_latest
+  declared_latest="$(jq -r --arg m "$stable" \
+    '.lines[] | select(.minor == $m) | (.latest // "")' "$SUPPORT_JSON" 2>/dev/null || true)"
+  [[ "$declared_latest" == "$stable.0" ]] || return 1
+
+  # The new line has no published patch of its own yet.
+  local stable_patches
+  stable_patches="$(published_patch_tags "v$stable.*" | sort -V | tail -n 1 || true)"
+  [[ -z "$stable_patches" ]] || return 1
+  [[ -z "$(git tag --list "v$stable.0")" ]] || return 1
+
+  # The predecessor is the ONE declared MAINTENANCE line.
+  local maint_count predecessor_state
+  maint_count="$(jq -r '[.lines[] | select(.state == "MAINTENANCE")] | length' \
+    "$SUPPORT_JSON" 2>/dev/null || true)"
+  [[ "$maint_count" == "1" ]] || return 1
+  predecessor_state="$(jq -r --arg m "$newest" \
+    '.lines[] | select(.minor == $m) | (.state // "")' "$SUPPORT_JSON" 2>/dev/null || true)"
+  [[ "$predecessor_state" == "MAINTENANCE" ]] || return 1
+  return 0
+}
+
 # unparseable_tags: the `v*` tags that are NEITHER a publication (vX.Y.Z) NOR
 # a release candidate (vX.Y.Z-rc.N — the shape release-tag-trust.sh accepts).
 #
@@ -339,6 +424,15 @@ check_published() {
   NEWEST_TAG="$(published_patch_tags | sort -V | tail -n 1 || true)"
   NEWEST_TAG="${NEWEST_TAG:+v$NEWEST_TAG}"
 
+  # The in-flight window of a MINOR release: the Release PR already declares
+  # the new support window, but the tag it publishes does not exist yet. The
+  # gate accepts that ONE state with a note; every other mismatch keeps
+  # failing exactly as before.
+  PENDING_ROTATION=""
+  if [[ -n "$stable" ]] && pending_rotation "$stable" "$newest"; then
+    PENDING_ROTATION="$stable"
+  fi
+
   # Support tracking has a floor: the OLDEST declared line. Everything published
   # before it predates tracking — 1.0/1.1 are exactly the case 2.0 records with
   # `eol_reason: "baseline: predates support tracking"` — and requiring them to
@@ -364,7 +458,11 @@ check_published() {
   if [[ -z "$stable" ]]; then
     err "no hay ninguna línea STABLE declarada, pero la minor publicada más reciente es $newest."
   elif [[ "$stable" != "$newest" ]]; then
-    err "línea STABLE declarada: $stable; minor publicada más reciente: $newest. La ventana de soporte exige que la STABLE sea la minor vigente (publicar vX.(Y+1).0 rota la anterior a MAINTENANCE)."
+    if [[ -n "$PENDING_ROTATION" ]]; then
+      note "rotación pendiente: la línea STABLE declarada $stable es la sucesora inmediata de la minor publicada más reciente $newest; el tag v$stable.0 todavía no existe."
+    else
+      err "línea STABLE declarada: $stable; minor publicada más reciente: $newest. La ventana de soporte exige que la STABLE sea la minor vigente (publicar vX.(Y+1).0 rota la anterior a MAINTENANCE)."
+    fi
   fi
 
   # Every published minor at or above the floor must carry a declaration. An
@@ -412,6 +510,12 @@ check_published() {
     if [[ "$newest_line" == "$l" ]]; then
       continue
     fi
+    if [[ -z "$newest_line" && "$m" == "$PENDING_ROTATION" ]]; then
+      # The pending rotation's own line has no published patch yet: the tag is
+      # cut after the Release PR merges. The rotation note already announced
+      # this window, so it is not drift.
+      continue
+    fi
     if [[ -n "$newest_line" ]] && pending_publication "$m" "$l" "$newest_line"; then
       pending_latest+="v$m declara v$l: publicación pendiente (el parche published más nuevo de esa minor es v$newest_line)"$'\n'
       continue
@@ -443,7 +547,13 @@ check_published() {
   maint="$(jq -r '.lines[] | select(.state == "MAINTENANCE") | .minor // empty' "$SUPPORT_JSON" 2>/dev/null || true)"
   if [[ -n "$maint" ]]; then
     local expected_prev
-    expected_prev="$(echo "$tracked" | grep -B1 -x -F "$stable" | head -n 1 || true)"
+    if [[ -n "$PENDING_ROTATION" ]]; then
+      # In the pending rotation the STABLE has no published minor yet, so the
+      # MAINTENANCE line that sustains it is the newest PUBLISHED minor.
+      expected_prev="$newest"
+    else
+      expected_prev="$(echo "$tracked" | grep -B1 -x -F "$stable" | head -n 1 || true)"
+    fi
     if [[ -z "$expected_prev" ]]; then
       err "línea MAINTENANCE declarada: $maint, pero $stable es la minor publicada más reciente (no hay minor publicada anterior que sostenerla)."
     elif [[ "$maint" != "$expected_prev" ]]; then
@@ -473,6 +583,9 @@ write_summary() {
       printf '| Declared STABLE | `%s` |\n' "${DECLARED_STABLE:-none}"
       printf '| Newest published tag | `%s` |\n' "${NEWEST_TAG:-none}"
       printf '| Published but not declared | `%s` |\n' "${unregistered:-none}"
+      if [[ -n "$PENDING_ROTATION" ]]; then
+        printf '| Pending rotation | `%s` |\n' "$PENDING_ROTATION"
+      fi
     fi
     echo "| Problems | $ERRORS |"
     echo
