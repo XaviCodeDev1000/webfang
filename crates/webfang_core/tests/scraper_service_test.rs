@@ -801,8 +801,8 @@ fn test_extract_with_selector_extracts_matching_elements() {
         "should contain matched element content"
     );
     assert!(
-        result.as_html().contains("selector-extracted"),
-        "should wrap in selector-extracted div"
+        !result.as_html().contains("selector-extracted"),
+        "the matched element IS the content: no Readability wrapper"
     );
     assert!(
         !result.as_html().contains("Sidebar"),
@@ -887,7 +887,7 @@ fn test_extract_with_selector_matched() {
         "matched HTML should contain the article content"
     );
     assert!(
-        result.as_html().contains("selector-extracted"),
+        !result.as_html().contains("selector-extracted"),
         "matched HTML should be wrapped in selector-extracted div"
     );
 }

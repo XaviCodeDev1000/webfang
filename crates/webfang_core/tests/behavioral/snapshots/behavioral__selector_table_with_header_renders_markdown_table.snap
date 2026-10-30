@@ -1,0 +1,13 @@
+---
+source: crates/webfang_core/tests/behavioral/main.rs
+expression: redacted
+---
+---
+title: 'Document: [127.0.0.1]'
+url: http://127.0.0.1:<PORT>/
+date: [DATE]
+---
+
+| Region | Revenue |
+| ------ | ------- |
+| North  | 120     |
