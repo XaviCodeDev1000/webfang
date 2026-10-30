@@ -170,9 +170,29 @@ pub fn extract_date_from_document(document: &Html) -> Option<String> {
 
 /// JSON-LD types that carry a publication date.
 ///
-/// Copied from legible: it is private there, and the two implementations must
-/// agree on which blocks count, or the same page resolves a different date
-/// depending on the route.
+/// The gate exists for **precision**, not for parity. A page's JSON-LD
+/// routinely describes more than the article: a `WebSite`, a `Comment`, a
+/// `Review`, a related `Article`. Without a type check the first
+/// `datePublished` in the document wins, and a comment's timestamp becomes the
+/// page's publication date.
+///
+/// The list and the surrounding logic (`@context` required, `@graph` consulted
+/// only when `@type` is absent, an array contributing its first article-typed
+/// element) are transcribed from **legible 0.5.1** (`src/metadata.rs`,
+/// `src/constants.rs`). It is private there and it can drift: fixture parity
+/// would not notice a type legible adds, because no fixture uses it. When
+/// bumping legible, diff this list against its `JSON_LD_ARTICLE_TYPES`.
+///
+/// legible 0.4.3 had the same 19 names but as a regex
+/// (`^Article|AdvertiserContentArticle|…|APIReference$`) where only the first
+/// and last alternatives are anchored, so it matched the middle ones as
+/// substrings — `"ArticleComment"` passed there and fails here. That is one
+/// more reason the list is a list and not a regex.
+///
+/// Accepted cost: a block without a schema.org `@context`, or with a type
+/// outside this list (`Recipe`, `Review`, `WebPage`), is ignored and the
+/// cascade falls through to `<meta>`. Rare for article pages, and falling
+/// through is what the full-page route does too.
 const JSON_LD_ARTICLE_TYPES: &[&str] = &[
     "APIReference",
     "AdvertiserContentArticle",
@@ -235,10 +255,11 @@ fn typed_article(value: &Value) -> Option<&Value> {
 
 /// The article node inside a JSON-LD payload, following `@graph`.
 ///
-/// Mirrors legible's gate exactly: an array contributes its first article-typed
-/// element, the payload must declare a schema.org `@context`, and a payload with
-/// no `@type` is resolved through `@graph`. Anything else is not an article and
-/// is skipped, so a `WebSite` block cannot hijack the date.
+/// An array contributes its first article-typed element, the payload must
+/// declare a schema.org `@context`, and a payload with no `@type` is resolved
+/// through `@graph`. Anything else is not an article and is skipped, so a
+/// `WebSite` block — or a comment's — cannot hijack the date. See
+/// [`JSON_LD_ARTICLE_TYPES`] for why the gate exists.
 fn article_node(parsed: &Value) -> Option<&Value> {
     let candidate = match parsed {
         Value::Array(items) => items.iter().find(|item| typed_article(item).is_some())?,
