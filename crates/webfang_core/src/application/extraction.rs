@@ -31,12 +31,12 @@ use crate::application::adaptive_engine::AdaptiveSelectorEngine;
 /// # Arguments
 /// * `html` - The HTML document to extract from
 /// * `selector` - CSS selector string (use `"body"` to skip extraction)
-/// * `_base_url` - Page URL used to resolve relative links; not consumed yet
+/// * `base_url` - Page URL used to resolve relative links in the fragment
 /// * `inspector` - Optional DOM inspector for diagnostics on failure paths
 pub fn extract_with_selector(
     html: &str,
     selector: &str,
-    _base_url: &url::Url,
+    base_url: &url::Url,
     inspector: Option<&dyn DomInspectorPort>,
 ) -> ExtractResult {
     if selector == "body" {
@@ -76,29 +76,31 @@ pub fn extract_with_selector(
         },
     };
 
-    let matched: Vec<String> = document.select(&sel).map(|el| el.html()).collect();
-
-    if matched.is_empty() {
-        return fallback(
+    match serialize_matches(&document, &sel, base_url) {
+        Some(fragment) => {
+            debug!("CSS selector '{}' produced a {}-byte fragment", selector, fragment.len());
+            ExtractResult::Matched(fragment)
+        }
+        None => fallback(
             html,
             inspector,
             &document,
             SelectorErrorKind::ZeroMatches,
             selector,
             &format!("CSS selector '{selector}' matched 0 elements, falling back to full HTML"),
-        );
+        ),
     }
+}
 
-    debug!(
-        "CSS selector '{}' matched {} elements",
-        selector,
-        matched.len()
-    );
-
-    ExtractResult::Matched(format!(
-        "<div id=\"selector-extracted\">{}</div>",
-        matched.join("\n")
-    ))
+/// Whether the caller must use the fragment as-is instead of running Readability.
+///
+/// The default `body` selector returns `Matched` too — it means "no extraction
+/// happened, the whole document is the input" — so `is_matched()` alone would
+/// skip Readability for every page. Both extraction routes ask this question,
+/// so the rule lives in one place (#2534).
+#[must_use]
+pub(crate) fn selector_supplied_fragment(selector: &str, result: &ExtractResult) -> bool {
+    selector != "body" && result.is_matched()
 }
 
 /// Serialize the elements matched by `selector` into one fragment.
@@ -110,11 +112,6 @@ pub fn extract_with_selector(
 /// of two concatenated headings.
 ///
 /// Returns `None` when the selector matches nothing.
-// Wired into the `--selector` path by the next commit of #2534; until then the
-// only callers are the tables below. `expect` (not `allow`) so that commit
-// cannot forget to remove this: once the function is used, the expectation is
-// unfulfilled and the lint fires.
-#[expect(dead_code)]
 fn serialize_matches(
     document: &scraper::Html,
     selector: &scraper::Selector,
@@ -425,6 +422,43 @@ pub async fn extract_content(
     // CSS selector step; content assembly not yet complete.
     crate::cli::crash_points::hit(crate::cli::crash_points::MID_EXTRACTION);
 
+    // #2534: an explicit selector already chose the content. Readability is a
+    // heuristic for FINDING main content in a full document; feeding it the
+    // user's own choice re-decides it and drags the output back onto legible's
+    // heuristics (which is why every new selector needed a new snapshot).
+    if selector_supplied_fragment(&config.selector, &extract_result) {
+        let fragment = extract_result.as_html().to_owned();
+        let assets = crate::application::asset_download::download_assets_if_enabled(
+            html,
+            url,
+            config,
+            asset_downloader,
+        )
+        .await?;
+        let document = scraper::Html::parse_document(html);
+        let original_title = crate::application::scraper_service::extract_original_title(&document);
+        // No byline: the fragment is not an article, so the author comes from
+        // the document metadata (JSON-LD, meta tags, microdata).
+        let author = author_extractor::extract_author(html, None);
+
+        return Ok(ScrapedContent {
+            title: crate::application::resolve_title(&original_title, url),
+            // Derived from the fragment so JSON/JSONL keep block boundaries.
+            content: fallback::extract_text(&fragment),
+            url: ValidUrl::try_from_url(url.clone())?,
+            // The user asked for elements, not an article: no excerpt.
+            excerpt: None,
+            author,
+            // Published time lived in legible's article; the selector path has
+            // no source for it yet (tracked as a follow-up).
+            date: None,
+            html: Some(fragment),
+            assets,
+            correlation_id: Some(correlation_id.clone()),
+            quality_hint,
+        });
+    }
+
     let extraction_html = extract_result.as_html().to_owned();
 
     // Try Readability first, fallback to plain text extraction
@@ -562,19 +596,22 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // servo_arc 0.4.3 Tree Borrows UB: drops parsed Selector (#487, #764)
     #[test]
-    fn test_matching_selector_wraps_elements() {
+    fn test_matching_selector_returns_the_fragment_unwrapped() {
         let html = "<html><body><div class=\"main\">Hello</div><aside>noise</aside></body></html>";
         let result = extract_with_selector(html, "div.main", &base(), None);
         assert!(result.is_matched());
         let extracted = result.as_html();
-        assert!(
-            extracted.starts_with("<div id=\"selector-extracted\">"),
-            "matched output must be wrapped for Readability, got: {extracted}"
+        assert_eq!(
+            extracted, "<div class=\"main\">Hello</div>",
+            "the matched element is the content: no Readability wrapper, no siblings"
         );
-        assert!(extracted.contains("Hello"));
         assert!(
-            !extracted.contains("noise"),
-            "non-matching elements must be excluded"
+            selector_supplied_fragment("div.main", &result),
+            "an explicit selector that matched must skip Readability"
+        );
+        assert!(
+            !selector_supplied_fragment("body", &result),
+            "the body default never skips Readability, even when Matched"
         );
     }
 
