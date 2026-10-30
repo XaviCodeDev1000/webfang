@@ -190,8 +190,13 @@ check_fast_gate_wiring() {
   # EJECUTAR el harness. La forma de casa aquí es
   # `run_step "<nombre>" bash <script>`.
   for script in "${HARNESSES[@]}"; do
+    # grep -E WITHOUT -q, redirected: -q exits at the first match, and under
+    # `pipefail` the upstream grep's late SIGPIPE (141) turns an existing
+    # match into a pipeline failure — a race that reds the required Repo
+    # guards intermittently (measured on merge-group CI, PR #2536). Without
+    # -q the downstream reads to EOF and the upstream can never get EPIPE.
     if ! grep -vE '^[[:space:]]*#' <<< "$lane" \
-      | grep -qE "run_step .*${script//./\\.}|bash ${script//./\\.}"; then
+      | grep -E "run_step .*${script//./\\.}|bash ${script//./\\.}" >/dev/null; then
       echo "lane_ci no corre $script: un cambio \`scripts/**\` — el único que puede romperlo — no lo ejercitaría localmente"
       bad=1
     fi
