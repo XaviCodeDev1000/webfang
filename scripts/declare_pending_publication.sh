@@ -169,7 +169,14 @@ write_declaration() {
       # workspace version it reads there: the version the Release PR carries
       # and the version its tag will be cut from.
       if ! bash "$root/scripts/rotate-stable.sh" "$minor" --pending-publication; then
+        # The failure arm does NOT continue: `err` terminates the process, and
+        # the explicit `return 1` below keeps the arm non-continuing even if
+        # that contract ever changes. The success line below is therefore
+        # unreachable after a failed rotation — a failure never reports a
+        # rotated window (review of PR #2536, R1/R3/R4).
         err "the support window could not be rotated for the pending minor $version: the release is NOT declared and nothing was committed. A minor release whose window cannot be rotated must not publish a tag without a declaration (#2052, #2520)."
+        # shellcheck disable=SC2317  # deliberate belt to err's suspenders: the arm never continues
+        return 1
       fi
       printf 'declare-pending-publication: rotated the support window for %s (pending publication → v%s; the tag is cut after the Release PR merges)\n' "$minor" "$version"
       return 0

@@ -481,6 +481,17 @@ if [[ $LAST_RC -ne 0 ]]; then
   else
     fail "(b'') the declaration is byte-identical after the refusal"
   fi
+  # The success line must be unreachable on the refusal path: a stdout line
+  # reporting a rotation would tell unattended log consumers that key on the
+  # message instead of the exit code that the rotation landed — the
+  # silent-success class this change exists to eliminate. Today `err`
+  # terminates the process; this row keeps that invariant true even if the
+  # helper's contract ever changes.
+  if ! grep -qF "rotated the support window" <<< "$LAST_OUT"; then
+    pass "(b'') the refusal output carries no success line"
+  else
+    fail "(b'') the refusal output carries no success line"
+  fi
 else
   fail "(b'') a rotation that cannot be done fails the writer (rc=0: $LAST_OUT)"
 fi
