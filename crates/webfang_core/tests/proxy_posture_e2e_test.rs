@@ -13,9 +13,9 @@ mod common;
 
 use common::BehavioralTest;
 use url::Url;
-use webfang_core::HttpClientConfig;
 use webfang_core::infrastructure::downloader::wreq_downloader::WreqDownloader;
 use webfang_core::infrastructure::downloader::Downloader;
+use webfang_core::HttpClientConfig;
 use webfang_test_utils::EnvGuard;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -35,10 +35,12 @@ const SCRUBBED_PROXY_VARS: &[&str] = &[
 async fn mount_ok(server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_raw("<html><body>ok</body></html>", "text/html; charset=utf-8"),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            "<html><body><h1>Proxy Posture</h1><p>This page carries enough \
+             extractable text to pass the minimum-content guard, so a direct \
+             dial produces a successful scrape end to end.</p></body></html>",
+            "text/html; charset=utf-8",
+        ))
         .mount(server)
         .await;
 }
@@ -80,7 +82,10 @@ async fn scrape_client_ignores_env_proxy() {
         .fetch(&url)
         .await
         .expect("direct fetch from wiremock should succeed");
-    assert_eq!(page.status, 200, "fetch must reach the target, not the proxy");
+    assert_eq!(
+        page.status, 200,
+        "fetch must reach the target, not the proxy"
+    );
 
     let proxy_requests = proxy.received_requests().await.unwrap_or_default();
     assert!(
