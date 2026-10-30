@@ -229,6 +229,26 @@ fn test_issue_1933_doctor_budget_discloses_the_tramo_d_boundary() {
     );
 }
 
+/// `webfang doctor` must state the proxy posture on every run (#2500): the
+/// proxy environment is ignored by design, so an operator behind a corporate
+/// proxy gets an explicit answer here, not a TLS failure at dial time.
+#[test]
+fn test_issue_2500_doctor_states_the_proxy_posture() {
+    let (_dir, config) = seeded_config(KNOWN_PROVIDER_TOML);
+
+    let output = run_with_config(&["doctor"], &config);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("Proxy: no se usa"),
+        "doctor must state the proxy posture explicitly, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("se ignora por diseño"),
+        "doctor must say the proxy environment is ignored by design, got:\n{stdout}"
+    );
+}
+
 /// A config that still declares the removed `local_onnx` kind must fail to
 /// load, naming the value.
 ///

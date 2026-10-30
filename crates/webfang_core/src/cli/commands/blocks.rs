@@ -98,6 +98,19 @@ pub fn print_provider_block(provider: &ProviderConfig, explicit: bool) {
     }
 }
 
+/// Print the shared proxy posture line (#2500).
+///
+/// The proxy environment is ignored by design: egress is direct and the SSRF
+/// resolver always resolves the real destination. `doctor` states it on every
+/// run so an operator behind a corporate proxy gets an explicit answer here,
+/// not a TLS handshake failure at dial time.
+pub fn print_proxy_posture() {
+    println!(
+        "Proxy: no se usa — el entorno HTTP_PROXY/HTTPS_PROXY/ALL_PROXY se ignora por diseño;"
+    );
+    println!("  el egreso es directo y el guard SSRF resuelve siempre el destino real (#2500).");
+}
+
 /// Print the shared historical block: the `[[model_profiles]]` metadata.
 ///
 /// Every shipped profile is listed with its provenance and its cited
