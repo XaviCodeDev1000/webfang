@@ -35,10 +35,14 @@ FAILED=0
 pass() { PASSED=$((PASSED + 1)); printf '  ok   %s\n' "$1"; }
 fail() { FAILED=$((FAILED + 1)); printf '  FAIL %s\n' "$1"; }
 
-# new_fx <name>: repo + local bare origin, main pushed, eol script installed.
-# Lines: 2.2 STABLE, 2.1 MAINTENANCE (with a materialized branch), 2.0 EOL.
+# new_fx <name> [branch_2_1]: repo + local bare origin, main pushed, eol script
+# installed. Lines: 2.2 STABLE, 2.1 MAINTENANCE (with a materialized branch,
+# unless the second argument is empty: a branchless MAINTENANCE line — branch
+# null — is a shape the declaration model itself allows), 2.0 EOL.
 new_fx() {
-  local bare="$WORK/$1.git" repo="$WORK/$1-clone"
+  local bare="$WORK/$1.git" repo="$WORK/$1-clone" branch_21="${2-support/2.1}"
+  local branch_21_json=""
+  if [[ -n "$branch_21" ]]; then branch_21_json="\"$branch_21\""; else branch_21_json="null"; fi
   mkdir -p "$repo/scripts"
   cp "$REPO_ROOT/scripts/eol-line.sh" "$repo/scripts/"
   chmod +x "$repo/scripts/eol-line.sh"
@@ -56,18 +60,21 @@ new_fx() {
   "schema_version": 1,
   "lines": [
     {"minor":"2.2","state":"STABLE","branch":null,"latest":"2.2.0","accepts":["bugfix","security"]},
-    {"minor":"2.1","state":"MAINTENANCE","branch":"support/2.1","latest":"2.1.0","accepts":["security"]},
+    {"minor":"2.1","state":"MAINTENANCE","branch":%s,"latest":"2.1.0","accepts":["security"]},
     {"minor":"2.0","state":"EOL","branch":null,"latest":"2.0.0","eol_at":"2026-10-01","eol_reason":"fixture"}
   ]
 }
-' > "$repo/.github/support.json"
+' "$branch_21_json" > "$repo/.github/support.json"
   git -C "$repo" add -A
   git -C "$repo" commit -q -m init
   git -C "$repo" push -q origin main 2>/dev/null
   # The support branch of the MAINTENANCE line, local AND remote: a deletion
-  # would have something real to delete.
-  git -C "$repo" branch support/2.1
-  git -C "$repo" push -q origin support/2.1 2>/dev/null
+  # would have something real to delete. A branchless line has no branch to
+  # create — that is the point of the shape.
+  if [[ -n "$branch_21" ]]; then
+    git -C "$repo" branch "$branch_21"
+    git -C "$repo" push -q origin "$branch_21" 2>/dev/null
+  fi
   echo "$repo"
 }
 
@@ -138,6 +145,41 @@ if grep -qF 'OK: línea 2.1 en EOL.' <<<"$LAST_OUT"; then
   pass "el contrato de salida (OK: línea X.Y en EOL.) sigue intacto"
 else
   fail "la línea de OK cambió o desapareció: $LAST_OUT"
+fi
+
+echo "== una línea MAINTENANCE sin rama no anuncia ningún borrado =="
+
+# The declaration model allows a MAINTENANCE line with branch null (the drift
+# fixtures use exactly that shape), and the rotation EOLs the previous
+# MAINTENANCE line through this script. For such a line there is no branch to
+# delete: announcing `git push origin --delete` would hand the runbook a
+# command that cannot succeed. The baseline answered an absent branch with its
+# own message and no command; the notice-as-runbook flow has to keep that
+# honesty.
+# NEGATION: pre-fix both notices interpolated the branch name unconditionally,
+# so a branchless line got a deletion command with a name that does not exist.
+FX_NULL="$(new_fx eol_branchless "")"
+run_eol "$FX_NULL" 2.1
+if [[ "$LAST_RC" -eq 0 ]]; then
+  pass "declarar EOL de una línea sin rama termina bien"
+else
+  fail "declarar EOL de una línea sin rama falló (rc=$LAST_RC): $LAST_OUT"
+fi
+STATE_NULL="$(jq -r '.lines[] | select(.minor=="2.1") | .state' "$FX_NULL/.github/support.json")"
+if [[ "$STATE_NULL" == "EOL" ]]; then
+  pass "la línea 2.1 sin rama queda EOL"
+else
+  fail "la línea 2.1 sin rama no quedó EOL (state=$STATE_NULL)"
+fi
+if grep -qF 'git push origin --delete' <<<"$LAST_OUT"; then
+  fail "una línea sin rama NO anuncia ningún comando de borrado: $LAST_OUT"
+else
+  pass "una línea sin rama NO anuncia ningún comando de borrado"
+fi
+if grep -qF 'OK: línea 2.1 en EOL.' <<<"$LAST_OUT"; then
+  pass "el contrato de salida (OK: línea X.Y en EOL.) vale también sin rama"
+else
+  fail "la línea de OK cambió o desapareció para la línea sin rama: $LAST_OUT"
 fi
 
 echo "== una línea inexistente falla cerrada y no muta nada =="

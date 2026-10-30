@@ -27,7 +27,6 @@ cd "$(git rev-parse --show-toplevel)"
 MINOR="${1:?usage: eol-line.sh X.Y}"
 SUPPORT_JSON=".github/support.json"
 [[ -f "$SUPPORT_JSON" ]] || { echo "$SUPPORT_JSON no existe" >&2; exit 1; }
-BRANCH="support/${MINOR}"
 
 # Audit B10: the line is validated BEFORE anything else — a nonexistent minor
 # used to fall through `select()` unpatched (jq writes an unchanged document,
@@ -37,6 +36,16 @@ if ! jq -e --arg minor "$MINOR" 'any(.lines[]; .minor == $minor)' "$SUPPORT_JSON
   echo "::error::eol-line.sh: la línea $MINOR no existe en $SUPPORT_JSON — falla-cerrada: ninguna mutación (branch ni estado) corrió (audit B10)." >&2
   exit 1
 fi
+
+# The branch the line declares BEFORE the EOL write nulls it. The state model
+# allows a MAINTENANCE line with branch null (the drift-gate fixtures use
+# exactly that shape), and the rotation EOLs the previous MAINTENANCE line
+# through this script: for such a line there is no branch to delete, and
+# announcing a deletion command would hand the runbook a command that cannot
+# succeed. Read here, before any mutation, so a read failure leaves the
+# declaration untouched (fail closed, audit B10 discipline).
+DECLARED_BRANCH="$(jq -r --arg minor "$MINOR" '(.lines[] | select(.minor == $minor) | (.branch // ""))' "$SUPPORT_JSON")" \
+  || { echo "::error::eol-line.sh: no se pudo leer la rama declarada de $MINOR — falla-cerrada: ninguna mutación corrió." >&2; exit 1; }
 
 # State is written FIRST (audit B10): a failed state write must leave the
 # declaration exactly as it was. A jq failure aborts BEFORE the write lands —
@@ -58,9 +67,17 @@ echo "estado escrito: línea $MINOR -> EOL."
 # source of truth, and the branch is its physical projection — deleting it is
 # an explicit step of the runbook, announced here with the exact command, not
 # a side effect of the rotation. Nothing in this script touches the remote.
-echo "::notice::eol-line.sh: la línea $MINOR queda EOL. La rama $BRANCH NO se borra automáticamente: la branch es la proyección física del estado, y su borrado es un paso explícito del runbook."
-echo "::notice::eol-line.sh: borrá la rama de soporte con: git push origin --delete $BRANCH"
-if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-  echo "::notice::eol-line.sh: la branch local $BRANCH existe; después del borrado remoto se elimina local con: git branch -D $BRANCH"
+# The runbook is only announced for a line that actually anchored a branch:
+# a branchless declaration gets its own honest notice, never a command that
+# cannot succeed.
+echo "::notice::eol-line.sh: la línea $MINOR queda EOL."
+if [[ -n "$DECLARED_BRANCH" ]]; then
+  echo "::notice::eol-line.sh: la rama $DECLARED_BRANCH NO se borra automáticamente: la branch es la proyección física del estado, y su borrado es un paso explícito del runbook."
+  echo "::notice::eol-line.sh: borrá la rama de soporte con: git push origin --delete $DECLARED_BRANCH"
+  if git show-ref --verify --quiet "refs/heads/$DECLARED_BRANCH"; then
+    echo "::notice::eol-line.sh: la branch local $DECLARED_BRANCH existe; después del borrado remoto se elimina local con: git branch -D $DECLARED_BRANCH"
+  fi
+else
+  echo "::notice::eol-line.sh: la línea $MINOR no ancla ninguna rama (branch null): no hay borrado que anunciar en el runbook."
 fi
 echo "OK: línea $MINOR en EOL."
