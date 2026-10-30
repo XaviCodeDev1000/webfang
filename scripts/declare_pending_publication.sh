@@ -36,12 +36,23 @@
 #     of the checkout it runs in, with the same sed discipline
 #     scripts/apply_release_pins.sh uses (one grammar, not two);
 #   - the line is `${VERSION%.*}`;
-#   - a line that is NOT declared in .github/support.json is NOT invented:
-#     rotating the support lines is a governance decision (an issue plus the
-#     maintainer — see AGENTS.md "Agent routing" and scripts/rotate-stable.sh),
-#     so the step warns, names the version and exits 0. A release is never
-#     blocked by a support governance matter; the enforcing gate reports the
-#     pending rotation with its own, more precise message;
+#   - a MINOR release rotates the support window: the Release PR is the only
+#     place where the new window can be declared, because the tag it is about
+#     to publish does not exist yet (issue #2531, option A). The rotation is
+#     delegated to scripts/rotate-stable.sh --pending-publication, whose
+#     premise is the workspace version of the checkout it runs in — the
+#     version the Release PR carries and the version its tag will be cut from;
+#   - a PATCH release on a line that is NOT declared in .github/support.json
+#     is NOT invented: declaring a new line is a governance decision (an
+#     issue plus the maintainer — see AGENTS.md "Agent routing"), so the step
+#     warns, names the version and exits 0, exactly as before;
+#   - when the rotation itself cannot be done (a published minor that was
+#     never declared, a gap in the chain), the step FAILS instead of
+#     skipping. A minor release whose window cannot be declared must not
+#     publish a tag without its declaration: that tag is what turned the
+#     whole repository red in #2052 and #2520, and what expelled unrelated
+#     pull requests from the merge queue. Failing here stops the release
+#     BEFORE the tag exists, which is the only point where stopping is cheap;
 #   - a declared line is handed to scripts/refresh_support_latest.sh, which is
 #     the SINGLE WRITER of the `latest` values. This script never writes
 #     support.json itself and never re-implements the writer's guards;
@@ -146,8 +157,32 @@ write_declaration() {
 
   local minor="${version%.*}"
   if [[ -z "$(declared_minor "$minor")" ]]; then
-    warn "the workspace version $version belongs to line $minor, which is not declared in .github/support.json: the pending publication is NOT declared. Rotating the support lines is a governance decision (an issue plus the maintainer — see AGENTS.md 'Agent routing' and scripts/rotate-stable.sh), and this step does not invent a line. The enforcing gate (scripts/check_support_drift.sh --scope=published) reports the pending rotation with its own message."
-    printf 'declare-pending-publication: skipped %s (line not declared; the support rotation is a governance decision)\n' "$minor"
+    if [[ "$version" == "${minor}.0" ]]; then
+      # A MINOR release: the Release PR owns the rotation of the support
+      # window (issue #2531, option A). The rotation declares STABLE /
+      # MAINTENANCE / EOL BEFORE the tag exists, so a tag never lands
+      # without its declaration — the drift that reddened every pull request
+      # in the repository.
+      #
+      # The rotation runs in THIS checkout (the worktree of the Release PR
+      # branch, when the orchestrator drives it) and its premise is the
+      # workspace version it reads there: the version the Release PR carries
+      # and the version its tag will be cut from.
+      if ! bash "$root/scripts/rotate-stable.sh" "$minor" --pending-publication; then
+        # The failure arm does NOT continue: `err` terminates the process, and
+        # the explicit `return 1` below keeps the arm non-continuing even if
+        # that contract ever changes. The success line below is therefore
+        # unreachable after a failed rotation — a failure never reports a
+        # rotated window (review of PR #2536, R1/R3/R4).
+        err "the support window could not be rotated for the pending minor $version: the release is NOT declared and nothing was committed. A minor release whose window cannot be rotated must not publish a tag without a declaration (#2052, #2520)."
+        # shellcheck disable=SC2317  # deliberate belt to err's suspenders: the arm never continues
+        return 1
+      fi
+      printf 'declare-pending-publication: rotated the support window for %s (pending publication → v%s; the tag is cut after the Release PR merges)\n' "$minor" "$version"
+      return 0
+    fi
+    warn "the workspace version $version belongs to line $minor, which is not declared in .github/support.json: the pending publication is NOT declared. Declaring a new line is a governance decision (an issue plus the maintainer — see AGENTS.md 'Agent routing'), and this step does not invent a line. The enforcing gate (scripts/check_support_drift.sh --scope=published) reports the pending publication with its own message."
+    printf 'declare-pending-publication: skipped %s (line not declared; declaring a new line is a governance decision)\n' "$minor"
     return 0
   fi
 

@@ -13,7 +13,11 @@
 #   3. it fails CLOSED on what it cannot see: a shallow clone, no tags,
 #      unparseable JSON, an unparseable tag. A guard that degrades to "skip"
 #      when blind is worse than no guard, because it reports safety it never
-#      established.
+#      established;
+#   4. it accepts ONLY the two sanctioned in-flight windows — a pending
+#      patch publication and a pending minor rotation — and still rejects
+#      every shape around them: a gap, a missing MAINTENANCE predecessor, a
+#      line whose minor has no published patch at all.
 #
 # Everything runs against mktemp fixtures: a synthetic git repo with synthetic
 # tags, plus copies of the two scripts under test. No network, no real tags,
@@ -356,6 +360,160 @@ if [[ "$GATE_RC" -eq 0 ]]; then
   pass "la ventana en vuelo se reconoce también en el salto numérico 9 -> 10"
 else
   fail "el salto numérico 9 -> 10 no se reconoció como ventana en vuelo (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+
+# ─── The pending MINOR rotation: the Release PR declares the window before the
+# tag exists ────────────────────────────────────────────────────────────────
+# A minor release publishes its tag only AFTER the Release PR merges, so the
+# Release PR must carry the new support window while the tag is still absent.
+# The window is as narrow as the state allows: the declared STABLE is the
+# immediate successor of the newest published minor, its predecessor is
+# declared MAINTENANCE, and the new line declares exactly X.Y.0 with no
+# published patch of its own.
+echo "== la ventana en vuelo de la rotación de minor: una minor por delante es una rotación pendiente =="
+
+PENDING_ROTATION_LINES='{
+  "schema_version": 1,
+  "lines": [
+    {"minor":"2.2","state":"STABLE","branch":null,"latest":"2.2.0","accepts":["bugfix","security"]},
+    {"minor":"2.1","state":"MAINTENANCE","branch":null,"latest":"2.1.1","accepts":["security"]},
+    {"minor":"2.0","state":"EOL","branch":null,"latest":"2.0.0","eol_at":"2026-09-14","eol_reason":"baseline"}
+  ]
+}'
+
+# (a) THE WINDOW: the declared STABLE is the immediate successor of the
+# newest published minor, its predecessor is declared MAINTENANCE, and the
+# new line declares X.Y.0 with no tag of its own. The gate must PASS.
+# NEGATION: before this window, the Release PR of a minor release was
+# rejected by its OWN required check — the STABLE it declares is one minor
+# ahead of the newest published tag — so the release could not be prepared.
+FX_ROT_PENDING="$(new_fixture pending_rotation)"
+set_lines "$FX_ROT_PENDING" "$PENDING_ROTATION_LINES"
+add_tags "$FX_ROT_PENDING" v2.0.0 v2.1.0 v2.1.1
+run_gate "$FX_ROT_PENDING" --scope=published
+if [[ "$GATE_RC" -eq 0 ]]; then
+  pass "una rotación de minor declarada antes del tag pasa el gate"
+else
+  fail "el gate rechazó la ventana en vuelo de la rotación de minor (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+if grep -qF 'rotación pendiente' <<<"$GATE_OUT" && grep -qF 'v2.2.0' <<<"$GATE_OUT"; then
+  pass "la rotación pendiente se anuncia nombrando la línea y el tag ausente"
+else
+  fail "la aceptación de la rotación pendiente no se distingue del silencio: $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+if ! grep -q '::error' <<<"$GATE_OUT"; then
+  pass "la rotación pendiente no produce anotación de error"
+else
+  fail "la rotación pendiente produjo una anotación de error: $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+expect "$FX_ROT_PENDING" pass "la rotación pendiente es internamente coherente (dos líneas vivas)" --scope=declared
+
+# (b) A GAP: the declared STABLE is NOT the immediate successor of the newest
+# published minor. The tolerance must not accept a line that skipped one.
+# NEGATION: a tolerance that accepts "one minor ahead" would also accept a
+# gap; the successor comparison must be exact.
+FX_ROT_PENDING_GAP="$(new_fixture pending_rotation_gap)"
+set_lines "$FX_ROT_PENDING_GAP" '{
+  "schema_version": 1,
+  "lines": [
+    {"minor":"2.3","state":"STABLE","branch":null,"latest":"2.3.0","accepts":["bugfix","security"]},
+    {"minor":"2.1","state":"MAINTENANCE","branch":null,"latest":"2.1.1","accepts":["security"]},
+    {"minor":"2.0","state":"EOL","branch":null,"latest":"2.0.0","eol_at":"2026-09-14","eol_reason":"baseline"}
+  ]
+}'
+add_tags "$FX_ROT_PENDING_GAP" v2.0.0 v2.1.0 v2.1.1
+run_gate "$FX_ROT_PENDING_GAP" --scope=published
+if [[ "$GATE_RC" -ne 0 ]] \
+   && grep -qF 'línea STABLE declarada: 2.3; minor publicada más reciente: 2.1' <<<"$GATE_OUT"; then
+  pass "una rotación que salta una minor sigue fallando (la tolerancia no abre el gap)"
+else
+  fail "una rotación que salta una minor dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+
+# (c) The predecessor of the pending STABLE is NOT declared MAINTENANCE: the
+# rotation is incomplete, so it is not the sanctioned window.
+# NEGATION: an incomplete rotation (no MAINTENANCE predecessor) is not the
+# sanctioned window, even when the successor relation holds.
+FX_ROT_PENDING_NO_MAINT="$(new_fixture pending_rotation_no_maintenance)"
+set_lines "$FX_ROT_PENDING_NO_MAINT" '{
+  "schema_version": 1,
+  "lines": [
+    {"minor":"2.2","state":"STABLE","branch":null,"latest":"2.2.0","accepts":["bugfix","security"]},
+    {"minor":"2.1","state":"EOL","branch":null,"latest":"2.1.1","eol_at":"2026-09-14","eol_reason":"fixture"},
+    {"minor":"2.0","state":"EOL","branch":null,"latest":"2.0.0","eol_at":"2026-09-14","eol_reason":"baseline"}
+  ]
+}'
+add_tags "$FX_ROT_PENDING_NO_MAINT" v2.0.0 v2.1.0 v2.1.1
+run_gate "$FX_ROT_PENDING_NO_MAINT" --scope=published
+if [[ "$GATE_RC" -ne 0 ]] \
+   && grep -qF 'línea STABLE declarada: 2.2; minor publicada más reciente: 2.1' <<<"$GATE_OUT"; then
+  pass "una rotación pendiente sin predecesora en MAINTENANCE sigue fallando"
+else
+  fail "una rotación pendiente sin predecesora en MAINTENANCE dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+
+# (d) The pending line declares a patch other than X.Y.0. A minor release
+# publishes X.Y.0; anything else is not the sanctioned rotation window.
+# NEGATION: a line whose minor has no published patch at all must keep
+# failing closed — the rotation window declares X.Y.0, not a patch.
+FX_ROT_PENDING_PATCH="$(new_fixture pending_rotation_patch)"
+set_lines "$FX_ROT_PENDING_PATCH" '{
+  "schema_version": 1,
+  "lines": [
+    {"minor":"2.2","state":"STABLE","branch":null,"latest":"2.2.1","accepts":["bugfix","security"]},
+    {"minor":"2.1","state":"MAINTENANCE","branch":null,"latest":"2.1.1","accepts":["security"]},
+    {"minor":"2.0","state":"EOL","branch":null,"latest":"2.0.0","eol_at":"2026-09-14","eol_reason":"baseline"}
+  ]
+}'
+add_tags "$FX_ROT_PENDING_PATCH" v2.0.0 v2.1.0 v2.1.1
+run_gate "$FX_ROT_PENDING_PATCH" --scope=published
+if [[ "$GATE_RC" -ne 0 ]] \
+   && grep -qF 'v2.2: declarado v2.2.1, sin ningún parche X.Y.Z publicado' <<<"$GATE_OUT"; then
+  pass "una línea pendiente que no declara X.Y.0 sigue fallando cerrado"
+else
+  fail "una línea pendiente que no declara X.Y.0 dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+
+# (e) The successor comparison is NUMERIC: 2.9 -> 2.10 is a real increment.
+# NEGATION: a lexicographic successor comparison reads 2.10 as older than
+# 2.9 and rejects the window.
+FX_ROT_PENDING_TEN="$(new_fixture pending_rotation_minor10)"
+set_lines "$FX_ROT_PENDING_TEN" '{
+  "schema_version": 1,
+  "lines": [
+    {"minor":"2.10","state":"STABLE","branch":null,"latest":"2.10.0","accepts":["bugfix","security"]},
+    {"minor":"2.9","state":"MAINTENANCE","branch":null,"latest":"2.9.1","accepts":["security"]},
+    {"minor":"2.8","state":"EOL","branch":null,"latest":"2.8.0","eol_at":"2026-09-14","eol_reason":"fixture"}
+  ]
+}'
+add_tags "$FX_ROT_PENDING_TEN" v2.8.0 v2.9.0 v2.9.1
+run_gate "$FX_ROT_PENDING_TEN" --scope=published
+if [[ "$GATE_RC" -eq 0 ]]; then
+  pass "la rotación pendiente se reconoce también en el salto numérico 2.9 -> 2.10"
+else
+  fail "el salto numérico 2.9 -> 2.10 no se reconoció como rotación pendiente (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
+fi
+
+# (f) A major bump is also a successor of the support line it replaces:
+# 2.13 -> 3.0 is the shape release-plz produces when the workspace moves to a
+# new major. The tolerance must recognize it as the immediate successor.
+# NEGATION: a same-major-only successor comparison rejects the 2.13 -> 3.0
+# shape release-plz actually produces.
+FX_ROT_PENDING_MAJOR="$(new_fixture pending_rotation_major)"
+set_lines "$FX_ROT_PENDING_MAJOR" '{
+  "schema_version": 1,
+  "lines": [
+    {"minor":"3.0","state":"STABLE","branch":null,"latest":"3.0.0","accepts":["bugfix","security"]},
+    {"minor":"2.13","state":"MAINTENANCE","branch":null,"latest":"2.13.0","accepts":["security"]},
+    {"minor":"2.12","state":"EOL","branch":null,"latest":"2.12.0","eol_at":"2026-09-14","eol_reason":"fixture"}
+  ]
+}'
+add_tags "$FX_ROT_PENDING_MAJOR" v2.12.0 v2.13.0
+run_gate "$FX_ROT_PENDING_MAJOR" --scope=published
+if [[ "$GATE_RC" -eq 0 ]]; then
+  pass "un salto de major 2.13 -> 3.0 se reconoce como rotación pendiente"
+else
+  fail "el salto de major 2.13 -> 3.0 no se reconoció como rotación pendiente (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
 fi
 
 # Positive control that keeps "-rc.N" out of the published set: an rc tag for a
