@@ -342,7 +342,7 @@ async fn scrape_page(
     crate::cli::crash_points::hit(crate::cli::crash_points::POST_FETCH_PRE_EXTRACT);
 
     // Apply CSS selector extraction if a non-default selector is configured.
-    let extract_result = extract_with_selector(&cleaned_html, &config.selector, inspector);
+    let extract_result = extract_with_selector(&cleaned_html, &config.selector, url, inspector);
 
     // Adaptive selector repair: delegate to the canonical shared helper (#442),
     // threading this use case's inspector through for diagnostics.
@@ -352,6 +352,7 @@ async fn scrape_page(
         extract_result,
         engine,
         &config.selector,
+        url,
         url.host_str(),
         inspector,
     )
@@ -372,11 +373,11 @@ async fn scrape_page(
     // [`extract_page_extractions`]: `scraper::Html` is neither `Send` nor
     // `Sync`, so confining all DOM access to a non-async function guarantees
     // this scrape future never captures the document across an `.await`.
-    let page = extract_page_extractions(html, &extraction_html, url, config);
+    let page = extract_page_extractions(html, &extract_result, url, config);
 
     // Try Readability first, fallback to plain text extraction
     let content = build_scraped_content(
-        page.article,
+        page.content,
         page.author,
         html,
         &extraction_html,
@@ -491,7 +492,7 @@ fn detect_waf(
 /// Extract the `<title>` from the original DOM before any transformation.
 ///
 /// 'title' is a compile-time-constant selector; `Selector::parse` cannot fail.
-fn extract_original_title(document: &scraper::Html) -> String {
+pub(crate) fn extract_original_title(document: &scraper::Html) -> String {
     #[allow(clippy::expect_used)]
     let selector = scraper::Selector::parse("title")
         // LCOV_EXCL_LINE defensive: compile-time-selector — 'title' is a constant valid selector
@@ -510,14 +511,25 @@ fn extract_original_title(document: &scraper::Html) -> String {
 struct PageExtractions {
     /// `<title>` of the original DOM (H1 FIX), empty when absent.
     original_title: String,
-    /// Readability article over the extracted HTML (`Err` → fallback branch).
-    article: crate::error::Result<readability::Article>,
+    /// What the extraction stage produced: the user's fragment or Readability.
+    content: PageContent,
     /// Author resolved against the shared DOM and the readability byline.
     author: Option<String>,
     /// Deduplicated asset URLs extracted from the shared DOM — validated
     /// `ValidUrl` values: the port downstream only accepts the typestate
     /// (#1117).
     asset_urls: Vec<crate::domain::ValidUrl>,
+}
+
+/// What the extraction stage produced for one page (#2534).
+///
+/// An explicit selector that matched means Readability never runs: the
+/// fragment is already the content the user asked for.
+enum PageContent {
+    /// `--selector` matched — the fragment IS the content.
+    Selector(String),
+    /// No explicit selector, or it fell back — Readability over the page.
+    Readability(crate::error::Result<readability::Article>),
 }
 
 /// Parse `html` once (#962) and run every document-dependent stage over the
@@ -530,7 +542,7 @@ struct PageExtractions {
 /// only ever holds the owned [`PageExtractions`] values.
 fn extract_page_extractions(
     html: &str,
-    extraction_html: &str,
+    extract_result: &crate::domain::dom_inspector::ExtractResult,
     url: &url::Url,
     config: &ScraperConfig,
 ) -> PageExtractions {
@@ -541,19 +553,33 @@ fn extract_page_extractions(
     // This preserves the <title> tag even when --selector filters it out.
     let original_title = extract_original_title(&document);
 
-    // Try Readability first; the caller falls back to plain-text extraction
-    // when this fails.
-    let article = readability::parse(extraction_html, Some(url.as_str()));
+    // #2534: an explicit selector already chose the content, so Readability is
+    // skipped entirely for it. Without a selector this is unchanged.
+    let content =
+        if crate::application::extraction::selector_supplied_fragment(&config.selector, extract_result)
+        {
+            PageContent::Selector(extract_result.as_html().to_owned())
+        } else {
+            PageContent::Readability(readability::parse(
+                extract_result.as_html(),
+                Some(url.as_str()),
+            ))
+        };
 
-    let author = article.as_ref().ok().and_then(|a| {
-        author_extractor::extract_author_from_document(&document, a.byline.as_deref())
-    });
+    let author = match &content {
+        PageContent::Readability(Ok(article)) => {
+            author_extractor::extract_author_from_document(&document, article.byline.as_deref())
+        }
+        PageContent::Readability(Err(_)) => None,
+        // No byline to fall back to: metadata only.
+        PageContent::Selector(_) => author_extractor::extract_author_from_document(&document, None),
+    };
 
     let asset_urls = extract_asset_urls(&document, url, config);
 
     PageExtractions {
         original_title,
-        article,
+        content,
         author,
         asset_urls,
     }
@@ -585,7 +611,7 @@ fn clean_html_for_scrape(html: &str, config: &ScraperConfig) -> String {
 /// this future only receives owned / `Send` data.
 #[allow(clippy::too_many_arguments)]
 async fn build_scraped_content(
-    article: crate::error::Result<readability::Article>,
+    content: PageContent,
     author: Option<String>,
     html: &str,
     extraction_html: &str,
@@ -597,6 +623,46 @@ async fn build_scraped_content(
     correlation: &CorrelationId,
     quality_hint: Option<crate::domain::extraction_quality::ExtractionQualityHint>,
 ) -> Result<ScrapedContent> {
+    // #2534: the selector fragment is the content. No Readability, no excerpt
+    // (the user asked for elements, not an article) and no published time
+    // (legible was its only source — tracked as a follow-up).
+    let article = match content {
+        PageContent::Selector(fragment) => {
+            let assets = download_asset_urls(
+                asset_urls,
+                config,
+                downloader.map(|d| d as &dyn crate::domain::ports::AssetDownloaderPort),
+            )
+            .await?;
+
+            // No minimum-content guard here: the guard exists to catch JS
+            // shells that rendered nothing, and an explicit selector is not
+            // a heuristic about whether the page rendered. A short heading is
+            // a legitimate answer to "--selector h3".
+            let selector_title = url.host_str().unwrap_or("unknown_host");
+            return Ok(ScrapedContent {
+                title: crate::application::resolve_title(
+                    if original_title.is_empty() {
+                        selector_title
+                    } else {
+                        original_title
+                    },
+                    url,
+                ),
+                content: fallback::extract_text(&fragment),
+                url: ValidUrl::try_from_url(url.clone())?,
+                excerpt: None,
+                author,
+                date: None,
+                html: Some(fragment),
+                assets,
+                correlation_id: Some(correlation.clone()),
+                quality_hint: quality_hint.clone(),
+            });
+        }
+        PageContent::Readability(article) => article,
+    };
+
     match article {
         Ok(article) => {
             let assets = download_asset_urls(

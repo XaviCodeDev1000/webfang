@@ -252,6 +252,36 @@ async fn selector_table_extracts_table() {
     assert_snapshot_redacted("selector_table_extracts_table", output.path(), &content);
 }
 
+/// #2534: a table WITH a header row survives the selector path as a real
+/// Markdown table. The sibling above uses a headerless table, where htmd has no
+/// column names to build the header from and falls back to cell text — that
+/// fixture therefore cannot demonstrate the fix.
+#[tokio::test]
+async fn selector_table_with_header_renders_markdown_table() {
+    let server = MockServer::start().await;
+    let output = tempfile::TempDir::new().unwrap();
+
+    mount_html_page(
+        &server,
+        "<html><body>\
+                 <h1>Data Page</h1>\
+                 <p>Intro text.</p>\
+                 <table><thead><tr><th>Region</th><th>Revenue</th></tr></thead>\
+                 <tbody><tr><td>North</td><td>120</td></tr></tbody></table>\
+                 <p>More text.</p>\
+                 </body></html>",
+    )
+    .await;
+    run_selector_cmd(&server, &output, Some("table"));
+
+    let content = read_first_md(&output);
+    assert_snapshot_redacted(
+        "selector_table_with_header_renders_markdown_table",
+        output.path(),
+        &content,
+    );
+}
+
 /// Without --selector (default "body"), full page content is extracted.
 #[tokio::test]
 async fn no_selector_extracts_full_page() {

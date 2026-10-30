@@ -47,7 +47,7 @@ expression: advertised_pretty(tool)
     },
     "selector": {
       "default": "body",
-      "description": "CSS selector for content extraction",
+      "description": "Matched elements become the content directly (no main-content cleanup); title comes from the whole document, date and excerpt stay empty",
       "type": [
         "string",
         "null"

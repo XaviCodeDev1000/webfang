@@ -43,7 +43,8 @@ pub const SELECTOR: OptionSpec = OptionSpec {
     aliases: &[],
     env: Some("WEBFANG_SELECTOR"),
     default: Some(DefaultValue::Str("body")),
-    help: "CSS selector for content extraction",
+    help: "Matched elements become the content directly (no main-content cleanup); \
+           title comes from the whole document, date and excerpt stay empty",
     heading: Some("Target"),
     kind: ValueKind::Text,
     visible_aliases: &[],
