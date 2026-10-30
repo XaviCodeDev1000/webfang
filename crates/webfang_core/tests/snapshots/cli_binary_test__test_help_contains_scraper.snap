@@ -42,7 +42,7 @@ Target:
           [env: WEBFANG_URL=]
 
   -s, --selector <SELECTOR>
-          Matched elements become the content directly (no main-content cleanup); title comes from the whole document, date and excerpt stay empty
+          Matched elements become the content directly (no main-content cleanup); title and date come from the whole document, excerpt stays empty
           
           [env: WEBFANG_SELECTOR=]
           [default: body]

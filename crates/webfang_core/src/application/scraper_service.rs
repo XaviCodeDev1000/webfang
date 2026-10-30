@@ -637,6 +637,7 @@ async fn selector_scraped_content(
     url: &url::Url,
     config: &ScraperConfig,
     downloader: Option<&dyn crate::domain::ports::AssetDownloaderPort>,
+    html: &str,
     original_title: &str,
     correlation: &CorrelationId,
     quality_hint: Option<crate::domain::extraction_quality::ExtractionQualityHint>,
@@ -653,7 +654,9 @@ async fn selector_scraped_content(
         url: ValidUrl::try_from_url(url.clone())?,
         excerpt: None,
         author,
-        date: None,
+        // legible supplied published_time and this path skips legible;
+        // the date comes from the RAW document metadata (#2539).
+        date: crate::domain::html_extraction::date_extractor::extract_date(html),
         html: Some(fragment),
         assets,
         correlation_id: Some(correlation.clone()),
@@ -684,6 +687,7 @@ async fn build_scraped_content(
                 url,
                 config,
                 downloader,
+                html,
                 original_title,
                 correlation,
                 quality_hint,
