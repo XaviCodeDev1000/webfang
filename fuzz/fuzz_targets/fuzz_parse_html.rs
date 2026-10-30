@@ -6,11 +6,16 @@ use libfuzzer_sys::fuzz_target;
 // This exercises the HTML parsing + CSS selector matching code path,
 // which is distinct from the readability parser (fuzz_readability_parse).
 // Panic = DoS when crawling sites with malformed HTML.
+/// Base URL for the selector path: resolution runs against it.
+fn base() -> url::Url {
+    url::Url::parse("https://example.com/").expect("static base URL is valid")
+}
+
 fuzz_target!(|data: &[u8]| {
     if let Ok(html) = std::str::from_utf8(data) {
         // Use a non-body selector to exercise the HTML parsing + CSS
         // selector matching pipeline. Selector parse errors are handled
         // gracefully (returned as Err), so no panic is possible.
-        let _ = webfang::application::scraper_service::extract_with_selector(html, "div", None);
+        let _ = webfang::application::scraper_service::extract_with_selector(html, "div", &base(), None);
     }
 });

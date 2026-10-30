@@ -768,10 +768,17 @@ fn test_min_content_chars_is_50() {
 // extract_with_selector tests (pure function, no I/O)
 // =====================================================================
 
+
+/// Base URL for the selector tests: the selector path resolves links against
+/// it, so every case pins the same origin.
+fn base() -> url::Url {
+    url::Url::parse("https://example.com/").expect("static base URL is valid")
+}
+
 #[test]
 fn test_extract_with_selector_body_passthrough() {
     let html = "<html><body><p>Hello</p></body></html>";
-    let result = extract_with_selector(html, "body", None);
+    let result = extract_with_selector(html, "body", &base(), None);
     assert!(result.is_matched(), "selector 'body' should return Matched");
     assert_eq!(
         result.as_html(),
@@ -787,7 +794,7 @@ fn test_extract_with_selector_extracts_matching_elements() {
             <div class="main"><p>Main content</p></div>
             <div class="sidebar"><p>Sidebar</p></div>
         </body></html>"#;
-    let result = extract_with_selector(html, "div.main", None);
+    let result = extract_with_selector(html, "div.main", &base(), None);
     assert!(result.is_matched(), "should return Matched");
     assert!(
         result.as_html().contains("Main content"),
@@ -807,7 +814,7 @@ fn test_extract_with_selector_extracts_matching_elements() {
 #[test]
 fn test_extract_with_selector_no_matches_falls_back() {
     let html = "<html><body><p>Hello</p></body></html>";
-    let result = extract_with_selector(html, "article", None);
+    let result = extract_with_selector(html, "article", &base(), None);
     assert!(!result.is_matched(), "no matches should return Fallback");
     assert_eq!(
         result.as_html(),
@@ -820,7 +827,7 @@ fn test_extract_with_selector_no_matches_falls_back() {
 #[test]
 fn test_extract_with_selector_invalid_syntax_falls_back() {
     let html = "<html><body><p>Hello</p></body></html>";
-    let result = extract_with_selector(html, ">>>invalid", None);
+    let result = extract_with_selector(html, ">>>invalid", &base(), None);
     assert!(
         !result.is_matched(),
         "invalid selector syntax should return Fallback"
@@ -840,7 +847,7 @@ fn test_extract_with_selector_multiple_matches_joined() {
             <li>Item 2</li>
             <li>Item 3</li>
         </body></html>"#;
-    let result = extract_with_selector(html, "li", None);
+    let result = extract_with_selector(html, "li", &base(), None);
     assert!(result.is_matched(), "should return Matched");
     assert!(result.as_html().contains("Item 1"));
     assert!(result.as_html().contains("Item 2"));
@@ -854,7 +861,7 @@ fn test_extract_with_selector_id_selector() {
             <div id="target"><p>Targeted</p></div>
             <div id="other"><p>Other</p></div>
         </body></html>"#;
-    let result = extract_with_selector(html, "#target", None);
+    let result = extract_with_selector(html, "#target", &base(), None);
     assert!(result.is_matched(), "should return Matched");
     assert!(result.as_html().contains("Targeted"));
     assert!(!result.as_html().contains("Other"));
@@ -870,7 +877,7 @@ fn test_extract_with_selector_matched() {
     let html = r#"<html><body>
             <article><p>Article content</p></article>
         </body></html>"#;
-    let result = extract_with_selector(html, "article", None);
+    let result = extract_with_selector(html, "article", &base(), None);
     assert!(
         result.is_matched(),
         "valid selector with matches should return Matched"
@@ -897,6 +904,7 @@ fn test_extract_with_selector_zero_matches_with_inspector() {
     let result = extract_with_selector(
         html,
         ".nonexistent",
+        &base(),
         Some(&inspector as &dyn DomInspectorPort),
     );
     assert!(!result.is_matched(), "zero matches should return Fallback");
@@ -926,7 +934,7 @@ fn test_extract_with_selector_zero_matches_with_inspector() {
 #[test]
 fn test_extract_with_selector_zero_matches_no_inspector() {
     let html = "<html><body><p>Hello</p></body></html>";
-    let result = extract_with_selector(html, "article", None);
+    let result = extract_with_selector(html, "article", &base(), None);
     assert!(!result.is_matched(), "zero matches should return Fallback");
     match &result {
         ExtractResult::Fallback {
@@ -950,7 +958,7 @@ fn test_extract_with_selector_invalid_syntax() {
     let html = "<html><body><p>Hello</p></body></html>";
     let inspector = DefaultDomInspector::new();
     let result =
-        extract_with_selector(html, "div >>> p", Some(&inspector as &dyn DomInspectorPort));
+        extract_with_selector(html, "div >>> p", &base(), Some(&inspector as &dyn DomInspectorPort));
     assert!(
         !result.is_matched(),
         "invalid selector syntax should return Fallback"
@@ -984,7 +992,7 @@ fn test_extract_with_selector_empty_html() {
     let inspector = DefaultDomInspector::new();
 
     // --- Truly empty HTML ---
-    let result = extract_with_selector("", "article", Some(&inspector as &dyn DomInspectorPort));
+    let result = extract_with_selector("", "article", &base(), Some(&inspector as &dyn DomInspectorPort));
     assert!(
         !result.is_matched(),
         "empty HTML should return Fallback, not Matched"
@@ -1011,6 +1019,7 @@ fn test_extract_with_selector_empty_html() {
     let result = extract_with_selector(
         "   \n\t  ",
         "article",
+        &base(),
         Some(&inspector as &dyn DomInspectorPort),
     );
     assert!(
@@ -1032,7 +1041,7 @@ fn test_extract_with_selector_empty_html() {
     }
 
     // --- Empty HTML without inspector -> diagnostic is None ---
-    let result = extract_with_selector("", "article", None);
+    let result = extract_with_selector("", "article", &base(), None);
     assert!(
         !result.is_matched(),
         "empty HTML without inspector should still return Fallback"
@@ -1049,7 +1058,7 @@ fn test_extract_with_selector_empty_html() {
     }
 
     // --- Empty HTML with body selector -> backward compat (returns Matched) ---
-    let result = extract_with_selector("", "body", None);
+    let result = extract_with_selector("", "body", &base(), None);
     assert!(
         result.is_matched(),
         "body selector on empty HTML should return Matched (backward compat)"

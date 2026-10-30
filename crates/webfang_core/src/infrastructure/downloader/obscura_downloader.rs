@@ -209,6 +209,11 @@ impl Downloader for ObscuraDownloader {
 mod tests {
     use super::*;
 
+    /// Base URL for the selector path exercised below.
+    fn base() -> url::Url {
+        url::Url::parse("https://example.com/").expect("static base URL is valid")
+    }
+
     #[test]
     fn test_obscura_downloader_basics() {
         let dl = ObscuraDownloader::new(15, "obscura");
@@ -453,7 +458,7 @@ mod tests {
         let url: Url = "https://example.com".parse().expect("valid test URL");
         let page = dl.fetch(&url).await.expect("fake obscura fetch");
 
-        match crate::application::extraction::extract_with_selector(&page.html, "article", None) {
+        match crate::application::extraction::extract_with_selector(&page.html, "article", &base(), None) {
             crate::domain::ExtractResult::Matched(html) => {
                 assert!(
                     html.contains("Obscura Article"),
