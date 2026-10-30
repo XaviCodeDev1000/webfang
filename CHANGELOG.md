@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.2.1] - 2026-10-30
+
+
+### 🏗️ Architecture Improvements
+
+- Collapse HTML→Markdown onto a single MarkdownConverter port backed by htmd ([#2503](https://github.com/XaviCodeDev1000/webfang/pull/2503))
+
+### 📦 Dependencies
+
+- Update Cargo.lock dependencies
+
+### 🔧 Fixed
+
+- The sitemap parser's fetch client honors --timeout-secs ([#2507](https://github.com/XaviCodeDev1000/webfang/pull/2507))
+- Pin direct egress — ignore the proxy environment ([#2547](https://github.com/XaviCodeDev1000/webfang/pull/2547))
+
+### 🧪 Testing
+
+- Single-source the budget epilogue and pin the crawl timeout keyword ([#2516](https://github.com/XaviCodeDev1000/webfang/pull/2516))
+- Differentiate the twin batch timeout tests — partial-failure contract ([#2517](https://github.com/XaviCodeDev1000/webfang/pull/2517)) ([#2525](https://github.com/XaviCodeDev1000/webfang/pull/2525))
+- Class sweep — convert residual wall-clock asserts to observable outcomes ([#2537](https://github.com/XaviCodeDev1000/webfang/pull/2537))
 ## [7.2.0] - 2026-10-29
 
 
