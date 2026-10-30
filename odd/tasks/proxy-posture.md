@@ -48,3 +48,10 @@ Resolution: **declare proxy support unsupported, explicitly.**
   check/clippy/fmt/nextest but NOT the repo-guards lane. Fixed on top: a2e26a52 (golden
   refresh, verified green with `cargo test --test real_tree` in tools/intra-crate-lint).
   Lesson: the fast gate's lane for src changes must include the intra-crate lint tests.
+- L7 (DEFECT 2): second CI run failed the same job at "Test inventory drift gate" — the new
+  test file must be regenerated into docs/test-inventory.json (ci_test_inventory.py). Fixed,
+  and this time the FULL fast gate ran locally first, which caught a third one before pushing:
+  the ai-providers doc drift gate (#2136) pins doctor.rs line citations — updated the claim
+  table (70 → 72) and the prose. Lesson: run `ci_fast_gate.sh` (with direnv env) before EVERY
+  push; tree-derived artifacts (golden set, test inventory, doc claim tables) travel with the
+  tree. Final local gate: PASS=61 FAIL=0.

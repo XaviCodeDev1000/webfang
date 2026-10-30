@@ -464,7 +464,7 @@
       "path": "crates/webfang_core/tests/cli_binary_test.rs",
       "crate": "webfang_core",
       "area": "cli",
-      "test_count": 23,
+      "test_count": 24,
       "ignored_count": 1,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
@@ -969,6 +969,15 @@
       "crate": "webfang_core",
       "area": "core",
       "test_count": 9,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
+      "path": "crates/webfang_core/tests/proxy_posture_e2e_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 2,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"
