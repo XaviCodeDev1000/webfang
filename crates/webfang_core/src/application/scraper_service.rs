@@ -342,7 +342,7 @@ async fn scrape_page(
     crate::cli::crash_points::hit(crate::cli::crash_points::POST_FETCH_PRE_EXTRACT);
 
     // Apply CSS selector extraction if a non-default selector is configured.
-    let extract_result = extract_with_selector(&cleaned_html, &config.selector, inspector);
+    let extract_result = extract_with_selector(&cleaned_html, &config.selector, url, inspector);
 
     // Adaptive selector repair: delegate to the canonical shared helper (#442),
     // threading this use case's inspector through for diagnostics.
@@ -352,6 +352,7 @@ async fn scrape_page(
         extract_result,
         engine,
         &config.selector,
+        url,
         url.host_str(),
         inspector,
     )

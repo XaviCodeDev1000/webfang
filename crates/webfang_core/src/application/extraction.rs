@@ -31,10 +31,12 @@ use crate::application::adaptive_engine::AdaptiveSelectorEngine;
 /// # Arguments
 /// * `html` - The HTML document to extract from
 /// * `selector` - CSS selector string (use `"body"` to skip extraction)
+/// * `_base_url` - Page URL used to resolve relative links; not consumed yet
 /// * `inspector` - Optional DOM inspector for diagnostics on failure paths
 pub fn extract_with_selector(
     html: &str,
     selector: &str,
+    _base_url: &url::Url,
     inspector: Option<&dyn DomInspectorPort>,
 ) -> ExtractResult {
     if selector == "body" {
@@ -109,8 +111,10 @@ pub fn extract_with_selector(
 ///
 /// Returns `None` when the selector matches nothing.
 // Wired into the `--selector` path by the next commit of #2534; until then the
-// only callers are the tables below.
-#[allow(dead_code)]
+// only callers are the tables below. `expect` (not `allow`) so that commit
+// cannot forget to remove this: once the function is used, the expectation is
+// unfulfilled and the lint fires.
+#[expect(dead_code)]
 fn serialize_matches(
     document: &scraper::Html,
     selector: &scraper::Selector,
@@ -297,6 +301,7 @@ pub(crate) async fn adaptive_selector_repair(
     extract_result: ExtractResult,
     engine: Option<&AdaptiveSelectorEngine>,
     selector: &str,
+    base_url: &url::Url,
     host: Option<&str>,
     inspector: Option<&dyn DomInspectorPort>,
 ) -> (
@@ -316,7 +321,7 @@ pub(crate) async fn adaptive_selector_repair(
                 Ok(outcome) => {
                     let trace = outcome.trace.clone();
                     let repaired =
-                        extract_with_selector(&html, &outcome.suggestion.selector, inspector);
+                        extract_with_selector(&html, &outcome.suggestion.selector, base_url, inspector);
                     if repaired.is_matched() {
                         tracing::info!(
                             repaired_selector = %outcome.suggestion.selector,
@@ -393,7 +398,7 @@ pub async fn extract_content(
     let cleaned_html = clean_html(&pruned_html);
 
     // Apply CSS selector extraction if a non-default selector is configured.
-    let extract_result = extract_with_selector(&cleaned_html, &config.selector, None);
+    let extract_result = extract_with_selector(&cleaned_html, &config.selector, url, None);
     // Adaptive selector repair (Tier 1 lexical): delegate to the canonical
     // shared helper (#442). Returns (ExtractResult, Option<CascadeTrace>).
     // The trace enables structural scoring for honest error hints (#792).
@@ -402,6 +407,7 @@ pub async fn extract_content(
         extract_result,
         engine,
         &config.selector,
+        url,
         url.host_str(),
         None,
     )
@@ -522,6 +528,11 @@ pub async fn extract_content(
 mod tests {
     use super::*;
 
+    /// Base URL for the selector cases below.
+    fn base() -> url::Url {
+        url::Url::parse("https://example.com/").expect("static base URL is valid")
+    }
+
     // Miri gating policy for this module (#764, #487): 6 tests below trip the
     // known servo_arc 0.4.3 ArcUnion Tree Borrows UB via two entry points:
     // - valid-selector tests drop a `scraper::Selector` built in
@@ -540,7 +551,7 @@ mod tests {
     #[test]
     fn test_body_selector_is_passthrough() {
         let html = "<html><body><p>keep me</p></body></html>";
-        let result = extract_with_selector(html, "body", None);
+        let result = extract_with_selector(html, "body", &base(), None);
         assert!(result.is_matched());
         assert_eq!(
             result.as_html(),
@@ -553,7 +564,7 @@ mod tests {
     #[test]
     fn test_matching_selector_wraps_elements() {
         let html = "<html><body><div class=\"main\">Hello</div><aside>noise</aside></body></html>";
-        let result = extract_with_selector(html, "div.main", None);
+        let result = extract_with_selector(html, "div.main", &base(), None);
         assert!(result.is_matched());
         let extracted = result.as_html();
         assert!(
@@ -571,7 +582,7 @@ mod tests {
     #[test]
     fn test_zero_matches_falls_back_without_inspector() {
         let html = "<html><body><p>content</p></body></html>";
-        let result = extract_with_selector(html, "div.does-not-exist", None);
+        let result = extract_with_selector(html, "div.does-not-exist", &base(), None);
         assert!(!result.is_matched());
         assert_eq!(result.as_html(), html, "fallback must carry the full HTML");
         match result {
@@ -585,7 +596,7 @@ mod tests {
     #[test]
     fn test_invalid_selector_falls_back() {
         let html = "<html><body><p>content</p></body></html>";
-        let result = extract_with_selector(html, ">>>not-a-selector", None);
+        let result = extract_with_selector(html, ">>>not-a-selector", &base(), None);
         assert!(!result.is_matched());
         assert_eq!(result.as_html(), html);
     }
@@ -611,7 +622,7 @@ mod tests {
 
     #[test]
     fn test_empty_html_falls_back() {
-        let result = extract_with_selector("   ", "div.main", None);
+        let result = extract_with_selector("   ", "div.main", &base(), None);
         assert!(!result.is_matched(), "whitespace-only HTML must fall back");
     }
 
@@ -873,6 +884,17 @@ mod selector_serialization {
                 // boundary as a paragraph break, but htmd still emits no table
                 // (it needs a <thead> to build the header row).
                 expected: "a\n\nb",
+            },
+            MdCase {
+                name: "characterize_two_tr_in_one_tbody",
+                html: "<table><tbody><tr><td>a</td><td>b</td></tr>\
+                       <tr><td>c</td><td>d</td></tr></tbody></table>",
+                selector: "tr",
+                // Characterization: every matched row lands in ONE synthetic
+                // table, and htmd still emits no table — only cell text, one
+                // paragraph per cell. Multi-row is the common case, so the
+                // limitation is stated for it, not for the single-row one.
+                expected: "a\n\nb\n\nc\n\nd",
             },
             MdCase {
                 name: "characterize_td_inside_table",
