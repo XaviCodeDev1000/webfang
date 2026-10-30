@@ -27,9 +27,9 @@ T2 — C4: keep the branch deletion out of the automatic rotation — `scripts/e
 
 T3 — C2: add the `rotate-stable.sh --pending-publication` mode, whose premise is the workspace version of the checkout instead of a published tag, keeping the GAP check and the default mode intact; new harness `scripts/test_rotate_stable.sh`, wired in `ci.yml` (S2, S3) — route: inline/test-first — commit: `feat(support): rotate the window before the tag is published` — DONE, commit `8c52cf23`
 
-T4 — C3: route an undeclared minor through `scripts/declare_pending_publication.sh` into the pending rotation, leaving the patch path untouched; harness cases in `scripts/test_declare_pending_publication.sh` (S2) — route: inline/test-first — commit: `feat(release): declare the pending minor rotation in the Release PR`
+T4 — C3: route an undeclared minor through `scripts/declare_pending_publication.sh` into the pending rotation, leaving the patch path untouched; harness cases in `scripts/test_declare_pending_publication.sh` (S2) — route: inline/test-first — commit: `feat(release): declare the pending minor rotation in the Release PR` — DONE, commit `717b9175`
 
-T5 — Delivery: open the PR against #2531 once that issue carries the protected `status:approved` label (S4) — route: branch-pr — commit: none (delivery)
+T5 — Delivery: open the PR against #2531 once that issue carries the protected `status:approved` label (S4) — route: branch-pr — commit: none (delivery) — IN PROGRESS: the label landed (L19)
 
 ## Log
 
@@ -70,3 +70,7 @@ L16. T4 evidence — RED: the new `scripts/test_declare_pending_publication.sh` 
 L17. Latent defect found and fixed while wiring the pending mode — `scripts/rotate-stable.sh` died SILENTLY, with no message, on a repository without tags: the `grep` of an empty tag stream exits 1, `pipefail` turns the assignment into a failure and `set -e` kills the script. The default mode never reaches that line (the tag premise comes first and exits with a message), so only the pending mode could hit it. Fixed with an explicit `|| true` and a comment that says why: no tags means no published minors, which is an answer (the gap is empty), not a crash.
 
 L18. Fixture hygiene — the support harnesses pin `tag.gpgsign false` on purpose: this workstation signs tags globally, and a signed tag opens an editor to compose the message, so a harness that tags without pinning the config HANGS instead of failing. The new case that publishes a tag (the GAP fixture) had to pin it as well.
+
+L19. The protected label landed — `gh issue view 2531` reports `status:approved` on #2531 (with `type:bug`), so the delivery gate of the repository is satisfied and T5 is unblocked. The branch is `fix/support-drift-rotation` with four work-unit commits: `10be5260` (C1), `ad68339e` (C4), `8c52cf23` (C2), `717b9175` (C3).
+
+L20. Verification of the whole branch — `cargo check`, `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` and `cargo fmt --all -- --check` are green (the diff is shell-only); `bash scripts/ci_fast_gate.sh` is GREEN (19 pass, 0 fail, 13 skipped by lane); `bash scripts/test_guard_coverage.sh` is green (28 wired guards, mutation on); `scripts/check_test_inventory.sh`, `scripts/check_regression_naming.sh`, `scripts/test_ci_gate_structure.sh` and the `ci.yml` YAML parse are green; the five support harnesses are green (drift 69/0, EOL 13/0, rotation 21/0, branch cut 15/0, patch bump 58/0, pending publication 45/0) and `bash scripts/check_support_drift.sh --scope=both` is green against this repository.
