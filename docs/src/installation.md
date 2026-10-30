@@ -227,7 +227,7 @@ endpoints; the sidecar talks to the corporate proxy, WebFang does not.
 
 ```powershell
 # 1. Download (PowerShell 5.1+)
-$Version = "v7.2.0"
+$Version = "v7.2.1"
 $Asset   = "webfang-x86_64-pc-windows-msvc.zip"
 Invoke-WebRequest "https://github.com/XaviCodeDev1000/webfang/releases/download/$Version/$Asset" -OutFile $Asset
 Invoke-WebRequest "https://github.com/XaviCodeDev1000/webfang/releases/download/$Version/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
