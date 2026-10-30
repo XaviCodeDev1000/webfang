@@ -423,6 +423,13 @@ impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::Default
     fn secure_client(&self, builder: wreq::ClientBuilder) -> wreq::ClientBuilder {
         builder
             .redirect(redirect_policy())
+            // Direct egress only (#2500): wreq honours HTTP_PROXY/HTTPS_PROXY/
+            // ALL_PROXY by default (`auto_sys_proxy`), which would resolve the
+            // PROXY host through the validating resolver instead of the
+            // destination — silently rejecting RFC1918 corporate proxies at
+            // the guard and delegating destination IP checks to the proxy.
+            // Proxy support is a declared non-feature; see docs/src/data-flow.md.
+            .no_proxy()
             .dns_resolver(ValidatingResolver::new())
     }
 
@@ -433,6 +440,7 @@ impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::Default
     ) -> wreq::ClientBuilder {
         builder
             .redirect(redirect_policy_with_loopback(allow_loopback))
+            .no_proxy()
             .dns_resolver(ValidatingResolver::with_allow_loopback(allow_loopback))
     }
 
@@ -444,6 +452,7 @@ impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::Default
     ) -> wreq::ClientBuilder {
         builder
             .redirect(redirect_policy_with_policy(allow_loopback, policy.clone()))
+            .no_proxy()
             .dns_resolver(ValidatingResolver::with_policy(allow_loopback, policy))
     }
 }

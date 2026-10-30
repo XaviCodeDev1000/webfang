@@ -60,6 +60,8 @@ pub async fn run(config_path: &Path, args: &SubcommandArgs) -> CliExit {
             Ok(provider) => diagnose_provider(&provider.clone(), args, &profiles).await,
             Err(e) => {
                 println!("\n=== doctor: ruta de embeddings ===\n");
+                crate::cli::commands::blocks::print_proxy_posture();
+                println!();
                 println!("Estado: provider '{id}' no resoluble");
                 println!("  {e}");
                 CliExit::ConfigError(format!(
@@ -78,7 +80,8 @@ pub async fn run(config_path: &Path, args: &SubcommandArgs) -> CliExit {
 /// from "something configured, but nothing that can serve embeddings".
 fn diagnose_no_usable_provider(providers: &[ProviderConfig]) -> CliExit {
     println!("\n=== doctor: ruta de embeddings ===\n");
-
+    crate::cli::commands::blocks::print_proxy_posture();
+    println!();
     if providers.is_empty() {
         println!("Estado: sin provider configurado");
         println!("  No hay ningún provider en el archivo de configuración.");
@@ -121,6 +124,8 @@ async fn diagnose_provider(
     profiles: &ModelProfilesConfig,
 ) -> CliExit {
     println!("\n=== doctor: ruta de embeddings ===\n");
+    crate::cli::commands::blocks::print_proxy_posture();
+    println!();
     crate::cli::commands::blocks::print_provider_block(provider, args.provider_id.is_some());
     print_profile_and_budget(args, profiles);
 

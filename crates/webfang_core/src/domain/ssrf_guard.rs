@@ -1034,7 +1034,9 @@ pub(crate) mod sealed {
 /// module) may implement it.
 pub trait SsrfGuard: Send + Sync + sealed::Sealed {
     /// Apply the full SSRF guard (redirect policy + validating resolver) to a
-    /// client builder. Consuming: `wreq::ClientBuilder` is not `Clone`.
+    /// client builder. Also pins direct egress (#2500): the proxy environment
+    /// is ignored, so the resolver always resolves the real destination.
+    /// Consuming: `wreq::ClientBuilder` is not `Clone`.
     fn secure_client(&self, builder: wreq::ClientBuilder) -> wreq::ClientBuilder;
 
     /// Parameterized variant of [`secure_client`](Self::secure_client) (#1462):

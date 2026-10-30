@@ -213,6 +213,16 @@ embeddings provider is selected at all (no `--embedding-provider`, and no
 provider with the `embedding` capability in the config), otherwise the run
 fails with exit 78 (ADR-0004 §46, corrected 2026-10-21).
 
+### Behind a corporate proxy?
+
+WebFang ignores the proxy environment (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`)
+by design — for the AI endpoints and for crawling alike (#2500, see
+[data flow](data-flow.md#proxy-posture-the-proxy-environment-is-ignored-by-design)).
+If your network only egresses through a proxy, run a local forwarding sidecar,
+point the provider's `base_url` at it, and opt that provider into loopback
+endpoints; the sidecar talks to the corporate proxy, WebFang does not.
+`webfang doctor` states this posture on every run.
+
 ### Windows
 
 ```powershell

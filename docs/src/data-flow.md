@@ -38,6 +38,36 @@ the SSRF-guarded downloader or through the two OpenAI-compatible AI adapters
 above. (The historical Hugging Face / local-ONNX paths were removed — see
 [the ONNX migration page](ai-onnx-migration.md).)
 
+## Proxy posture: the proxy environment is ignored by design
+
+WebFang dials **directly**. The proxy environment variables
+(`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY`) are ignored for every
+fetch path — crawling, assets, and both AI adapters — on every platform.
+
+This is deliberate, not an omission. The HTTP client honours those variables
+by default, and under a proxy the guard's validating DNS resolver resolves the
+**proxy's** host instead of the destination. Two consequences made silent
+proxy support unacceptable:
+
+- A corporate proxy on a private range (RFC1918) — the common deployment — is
+  rejected by the SSRF guard before a socket exists, with the operator seeing
+  an SSRF diagnosis instead of a working proxy.
+- When the proxy itself is allowed, the destination's IP checks are delegated
+  to the proxy: the client never resolves the destination, so the "forbidden
+  ranges are rejected before the socket exists" guarantee stops covering it.
+
+Where this is pinned: `DefaultSsrfGuard::secure_client*` applies `no_proxy()`
+at the single client-construction choke point, and
+`tests/proxy_posture_e2e_test.rs` proves that a request with `HTTP_PROXY` set
+reaches the target with zero requests observable at the proxy (both through
+the downloader and the `webfang` binary). `webfang doctor` states the posture
+on every run.
+
+**If you cannot dial out directly** (mandatory corporate proxy): run a local
+forwarding sidecar, point the provider's `base_url` at it, and opt into
+loopback endpoints for that provider — the sidecar, not WebFang, talks to the
+corporate proxy. WebFang never reads the proxy environment itself.
+
 ---
 
 ## The payload contract: extracted text, never raw HTML
