@@ -34,7 +34,7 @@ Checks: `git diff origin/main...HEAD --name-only`.
 - T2 (S1, S4) — inline — re-resolve the lock onto `legible 0.4.3`; the manifest requirement stays `legible = "0.4"` because it already admits 0.4.3. Commit `38c8d374`. Status: done.
 - T3 (S2, S3) — inline — update `scripts/duplicate-crate-baseline.txt`: drop the converged `tendril` line, refresh the `selectors` doc line, add the dated #2514 entry. Commit `38c8d374`. Status: done.
 - T4 (S4) — inline — local gates: `cargo check --workspace --all-features`, `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines`, `cargo fmt --all -- --check`, full suite (5097 tests run, 5097 passed, 9 skipped). Status: done.
-- T5 (S4, S5) — inline — PR #2526 body, issue comment correction, CI green, native assessment. Status: in progress (CI running on head `0a2449e4`).
+- T5 (S4, S5) — inline — PR #2526 body, issue comment correction, CI green, native assessment and native review. Status: done (CI green on `8bd073c4`; native review lineage `review-e2f0ca20e6d00199` approved with 0 findings and acknowledged).
 
 ## Log
 
@@ -51,3 +51,7 @@ L5 (2026-10-29): pivot committed as `38c8d374` ("chore(infra): reach html5ever 0
 L6 (2026-10-29): `origin/main` advanced twice during the work (`7f096ee8`, then `d81136cf`); both were merged in so the branch stays current and the native candidate is not polluted by a stale base. Net PR diff against main: `Cargo.lock` + `scripts/duplicate-crate-baseline.txt` (2 files).
 
 L7 (2026-10-30): baseline re-measured on the pivoted tree — 44 baseline names = 44 live names, zero stale, zero new duplicates; `tendril` stays converged on 0.5.1. The `behavioral__selector_h3_extracts_only_h3.snap.new` produced by the 0.5.1 experiment was deleted, so the PR carries no snapshot change.
+
+L8 (2026-10-30): the delegated independent verifier (`gentle-ai-verify`) never produced evidence — 13+ hours with no cargo/rustc process, no scratch directory and no write to the Cargo target dir. Root cause found: the per-user tmpfs quota (~12.5 GiB, `quota -v` on `tmpfs`) was exhausted by concurrent scratch builds, so cargo failed with `Disk quota exceeded` and the run never progressed. Its evidence is therefore UNAVAILABLE, and the native RDD review took over as the outside view: lineage `review-e2f0ca20e6d00199`, lenses `review-risk` + `review-reliability`, 0 findings, approved and acknowledged (authority burned). The mechanical differential was run in the parent instead: `legible 0.4.2` vs `0.4.3` over the repo's 19 HTML fixtures produced 0 differences in `title`, `byline`, `excerpt`, `length` and `text_content`, including the two fixtures that fail extraction identically in both versions.
+
+L9 (2026-10-30): native review completed on the frozen candidate (3 paths / 187 lines): both lenses returned zero findings, the capture was admitted, and the exact acknowledgement invocation was replayed from STATUS and burned the authority (`gentle-ai.review-acknowledged/v1`, `authority: burned`). The native result is an outside view, not a delivery authorization: the merge stays a maintainer decision under ordinary repository policy.
