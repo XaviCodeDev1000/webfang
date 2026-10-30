@@ -1196,6 +1196,15 @@ mod spawn_latency_budget {
     /// the budget, so the helper adds no latency to the ~941 tests that spawn
     /// the binary normally.
     ///
+    /// The property is the OUTCOME the budget machinery itself measured, not a
+    /// caller's wall clock (#2063, #2533 class): `run_under_budget` resolves
+    /// `Passed` the instant the worker reports, so a passing attempt never
+    /// waits — and a regression that made the helper pay the budget would
+    /// surface as `Overran`, not as a stretched clock on a healthy run. The
+    /// former `elapsed < 1s` assert measured a sub-millisecond operation on a
+    /// shared runner, which is the shape that flakes on a loaded machine while
+    /// the product stays healthy.
+    ///
     /// These three tests are compiled into every integration-test binary that
     /// includes `cli_harness.rs`, so this one ran in parallel with whatever
     /// else the runner was doing — and whichever of them warmed the binary
@@ -1205,12 +1214,12 @@ mod spawn_latency_budget {
     #[test]
     fn a_healthy_attempt_returns_without_paying_the_budget() {
         let _ = super::webfang_path();
-        let started = Instant::now();
-        assert_spawn_within(SPAWN_LATENCY_BUDGET, "healthy_spawn", |_child| Ok(()));
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "a passing attempt must not wait on the budget"
-        );
+        match run_under_budget(SPAWN_LATENCY_BUDGET, |_child| Ok(())) {
+            SpawnOutcome::Passed => {},
+            other => {
+                panic!("a healthy attempt must return without paying the budget, got {other:?}")
+            },
+        }
     }
 
     /// A genuine failure must surface its own message, not be swallowed into
