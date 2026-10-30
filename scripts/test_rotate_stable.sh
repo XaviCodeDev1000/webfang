@@ -253,6 +253,39 @@ else
   fail "el rechazo por gap mutó support.json"
 fi
 
+echo "== la rotación pendiente en un repositorio sin tags =="
+
+# The `|| true` rescue on the published-minors pipeline exists for exactly
+# this repository: zero tags, an empty published set, an empty gap. Every
+# other fixture publishes tags before rotating, so the one line whose stated
+# purpose is the tagless scenario was unproved (RDD review of this PR:
+# R3-tagless-pending-rotation-untested). The rotation proceeds — an empty
+# published set is an answer, not a crash — and the window still rotates
+# whole: new STABLE, previous STABLE demoted, third line EOL.
+FX_NOTAG="$(new_fx tagless 2.2.0)"
+run_rotate "$FX_NOTAG" 2.2 --pending-publication
+if [[ "$LAST_RC" -eq 0 ]]; then
+  pass "una rotación pendiente sin ningún tag procede"
+else
+  fail "una rotación pendiente sin ningún tag se negó (rc=$LAST_RC): $LAST_OUT"
+fi
+if [[ "$(state_of "$FX_NOTAG" 2.2)" == "STABLE" ]] \
+  && [[ "$(jq -r '.lines[] | select(.minor=="2.2") | .latest' "$FX_NOTAG/.github/support.json")" == "2.2.0" ]]; then
+  pass "la línea 2.2 queda STABLE declarando latest 2.2.0"
+else
+  fail "la línea 2.2 no quedó STABLE con latest 2.2.0 (state=$(state_of "$FX_NOTAG" 2.2))"
+fi
+if [[ "$(state_of "$FX_NOTAG" 2.1)" == "MAINTENANCE" ]] && [[ "$(state_of "$FX_NOTAG" 2.0)" == "EOL" ]]; then
+  pass "la ventana rota entera: 2.1 MAINTENANCE y 2.0 EOL"
+else
+  fail "la ventana no rotó entera (2.1=$(state_of "$FX_NOTAG" 2.1), 2.0=$(state_of "$FX_NOTAG" 2.0))"
+fi
+if [[ -z "$(git -C "$FX_NOTAG" tag --list 'v*')" ]]; then
+  pass "la rotación sin tags no publicó ningún tag"
+else
+  fail "la rotación sin tags creó tags: $(git -C "$FX_NOTAG" tag --list 'v*' | tr '\n' ' ')"
+fi
+
 echo "== la rotación pendiente es idempotente =="
 
 FX_IDEM="$(new_fx idempotent 2.2.0)"
