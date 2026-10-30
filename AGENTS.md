@@ -408,6 +408,14 @@ is shared; working tree, index and HEAD are isolated.
     └── fix-crawler-timeout/     # branch: fix/crawler-timeout
 ```
 
+**Never put a worktree under `/tmp`.** On this machine `/tmp` is a 16 GB tmpfs, and a
+from-scratch `target/` for this workspace does not fit: the build dies with
+`Disk quota exceeded`. Worse, a backgrounded build that dies that way returns an
+**empty log** — it looks like the command never ran, and the failure is easy to misread as
+a tooling problem. For a throwaway tree (a merge probe, a bisect), create it elsewhere and
+point `CARGO_TARGET_DIR` at an existing worktree's `target/` instead of building a second
+one.
+
 The convention is `/ → -`: `feat/auth` → `feat-auth`. **The invariant that matters is that the
 commit lands on the branch intended for the task or the PR.** The name proxy is the default
 verification — run this before every commit in a worktree:
