@@ -48,3 +48,48 @@ construction — pushes to `main` do not queue).
   from 1 to 2 in the ruleset. Do not raise it on intuition — re-measure
   after the window accumulates, and put the before/after table in the PR
   that changes the ruleset.
+
+## Decision — 2026-10-30: `max_entries_to_build` 1 → 2
+
+Re-measured with the accumulated window (defaults: `bash
+scripts/ci_queue_metrics.sh --days 14`, n=49 PRs / 129 merge_group runs;
+accounting line in the run log: 0 timeline failures, 1 jobs API failure,
+1 PR not merged, 0 negative waits):
+
+| Metric | p50 | p95 | n |
+|---|---|---|---|
+| Merge-queue residence per PR (enqueue → merged) | 9.3 min | **17.1 min** | 49 |
+| Merge_group run duration | 11.1 min | 34.2 min | 129 |
+| Runs started while another was still in flight | — | 29% (37/129) | 129 |
+
+Contention is real, not theoretical: ~16 merge_group runs/day, and 29% of
+them start before the previous one finishes — the 2026-10-29 burst (4 PRs
+in 26 minutes) was not an outlier.
+
+**Applied on 2026-10-30** to ruleset `main-protection-migrated` (id
+25720640): `max_entries_to_build: 2`. Kept unchanged:
+`min_entries_to_merge: 1`, `min_entries_to_merge_wait_minutes: 0`,
+`max_entries_to_merge: 5`, `grouping_strategy: ALLGREEN`,
+`check_response_timeout_minutes: 30`.
+
+- **Why this direction is latency-neutral**: with `min_entries_to_merge:
+  1` and wait 0, a solo PR merges exactly as before (group of 1); under a
+  burst the second entry can be checked concurrently instead of strictly
+  serializing behind the first. The side benefit (fewer runner cycles
+  under contention) is incidental — on a public repo runner minutes are
+  not the currency; residence latency is (#2284).
+- **Why `min_entries_to_merge: 2` was rejected**: the wait parameter is
+  how long a batch waits to reach the minimum group size — after it
+  elapses the minimum is ignored and a smaller group merges. With wait 0
+  a minimum of 2 would be ignored immediately (no-op); making it bite
+  requires `min_entries_to_merge_wait_minutes > 0`, which taxes every
+  solo merge to save runner cycles the issue itself declares irrelevant.
+- **Criterion reframe**: #2284's original "raise after p95 drops" has no
+  BEFORE side — the pre-#2515 script measured the `main` lane only, where
+  the wait is zero by construction. The anchor actually used: the
+  absolute p95 (17.1 min) sits far under the 30-minute check timeout, and
+  CI itself is ~11 min of that residence.
+- **Post-change monitoring**: re-run the script as the window accumulates
+  and append a dated row here. If residence p95 degrades materially
+  toward the timeout (pair-failure re-queues would show up there first),
+  revisit this knob.
