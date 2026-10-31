@@ -609,6 +609,54 @@ fn clean_html_for_scrape(html: &str, config: &ScraperConfig) -> String {
 /// [`scrape_page`] — `scraper::Html` is neither `Send` nor `Sync`, and
 /// async-fn parameters are conservatively live across `.await` points, so
 /// this future only receives owned / `Send` data.
+/// #2534: the selector fragment is the content. No Readability, no excerpt
+/// (the user asked for elements, not an article) and no published time
+/// (legible was its only source — tracked as a follow-up).
+///
+/// No minimum-content guard either: the guard exists to catch JS shells that
+/// rendered nothing, and an explicit selector is not a heuristic about whether
+/// the page rendered. A short heading is a legitimate answer to `--selector h3`.
+#[allow(clippy::too_many_arguments)]
+async fn selector_scraped_content(
+    fragment: String,
+    author: Option<String>,
+    asset_urls: &[crate::domain::ValidUrl],
+    url: &url::Url,
+    config: &ScraperConfig,
+    downloader: Option<&dyn crate::domain::ports::AssetDownloaderPort>,
+    original_title: &str,
+    correlation: &CorrelationId,
+    quality_hint: Option<crate::domain::extraction_quality::ExtractionQualityHint>,
+) -> Result<ScrapedContent> {
+    let assets = download_asset_urls(
+        asset_urls,
+        config,
+        downloader.map(|d| d as &dyn crate::domain::ports::AssetDownloaderPort),
+    )
+    .await?;
+
+    let selector_title = url.host_str().unwrap_or("unknown_host");
+    Ok(ScrapedContent {
+        title: crate::application::resolve_title(
+            if original_title.is_empty() {
+                selector_title
+            } else {
+                original_title
+            },
+            url,
+        ),
+        content: fallback::extract_text(&fragment),
+        url: ValidUrl::try_from_url(url.clone())?,
+        excerpt: None,
+        author,
+        date: None,
+        html: Some(fragment),
+        assets,
+        correlation_id: Some(correlation.clone()),
+        quality_hint: quality_hint.clone(),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn build_scraped_content(
     content: PageContent,
@@ -623,42 +671,20 @@ async fn build_scraped_content(
     correlation: &CorrelationId,
     quality_hint: Option<crate::domain::extraction_quality::ExtractionQualityHint>,
 ) -> Result<ScrapedContent> {
-    // #2534: the selector fragment is the content. No Readability, no excerpt
-    // (the user asked for elements, not an article) and no published time
-    // (legible was its only source — tracked as a follow-up).
     let article = match content {
         PageContent::Selector(fragment) => {
-            let assets = download_asset_urls(
-                asset_urls,
-                config,
-                downloader.map(|d| d as &dyn crate::domain::ports::AssetDownloaderPort),
-            )
-            .await?;
-
-            // No minimum-content guard here: the guard exists to catch JS
-            // shells that rendered nothing, and an explicit selector is not
-            // a heuristic about whether the page rendered. A short heading is
-            // a legitimate answer to "--selector h3".
-            let selector_title = url.host_str().unwrap_or("unknown_host");
-            return Ok(ScrapedContent {
-                title: crate::application::resolve_title(
-                    if original_title.is_empty() {
-                        selector_title
-                    } else {
-                        original_title
-                    },
-                    url,
-                ),
-                content: fallback::extract_text(&fragment),
-                url: ValidUrl::try_from_url(url.clone())?,
-                excerpt: None,
+            return selector_scraped_content(
+                fragment,
                 author,
-                date: None,
-                html: Some(fragment),
-                assets,
-                correlation_id: Some(correlation.clone()),
-                quality_hint: quality_hint.clone(),
-            });
+                asset_urls,
+                url,
+                config,
+                downloader,
+                original_title,
+                correlation,
+                quality_hint,
+            )
+            .await;
         }
         PageContent::Readability(article) => article,
     };
