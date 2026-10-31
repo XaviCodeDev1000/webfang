@@ -555,21 +555,22 @@ fn extract_page_extractions(
 
     // #2534: an explicit selector already chose the content, so Readability is
     // skipped entirely for it. Without a selector this is unchanged.
-    let content =
-        if crate::application::extraction::selector_supplied_fragment(&config.selector, extract_result)
-        {
-            PageContent::Selector(extract_result.as_html().to_owned())
-        } else {
-            PageContent::Readability(readability::parse(
-                extract_result.as_html(),
-                Some(url.as_str()),
-            ))
-        };
+    let content = if crate::application::extraction::selector_supplied_fragment(
+        &config.selector,
+        extract_result,
+    ) {
+        PageContent::Selector(extract_result.as_html().to_owned())
+    } else {
+        PageContent::Readability(readability::parse(
+            extract_result.as_html(),
+            Some(url.as_str()),
+        ))
+    };
 
     let author = match &content {
         PageContent::Readability(Ok(article)) => {
             author_extractor::extract_author_from_document(&document, article.byline.as_deref())
-        }
+        },
         PageContent::Readability(Err(_)) => None,
         // No byline to fall back to: metadata only.
         PageContent::Selector(_) => author_extractor::extract_author_from_document(&document, None),
@@ -609,6 +610,18 @@ fn clean_html_for_scrape(html: &str, config: &ScraperConfig) -> String {
 /// [`scrape_page`] — `scraper::Html` is neither `Send` nor `Sync`, and
 /// async-fn parameters are conservatively live across `.await` points, so
 /// this future only receives owned / `Send` data.
+/// Prefer the title from the original DOM, fall back to what the extraction
+/// produced. The empty check lives here once instead of being repeated at every
+/// call site — three copies of the same `if` is what pushed this module over the
+/// duplication ratchet.
+fn preferred_title<'a>(original_title: &'a str, fallback: &'a str) -> &'a str {
+    if original_title.is_empty() {
+        fallback
+    } else {
+        original_title
+    }
+}
+
 /// #2534: the selector fragment is the content. No Readability, no excerpt
 /// (the user asked for elements, not an article) and no published time
 /// (legible was its only source — tracked as a follow-up).
@@ -628,21 +641,12 @@ async fn selector_scraped_content(
     correlation: &CorrelationId,
     quality_hint: Option<crate::domain::extraction_quality::ExtractionQualityHint>,
 ) -> Result<ScrapedContent> {
-    let assets = download_asset_urls(
-        asset_urls,
-        config,
-        downloader.map(|d| d as &dyn crate::domain::ports::AssetDownloaderPort),
-    )
-    .await?;
+    let assets = download_asset_urls(asset_urls, config, downloader).await?;
 
     let selector_title = url.host_str().unwrap_or("unknown_host");
     Ok(ScrapedContent {
         title: crate::application::resolve_title(
-            if original_title.is_empty() {
-                selector_title
-            } else {
-                original_title
-            },
+            preferred_title(original_title, selector_title),
             url,
         ),
         content: fallback::extract_text(&fragment),
@@ -685,18 +689,13 @@ async fn build_scraped_content(
                 quality_hint,
             )
             .await;
-        }
+        },
         PageContent::Readability(article) => article,
     };
 
     match article {
         Ok(article) => {
-            let assets = download_asset_urls(
-                asset_urls,
-                config,
-                downloader.map(|d| d as &dyn crate::domain::ports::AssetDownloaderPort),
-            )
-            .await?;
+            let assets = download_asset_urls(asset_urls, config, downloader).await?;
 
             // Shared minimum-content guard (#706): fail honestly on JS-shell
             // or near-empty extraction instead of returning Ok near-empty.
@@ -710,11 +709,7 @@ async fn build_scraped_content(
             Ok(ScrapedContent {
                 // H1 FIX: Use title from original DOM, falling back to Readability's title
                 title: crate::application::resolve_title(
-                    if original_title.is_empty() {
-                        &article.title
-                    } else {
-                        original_title
-                    },
+                    preferred_title(original_title, &article.title),
                     url,
                 ),
                 content: article.text_content,
@@ -741,12 +736,7 @@ async fn build_scraped_content(
             // H2 FIX: Apply clean_html to fallback content to prevent JS/CSS leakage
             let raw_fallback = fallback::extract_text(extraction_html);
             let fallback_content = clean_html(&raw_fallback);
-            let assets = download_asset_urls(
-                asset_urls,
-                config,
-                downloader.map(|d| d as &dyn crate::domain::ports::AssetDownloaderPort),
-            )
-            .await?;
+            let assets = download_asset_urls(asset_urls, config, downloader).await?;
 
             // Shared minimum-content guard (#706): the fallback branch has NO
             // content-size check today (unlike extract_content's
@@ -763,11 +753,7 @@ async fn build_scraped_content(
             Ok(ScrapedContent {
                 // H1 FIX: Use title from original DOM, falling back to host-based fallback
                 title: crate::application::resolve_title(
-                    if original_title.is_empty() {
-                        &fallback_title
-                    } else {
-                        original_title
-                    },
+                    preferred_title(original_title, &fallback_title),
                     url,
                 ),
                 content: fallback_content,
