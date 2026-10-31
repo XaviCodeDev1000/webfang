@@ -78,9 +78,13 @@ pub fn extract_with_selector(
 
     match serialize_matches(&document, &sel, base_url) {
         Some(fragment) => {
-            debug!("CSS selector '{}' produced a {}-byte fragment", selector, fragment.len());
+            debug!(
+                "CSS selector '{}' produced a {}-byte fragment",
+                selector,
+                fragment.len()
+            );
             ExtractResult::Matched(fragment)
-        }
+        },
         None => fallback(
             html,
             inspector,
@@ -317,8 +321,12 @@ pub(crate) async fn adaptive_selector_repair(
             {
                 Ok(outcome) => {
                     let trace = outcome.trace.clone();
-                    let repaired =
-                        extract_with_selector(&html, &outcome.suggestion.selector, base_url, inspector);
+                    let repaired = extract_with_selector(
+                        &html,
+                        &outcome.suggestion.selector,
+                        base_url,
+                        inspector,
+                    );
                     if repaired.is_matched() {
                         tracing::info!(
                             repaired_selector = %outcome.suggestion.selector,

@@ -768,7 +768,6 @@ fn test_min_content_chars_is_50() {
 // extract_with_selector tests (pure function, no I/O)
 // =====================================================================
 
-
 /// Base URL for the selector tests: the selector path resolves links against
 /// it, so every case pins the same origin.
 fn base() -> url::Url {
@@ -957,8 +956,12 @@ fn test_extract_with_selector_invalid_syntax() {
 
     let html = "<html><body><p>Hello</p></body></html>";
     let inspector = DefaultDomInspector::new();
-    let result =
-        extract_with_selector(html, "div >>> p", &base(), Some(&inspector as &dyn DomInspectorPort));
+    let result = extract_with_selector(
+        html,
+        "div >>> p",
+        &base(),
+        Some(&inspector as &dyn DomInspectorPort),
+    );
     assert!(
         !result.is_matched(),
         "invalid selector syntax should return Fallback"
@@ -992,7 +995,12 @@ fn test_extract_with_selector_empty_html() {
     let inspector = DefaultDomInspector::new();
 
     // --- Truly empty HTML ---
-    let result = extract_with_selector("", "article", &base(), Some(&inspector as &dyn DomInspectorPort));
+    let result = extract_with_selector(
+        "",
+        "article",
+        &base(),
+        Some(&inspector as &dyn DomInspectorPort),
+    );
     assert!(
         !result.is_matched(),
         "empty HTML should return Fallback, not Matched"
