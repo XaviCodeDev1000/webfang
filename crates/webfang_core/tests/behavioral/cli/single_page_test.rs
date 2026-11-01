@@ -259,7 +259,6 @@ async fn selector_table_extracts_table() {
     .await;
 }
 
-
 /// #2539: the selector path skips legible, so the frontmatter date comes from
 /// document metadata instead of `published_time`. Asserted as a string, not a
 /// snapshot: the harness collapses `date:` to `[DATE]` before comparing.

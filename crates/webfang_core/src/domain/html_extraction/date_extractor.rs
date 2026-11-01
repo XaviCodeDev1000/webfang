@@ -26,14 +26,10 @@ use std::sync::LazyLock;
 use scraper::{Html, Selector};
 use serde_json::Value;
 
+use super::{non_empty, text_content, SEL_JSONLD};
+
 // All selectors below are compile-time-constant strings, so `Selector::parse`
 // cannot fail at runtime; each `expect` documents a true invariant.
-#[allow(clippy::expect_used)]
-static SEL_JSONLD: LazyLock<Selector> = LazyLock::new(|| {
-    Selector::parse("script[type=\"application/ld+json\"]")
-        // LCOV_EXCL_LINE defensive: compile-time-selector — constant selector string, parse cannot fail
-        .expect("BUG: invalid CSS selector application/ld+json")
-});
 #[allow(clippy::expect_used)]
 static SEL_META_DATE: LazyLock<Selector> = LazyLock::new(|| {
     Selector::parse(
@@ -289,31 +285,321 @@ fn date_from_json(parsed: &Value) -> Option<String> {
         .and_then(non_empty)
 }
 
-fn non_empty(s: &str) -> Option<String> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn text_content(element: &scraper::ElementRef<'_>) -> Option<String> {
-    let collapsed: String = element.text().collect::<Vec<_>>().join(" ");
-    let collapsed = collapsed.split_whitespace().collect::<Vec<_>>().join(" ");
-    non_empty(&collapsed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     struct Case {
         name: &'static str,
-        html: &'static str,
+        html: String,
         expected: Option<&'static str>,
     }
 
+    /// A page with only the parts a case cares about spelled out.
+    fn page(head: &[&str], body: &str) -> String {
+        format!(
+            "<html><head>{}</head><body>{body}</body></html>",
+            head.concat()
+        )
+    }
+
+    fn jsonld(payload: &str) -> String {
+        format!(r#"<script type="application/ld+json">{payload}</script>"#)
+    }
+
+    fn meta(attr: &str, value: &str, content: &str) -> String {
+        format!(r#"<meta {attr}="{value}" content="{content}">"#)
+    }
+
+    /// The minimal block that passes the gate: schema.org `@context` plus an
+    /// article `@type`, with an optional `datePublished`.
+    fn article_jsonld(date: Option<&str>) -> String {
+        let published = date.map_or_else(String::new, |d| format!(r#","datePublished":"{d}""#));
+        jsonld(&format!(
+            r#"{{"@context":"https://schema.org","@type":"Article"{published}}}"#
+        ))
+    }
+
+    /// What legible's own metadata pass finds on the same page, so the two
+    /// routes can be compared source by source.
+    fn legible_published(html: &str) -> Option<String> {
+        crate::domain::html_extraction::readability::parse(html, Some("https://example.com/post"))
+            .ok()
+            .and_then(|article| article.published_time)
+    }
+
+    /// One failing row must not hide the rows behind it, so every row runs and
+    /// the failures are reported together.
+    fn assert_no_failures(failures: Vec<String>, label: &str) {
+        assert!(
+            failures.is_empty(),
+            "{} {label}:\n{}",
+            failures.len(),
+            failures.join("\n---\n")
+        );
+    }
+
+    fn assert_cases(cases: &[Case]) {
+        let mut failures = Vec::new();
+        for case in cases {
+            let actual = extract_date(&case.html);
+            if actual.as_deref() != case.expected {
+                failures.push(format!(
+                    "case `{}`\n  expected: {:?}\n  actual:   {:?}",
+                    case.name, case.expected, actual
+                ));
+            }
+        }
+        assert_no_failures(failures, "date case(s) diverged");
+    }
+
+    /// A block that passes the gate wins over every other source, including a
+    /// meta tag that is also present.
+    #[test]
+    fn jsonld_article_blocks_supply_the_date() {
+        let cases = [
+            Case {
+                name: "jsonld_date_published",
+                html: page(&[&article_jsonld(Some("2026-03-04T10:00:00Z"))], ""),
+                expected: Some("2026-03-04T10:00:00Z"),
+            },
+            Case {
+                name: "jsonld_graph_array",
+                html: page(
+                    &[&jsonld(
+                        r#"{"@context":"https://schema.org","@graph":[{"@type":"WebSite"},{"@type":"Article","datePublished":"2026-05-01"}]}"#,
+                    )],
+                    "",
+                ),
+                expected: Some("2026-05-01"),
+            },
+            Case {
+                name: "jsonld_beats_meta",
+                html: page(
+                    &[
+                        &article_jsonld(Some("2026-01-01")),
+                        &meta("property", "article:published_time", "2025-12-31T23:59:59Z"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-01-01"),
+            },
+            Case {
+                name: "jsonld_absolute_type_url_is_recognized",
+                html: page(
+                    &[&jsonld(
+                        r#"{"@context":"https://schema.org","@type":"https://schema.org/NewsArticle","datePublished":"2026-11-14"}"#,
+                    )],
+                    "",
+                ),
+                expected: Some("2026-11-14"),
+            },
+            Case {
+                name: "jsonld_context_object_with_vocab_is_recognized",
+                html: page(
+                    &[&jsonld(
+                        r#"{"@context":{"@vocab":"https://schema.org"},"@type":"BlogPosting","datePublished":"2026-11-15"}"#,
+                    )],
+                    "",
+                ),
+                expected: Some("2026-11-15"),
+            },
+            Case {
+                name: "jsonld_array_payload_uses_article_element",
+                html: page(
+                    &[&jsonld(
+                        r#"[{"@type":"WebSite"},{"@context":"https://schema.org","@type":"Article","datePublished":"2026-11-16"}]"#,
+                    )],
+                    "",
+                ),
+                expected: Some("2026-11-16"),
+            },
+            Case {
+                name: "multiple_jsonld_blocks_second_one_wins",
+                html: page(
+                    &[
+                        &jsonld(r#"{"@type":"WebSite"}"#),
+                        &article_jsonld(Some("2026-10-13")),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-10-13"),
+            },
+        ];
+        assert_cases(&cases);
+    }
+
+    /// The gate is deliberately identical to legible's: a block without a
+    /// schema.org `@context`, without an article `@type`, or without a
+    /// `datePublished` is not trusted. Both routes ignore it and both fall
+    /// through to the same meta tag.
+    #[test]
+    fn jsonld_blocks_outside_the_gate_are_ignored() {
+        let cases = [
+            Case {
+                name: "jsonld_without_context_is_ignored",
+                html: page(
+                    &[
+                        &jsonld(r#"{"datePublished":"2026-01-01"}"#),
+                        &meta("property", "article:published_time", "2026-08-11"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-08-11"),
+            },
+            Case {
+                name: "jsonld_without_context_is_ignored_even_when_article_typed",
+                html: page(
+                    &[
+                        &jsonld(r#"{"@type":"Article","datePublished":"2026-01-01"}"#),
+                        &meta("property", "article:published_time", "2026-08-14"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-08-14"),
+            },
+            Case {
+                name: "jsonld_graph_without_context_is_ignored",
+                html: page(
+                    &[
+                        &jsonld(r#"{"@graph":[{"@type":"Article","datePublished":"2026-01-01"}]}"#),
+                        &meta("property", "article:published_time", "2026-08-15"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-08-15"),
+            },
+            Case {
+                name: "jsonld_non_article_type_is_ignored",
+                html: page(
+                    &[
+                        &jsonld(
+                            r#"{"@context":"https://schema.org","@type":"WebPage","datePublished":"2026-01-01"}"#,
+                        ),
+                        &meta("property", "article:published_time", "2026-08-12"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-08-12"),
+            },
+            Case {
+                name: "jsonld_graph_without_article_type_is_ignored",
+                html: page(
+                    &[
+                        &jsonld(
+                            r#"{"@context":"https://schema.org","@graph":[{"@type":"WebSite","datePublished":"2026-01-01"}]}"#,
+                        ),
+                        &meta("property", "article:published_time", "2026-08-13"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-08-13"),
+            },
+            Case {
+                name: "malformed_jsonld_falls_through_to_meta",
+                html: page(
+                    &[
+                        &jsonld("{not json"),
+                        &meta("property", "article:published_time", "2026-08-09"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-08-09"),
+            },
+            Case {
+                name: "jsonld_without_date_published_falls_through",
+                html: page(
+                    &[
+                        &jsonld(
+                            r#"{"@context":"https://schema.org","@type":"Article","headline":"No date here"}"#,
+                        ),
+                        &meta("property", "article:published_time", "2026-08-10"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-08-10"),
+            },
+            Case {
+                name: "date_modified_is_not_a_publish_date",
+                // A different semantic: falling back to it would publish an
+                // update timestamp as if it were the publication date.
+                html: page(
+                    &[&jsonld(
+                        r#"{"@context":"https://schema.org","@type":"Article","dateModified":"2026-09-11"}"#,
+                    )],
+                    "<article><p>edited later</p></article>",
+                ),
+                expected: None,
+            },
+        ];
+        assert_cases(&cases);
+    }
+
+    /// Sources below the JSON-LD block in the cascade, and the guards that keep
+    /// a stray `<time>` from becoming the publication date.
+    #[test]
+    fn meta_microdata_and_article_time_supply_the_date() {
+        let cases = [
+            Case {
+                name: "meta_article_published_time",
+                html: page(
+                    &[&meta(
+                        "property",
+                        "article:published_time",
+                        "2026-02-02T08:30:00Z",
+                    )],
+                    "",
+                ),
+                expected: Some("2026-02-02T08:30:00Z"),
+            },
+            Case {
+                name: "meta_og_published_time",
+                html: page(&[&meta("property", "og:published_time", "2026-02-03")], ""),
+                expected: Some("2026-02-03"),
+            },
+            Case {
+                name: "itemprop_content_attribute",
+                html: page(
+                    &[],
+                    r#"<span itemprop="datePublished" content="2026-04-05">5 April</span>"#,
+                ),
+                expected: Some("2026-04-05"),
+            },
+            Case {
+                name: "article_time_datetime",
+                html: page(
+                    &[],
+                    r#"<article><time datetime="2026-06-07T12:00:00Z">June 7</time></article>"#,
+                ),
+                expected: Some("2026-06-07T12:00:00Z"),
+            },
+            Case {
+                name: "stray_time_outside_article_is_ignored",
+                html: page(
+                    &[],
+                    r#"<time datetime="2026-06-01">comment</time><div class="post"><time datetime="2026-06-02">post</time></div>"#,
+                ),
+                expected: None,
+            },
+            Case {
+                name: "nothing_found_is_none",
+                html: page(&[], "<p>no metadata here</p>"),
+                expected: None,
+            },
+            Case {
+                name: "blank_content_falls_through_to_next_meta",
+                html: page(
+                    &[
+                        &meta("property", "article:published_time", "   "),
+                        &meta("name", "date", "2026-07-08"),
+                    ],
+                    "",
+                ),
+                expected: Some("2026-07-08"),
+            },
+        ];
+        assert_cases(&cases);
+    }
 
     /// The cascade and legible's metadata pass are two independent
     /// implementations. On the same page they must agree wherever legible has a
@@ -326,175 +612,64 @@ mod tests {
     /// is not the divergence that matters; disagreeing on the same source is.
     #[test]
     fn date_cascade_agrees_with_legible_on_shared_sources() {
+        let article_body = "<article><p>x</p></article>";
         let shared = [
-            r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-03-04T10:00:00Z"}</script></head><body><article><p>x</p></article></body></html>"#,
-            r#"<html><head><meta property="article:published_time" content="2026-02-02T08:30:00Z"></head><body><article><p>x</p></article></body></html>"#,
-            r#"<html><head><meta name="parsely-pub-date" content="2026-02-06"></head><body><article><p>x</p></article></body></html>"#,
-            r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite"},{"@type":"Article","datePublished":"2026-05-01"}]}</script></head><body><article><p>x</p></article></body></html>"#,
-            r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-01-01"}</script><meta property="article:published_time" content="2025-12-31T23:59:59Z"></head><body><article><p>x</p></article></body></html>"#,
-            r#"<html><head><script type="application/ld+json">{"@type":"Article","datePublished":"2026-01-01"}</script><meta property="article:published_time" content="2026-08-14"></head><body><article><p>x</p></article></body></html>"#,
-            r#"<html><head><script type="application/ld+json">{"@graph":[{"@type":"Article","datePublished":"2026-01-01"}]}</script><meta property="article:published_time" content="2026-08-15"></head><body><article><p>x</p></article></body></html>"#,
+            page(
+                &[&article_jsonld(Some("2026-03-04T10:00:00Z"))],
+                article_body,
+            ),
+            page(
+                &[&meta(
+                    "property",
+                    "article:published_time",
+                    "2026-02-02T08:30:00Z",
+                )],
+                article_body,
+            ),
+            page(
+                &[&meta("name", "parsely-pub-date", "2026-02-06")],
+                article_body,
+            ),
+            page(
+                &[&jsonld(
+                    r#"{"@context":"https://schema.org","@graph":[{"@type":"WebSite"},{"@type":"Article","datePublished":"2026-05-01"}]}"#,
+                )],
+                article_body,
+            ),
+            page(
+                &[
+                    &article_jsonld(Some("2026-01-01")),
+                    &meta("property", "article:published_time", "2025-12-31T23:59:59Z"),
+                ],
+                article_body,
+            ),
+            page(
+                &[
+                    &jsonld(r#"{"@type":"Article","datePublished":"2026-01-01"}"#),
+                    &meta("property", "article:published_time", "2026-08-14"),
+                ],
+                article_body,
+            ),
+            page(
+                &[
+                    &jsonld(r#"{"@graph":[{"@type":"Article","datePublished":"2026-01-01"}]}"#),
+                    &meta("property", "article:published_time", "2026-08-15"),
+                ],
+                article_body,
+            ),
         ];
 
         let mut failures = Vec::new();
         for html in shared {
-            let ours = extract_date(html);
-            let legible = crate::domain::html_extraction::readability::parse(
-                html,
-                Some("https://example.com/post"),
-            )
-            .ok()
-            .and_then(|article| article.published_time);
+            let ours = extract_date(&html);
+            let legible = legible_published(&html);
             if ours != legible {
                 failures.push(format!(
                     "html: {html}\n  ours:    {ours:?}\n  legible: {legible:?}"
                 ));
             }
         }
-        assert!(
-            failures.is_empty(),
-            "{} fixture(s) disagree with legible:\n{}",
-            failures.len(),
-            failures.join("\n---\n")
-        );
-    }
-
-    #[test]
-    fn date_extraction_cascade_table() {
-        let cases = [
-            Case {
-                name: "jsonld_date_published",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-03-04T10:00:00Z"}</script></head><body></body></html>"#,
-                expected: Some("2026-03-04T10:00:00Z"),
-            },
-            Case {
-                name: "jsonld_graph_array",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite"},{"@type":"Article","datePublished":"2026-05-01"}]}</script></head><body></body></html>"#,
-                expected: Some("2026-05-01"),
-            },
-            Case {
-                name: "jsonld_beats_meta",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-01-01"}</script><meta property="article:published_time" content="2025-12-31T23:59:59Z"></head><body></body></html>"#,
-                expected: Some("2026-01-01"),
-            },
-            // The JSON-LD gate is deliberately identical to legible's: without a
-            // schema.org @context the block is not trusted, so both routes ignore
-            // it and both fall through to the same meta tag.
-            Case {
-                name: "jsonld_without_context_is_ignored",
-                html: r#"<html><head><script type="application/ld+json">{"datePublished":"2026-01-01"}</script><meta property="article:published_time" content="2026-08-11"></head><body></body></html>"#,
-                expected: Some("2026-08-11"),
-            },
-            Case {
-                name: "jsonld_without_context_is_ignored_even_when_article_typed",
-                html: r#"<html><head><script type="application/ld+json">{"@type":"Article","datePublished":"2026-01-01"}</script><meta property="article:published_time" content="2026-08-14"></head><body></body></html>"#,
-                expected: Some("2026-08-14"),
-            },
-            Case {
-                name: "jsonld_graph_without_context_is_ignored",
-                html: r#"<html><head><script type="application/ld+json">{"@graph":[{"@type":"Article","datePublished":"2026-01-01"}]}</script><meta property="article:published_time" content="2026-08-15"></head><body></body></html>"#,
-                expected: Some("2026-08-15"),
-            },
-            Case {
-                name: "jsonld_non_article_type_is_ignored",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","datePublished":"2026-01-01"}</script><meta property="article:published_time" content="2026-08-12"></head><body></body></html>"#,
-                expected: Some("2026-08-12"),
-            },
-            Case {
-                name: "jsonld_graph_without_article_type_is_ignored",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","datePublished":"2026-01-01"}]}</script><meta property="article:published_time" content="2026-08-13"></head><body></body></html>"#,
-                expected: Some("2026-08-13"),
-            },
-            Case {
-                name: "jsonld_absolute_type_url_is_recognized",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"https://schema.org/NewsArticle","datePublished":"2026-11-14"}</script></head><body></body></html>"#,
-                expected: Some("2026-11-14"),
-            },
-            Case {
-                name: "jsonld_context_object_with_vocab_is_recognized",
-                html: r#"<html><head><script type="application/ld+json">{"@context":{"@vocab":"https://schema.org"},"@type":"BlogPosting","datePublished":"2026-11-15"}</script></head><body></body></html>"#,
-                expected: Some("2026-11-15"),
-            },
-            Case {
-                name: "jsonld_array_payload_uses_article_element",
-                html: r#"<html><head><script type="application/ld+json">[{"@type":"WebSite"},{"@context":"https://schema.org","@type":"Article","datePublished":"2026-11-16"}]</script></head><body></body></html>"#,
-                expected: Some("2026-11-16"),
-            },
-            Case {
-                name: "meta_article_published_time",
-                html: r#"<html><head><meta property="article:published_time" content="2026-02-02T08:30:00Z"></head><body></body></html>"#,
-                expected: Some("2026-02-02T08:30:00Z"),
-            },
-            Case {
-                name: "meta_og_published_time",
-                html: r#"<html><head><meta property="og:published_time" content="2026-02-03"></head><body></body></html>"#,
-                expected: Some("2026-02-03"),
-            },
-            Case {
-                name: "itemprop_content_attribute",
-                html: r#"<html><body><span itemprop="datePublished" content="2026-04-05">5 April</span></body></html>"#,
-                expected: Some("2026-04-05"),
-            },
-            Case {
-                name: "article_time_datetime",
-                html: r#"<html><body><article><time datetime="2026-06-07T12:00:00Z">June 7</time></article></body></html>"#,
-                expected: Some("2026-06-07T12:00:00Z"),
-            },
-            Case {
-                name: "stray_time_outside_article_is_ignored",
-                html: r#"<html><body><time datetime="2026-06-01">comment</time><div class="post"><time datetime="2026-06-02">post</time></div></body></html>"#,
-                expected: None,
-            },
-            Case {
-                name: "malformed_jsonld_falls_through_to_meta",
-                html: r#"<html><head><script type="application/ld+json">{not json</script><meta property="article:published_time" content="2026-08-09"></head><body></body></html>"#,
-                expected: Some("2026-08-09"),
-            },
-            Case {
-                name: "jsonld_without_date_published_falls_through",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"No date here"}</script><meta property="article:published_time" content="2026-08-10"></head><body></body></html>"#,
-                expected: Some("2026-08-10"),
-            },
-            Case {
-                name: "date_modified_is_not_a_publish_date",
-                html: r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","dateModified":"2026-09-11"}</script></head><body><article><p>edited later</p></article></body></html>"#,
-                // A different semantic: falling back to it would publish an
-                // update timestamp as if it were the publication date.
-                expected: None,
-            },
-            Case {
-                name: "multiple_jsonld_blocks_second_one_wins",
-                html: r#"<html><head><script type="application/ld+json">{"@type":"WebSite"}</script><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-10-13"}</script></head><body></body></html>"#,
-                expected: Some("2026-10-13"),
-            },
-            Case {
-                name: "nothing_found_is_none",
-                html: "<html><body><p>no metadata here</p></body></html>",
-                expected: None,
-            },
-            Case {
-                name: "blank_content_falls_through_to_next_meta",
-                html: r#"<html><head><meta property="article:published_time" content="   "><meta name="date" content="2026-07-08"></head><body></body></html>"#,
-                expected: Some("2026-07-08"),
-            },
-        ];
-
-        let mut failures = Vec::new();
-        for case in cases {
-            let actual = extract_date(case.html);
-            if actual.as_deref() != case.expected {
-                failures.push(format!(
-                    "case `{}`\n  expected: {:?}\n  actual:   {:?}",
-                    case.name, case.expected, actual
-                ));
-            }
-        }
-        assert!(
-            failures.is_empty(),
-            "{} date case(s) diverged:\n{}",
-            failures.len(),
-            failures.join("\n---\n")
-        );
+        assert_no_failures(failures, "fixture(s) disagree with legible");
     }
 
     /// Places where this cascade is intentionally more permissive than legible.
@@ -510,55 +685,46 @@ mod tests {
             // A JSON-LD block that passes legible's gate but carries no
             // datePublished stops legible's loop (break) before it ever sees the
             // second block. We keep looking.
-            (
-                "later_jsonld_block_after_a_dateless_article",
-                r#"<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"no date"}</script><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","datePublished":"2026-12-01"}</script></head><body></body></html>"#,
-                Some("2026-12-01"),
-            ),
+            Case {
+                name: "later_jsonld_block_after_a_dateless_article",
+                html: page(
+                    &[&article_jsonld(None), &article_jsonld(Some("2026-12-01"))],
+                    "",
+                ),
+                expected: Some("2026-12-01"),
+            },
             // legible's meta pass only picks article:published_time and
             // parsely-pub-date; these three sources are ours alone.
-            (
-                "og_published_time",
-                r#"<html><head><meta property="og:published_time" content="2026-12-02"></head><body></body></html>"#,
-                Some("2026-12-02"),
-            ),
-            (
-                "name_date_meta",
-                r#"<html><head><meta name="date" content="2026-12-03"></head><body></body></html>"#,
-                Some("2026-12-03"),
-            ),
-            (
-                "article_time",
-                r#"<html><body><article><time datetime="2026-12-04">Dec 4</time></article></body></html>"#,
-                Some("2026-12-04"),
-            ),
+            Case {
+                name: "og_published_time",
+                html: page(&[&meta("property", "og:published_time", "2026-12-02")], ""),
+                expected: Some("2026-12-02"),
+            },
+            Case {
+                name: "name_date_meta",
+                html: page(&[&meta("name", "date", "2026-12-03")], ""),
+                expected: Some("2026-12-03"),
+            },
+            Case {
+                name: "article_time",
+                html: page(
+                    &[],
+                    r#"<article><time datetime="2026-12-04">Dec 4</time></article>"#,
+                ),
+                expected: Some("2026-12-04"),
+            },
         ];
+        assert_cases(&cases);
 
-        let mut failures = Vec::new();
-        for (name, html, expected) in cases {
-            let ours = extract_date(html);
-            let legible = crate::domain::html_extraction::readability::parse(
-                html,
-                Some("https://example.com/post"),
-            )
-            .ok()
-            .and_then(|article| article.published_time);
-            if ours.as_deref() != expected {
-                failures.push(format!(
-                    "case `{name}`: ours = {ours:?}, expected {expected:?}"
-                ));
-            }
-            if legible.is_some() {
-                failures.push(format!(
-                    "case `{name}`: legible now finds {legible:?} too — re-check whether this is still a divergence"
+        let mut found = Vec::new();
+        for case in &cases {
+            if let Some(published) = legible_published(&case.html) {
+                found.push(format!(
+                    "case `{}`: legible now finds {published:?} too — re-check whether this is still a divergence",
+                    case.name
                 ));
             }
         }
-        assert!(
-            failures.is_empty(),
-            "{} divergence case(s) drifted:\n{}",
-            failures.len(),
-            failures.join("\n---\n")
-        );
+        assert_no_failures(found, "divergence case(s) drifted");
     }
 }

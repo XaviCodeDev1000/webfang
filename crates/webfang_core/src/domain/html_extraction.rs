@@ -6,12 +6,52 @@
 //! no adapter seam, so the helpers are plain functions and the caller names
 //! them directly.
 
+use std::sync::LazyLock;
+
+use scraper::{ElementRef, Selector};
+
 /// Multi-strategy author extraction (domain pure, `scraper` + `serde_json`).
 pub mod author_extractor;
 pub mod date_extractor;
 
 /// DOM pre-pruning pass to drop invisible/empty nodes before Readability.
 pub mod dom_pruner;
+
+// --- primitives shared by the author and date cascades -----------------------
+//
+// Both cascades read the same JSON-LD blocks and both need to turn an element
+// into a trimmed string. The two copies had already drifted into a duplication
+// gate failure, so the shapes live here once and the submodules import them.
+
+/// The `script[type="application/ld+json"]` selector.
+///
+/// # Rules Applied
+///
+/// - **opt-inline**: compiled once via `LazyLock`
+/// - **err-no-unwrap-prod**: `expect` documents a compile-time invariant
+#[allow(clippy::expect_used)]
+static SEL_JSONLD: LazyLock<Selector> = LazyLock::new(|| {
+    Selector::parse("script[type=\"application/ld+json\"]")
+        // LCOV_EXCL_LINE defensive: compile-time-selector — constant selector string, parse cannot fail
+        .expect("BUG: invalid CSS selector application/ld+json")
+});
+
+/// Trim and return the string, or `None` if it is empty/whitespace.
+fn non_empty(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Collapse an element's text nodes into a single trimmed string.
+fn text_content(element: &ElementRef<'_>) -> Option<String> {
+    let collapsed: String = element.text().collect::<Vec<_>>().join(" ");
+    let collapsed = collapsed.split_whitespace().collect::<Vec<_>>().join(" ");
+    non_empty(&collapsed)
+}
 
 /// Fallback text extraction (domain pure, htmd).
 ///
