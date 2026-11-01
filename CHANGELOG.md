@@ -12,8 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 📦 Dependencies
 
-- Update Cargo.toml dependencies
-- Update Cargo.lock dependencies
+- legible 0.4.3 → 0.5.1: the JSON-LD article gate is now an exact type list instead of an unanchored regex, so a block typed `ArticleComment` (or anything merely *containing* one of the 19 names) no longer supplies the page's `date`, title or byline; a string `author` now yields `author:` ([#2543](https://github.com/XaviCodeDev1000/webfang/pull/2543))
 ## [7.3.0] - 2026-11-01
 
 
