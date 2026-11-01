@@ -167,6 +167,37 @@ webfang --url https://example.com --max-pages 50 --concurrency 4
 webfang --url https://example.com --use-sitemap --sitemap-url https://example.com/sitemap.xml
 ```
 
+### Selecting content with `--selector`
+
+`--selector` **replaces** the extraction strategy instead of narrowing it: the
+matched elements are the content. Nothing is trimmed, re-ranked or re-ordered
+afterwards.
+
+```bash
+webfang --url https://example.com/post --selector "article"
+```
+
+What differs from a run without a selector:
+
+| | no selector | with `--selector` |
+|---|---|---|
+| `content` / `html` | Readability's cleaned article | the matched elements, verbatim |
+| links | resolved by Readability | resolved against the page URL |
+| `title` | Readability's title | `<title>` of the full document |
+| `author` | byline, then document metadata | document metadata only |
+| `date` | `article:published_time` via Readability | empty — see #2539 |
+| `excerpt` | first paragraph or meta description | empty |
+
+Two details worth knowing:
+
+- **Row and cell selectors** (`tr`, `td`, `th`, `thead`, `tbody`, `tfoot`) get a
+  synthetic `<table><tbody>` around the fragment. A bare `<tr>` is not valid
+  standalone HTML and loses its tags when converted, so this is the only case
+  where the `html` field is not literally what the selector matched.
+- **Tables without a `<th>`** degrade to one paragraph per cell instead of a
+  Markdown table. Tables with a header row — with or without `<thead>` —
+  convert correctly. Tracked in #2540.
+
 ### Output formats
 
 ```bash

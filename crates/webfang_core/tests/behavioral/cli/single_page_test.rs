@@ -230,14 +230,25 @@ async fn selector_h3_extracts_only_h3() {
     assert_snapshot_redacted("selector_h3_extracts_only_h3", output.path(), &content);
 }
 
-/// --selector 'table' extracts table content.
-#[tokio::test]
-async fn selector_table_extracts_table() {
+/// Both table fixtures below run the same command and assert the same kind of
+/// snapshot; only the HTML and the snapshot name differ. Kept as one helper so
+/// the two tests cannot drift apart in how they set up the page.
+async fn assert_selector_table_snapshot(name: &str, html: &str) {
     let server = MockServer::start().await;
     let output = tempfile::TempDir::new().unwrap();
 
-    mount_html_page(
-        &server,
+    mount_html_page(&server, html).await;
+    run_selector_cmd(&server, &output, Some("table"));
+
+    let content = read_first_md(&output);
+    assert_snapshot_redacted(name, output.path(), &content);
+}
+
+/// --selector 'table' extracts table content.
+#[tokio::test]
+async fn selector_table_extracts_table() {
+    assert_selector_table_snapshot(
+        "selector_table_extracts_table",
         "<html><body>\
                  <h1>Data Page</h1>\
                  <p>Intro text.</p>\
@@ -246,10 +257,25 @@ async fn selector_table_extracts_table() {
                  </body></html>",
     )
     .await;
-    run_selector_cmd(&server, &output, Some("table"));
+}
 
-    let content = read_first_md(&output);
-    assert_snapshot_redacted("selector_table_extracts_table", output.path(), &content);
+/// #2534: a table WITH a header row survives the selector path as a real
+/// Markdown table. The sibling above uses a headerless table, where htmd has no
+/// column names to build the header from and falls back to cell text — that
+/// fixture therefore cannot demonstrate the fix.
+#[tokio::test]
+async fn selector_table_with_header_renders_markdown_table() {
+    assert_selector_table_snapshot(
+        "selector_table_with_header_renders_markdown_table",
+        "<html><body>\
+                 <h1>Data Page</h1>\
+                 <p>Intro text.</p>\
+                 <table><thead><tr><th>Region</th><th>Revenue</th></tr></thead>\
+                 <tbody><tr><td>North</td><td>120</td></tr></tbody></table>\
+                 <p>More text.</p>\
+                 </body></html>",
+    )
+    .await;
 }
 
 /// Without --selector (default "body"), full page content is extracted.
