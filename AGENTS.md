@@ -671,6 +671,15 @@ equivalent you can execute yourself.
    here (a regex citation rots: the workflow is the source of truth).
 5. **No AI attribution** in the PR's commits.
 
+**The changelog line is the squash subject, and that is not always the PR title.** The merge
+queue squashes: with **two or more** commits it uses the PR title, with **exactly one** it uses
+that commit's subject and the title is ignored. `cliff.toml` keeps only the first line, so on a
+one-commit branch the changelog entry is whatever the commit says — renaming the PR changes
+nothing. Measured 2026-11-01: #2548 (6 commits) landed as its retitled PR title, #2543
+(1 commit) landed as `chore(deps): bump legible to 0.5` despite a `fix(deps)` title, and its
+changelog entry had to be rewritten by hand in the release PR. **Set the commit subject of a
+one-commit branch to the line you want in the changelog.**
+
 **Pre-commit (must replicate CI exactly):**
 
 ```bash
