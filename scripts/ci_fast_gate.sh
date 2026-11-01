@@ -562,6 +562,18 @@ EOF
   else
     skip_step "target isolation guard semantics" "no target-guard files changed"
   fi
+  # File-size ratchet harness (odd/tasks/file-size-ratchet.md): hermetic
+  # mktemp-sandbox proof of the ratchet's decisions (strict >, growth fails,
+  # <=limit fails asking removal, orphans fail, --generate one-shot,
+  # --update descending-only, --remove exposes the file again). Triggered by
+  # either the guard or its harness changing — both are `scripts/**`, so a PR
+  # touching only one of them still lands in this CI-ONLY lane. Offline, no
+  # cargo, <1s — cheap enough that it is never skipped once triggered.
+  if grep -Eq '^(scripts/check_file_size\.sh|scripts/test_file_size\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "file size ratchet semantics (offline)" bash scripts/test_file_size.sh
+  else
+    skip_step "file size ratchet semantics" "no file-size ratchet files changed"
+  fi
   # Windows-platform check semantics (#1833): pins the guard's fail-closed
   # missing-target refusal (a PATH-stubbed rustup, so the case itself is
   # offline) and, where the MSVC std target is installed, the GREEN/RED/lint
@@ -889,6 +901,17 @@ lane_fmt_and_guards() {
     bash scripts/check_concurrency_lints.sh
   run_guard "concurrency lint semantics harness (#1616)" scripts/test_concurrency_lints.sh \
     bash scripts/test_concurrency_lints.sh
+  # File-size ratchet (the AGENTS.md ~500-line rule; ODD
+  # odd/tasks/file-size-ratchet.md): a file NOT in the baseline fails above
+  # the hard limit, a grandfathered file cannot grow one line, and orphaned
+  # baseline entries fail loudly. Descending-only baseline in
+  # quality-baselines.json (the #516 pattern, like the duplication ratchet).
+  # Pure bash+python3 (no external binary), so unlike check_duplication.sh it
+  # runs in the local gate; the CI wiring is the .github/ PR's business. Its
+  # hermetic harness is wired in lane_ci (triggered), not here, so FULL does
+  # not run it twice.
+  run_guard "file size ratchet gate" scripts/check_file_size.sh \
+    bash scripts/check_file_size.sh
   run_guard "nextest invocation lint gate (#1784)" scripts/check_nextest_invocation_lint.sh \
     bash scripts/check_nextest_invocation_lint.sh
   run_guard "nextest invocation lint semantics harness (#1784)" scripts/test_nextest_invocation_lint.sh \
