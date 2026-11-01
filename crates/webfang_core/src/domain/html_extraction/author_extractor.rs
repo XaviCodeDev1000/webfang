@@ -25,6 +25,8 @@ use std::sync::LazyLock;
 use scraper::{Html, Selector};
 use serde_json::Value;
 
+use super::{non_empty, text_content, SEL_JSONLD};
+
 /// Maximum length of a plausible author name.
 ///
 /// CSS-class candidates longer than this are almost certainly containers
@@ -38,12 +40,6 @@ const BYLINE_PREFIXES: &[&str] = &["written by", "por", "by"];
 
 // All selectors below are compile-time-constant strings, so `Selector::parse`
 // cannot fail at runtime; each `expect` documents a true invariant.
-#[allow(clippy::expect_used)]
-static SEL_JSONLD: LazyLock<Selector> = LazyLock::new(|| {
-    Selector::parse("script[type=\"application/ld+json\"]")
-        // LCOV_EXCL_LINE defensive: compile-time-selector — constant selector string, parse cannot fail
-        .expect("BUG: invalid CSS selector application/ld+json")
-});
 #[allow(clippy::expect_used)]
 static SEL_META_AUTHOR: LazyLock<Selector> = LazyLock::new(|| {
     Selector::parse("meta[name=\"author\"], meta[property=\"article:author\"]")
@@ -264,23 +260,6 @@ fn author_name(value: &Value) -> Option<String> {
         Value::Array(items) => items.iter().find_map(author_name),
         _ => None,
     }
-}
-
-/// Trim and return the string, or `None` if it is empty/whitespace.
-fn non_empty(s: &str) -> Option<String> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-/// Collapse an element's text nodes into a single trimmed string.
-fn text_content(element: &scraper::ElementRef<'_>) -> Option<String> {
-    let collapsed: String = element.text().collect::<Vec<_>>().join(" ");
-    let collapsed = collapsed.split_whitespace().collect::<Vec<_>>().join(" ");
-    non_empty(&collapsed)
 }
 
 /// Strip a leading byline prefix ("By ", "Written by ", "Por ") if present.
