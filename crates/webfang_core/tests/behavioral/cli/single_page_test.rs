@@ -290,6 +290,33 @@ async fn selector_reads_publication_date_from_metadata() {
     );
 }
 
+/// #2563: a page that declares no date must not gain one. The frontmatter used
+/// to fall back to `Utc::now()`, which published the scrape day as if it were
+/// the publication date — invisible on the day of publication and wrong every
+/// day after.
+#[tokio::test]
+async fn page_without_a_date_omits_the_frontmatter_line() {
+    let server = MockServer::start().await;
+    let output = tempfile::TempDir::new().unwrap();
+
+    mount_html_page(
+        &server,
+        "<html><head><title>Undated Post</title></head><body><article>\
+         <h1>Undated Post</h1>\
+         <p>Body text long enough for the minimum-content guard, carrying no\
+         date metadata of any kind.</p>\
+         </article></body></html>",
+    )
+    .await;
+    run_selector_cmd(&server, &output, None);
+
+    let content = read_first_md(&output);
+    assert!(
+        !content.lines().any(|line| line.starts_with("date:")),
+        "a page with no date must not get a fabricated one, got:\n{content}"
+    );
+}
+
 /// #2534: a table WITH a header row survives the selector path as a real
 /// Markdown table. The sibling above uses a headerless table, where htmd has no
 /// column names to build the header from and falls back to cell text — that

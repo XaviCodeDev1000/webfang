@@ -3,13 +3,12 @@
 //! Generates YAML frontmatter for Markdown files with metadata:
 //! - Title
 //! - URL
-//! - Date (publication or scrape date)
+//! - Date (publication date, omitted when the page declares none)
 //! - Author (if available)
 //! - Excerpt (if available)
 //! - Tags (if available, for Obsidian compatibility)
 //! - Rich metadata (word count, reading time, language, content type, status)
 
-use chrono::Utc;
 use serde::Serialize;
 
 use crate::domain::excerpt_repair::repair_empty_byline;
@@ -23,8 +22,13 @@ struct Frontmatter {
     /// Original URL
     #[serde(skip_serializing_if = "String::is_empty")]
     url: String,
-    /// Publication/scrape date (YYYY-MM-DD)
-    date: String,
+    /// Publication date.
+    ///
+    /// Omitted when the page declares none. Substituting `Utc::now()` here
+    /// published the scrape day as if it were the publication date, which is
+    /// invisible on the day of publication and wrong every day after (#2563).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    date: Option<String>,
     /// Author name (if available)
     #[serde(skip_serializing_if = "Option::is_none")]
     author: Option<String>,
@@ -76,7 +80,7 @@ pub fn generate(
 /// # Arguments
 /// * `title` - Article/page title
 /// * `url` - Original URL
-/// * `date` - Publication date (optional, uses current date if None)
+/// * `date` - Publication date (optional; the field is omitted when `None`)
 /// * `author` - Author name (optional)
 /// * `excerpt` - Excerpt/summary (optional)
 /// * `tags` - Tags for Obsidian (optional, empty slice for no tags)
@@ -96,9 +100,7 @@ pub fn generate_with_metadata(
     let fm = Frontmatter {
         title: title.to_string(),
         url: url.to_string(),
-        date: date
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string()),
+        date: date.map(str::to_string),
         author: author.map(|s| s.to_string()),
         excerpt: excerpt.map(|s| repair_empty_byline(s, author)),
         tags: tags.to_vec(),
@@ -139,14 +141,18 @@ mod tests {
         assert!(fm.contains("tag2"));
     }
 
+    /// #2563: an unknown date is unknown. Substituting `Utc::now()` published
+    /// the scrape day as if it were the publication date.
     #[test]
-    fn test_generate_with_auto_date() {
+    fn test_generate_without_date_omits_the_field() {
         let fm = generate("Test", "https://example.com", None, None, None, &[]);
 
         assert!(fm.contains("title: Test"));
         assert!(fm.contains("url: https://example.com"));
-        // Date should be today (format may vary)
-        assert!(fm.contains("date:"));
+        assert!(
+            !fm.lines().any(|line| line.starts_with("date:")),
+            "no date must be emitted when none is known, got:\n{fm}"
+        );
         assert!(!fm.contains("author"));
         assert!(!fm.contains("excerpt"));
         assert!(!fm.contains("tags:"));
