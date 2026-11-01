@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Added
 
-- --selector converts matched elements directly, without Readability ([#2541](https://github.com/XaviCodeDev1000/webfang/pull/2541))
+- --selector converts matched elements directly, without Readability ([#2541](https://github.com/XaviCodeDev1000/webfang/pull/2541)): the content is the matched elements, `title` and `date` come from the whole document, and `excerpt` is empty
 
 ### 🏗️ Architecture Improvements
 
