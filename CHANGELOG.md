@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 🔧 Fixed
 
 - Absorb the transient class — hermetic ssrf redirect test + gate API retry ([#2562](https://github.com/XaviCodeDev1000/webfang/pull/2562))
-- Date is the publication date, never the scrape date ([#2567](https://github.com/XaviCodeDev1000/webfang/pull/2567))
+- Date is the publication date, never the scrape date ([#2567](https://github.com/XaviCodeDev1000/webfang/pull/2567)): when a page declares no date the frontmatter now omits the `date:` line instead of writing the scrape day, so consumers must treat the field as optional
 ## [7.3.1] - 2026-11-01
 
 
