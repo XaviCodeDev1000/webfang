@@ -722,7 +722,10 @@ async fn build_scraped_content(
                     crate::domain::excerpt_repair::repair_empty_byline(e, author.as_deref())
                 }),
                 author,
-                date: article.published_time,
+                // legible never sees the metadata — clean_html strips the JSON-LD
+                // blocks and the attributes off every <meta> — so the date has to
+                // come from the raw document (#2563).
+                date: crate::domain::html_extraction::date_extractor::extract_date(html),
                 // Store CLEAN HTML from Readability (not raw HTML with nav/ads/footer)
                 // This is what downstream Markdown converters receive.
                 html: Some(article.content),

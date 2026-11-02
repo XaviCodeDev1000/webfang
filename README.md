@@ -54,7 +54,7 @@ checksum, then `chmod +x` and put it on your `PATH`.
 <summary>Linux, end to end</summary>
 
 ```bash
-VERSION=v7.3.0   # ← the tag from the releases page
+VERSION=v7.3.2   # ← the tag from the releases page
 curl -fLO "https://github.com/XaviCodeDev1000/webfang/releases/download/${VERSION}/webfang-x86_64-unknown-linux-gnu.tar.gz"
 curl -fLO "https://github.com/XaviCodeDev1000/webfang/releases/download/${VERSION}/SHA256SUMS.txt"
 sha256sum -c SHA256SUMS.txt --ignore-missing   # verify BEFORE extracting
@@ -185,7 +185,7 @@ What differs from a run without a selector:
 | links | resolved by Readability | resolved against the page URL |
 | `title` | Readability's title | `<title>` of the full document |
 | `author` | byline, then document metadata | document metadata only |
-| `date` | `article:published_time` via Readability | document metadata: JSON-LD, `article:published_time`, microdata, `<time>` in an `<article>` |
+| `date` | document metadata, then Readability's `published_time` as a fallback | document metadata (the same cascade; no Readability fallback) |
 | `excerpt` | first paragraph or meta description | empty |
 
 Two details worth knowing:
@@ -195,7 +195,10 @@ Two details worth knowing:
   standalone HTML and loses its tags when converted, so this is the only case
   where the `html` field is not literally what the selector matched.
 - **The date** is the source string, trimmed — the same shape legible returns, so
-  the frontmatter never carries two date styles depending on the route.
+  the frontmatter never carries two date styles depending on the route. Both routes
+  read the **raw** document: `clean_html` strips the head, so Readability never sees
+  the JSON-LD blocks or the `<meta>` tags the date lives in. A page that declares no
+  date gets **no** `date:` line rather than today's date.
 - **Tables without a `<th>`** degrade to one paragraph per cell instead of a
   Markdown table. Tables with a header row — with or without `<thead>` —
   convert correctly. Tracked in #2540.

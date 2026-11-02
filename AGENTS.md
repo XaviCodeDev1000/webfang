@@ -408,6 +408,14 @@ is shared; working tree, index and HEAD are isolated.
     └── fix-crawler-timeout/     # branch: fix/crawler-timeout
 ```
 
+**Never put a worktree under `/tmp`.** On this machine `/tmp` is a 16 GB tmpfs, and a
+from-scratch `target/` for this workspace does not fit: the build dies with
+`Disk quota exceeded`. Worse, a backgrounded build that dies that way returns an
+**empty log** — it looks like the command never ran, and the failure is easy to misread as
+a tooling problem. For a throwaway tree (a merge probe, a bisect), create it elsewhere and
+point `CARGO_TARGET_DIR` at an existing worktree's `target/` instead of building a second
+one.
+
 The convention is `/ → -`: `feat/auth` → `feat-auth`. **The invariant that matters is that the
 commit lands on the branch intended for the task or the PR.** The name proxy is the default
 verification — run this before every commit in a worktree:
@@ -662,6 +670,15 @@ equivalent you can execute yourself.
 4. **Conventional branch name** — the regex lives in `pr-validation.yml`; do not restate it
    here (a regex citation rots: the workflow is the source of truth).
 5. **No AI attribution** in the PR's commits.
+
+**The changelog line is the squash subject, and that is not always the PR title.** The merge
+queue squashes: with **two or more** commits it uses the PR title, with **exactly one** it uses
+that commit's subject and the title is ignored. `cliff.toml` keeps only the first line, so on a
+one-commit branch the changelog entry is whatever the commit says — renaming the PR changes
+nothing. Measured 2026-11-01: #2548 (6 commits) landed as its retitled PR title, #2543
+(1 commit) landed as `chore(deps): bump legible to 0.5` despite a `fix(deps)` title, and its
+changelog entry had to be rewritten by hand in the release PR. **Set the commit subject of a
+one-commit branch to the line you want in the changelog.**
 
 **Pre-commit (must replicate CI exactly):**
 

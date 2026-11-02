@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.2] - 2026-11-02
+
+
+### 🔧 Fixed
+
+- Absorb the transient class — hermetic ssrf redirect test + gate API retry ([#2562](https://github.com/XaviCodeDev1000/webfang/pull/2562))
+- Date is the publication date, never the scrape date ([#2567](https://github.com/XaviCodeDev1000/webfang/pull/2567)): when a page declares no date the frontmatter now omits the `date:` line instead of writing the scrape day, so consumers must treat the field as optional
+## [7.3.1] - 2026-11-01
+
+
+### 📦 Dependencies
+
+- legible 0.4.3 → 0.5.1: the JSON-LD article gate is now an exact type list instead of an unanchored regex, so a block typed `ArticleComment` (or anything merely *containing* one of the 19 names) no longer supplies the page's `date`, title or byline; a string `author` now yields `author:` ([#2543](https://github.com/XaviCodeDev1000/webfang/pull/2543))
 ## [7.3.0] - 2026-11-01
 
 

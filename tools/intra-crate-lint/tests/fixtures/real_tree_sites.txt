@@ -508,7 +508,7 @@ application/extraction.rs	480	inline	crate::application::asset_download::downloa
 application/extraction.rs	492	inline	crate::application::spa_detection::validate_min_content
 application/extraction.rs	502	inline	crate::application::resolve_title
 application/extraction.rs	506	inline	crate::domain::excerpt_repair::repair_empty_byline
-application/extraction.rs	547	inline	crate::application::asset_download::download_assets_if_enabled
+application/extraction.rs	550	inline	crate::application::asset_download::download_assets_if_enabled
 application/http_client/client.rs	7	use	crate::domain::body_cap
 application/http_client/client.rs	8	use	crate::domain::http_config::HttpClientConfig
 application/http_client/client.rs	9	use	crate::domain::http_error::HttpError
@@ -656,11 +656,12 @@ application/scraper_service.rs	679	inline	crate::domain::extraction_quality::Ext
 application/scraper_service.rs	706	inline	crate::application::spa_detection::validate_min_content
 application/scraper_service.rs	715	inline	crate::application::resolve_title
 application/scraper_service.rs	722	inline	crate::domain::excerpt_repair::repair_empty_byline
-application/scraper_service.rs	749	inline	crate::application::spa_detection::validate_min_content
-application/scraper_service.rs	759	inline	crate::application::resolve_title
-application/scraper_service.rs	813	inline	crate::domain::ports::AssetDownloaderPort
-application/scraper_service.rs	852	inline	crate::domain::ports::AssetDownloaderPort
-application/scraper_service.rs	885	inline	crate::domain::ports::AssetDownloaderPort
+application/scraper_service.rs	728	inline	crate::domain::html_extraction::date_extractor::extract_date
+application/scraper_service.rs	752	inline	crate::application::spa_detection::validate_min_content
+application/scraper_service.rs	762	inline	crate::application::resolve_title
+application/scraper_service.rs	816	inline	crate::domain::ports::AssetDownloaderPort
+application/scraper_service.rs	855	inline	crate::domain::ports::AssetDownloaderPort
+application/scraper_service.rs	888	inline	crate::domain::ports::AssetDownloaderPort
 application/spa_detection.rs	106	use	crate::domain::html_cleaner::clean_html
 application/spa_detection.rs	107	use	crate::domain::html_extraction::fallback
 application/spa_detection.rs	107	use	crate::domain::html_extraction::readability
@@ -1582,8 +1583,8 @@ infrastructure/output/file_saver.rs	14	use	crate::infrastructure::converter::syn
 infrastructure/output/file_saver.rs	15	use	crate::infrastructure::obsidian::ObsidianRichMetadata
 infrastructure/output/file_saver.rs	16	use	crate::infrastructure::output::frontmatter
 infrastructure/output/file_saver.rs	17	use	crate::OutputFormat
-infrastructure/output/frontmatter.rs	15	use	crate::domain::excerpt_repair::repair_empty_byline
-infrastructure/output/frontmatter.rs	94	inline	crate::infrastructure::obsidian::ObsidianRichMetadata
+infrastructure/output/frontmatter.rs	14	use	crate::domain::excerpt_repair::repair_empty_byline
+infrastructure/output/frontmatter.rs	98	inline	crate::infrastructure::obsidian::ObsidianRichMetadata
 infrastructure/persistence/fingerprint.rs	14	use	crate::domain::extraction_quality::FingerprintRecord
 infrastructure/persistence/fingerprint.rs	15	use	crate::domain::fingerprint_repository::FingerprintRepository
 infrastructure/persistence/fingerprint.rs	16	use	crate::error::ScraperError

@@ -198,22 +198,84 @@ fi
 : "${REPO:?REPO is required (owner/name)}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 
+# ---------------------------------------------------------------------------
+# Transient absorption for the API reads (#2545)
+# ---------------------------------------------------------------------------
+# Every read below sits on a REQUIRED check's critical path: one call per
+# commit, and PRs in this repository carry a handful of them. A single
+# transient `gh api` failure used to come back as an empty message (the
+# `|| true` swallowed the cause) and hard-red the gate for a healthy PR —
+# measured on run 41125376595, where commit ad68339e was rejected with "No
+# se pudo leer el mensaje del commit" and a rerun with identical inputs
+# passed. The reads now retry ONLY the transient class with bounded
+# exponential backoff; a permanent 4xx fails on the first attempt, and a
+# sustained failure still fails closed — with the HTTP status in the final
+# error, never a bare "no se pudo leer".
+
+RETRY_ERR_FILE="$(mktemp)"
+trap 'rm -f "$RETRY_ERR_FILE"' EXIT
+
+# True when a failed `gh api` is of the TRANSIENT class: 5xx, 429, a 403
+# that is a rate limit (GitHub serves secondary rate limits as 403), or a
+# network error — gh renders those without any HTTP status. Everything else
+# (404, plain 403, auth) is permanent and must fail on the first attempt.
+is_transient_gh_error() {
+  local err="$1"
+  case "$err" in
+    *"(HTTP 5"*) return 0 ;;
+    *"(HTTP 429)"*) return 0 ;;
+    *"(HTTP 403)"*)
+      case "$err" in
+        *"rate limit"* | *"rate-limit"* | *"abuse"*) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *"(HTTP "*) return 1 ;;
+    # No HTTP status at all: connection refused, DNS, TLS, timeout.
+    *) return 0 ;;
+  esac
+}
+
+# `gh api` with bounded exponential backoff (3 attempts, sleeping 1s then
+# 2s) over the transient class only. Emits the response on stdout; the last
+# captured stderr stays in RETRY_ERR_FILE for the caller's final report.
+# The caller — not this function — reports the error: both call sites run
+# through a command/process substitution, so globals set here would not
+# reach the parent shell.
+gh_api_retry() {
+  local attempt out err
+  for attempt in 1 2 3; do
+    if out="$(gh api "$@" 2>"$RETRY_ERR_FILE")"; then
+      printf '%s' "$out"
+      return 0
+    fi
+    err="$(cat "$RETRY_ERR_FILE")"
+    if [ "$attempt" -eq 3 ] || ! is_transient_gh_error "$err"; then
+      return 1
+    fi
+    sleep $((2 ** (attempt - 1)))
+  done
+}
+
 # The workflow checkout is depth 1, so the PR's commits are not present
 # locally. Read each message from the API instead — one call per commit, and
 # PRs in this repository carry a handful of them.
 mapfile -t SHAS < <(
-  gh api "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate --jq '.[].sha' 2>/dev/null || true
+  gh_api_retry "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate --jq '.[].sha' || true
 )
 if [ "${#SHAS[@]}" -eq 0 ]; then
-  echo "::error::No se pudo leer ningún commit del PR $PR_NUMBER en $REPO." >&2
+  echo "::error::No se pudo leer ningún commit del PR $PR_NUMBER en $REPO: $(cat "$RETRY_ERR_FILE")" >&2
   exit 1
 fi
 
 MESSAGES=()
 for sha in "${SHAS[@]}"; do
-  msg="$(gh api "repos/$REPO/commits/$sha" --jq '.commit.message' 2>/dev/null || true)"
+  if ! msg="$(gh_api_retry "repos/$REPO/commits/$sha" --jq '.commit.message')"; then
+    echo "::error::No se pudo leer el mensaje del commit $sha tras 3 intentos: $(cat "$RETRY_ERR_FILE")" >&2
+    exit 1
+  fi
   if [ -z "$msg" ]; then
-    echo "::error::No se pudo leer el mensaje del commit $sha." >&2
+    echo "::error::El mensaje del commit $sha llegó vacío (lectura exitosa pero sin contenido)." >&2
     exit 1
   fi
   MESSAGES+=("$msg")

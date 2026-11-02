@@ -5,7 +5,6 @@ expression: redacted
 ---
 title: Quotes to Scrape
 url: http://127.0.0.1:<PORT>/
-date: [DATE]
 author: Albert Einstein
 excerpt: “The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking.” by Albert Einstein
 ---

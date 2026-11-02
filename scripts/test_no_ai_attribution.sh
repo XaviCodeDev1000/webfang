@@ -22,6 +22,10 @@
 # And it pins the whole-IDENTITY rule: a co-author name that merely STARTS
 # with an allowlisted actor (`renovate-bot, actually a human`) is a human and
 # is rejected, even though the prefix used to authorize it.
+# The API-mode cases (#2545) pass deliberately single-quoted bash snippets as
+# behavior programs: they must NOT expand in this harness — the stub sources
+# them later. That is SC2016 all over the section, silenced file-wide.
+# shellcheck disable=SC2016
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -205,6 +209,124 @@ $'chore: c\n\n🤖\n'
 # --- fail closed -----------------------------------------------------------
 
 expect reject "empty fixture has no messages" ""
+
+# --- API mode: the transient class no longer hard-reds the gate (#2545) ----
+#
+# The scanner half is exercised through --fixture above. These cases drive
+# the PR mode end-to-end with a stubbed `gh` on PATH: the gate's critical
+# path is the per-commit API read (one call per commit), where a single
+# transient failure — 5xx, secondary rate limit, network hiccup — used to
+# come back as an empty message (the `|| true` swallowed the cause) and
+# hard-red the required check for a healthy PR. Measured: run 41125376595
+# rejected commit ad68339e with "No se pudo leer el mensaje del commit",
+# and a rerun with identical inputs passed. The contract now: the transient
+# class is retried with bounded exponential backoff, a permanent 4xx fails
+# on the FIRST attempt, and a sustained failure still fails closed naming
+# the HTTP status instead of a bare "no se pudo leer".
+
+STUB_BIN="$WORKDIR/stub-bin"
+GH_LOG="$WORKDIR/gh-calls"
+mkdir -p "$STUB_BIN"
+# The stub replaces `gh api` entirely: it counts calls per shape (listing vs
+# per-commit) into $GH_LOG.{list,commit}, logs each attempt, sources
+# $GH_BEHAVIOR (which may emit stderr and exit), and falls back to healthy
+# responses. It emits pre-filtered plain text — the caller's --jq arrives as
+# an argument a stub cannot honor, and the caller consumes the lines as-is.
+cat > "$STUB_BIN/gh" <<'STUB'
+#!/usr/bin/env bash
+url="$2"
+case "$url" in
+  */pulls/*) f="${GH_LOG}.list" ;;
+  *) f="${GH_LOG}.commit" ;;
+esac
+n="$(cat "$f" 2>/dev/null || echo 0)"
+n=$((n + 1))
+echo "$n" > "$f"
+echo "attempt $n: $url" >> "$GH_LOG"
+# shellcheck disable=SC1090
+source "$GH_BEHAVIOR"
+case "$url" in
+  */pulls/*) printf 'cafe111111111111111111111111111111111111\nbeef222222222222222222222222222222222222\n' ;;
+  *) printf 'fix: clean commit\n' ;;
+esac
+STUB
+chmod +x "$STUB_BIN/gh"
+
+# api_case <label> <want: ok|reject> <expected commit-read attempts> <fixed
+# string the output must contain, or ""> <behavior bash using $url and $n>
+api_case() {
+  local label="$1" want="$2" want_attempts="$3" want_grep="$4" behavior="$5"
+  local bh="$WORKDIR/behavior.sh"
+  printf '%s\n' "$behavior" > "$bh"
+
+  local out rc got attempts detail=""
+  out="$(env \
+    PR_NUMBER=7 REPO=example/webfang GH_TOKEN=t \
+    GH_LOG="$GH_LOG" GH_BEHAVIOR="$bh" \
+    PATH="$STUB_BIN:$PATH" \
+    bash "$CHECK" 2>&1)"
+  rc=$?
+  got="ok"; [ "$rc" -ne 0 ] && got="reject"
+
+  [ "$got" != "$want" ] && detail+="verdict(want=$want got=$got) "
+  attempts="$(cat "${GH_LOG}.commit" 2>/dev/null || echo 0)"
+  [ "$attempts" -ne "$want_attempts" ] && detail+="commit-attempts(want=$want_attempts got=$attempts) "
+  if [ -n "$want_grep" ] && ! printf '%s' "$out" | grep -qF -- "$want_grep"; then
+    detail+="output-missing($want_grep) "
+  fi
+
+  if [ -z "$detail" ]; then
+    echo "  PASS  $label"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  $label ($detail)"
+    echo "        ---- output ----"
+    printf '%s\n' "$out" | sed 's/^/        /'
+    fail=$((fail + 1))
+  fi
+  rm -f "$GH_LOG" "$GH_LOG.list" "$GH_LOG.commit"
+}
+
+api_case "transient 502 on the first commit read is retried and absorbed" ok 3 "" \
+'case "$url" in
+  *"/pulls/"*) ;;
+  *) [ "$n" -eq 1 ] && { echo "gh: internal server error (HTTP 502)" >&2; exit 1; } ;;
+esac'
+
+api_case "a permanent 404 fails on the first attempt naming the status" reject 1 "HTTP 404" \
+'case "$url" in
+  *"/pulls/"*) ;;
+  *) echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+esac'
+
+api_case "a sustained 5xx still fails closed, naming the status" reject 3 "HTTP 502" \
+'case "$url" in
+  *"/pulls/"*) ;;
+  *) echo "gh: internal server error (HTTP 502)" >&2; exit 1 ;;
+esac'
+
+api_case "a secondary rate limit served as 403 is retried and absorbed" ok 3 "" \
+'case "$url" in
+  *"/pulls/"*) ;;
+  *) [ "$n" -eq 1 ] && { echo "gh: API rate limit exceeded for example/webfang (HTTP 403)" >&2; exit 1; } ;;
+esac'
+
+api_case "a plain 403 is permanent and fails on the first attempt" reject 1 "HTTP 403" \
+'case "$url" in
+  *"/pulls/"*) ;;
+  *) echo "gh: resource not accessible by integration (HTTP 403)" >&2; exit 1 ;;
+esac'
+
+api_case "a network error on the first commit read is retried and absorbed" ok 3 "" \
+'case "$url" in
+  *"/pulls/"*) ;;
+  *) [ "$n" -eq 1 ] && { echo "gh: Get \"https://api.github.com/repos/example/webfang/commits/cafe111111111111111111111111111111111111\": dial tcp: connection refused" >&2; exit 1; } ;;
+esac'
+
+api_case "a transient 502 on the listing call is retried and absorbed" ok 2 "" \
+'case "$url" in
+  *"/pulls/"*) [ "$n" -eq 1 ] && { echo "gh: internal server error (HTTP 502)" >&2; exit 1; } ;;
+esac'
 
 echo ""
 echo "  $pass passed, $fail failed"
