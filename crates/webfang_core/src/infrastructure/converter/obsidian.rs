@@ -224,4 +224,31 @@ mod tests {
             assert_eq!(result, format!("{expected}\n\n"), "input: {input}");
         }
     }
+
+    /// CHARACTERIZATION test — see #2579. This pins the CURRENT, possibly
+    /// unwanted behaviour of `ENABLE_WIKILINKS` in `convert_wiki_links`.
+    ///
+    /// It lives here, not in `wikilinks.rs`, because that file is grandfathered
+    /// by the file-size ratchet (`scripts/check_file_size.sh`): a baseline entry
+    /// fails if it grows by a single line, and the module has no room left.
+    /// `convert_wiki_links` is re-exported by this module, so the coverage is
+    /// identical.
+    ///
+    /// NOT a specification: `[](a)` for `[[a|]]` is an artefact of the
+    /// serializer. Do NOT "fix" these by flipping the flag; resolve #2579.
+    #[test]
+    fn test_characterizes_input_wikilink_downgrade_to_commonmark() {
+        for (input, expected) in [
+            ("[[a]]", "[a](a)"),
+            ("[[a|b]]", "[b](a)"),
+            ("![[img.png]]", "![img.png](img.png)"),
+            ("[[a|]]", "[](a)"),
+        ] {
+            assert_eq!(
+                convert_wiki_links(input, "example.com"),
+                expected,
+                "input: {input}"
+            );
+        }
+    }
 }
