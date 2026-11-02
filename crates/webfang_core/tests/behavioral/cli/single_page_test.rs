@@ -290,6 +290,35 @@ async fn selector_reads_publication_date_from_metadata() {
     );
 }
 
+/// #2563: the full-page route hands legible the CLEANED document, and cleaning
+/// strips the metadata the date lives in, so `published_time` came back empty
+/// and the frontmatter filled the gap with today's date. The cascade now reads
+/// the raw document, which is the only place the date survives.
+#[tokio::test]
+async fn full_page_reads_publication_date_from_metadata() {
+    let server = MockServer::start().await;
+    let output = tempfile::TempDir::new().unwrap();
+
+    mount_html_page(
+        &server,
+        "<html><head><title>Dated Post</title>\
+         <meta property=\"article:published_time\" content=\"2026-03-04T10:00:00Z\">\
+         </head><body><article>\
+         <h1>Dated Post</h1>\
+         <p>Body text long enough for the minimum-content guard, with the date\
+         declared only in the document head.</p>\
+         </article></body></html>",
+    )
+    .await;
+    run_selector_cmd(&server, &output, None);
+
+    let content = read_first_md(&output);
+    assert!(
+        content.contains("date: 2026-03-04T10:00:00Z"),
+        "the full-page route must resolve the date from document metadata, got:\n{content}"
+    );
+}
+
 /// #2563: a page that declares no date must not gain one. The frontmatter used
 /// to fall back to `Utc::now()`, which published the scrape day as if it were
 /// the publication date — invisible on the day of publication and wrong every

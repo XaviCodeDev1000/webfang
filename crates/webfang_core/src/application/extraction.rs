@@ -506,7 +506,10 @@ pub async fn extract_content(
                     crate::domain::excerpt_repair::repair_empty_byline(e, author.as_deref())
                 }),
                 author,
-                date: article.published_time,
+                // From the RAW document: clean_html strips <script> and every
+                // metadata attribute, so legible's `published_time` is always
+                // None here and this cascade is the only source (#2563).
+                date: date_extractor::extract_date(html),
                 // Store CLEAN HTML from Readability (not raw HTML with nav/ads/footer)
                 html: Some(article.content),
                 assets,
