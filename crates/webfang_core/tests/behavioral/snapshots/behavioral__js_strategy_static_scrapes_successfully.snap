@@ -5,7 +5,6 @@ expression: redacted
 ---
 title: JS Strategy Test
 url: http://127.0.0.1:<PORT>/
-date: [DATE]
 excerpt: This content is served via the static wreq downloader path, confirming that the FetchRouter wiring dispatches correctly for --js-strategy static.
 ---
 

@@ -5,7 +5,6 @@ expression: redacted
 ---
 title: Single Page Test
 url: http://127.0.0.1:<PORT>/
-date: [DATE]
 excerpt: This is meaningful content for the extractor to process.
 ---
 

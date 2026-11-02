@@ -1,13 +1,11 @@
 ---
 source: crates/webfang_core/tests/behavioral/main.rs
-assertion_line: 43
 expression: redacted
 ---
 ## 127.0.0.1/page-a.md
 ---
 title: 'Document: [127.0.0.1]'
 url: http://127.0.0.1:<PORT>/page-a
-date: [DATE]
 excerpt: Substantive content from sitemap page A, long enough to clear the fifty character minimum content guard comfortably.
 ---
 
@@ -18,7 +16,6 @@ Substantive content from sitemap page A, long enough to clear the fifty characte
 ---
 title: 'Document: [127.0.0.1]'
 url: http://127.0.0.1:<PORT>/page-b
-date: [DATE]
 excerpt: Substantive content from sitemap page B, long enough to clear the fifty character minimum content guard comfortably.
 ---
 
