@@ -113,6 +113,8 @@ baseline_json() {
 }
 
 # --- 1. new file at 501 fails, naming file and count ----------------------------
+# NEGATION: before this guard the documented rule had no enforcement — a
+# 501-line file merged silently. The gate must go red and name the file.
 
 new_sandbox c1
 make_rs "$SB/crates/webfang_x/src/a.rs" 501
@@ -125,6 +127,8 @@ else
 fi
 
 # --- 2. new file at exactly 500 passes (strict >) --------------------------------
+# NEGATION: the positive control of the case above — 500 exactly passes,
+# proving the comparison is strictly `>` and the limit needs no debate.
 
 new_sandbox c2
 make_rs "$SB/crates/webfang_x/src/a.rs" 500
@@ -137,6 +141,8 @@ else
 fi
 
 # --- 3. grandfathered grows by one line -> fails ----------------------------------
+# NEGATION: a grandfathered cap without growth rejection is not a freeze —
+# +1 line must go red.
 
 new_sandbox c3
 make_rs "$SB/crates/webfang_x/src/b.rs" 601
@@ -149,6 +155,8 @@ else
 fi
 
 # --- 4. grandfathered at baseline count -> passes ----------------------------------
+# NEGATION: the positive control — an untouched grandfathered file leaves the
+# gate green (the guard decides, it does not always fail).
 
 new_sandbox c4
 make_rs "$SB/crates/webfang_x/src/b.rs" 600
@@ -161,6 +169,8 @@ else
 fi
 
 # --- 5. grandfathered shrinks, still above limit -> passes with notice -------------
+# NEGATION: a descent that leaves the file above the limit must not force a
+# baseline edit — it passes, and the notice proposes the exact --update.
 
 new_sandbox c5
 make_rs "$SB/crates/webfang_x/src/b.rs" 550
@@ -173,6 +183,8 @@ else
 fi
 
 # --- 6. grandfathered <= limit -> fails asking removal -------------------------------
+# NEGATION: a parked <=500 entry would let the file grow back to its old cap
+# unnoticed — the win must be consolidated, so the gate demands --remove.
 
 new_sandbox c6
 make_rs "$SB/crates/webfang_x/src/b.rs" 480
@@ -185,6 +197,8 @@ else
 fi
 
 # --- 7. orphan baseline entry -> fails with removal command ---------------------------
+# NEGATION: a silent orphan lets the ratchet rot — the entry must demand its
+# own removal.
 
 new_sandbox c7
 make_rs "$SB/crates/webfang_x/src/a.rs" 100
@@ -197,6 +211,9 @@ else
 fi
 
 # --- 8. fail-closed reading ------------------------------------------------------------
+# NEGATION: "could not measure" once translated into "all green" (the
+# check_duplication.sh defect class) — a missing file, a missing key and an
+# empty corpus each go red with their own named cause.
 
 new_sandbox c8a
 make_rs "$SB/crates/webfang_x/src/a.rs" 100
@@ -233,6 +250,8 @@ else
 fi
 
 # --- 9. --generate: sorted map, feeds a passing check, refuses twice --------------------
+# NEGATION: a --generate that overwrote an existing key would let a
+# regeneration silently re-freeze whatever the tree measures — it refuses.
 
 new_sandbox c9
 make_rs "$SB/crates/webfang_x/src/a.rs" 501
@@ -289,6 +308,8 @@ PY
 fi
 
 # --- 10. --update is descending-only, and never writes on refusal -----------------------
+# NEGATION: an --update that accepted increases or additions would reopen the
+# ratchet upward — refused, and nothing is written on refusal.
 
 new_sandbox c10
 make_rs "$SB/crates/webfang_x/src/b.rs" 600
@@ -326,6 +347,8 @@ else
 fi
 
 # --- 11. --remove deletes the entry; the file becomes unguarded (NEW) --------------------
+# NEGATION: --remove is exposure, not amnesty — the removed file counts as NEW
+# and goes red above the limit again.
 
 new_sandbox c11
 make_rs "$SB/crates/webfang_x/src/b.rs" 600
