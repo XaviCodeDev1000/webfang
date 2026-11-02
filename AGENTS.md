@@ -102,6 +102,37 @@ above.
 - **Do not touch `CHANGELOG.md`** in a work PR — there is a single writer (the Release PR).
 - **Do not touch `docs/`** unless explicitly asked.
 
+### The local gate mirrors `gate.needs`, and now it says so
+
+`scripts/ci_fast_gate.sh` is the local equivalent of the PR fast gate, not of the whole
+workflow. Every run ends with a coverage report naming, for the lane that just ran, which
+`gate.needs` jobs it covers, which it covers only in part, and which it never touches. The
+declaration is `scripts/ci_fast_gate_coverage.tsv`, and `scripts/test_ci_gate_structure.sh`
+fails when it drifts from `gate.needs` in either direction — so a new required producer
+cannot go missing from the report in silence. **Read that report before pushing:** when it
+names a job you touched, run that job's check by hand.
+
+The two checks that used to be missing entirely now run in the code lane (#2559): the
+duplication ratchet (`scripts/check_duplication.sh`, merge-blocking in `code-quality`) and
+the `docs/test-inventory.json` drift check (`scripts/check_test_inventory.sh`, merge-blocking
+in `repo-guards`). Measured on #2548, the gate printed 37 pass / 0 fail — GREEN — while both
+were red in CI: a whole local cycle spent on a gate that exists to save them.
+
+What stays a deliberate local exception, by class:
+
+- **`toolchain`, `artifact-guards`** — nothing runs locally. They answer with a *pinned*
+  toolchain or with producers that a pre-push run may not download, so a verdict from
+  unpinned local tools would be worse than none.
+- **`security`** — only the *cached* zizmor audit runs (`.github/zizmor.yml`, unchanged,
+  `--min-severity high`). `cargo deny` and `cargo audit` never do, so the report lists the
+  job as partial and never as covered.
+- **The code lane's test depth, and the full step set of `repo-guards`** — cost. The code lane
+  runs nextest for the crates the classifier selected, not the workspace, so `test-core` is
+  *partial* there; `test-full` runs only in the `full` lane, which is where an `--all-features`
+  workspace run belongs.
+- **`merge-metrics-guards`** — its harnesses run locally only when their own files change,
+  because a change elsewhere cannot break them.
+
 ## 🏗️ Architecture
 
 ### Workspace map (5 crates)
@@ -701,6 +732,7 @@ cargo check && cargo clippy --all-targets --all-features -- -D warnings \
 **Checklist before opening the PR:**
 
 - [ ] `bash scripts/ci_fast_gate.sh` GREEN
+- [ ] its coverage report read: every `NOT covered` job you touched was run by hand
 - [ ] `cargo check` + `cargo clippy --all-targets --all-features` (full command above) + `cargo fmt --all -- --check`
 - [ ] `cargo doc` with `RUSTDOCFLAGS=-D warnings` if library code changed
 - [ ] `cargo nextest run` (at least the affected module)

@@ -57,11 +57,19 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# The operator's PATH, captured BEFORE any run replaces it inside a subshell.
+# Reading `$PATH` after that point would read the subshell's value, and the
+# linter is right to call that out (SC2031).
+AMBIENT_PATH="$PATH"
 
 PASS=0
 FAIL=0
+SKIP=0
 ok() { PASS=$((PASS + 1)); printf '  ok   %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf '  FAIL %s\n' "$1"; }
+# A case that cannot run here is a VISIBLE omission, never a silent pass and
+# never a false failure — the same rule the gate applies to a missing tool.
+skip() { SKIP=$((SKIP + 1)); printf '  skip %s\n' "$1"; }
 
 # has <file> <fixed-string> <label>: pass when the string IS in the file.
 has() {
@@ -138,7 +146,7 @@ trap cleanup EXIT
 # anything: a compile cannot happen even when the gate asks for one, so the
 # "no build" promise is structural instead of a promise.
 for stub_name in cargo rustfmt rustdoc cargo-clippy cargo-nextest cargo-fmt \
-  cargo-metadata clippy-driver; do
+  cargo-metadata clippy-driver jscpd; do
   cat >"$STUB_DIR/$stub_name" <<'STUB'
 #!/usr/bin/env bash
 # Fixture stub: records the invocation, returns success, builds nothing.
@@ -299,6 +307,24 @@ make_fixture() {
   cp "$REPO_ROOT/scripts/ci_fast_gate.sh" "$dir/scripts/ci_fast_gate.sh"
   cp "$REPO_ROOT/scripts/check_target_isolation.sh" "$dir/scripts/check_target_isolation.sh"
   write_classifier "$dir/scripts/ci_path_classifier.sh" "$mode"
+  # The gate's coverage table (#2559). The harness owns this fixture so the
+  # coverage assertions stay exact while the real table evolves; the real
+  # table's shape is pinned against `gate.needs` by
+  # scripts/test_ci_gate_structure.sh, which is where that contract belongs.
+  #
+  # Every row here exists to pin one claim the real table makes, and one
+  # review finding each: a note on a COVERED job, a note on a NOT-covered job,
+  # a lane list written with a space after the comma, `test-core` partial in
+  # the code lane and full in the full lane, and `security` partially covered
+  # so it is NOT listed among the jobs no lane covers.
+  {
+    printf 'change-scope\tdocs,ci,code,full\t-\tthe path classifier\t-\n'
+    printf 'fmt\tcode, full\t-\tcargo fmt --all -- --check\t-\n'
+    printf 'test-core\tfull\tcode\tworkspace nextest\tnextest for the selected crates only\n'
+    printf 'repo-guards\t-\tcode,full\t-\ta subset of the CI steps\n'
+    printf 'security\t-\tci,full\t-\tthe cached zizmor audit runs; cargo deny never does\n'
+    printf 'toolchain\t-\t-\t-\tno local equivalent\n'
+  } >"$dir/scripts/ci_fast_gate_coverage.tsv"
   # The FULL lane runs this one through `bash` (not through run_guard), so the
   # fixture provides a no-op instead of letting the step fail for a reason
   # that has nothing to do with the case under test.
@@ -367,17 +393,17 @@ GATE_OUT=""
 GATE_ERR=""
 GATE_RC=0
 
-# run_gate <fixture-dir> [gate args...]: run the fixture's gate with the stubs
-# on PATH and the scratch target registered.
-run_gate() {
-  local dir="$1"
-  shift
+# run_gate_path <path> <fixture-dir> [gate args...]: run the fixture's gate with
+# an explicit PATH and the scratch target registered.
+run_gate_path() {
+  local path="$1" dir="$2"
+  shift 2
   GATE_OUT="$SCRATCH/gate.out"
   GATE_ERR="$SCRATCH/gate.err"
   (
     cd "$dir" || exit 127
     unset GITHUB_OUTPUT CI_PATH_CLASSIFIER_FILES WEBFANG_REAL_CARGO
-    export PATH="$STUB_DIR:$PATH"
+    export PATH="$path"
     export CARGO_TARGET_DIR="$TARGET_DIR"
     export WEBFANG_SEEDS_ROOT="$SCRATCH/store/seeds"
     export WEBFANG_QUARANTINE_ROOT="$SCRATCH/store/quarantine"
@@ -385,6 +411,54 @@ run_gate() {
     bash scripts/ci_fast_gate.sh "$@"
   ) >"$GATE_OUT" 2>"$GATE_ERR"
   GATE_RC=$?
+}
+
+# run_gate <fixture-dir> [gate args...]: run the fixture's gate with the stubs
+# on PATH and the scratch target registered.
+run_gate() {
+  run_gate_path "$STUB_DIR:$AMBIENT_PATH" "$@"
+}
+
+# run_gate_no_jscpd <fixture-dir> [gate args...]: the gate runs with a PATH that
+# holds the stubs and the core utilities, and NO jscpd anywhere. On a machine
+# that has the real binary a plain `run_gate` would take the run branch and the
+# fail-open case would measure nothing.
+#
+# The PATH is BUILT, never pruned. Dropping every ambient directory that carries
+# a `jscpd` also drops that directory's `date`, `sed`, `grep` or `bash` on a
+# single-prefix layout, and the case would then report a regression that has
+# nothing to do with jscpd. Symlinking the binaries the code lane needs into one
+# directory keeps the promise ("nothing real is reached") without that coupling.
+#
+# Returns 1 — and the caller reports a VISIBLE skip — when a needed utility
+# cannot be resolved, because a harness that cannot run a case must say so
+# instead of failing it.
+NO_JSCPD_SKIP_REASON=""
+run_gate_no_jscpd() {
+  local bare="$SCRATCH/stub-no-jscpd" missing="" tool resolved
+  if [ ! -d "$bare" ]; then
+    mkdir -p "$bare"
+    for tool in "$STUB_DIR"/*; do
+      case "$(basename "$tool")" in jscpd) continue ;; esac
+      ln -s "$tool" "$bare/$(basename "$tool")"
+    done
+    for tool in bash sh date sed awk grep git mktemp realpath readlink find \
+      sort uniq cut tr tail head basename dirname cat rm cp mv ls mkdir touch \
+      chmod diff wc env python3 stat od tee xargs; do
+      resolved="$(command -v "$tool" 2>/dev/null)" || resolved=""
+      case "$resolved" in
+        /*) [ -e "$bare/$tool" ] || ln -s "$resolved" "$bare/$tool" ;;
+        *) missing+="$tool " ;;
+      esac
+    done
+    [ -z "$missing" ] || printf '%s' "${missing% }" >"$SCRATCH/stub-no-jscpd.missing"
+  fi
+  if [ -f "$SCRATCH/stub-no-jscpd.missing" ]; then
+    NO_JSCPD_SKIP_REASON="cannot build a jscpd-free PATH: unresolved $(cat "$SCRATCH/stub-no-jscpd.missing")"
+    return 1
+  fi
+  run_gate_path "$bare" "$@"
+  return 0
 }
 
 echo "fast-gate semantics: the lane decision must fail closed"
@@ -521,7 +595,7 @@ CLS_OUT="$SCRATCH/classifier.out"
 ) >"$CLS_OUT" 2>/dev/null
 has "$CLS_OUT" "all=true" "B45: the classifier widens to all=true on an unresolvable base"
 
-# ── 5b. B45: a local `main` is NOT a substitute for the requested base ──────
+# ── 6. B45: a local `main` is NOT a substitute for the requested base ──────
 # NEGATION: the fallback chain was "<base> -> main -> HEAD~1". The HEAD~1 half
 # is gone, but the `main` half was not: a local main can be stale or AHEAD
 # of the real base, so the diff would not be the PR's range — and a branch
@@ -616,7 +690,7 @@ run_gate "$D" --base-ref HEAD --head-ref HEAD
 has "$GATE_OUT" "PASS: path classifier harness semantics (offline)" \
   "B52: the control CI lane still runs the path-classifier harness"
 
-# ── 10. B53: a scan that could NOT run is a failure, not a clean result ─────
+# ── 9. B53: a scan that could NOT run is a failure, not a clean result ─────
 # NEGATION: pre-fix the pinned grep arms were `if grep ...; then fail; fi;
 # echo OK`, which cannot tell grep's exit 1 (nothing found) from its exit 2
 # (the scan could not run): an unreadable source tree printed the clean
@@ -648,7 +722,170 @@ has "$GATE_OUT" "::error::FAIL: forbid anyhow in webfang_core" \
 has "$GATE_OUT" "  - forbid anyhow in webfang_core" \
   "B53: the failed scan step is named in the summary"
 
-# ── 6. the resource contract: nothing was compiled, nothing was real ─────────
+# ── 10. #2559: the two merge-blocking checks the gate used to skip ───────────
+# NEGATION: pre-fix neither `scripts/check_duplication.sh` (merge-blocking in
+# the `code-quality` job) nor `scripts/check_test_inventory.sh` (merge-blocking
+# in `repo-guards`) appeared anywhere in the gate. Measured on #2548 the gate
+# printed 37 pass / 0 fail — GREEN — while BOTH were red in CI, so the local
+# cycle the gate exists to save was spent twice on the same change.
+#
+# The two scripts are STUBBED here: the case under test is the WIRING, and a
+# real jscpd over a fixture would measure the fixture, not the gate.
+D="$(make_fixture cq-code-lane main real)"
+printf '#!/usr/bin/env bash\necho "fixture: duplication stub"\nexit 0\n' \
+  >"$D/scripts/check_duplication.sh"
+printf '#!/usr/bin/env bash\necho "fixture: inventory stub"\nexit 0\n' \
+  >"$D/scripts/check_test_inventory.sh"
+fixture_git "$D" add -A
+fixture_git "$D" commit -q -m "fixture: the two stubbed checks"
+# A Rust edit is what reaches the CODE lane, and it is also the shape that
+# staled the inventory in #2548 (a new test function).
+printf '// touched\n' >>"$D/crates/webfang_core/src/lib.rs"
+run_gate "$D" --base-ref HEAD --head-ref HEAD
+if [ "$GATE_RC" -eq 0 ]; then
+  ok "#2559: the code lane is GREEN with both checks present"
+else
+  bad "#2559: the code lane failed (rc=$GATE_RC): $(tail -3 "$GATE_OUT")"
+fi
+has "$GATE_OUT" "PASS: duplication ratchet (jscpd v5, #2559)" \
+  "#2559: the code lane runs the duplication ratchet"
+has "$GATE_OUT" "PASS: test inventory drift (#2559)" \
+  "#2559: the code lane runs the test-inventory drift check"
+
+# And a red one really reds the gate: the wiring must not be a step that
+# cannot fail.
+D="$(make_fixture cq-code-red main real)"
+printf '#!/usr/bin/env bash\necho "fixture: duplication INCREASED" >&2\nexit 1\n' \
+  >"$D/scripts/check_duplication.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$D/scripts/check_test_inventory.sh"
+fixture_git "$D" add -A
+fixture_git "$D" commit -q -m "fixture: a duplication stub that fails"
+printf '// touched\n' >>"$D/crates/webfang_core/src/lib.rs"
+run_gate "$D" --base-ref HEAD --head-ref HEAD
+if [ "$GATE_RC" -ne 0 ]; then
+  ok "#2559: a red duplication ratchet reds the gate"
+else
+  bad "#2559: a red duplication ratchet left the gate GREEN"
+fi
+has "$GATE_OUT" "::error::FAIL: duplication ratchet" \
+  "#2559: the failing ratchet is reported as a failed step"
+has "$GATE_OUT" "  - duplication ratchet (jscpd v5, #2559)" \
+  "#2559: the failed ratchet is named in the summary"
+
+# A missing jscpd is a VISIBLE SKIP, never a silent pass and never a red gate:
+# the gate's documented contract is fail-open on a missing tool. Reached with a
+# PATH that carries no jscpd at all — a machine that HAS the real binary would
+# otherwise take the run branch and the case would measure nothing.
+D="$(make_fixture cq-no-jscpd main real)"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$D/scripts/check_duplication.sh"
+# Both code-lane checks are stubbed, like the two sibling cases: the inventory
+# check does not depend on jscpd, and leaving it unstubbed would let an
+# unrelated step decide the verdict.
+printf '#!/usr/bin/env bash\nexit 0\n' >"$D/scripts/check_test_inventory.sh"
+fixture_git "$D" add -A
+fixture_git "$D" commit -q -m "fixture: a duplication stub that never runs"
+printf '// touched\n' >>"$D/crates/webfang_core/src/lib.rs"
+if run_gate_no_jscpd "$D" --base-ref HEAD --head-ref HEAD; then
+  if [ "$GATE_RC" -eq 0 ]; then
+    ok "#2559: a missing jscpd does not red the gate"
+  else
+    bad "#2559: a missing jscpd failed the gate (rc=$GATE_RC): $(tail -3 "$GATE_OUT")"
+  fi
+  has "$GATE_OUT" "SKIP: duplication ratchet (jscpd v5)" \
+    "#2559: the missing jscpd is a logged skip, not a silent pass"
+  lacks "$GATE_OUT" "PASS: duplication ratchet" \
+    "#2559: the duplication ratchet did not report a pass it never earned"
+else
+  skip "#2559: the fail-open case cannot run here ($NO_JSCPD_SKIP_REASON)"
+fi
+
+# ── 11. #2559: the coverage report states only what the lane really verified ──
+# NEGATION: pre-fix the gate's summary implied full coverage of the merge gate,
+# two merge-blocking jobs were missing from it entirely, and nothing said so.
+# The report is what makes the remaining gap legible instead of invisible — so
+# every claim it makes is pinned here, one assertion per claim. A report that
+# over-states coverage is worse than no report: it is read and believed.
+D="$(make_fixture coverage-code main real)"
+printf '// touched\n' >>"$D/crates/webfang_core/src/lib.rs"
+run_gate "$D" --base-ref HEAD --head-ref HEAD
+has "$GATE_OUT" "fast-gate coverage vs gate.needs (lanes: code)" \
+  "#2559: the code lane prints the coverage report"
+# A note is kept for a COVERED job (finding: notes were dropped for covered),
+# and a lane list written `code, full` means covered here too (finding: the
+# gate matched the raw field while the validator normalised the space).
+has "$GATE_OUT" "  covered here: change-scope (the path classifier), fmt (cargo fmt --all -- --check)" \
+  "#2559: covered jobs keep their note, and a spaced lane list still counts"
+# `test-core` is PARTIAL in the code lane: only the classifier-selected crates
+# run. Reporting it as covered was the green-local/red-CI gap, re-endorsed.
+has "$GATE_OUT" "  partial here: test-core (nextest for the selected crates only), repo-guards (a subset of the CI steps)" \
+  "#2559: a job the lane covers only in part is reported as partial, with the gap named"
+# A note is kept for a NOT-covered job (finding: the explanation was dropped
+# exactly where it matters most), and `security` is NOT in the never-covered
+# list because the cached zizmor audit does run in some lanes.
+has "$GATE_OUT" "  NOT covered here: security (the cached zizmor audit runs; cargo deny never does), toolchain (no local equivalent)" \
+  "#2559: not-covered jobs keep their note"
+has "$GATE_OUT" "  no lane covers these, ever: toolchain (no local equivalent)" \
+  "#2559: a job NO lane covers is called out separately, with its reason"
+lacks "$GATE_OUT" "no lane covers these, ever: security" \
+  "#2559: a partially covered job is never listed as never covered"
+
+# The same table, a different lane: the report is lane-aware, not a constant,
+# and `test-core` is FULL in the full lane (workspace nextest).
+D="$(make_fixture coverage-full main full)"
+touch_worktree "$D"
+run_gate "$D" --base-ref HEAD --head-ref HEAD
+has "$GATE_OUT" "fast-gate coverage vs gate.needs (lanes: full)" \
+  "#2559: the full lane prints its own coverage report"
+has "$GATE_OUT" "test-core (workspace nextest)" \
+  "#2559: test-core is covered in the full lane, where the workspace run happens"
+
+# And in the CI lane, `security` is partial — the zizmor audit is the part of
+# that job a pre-push run really does.
+D="$(make_fixture coverage-ci main real)"
+printf '# touched\n' >>"$D/scripts/ci_path_classifier.sh"
+run_gate "$D" --base-ref HEAD --head-ref HEAD
+has "$GATE_OUT" "fast-gate coverage vs gate.needs (lanes: ci)" \
+  "#2559: the CI lane prints its own coverage report"
+has "$GATE_OUT" "  partial here: security (the cached zizmor audit runs; cargo deny never does)" \
+  "#2559: the CI lane reports the zizmor half of the security job as partial"
+
+# The docs lane covers almost nothing, and says so instead of staying silent.
+# `change-scope` is covered there (the classifier runs in every lane) and every
+# other row is not — the same shape the real table produces.
+D="$(make_fixture coverage-docs main real)"
+touch_worktree "$D"
+run_gate "$D" --base-ref HEAD --head-ref HEAD
+has "$GATE_OUT" "fast-gate coverage vs gate.needs (lanes: docs)" \
+  "#2559: the docs lane prints its own coverage report"
+has "$GATE_OUT" "  covered here: change-scope (the path classifier)" \
+  "#2559: the docs lane reports the one job it really covers"
+has "$GATE_OUT" "  NOT covered here: fmt, test-core (" \
+  "#2559: the docs lane names the cargo jobs it does not run"
+
+# The declaration is not a measurement, and the report says so on the LAST
+# screen — the SKIP lines that make it a non-measurement scrolled past earlier.
+has "$GATE_OUT" "  declaration, not a measurement:" \
+  "#2559: the report says it is a declaration, not a measurement"
+
+# An unreadable table is UNKNOWN, never an empty gap: "I cannot name the gap"
+# and "there is no gap" must not read the same.
+D="$(make_fixture coverage-unknown main real)"
+rm "$D/scripts/ci_fast_gate_coverage.tsv"
+fixture_git "$D" add -A
+fixture_git "$D" commit -q -m "fixture: the coverage table is gone"
+touch_worktree "$D"
+run_gate "$D" --base-ref HEAD --head-ref HEAD
+has "$GATE_OUT" "fast-gate coverage: UNKNOWN" \
+  "#2559: a missing coverage table is reported as UNKNOWN"
+lacks "$GATE_OUT" "  NOT covered here: none" \
+  "#2559: a missing coverage table did not claim a complete gap list"
+if [ "$GATE_RC" -eq 0 ]; then
+  ok "#2559: the coverage report never reds the gate"
+else
+  bad "#2559: the coverage report failed the gate (rc=$GATE_RC)"
+fi
+
+# ── 12. the resource contract: nothing was compiled, nothing was real ─────────
 # NEGATION: pre-fix no harness existed, so nothing observed what the gate
 # actually invoked. A harness that quietly reached a real cargo would turn
 # the suite into the resource accident it is supposed to prevent.
@@ -662,7 +899,9 @@ STUB_OUTSIDE=0
 while IFS= read -r line; do
   stub_path="$(printf '%s' "$line" | cut -f2)"
   case "$stub_path" in
-    "$STUB_DIR"/*) ;;
+    # `stub-no-jscpd/` holds symlinks to the same scripts, for the one case
+    # that must run with no jscpd anywhere on PATH.
+    "$STUB_DIR"/* | "$SCRATCH/stub-no-jscpd"/*) ;;
     *) STUB_OUTSIDE=$((STUB_OUTSIDE + 1)) ;;
   esac
 done <"$STUB_LOG"
@@ -687,7 +926,7 @@ else
   bad "resource: $FIXTURE_TARGETS fixture(s) grew a target dir"
 fi
 
-# ── 9. A15: a DELETED script must not fail the syntax steps ───────────────────
+# ── 13. A15: a DELETED script must not fail the syntax steps ───────────────────
 # NEGATION: pre-fix the changed-scripts list came straight from the changed-file
 # union, and `git diff --name-only` reports DELETED paths too. `bash -n` and
 # the linter were then handed a file that is not on disk: retiring one script
@@ -733,6 +972,6 @@ cat "$STUB_LOG"
 printf 'cargo target dir: %s (%s file(s))\n' "$TARGET_DIR" \
   "$(find "$TARGET_DIR" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
 
-printf '\nharness: %d ok, %d fail\n' "$PASS" "$FAIL"
+printf '\nharness: %d ok, %d fail, %d skip\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ] || exit 1
 echo "the lane decision fails closed: a broken classifier, an incomplete verdict, a stray code file and an unresolvable base all widen or fail the run"

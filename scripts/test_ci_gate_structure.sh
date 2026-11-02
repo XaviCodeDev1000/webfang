@@ -17,13 +17,36 @@ set -euo pipefail
 #      narrow-scope success list ∪ skip list ∪ {change-scope} equals
 #      gate.needs, and it fails when change-scope itself failed (a failed or
 #      empty plan can never green the gate).
+#   6. The fast gate's coverage table (scripts/ci_fast_gate_coverage.tsv)
+#      describes EXACTLY gate.needs: no producer missing, no stale row, and no
+#      lane token outside the set the gate's dispatcher actually assigns
+#      (#2559). The local gate reports its own gaps from that table, so a table
+#      that under-describes gate.needs would make the report lie in the same
+#      silence it exists to break.
 #
-# Hermetic: no cargo, no network, no fixture repos — it reads the two files
+#      The lane vocabulary is DERIVED from the dispatcher, never restated: a
+#      hand-maintained copy of "the lanes" is the same drift class as a
+#      hand-maintained producer list, one level down.
+#
+# What this harness does NOT prove: that a row's lane column names the lane that
+# really runs that job's step. Step names are free text, so there is no static
+# mapping to check — this harness pins the job set and the lane vocabulary, and
+# nothing else. The report's LOGIC is pinned behaviourally in
+# scripts/test_ci_fast_gate.sh, but against its OWN fixture table (one assertion
+# per claim: a spaced lane list, `security` partial, `test-core` partial in the
+# code lane and covered in the full lane, notes on every line). A wrong lane
+# column in the REAL table would therefore pass both harnesses. That residual
+# gap is accepted knowingly: the table is 13 hand-written rows that every
+# developer reads on every run, so a wrong column is visible, not buried.
+#
+# Hermetic: no cargo, no network, no fixture repos — it reads the three files
 # and nothing else.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_YML="${CI_GATE_STRUCTURE_YML:-$SCRIPT_DIR/../.github/workflows/ci.yml}"
 PLAN="${CI_PLAN:-$SCRIPT_DIR/ci_plan.sh}"
+COVERAGE="${CI_FAST_GATE_COVERAGE:-$SCRIPT_DIR/ci_fast_gate_coverage.tsv}"
+FAST_GATE="${CI_FAST_GATE:-$SCRIPT_DIR/ci_fast_gate.sh}"
 
 fail=0
 PASSED=0
@@ -38,6 +61,8 @@ bad() {
 
 [ -f "$CI_YML" ] || { echo "FAIL: ci.yml not found at $CI_YML"; exit 1; }
 [ -f "$PLAN" ] || { echo "FAIL: plan script not found at $PLAN"; exit 1; }
+[ -f "$COVERAGE" ] || { echo "FAIL: fast-gate coverage table not found at $COVERAGE"; exit 1; }
+[ -f "$FAST_GATE" ] || { echo "FAIL: fast gate not found at $FAST_GATE"; exit 1; }
 
 # --- Planner constants (single source of truth) ------------------------------
 FULL_PRODUCERS="$(sed -n 's/^FULL_PRODUCERS="\(.*\)"$/\1/p' "$PLAN")"
@@ -184,6 +209,58 @@ else
   bad "gate verify does not check change-scope's result — a failed/empty plan could green the gate"
 fi
 
+# --- 6. the fast gate's coverage table describes EXACTLY gate.needs ----------
+# `scripts/ci_fast_gate.sh` prints, at the end of every run, the `gate.needs`
+# jobs its lane did not verify (#2559). That report is only worth reading if
+# it is complete: a producer added to `gate.needs` and never declared here
+# would be missing from the report — the very silence the report exists to
+# break. So the two sets must match in BOTH directions, and every lane token
+# must name a lane the gate actually dispatches.
+COVERAGE_JOBS="$(awk -F'\t' '$1 !~ /^#/ && $1 != "" { print $1 }' "$COVERAGE" | sort -u)"
+COVERAGE_LANES="$(awk -F'\t' '$1 !~ /^#/ && $1 != "" { print $2; print $3 }' "$COVERAGE" \
+  | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | grep -vx -- '-' | sort -u)"
+
+# The lane vocabulary, read from the dispatcher's own assignments. The gate sets
+# FAST_GATE_LANES in exactly the branches that reach the coverage report, so the
+# set of values assigned there IS the set of lanes a row may name. Restating it
+# by hand here would recreate, one level down, the drift this harness exists to
+# catch.
+GATE_LANES="$(sed -n 's/^ *FAST_GATE_LANES="\(.*\)"$/\1/p' "$FAST_GATE" \
+  | tr ' ' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort -u)"
+
+if [[ -n "$GATE_LANES" ]]; then
+  ok "the fast gate's lanes were derived from its dispatcher ($(echo "$GATE_LANES" | tr '\n' ' '))"
+else
+  bad "could not derive any lane from $FAST_GATE (no FAST_GATE_LANES assignment found)"
+fi
+
+if [[ -n "$COVERAGE_JOBS" ]]; then
+  ok "fast-gate coverage table parsed ($(wc -l <<<"$COVERAGE_JOBS" | tr -d ' ') jobs)"
+else
+  bad "could not parse any job from $COVERAGE"
+fi
+
+COVERAGE_MISSING="$(comm -23 <(echo "$GATE_SET") <(echo "$COVERAGE_JOBS"))"
+if [[ -z "$COVERAGE_MISSING" ]]; then
+  ok "every gate.needs job is declared in the fast-gate coverage table"
+else
+  bad "gate.needs jobs absent from the fast-gate coverage table: $(echo "$COVERAGE_MISSING" | tr '\n' ' ')"
+fi
+
+COVERAGE_EXTRA="$(comm -13 <(echo "$GATE_SET") <(echo "$COVERAGE_JOBS"))"
+if [[ -z "$COVERAGE_EXTRA" ]]; then
+  ok "the fast-gate coverage table declares no job outside gate.needs"
+else
+  bad "the fast-gate coverage table names jobs that are not gate.needs: $(echo "$COVERAGE_EXTRA" | tr '\n' ' ')"
+fi
+
+COVERAGE_BAD_LANE="$(comm -23 <(echo "$COVERAGE_LANES") <(echo "$GATE_LANES"))"
+if [[ -z "$COVERAGE_BAD_LANE" ]]; then
+  ok "every lane named in the coverage table is a lane the dispatcher assigns ($(echo "$GATE_LANES" | tr '\n' ' '))"
+else
+  bad "lane(s) in the coverage table that the dispatcher never assigns: $(echo "$COVERAGE_BAD_LANE" | tr '\n' ' ')"
+fi
+
 echo
 if [[ "$fail" -ne 0 ]]; then
   echo "ci_gate_structure: $PASSED passed, at least one assertion FAILED."
@@ -227,7 +304,29 @@ expect_fail "continue-on-error on a gate producer"
 sed 's/^FULL_PRODUCERS=.*/FULL_PRODUCERS=""/' "$PLAN" > "$SELF/ci_plan.sh"
 export CI_GATE_STRUCTURE_YML="$CI_YML" CI_PLAN="$SELF/ci_plan.sh"
 expect_fail "empty FULL_PRODUCERS in the planner"
-unset CI_GATE_STRUCTURE_YML CI_PLAN
 
-echo "All ci_gate_structure checks passed ($PASSED assertions, 4 self-tests)."
+# Case 5: a producer missing from the fast gate's coverage table — the exact
+# silence the report exists to break.
+export CI_PLAN="$PLAN"
+awk -F'\t' '$1 != "fmt"' "$COVERAGE" > "$SELF/coverage-missing.tsv"
+export CI_FAST_GATE_COVERAGE="$SELF/coverage-missing.tsv"
+expect_fail "gate.needs job missing from the coverage table"
+
+# Case 6: the coverage table names a job that is not gate.needs — a stale row
+# from a retired producer.
+{ cat "$COVERAGE"; printf 'retired-job\tcode\t-\tno longer a producer\t-\n'; } > "$SELF/coverage-extra.tsv"
+export CI_FAST_GATE_COVERAGE="$SELF/coverage-extra.tsv"
+expect_fail "coverage table row outside gate.needs"
+
+# Case 7: the table names a lane the dispatcher no longer assigns. The lane
+# vocabulary is derived, so retiring a lane must red this harness rather than
+# leaving a row that certifies coverage nobody provides.
+export CI_FAST_GATE_COVERAGE="$COVERAGE"
+sed 's/^  FAST_GATE_LANES="code"$/  FAST_GATE_LANES=""/' "$FAST_GATE" > "$SELF/ci_fast_gate.sh"
+export CI_FAST_GATE="$SELF/ci_fast_gate.sh"
+expect_fail "coverage table lane the dispatcher no longer assigns"
+
+unset CI_GATE_STRUCTURE_YML CI_PLAN CI_FAST_GATE_COVERAGE CI_FAST_GATE
+
+echo "All ci_gate_structure checks passed ($PASSED assertions, 7 self-tests)."
 exit 0

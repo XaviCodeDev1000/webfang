@@ -1,0 +1,38 @@
+# ci_fast_gate_coverage.tsv — what scripts/ci_fast_gate.sh verifies, per lane.
+#
+# One row per job in `gate.needs` (.github/workflows/ci.yml) — the merge gate.
+# scripts/test_ci_gate_structure.sh fails when this file and `gate.needs` drift
+# apart in EITHER direction, and when a lane token here is not a lane the
+# dispatcher actually assigns, so a new required producer — or a renamed lane —
+# can never be omitted from the local gate's own coverage report in silence
+# (#2559).
+#
+# Columns, TAB separated:
+#   job            the ci.yml job id, exactly as `gate.needs` spells it
+#   full-lanes     comma-separated lanes that run a local equivalent of its checks
+#   partial-lanes  comma-separated lanes that run only SOME of them
+#   note-full      what runs, shown when the running lane is in full-lanes
+#   note-partial   what is missing or why nothing runs, shown when the running
+#                  lane is in partial-lanes OR in neither
+#
+# Lanes: docs, ci, code, full. "-" means no lane.
+# A note is never dropped: an explanation that only reaches the reader for the
+# `partial` case is missing exactly where it matters most — the checks that no
+# lane covers at all.
+#
+# `full`/`partial` are declarations of what each lane is BUILT to verify, not a
+# measurement of a particular run: a step that skipped because a tool was
+# missing prints its own SKIP line in the run itself.
+change-scope	docs,ci,code,full	-	the path classifier runs in every lane	-
+toolchain	-	-	-	verifies the installed rustc against Cargo.toml rust-version, and the local rustc is whatever the developer has
+repo-guards	-	docs,ci,code,full	-	a subset of the CI job's steps only; the test-inventory drift check runs in the code and full lanes
+fmt	code,full	-	cargo fmt --all -- --check	-
+clippy	code,full	-	clippy --all-targets --all-features with -D warnings	-
+artifact-guards	-	-	-	the five test_artifact_*.sh producers
+code-quality	-	code,full	-	the duplication ratchet runs; cargo machete does not
+merge-metrics-guards	-	ci,full	-	the four harnesses run only when their own files change
+test-core	full	code	workspace nextest	nextest for the crates the classifier selected, not the workspace
+test-full	full	-	workspace nextest with --all-features	-
+test-release-provenance	code,full	-	scripts/test_release_provenance.sh	-
+security	-	ci,full	-	the cached zizmor audit runs; cargo deny and cargo audit never do
+doc-quality	-	code,full	-	cargo doc only; cargo test --doc never runs locally
