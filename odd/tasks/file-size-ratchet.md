@@ -80,3 +80,11 @@ queda bajo el límite duro de 500, y la lista solo baja.
   (las victorias baratas del ratchet).
 - L3: decisión de usuario: `tests/` fuera de scope (extensible después sin
   reescribir); `.github/` en PR aparte.
+- L4: ENMIENDA de la segunda parte de L3, forzada por la política del repo:
+  el meta-guard de cobertura de guards (#2056) falla el PR con
+  `unwired-guard: check_file_size.sh is reachable from no workflow` y su
+  baseline "solo encoge" prohibe registrarlo como conocidamente sin cablear.
+  El guard + su harness se cablean en el job `repo-guards` de `ci.yml`
+  DENTRO de este PR (patrón dependency-direction, pasos vecinos), consultado
+  con el usuario sin respuesta explícita; decisión tomada sobre la única
+  ruta conforme hacia un PR mergeable.

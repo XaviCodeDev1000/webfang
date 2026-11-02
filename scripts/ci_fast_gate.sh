@@ -907,9 +907,10 @@ lane_fmt_and_guards() {
   # baseline entries fail loudly. Descending-only baseline in
   # quality-baselines.json (the #516 pattern, like the duplication ratchet).
   # Pure bash+python3 (no external binary), so unlike check_duplication.sh it
-  # runs in the local gate; the CI wiring is the .github/ PR's business. Its
-  # hermetic harness is wired in lane_ci (triggered), not here, so FULL does
-  # not run it twice.
+  # runs in the local gate; CI runs it for real in the repo-guards job of
+  # ci.yml (the guard-coverage meta-guard #2056 refuses an unwired
+  # check_*.sh). Its hermetic harness is wired in lane_ci (triggered), not
+  # here, so FULL does not run it twice.
   run_guard "file size ratchet gate" scripts/check_file_size.sh \
     bash scripts/check_file_size.sh
   run_guard "nextest invocation lint gate (#1784)" scripts/check_nextest_invocation_lint.sh \
