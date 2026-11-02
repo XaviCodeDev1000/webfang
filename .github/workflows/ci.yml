@@ -250,6 +250,23 @@ jobs:
       # invisible. Offline, no repo state touched.
       - name: Dependency direction gate semantics harness
         run: bash scripts/test_dependency_direction.sh
+      # File-size ratchet (the AGENTS.md ~500-line rule; #2568, ODD
+      # odd/tasks/file-size-ratchet.md). A file NOT in the baseline fails
+      # above the hard limit (strict wc -l > 500); a grandfathered file
+      # cannot grow one line and fails at <=500 (removal consolidates the
+      # win); a baseline entry whose file left the measured corpus fails
+      # loudly. Pure bash+python3, like the guards above. Wired here because
+      # the guard-coverage meta-guard (#2056) refuses an unwired check_*.sh:
+      # a guard reachable from no workflow is a guard that does not exist.
+      - name: File size ratchet gate
+        run: bash scripts/check_file_size.sh
+      # Semantics harness for the gate above: hermetic mktemp sandboxes (the
+      # guard exercised as a copy) proving the ratchet's decisions — strict >,
+      # growth fails, <=limit fails asking removal, orphans fail, --generate
+      # one-shot, --update descending-only, --remove exposes the file again.
+      # Offline, no repo state touched.
+      - name: File size ratchet gate semantics harness
+        run: bash scripts/test_file_size.sh
       # Build-graph hygiene guard (issues #1799, #1797, #1796). The graph must
       # carry ONE source of RAM (`sysinfo`, never `sys-info`, whose unit was
       # undocumented), NO `built`/`git2`/`libgit2-sys` (they fed a function with

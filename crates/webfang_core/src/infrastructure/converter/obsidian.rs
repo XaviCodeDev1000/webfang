@@ -192,4 +192,63 @@ mod tests {
         let result = resolve_asset_paths(md, md_dir, &assets);
         assert!(result.contains("images/photo.png"));
     }
+
+    /// CHARACTERIZATION test — see #2579. This pins the CURRENT, possibly
+    /// unwanted behaviour of `ENABLE_WIKILINKS` in `resolve_asset_paths`. It is
+    /// NOT a specification: dropping the brackets (`[[a]]` -> `a`) and the empty
+    /// output for `[[a|]]` are artefacts of the serializer, not a contract.
+    ///
+    /// Do NOT "fix" these expectations by flipping the flag, and do not treat
+    /// them as the desired output: resolve #2579 and update them deliberately.
+    ///
+    /// With the flag on, pulldown turns `[[a]]` into a Link tag this serializer
+    /// never handles, so the brackets are dropped and only `a` survives.
+    /// Turning the flag off would preserve `[[...]]` verbatim instead, so these
+    /// assertions fail loudly rather than letting the export change silently.
+    #[test]
+    fn test_characterizes_input_wikilink_downgrade_in_asset_paths() {
+        let md_dir = Path::new("/tmp/out");
+        let assets = vec![DownloadedAsset {
+            url: "https://example.com/img.png".to_string(),
+            local_path: "/tmp/out/images/img.png".to_string(),
+            asset_type: "image".to_string(),
+            size: 1,
+        }];
+        for (input, expected) in [
+            ("[[a]]", "a"),
+            ("[[a|b]]", "b"),
+            ("![[img.png]]", "![img.png](img.png)"),
+            ("[[a|]]", ""),
+        ] {
+            let result = resolve_asset_paths(input, md_dir, &assets);
+            assert_eq!(result, format!("{expected}\n\n"), "input: {input}");
+        }
+    }
+
+    /// CHARACTERIZATION test — see #2579. This pins the CURRENT, possibly
+    /// unwanted behaviour of `ENABLE_WIKILINKS` in `convert_wiki_links`.
+    ///
+    /// It lives here, not in `wikilinks.rs`, because that file is grandfathered
+    /// by the file-size ratchet (`scripts/check_file_size.sh`): a baseline entry
+    /// fails if it grows by a single line, and the module has no room left.
+    /// `convert_wiki_links` is re-exported by this module, so the coverage is
+    /// identical.
+    ///
+    /// NOT a specification: `[](a)` for `[[a|]]` is an artefact of the
+    /// serializer. Do NOT "fix" these by flipping the flag; resolve #2579.
+    #[test]
+    fn test_characterizes_input_wikilink_downgrade_to_commonmark() {
+        for (input, expected) in [
+            ("[[a]]", "[a](a)"),
+            ("[[a|b]]", "[b](a)"),
+            ("![[img.png]]", "![img.png](img.png)"),
+            ("[[a|]]", "[](a)"),
+        ] {
+            assert_eq!(
+                convert_wiki_links(input, "example.com"),
+                expected,
+                "input: {input}"
+            );
+        }
+    }
 }
