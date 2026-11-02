@@ -605,30 +605,60 @@ mod tests {
             assert!(outcome.is_err(), "empty answer set must fail closed");
         }
 
-        // B2 slice 2, layer 4: a redirect hop to an allowlisted LAN literal is
-        // still FOLLOWED. The discriminator is the terminal shape: a stopped
-        // hop surfaces the 302 response, a followed one a CONNECT-phase
-        // error (nothing listens on the RFC1918 discard target).
+        // B2 slice 2, layer 4: a redirect hop to a literal the provider's
+        // policy declares is still FOLLOWED. The discriminator is the terminal
+        // shape: a stopped hop surfaces the 302 response, a followed one the
+        // destination's own answer, observed on a listener this test owns.
+        //
+        // The follow arm declares 127.0.0.0/8 and redirects to that listener
+        // instead of dialing the RFC1918 discard target: a dial to
+        // `10.255.255.254:9` lands on the CI runner's own network stack, whose
+        // VNET routing decides the outcome (a runner inside 10.0.0.0/8 can
+        // even answer it) — an environment verdict, not a code one (#2557).
+        // The allowlist ladder is the same either way
+        // (`is_forbidden_ip_with_policy`: always-denied → loopback flag →
+        // allowlist), and the RFC1918 *value* of the pure decision is pinned
+        // without any socket by `redirect_literal_blocked_honors_the_allowlist`
+        // in `domain/ssrf_guard.rs`.
         #[cfg_attr(miri, ignore = "btls-sys FFI (wreq Client) not supported by Miri")]
         #[tokio::test]
-        async fn redirect_policy_with_policy_follows_an_allowlisted_lan_literal() {
-            use wiremock::matchers::method;
+        async fn redirect_policy_with_policy_follows_an_allowlisted_literal() {
+            use wiremock::matchers::{method, path};
             use wiremock::{Mock, MockServer, ResponseTemplate};
 
-            // The SOURCE is wiremock on 127.0.0.1, which the resolver forbids;
-            // the hatch disarms that ONE layer so the seed request can be
-            // served. The redirect policy under test stays fully armed.
+            // SOURCE and DESTINATION are both wiremock on 127.0.0.1, which
+            // the resolver forbids; the hatch disarms that ONE layer so the
+            // dials are served. The redirect policy under test stays fully
+            // armed.
             let _guard =
                 webfang_test_utils::EnvGuard::with(&[(DISABLE_VALIDATING_RESOLVER_ENV, "1")]);
+
+            let destination = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200))
+                .mount(&destination)
+                .await;
             // Composed at runtime, not written as one `IP:port` literal: that
             // shape reads as `path:line` to tooling that scans evidence
             // locations, and the native review admission layer rejects a
             // reviewer result that cites one as out-of-scope. See the same
             // note in `tests/ssrf_policy_e2e_test.rs`.
-            let target = format!("http://{LAN_DISCARD_HOST}:{LAN_DISCARD_PORT}/v1");
+            let lan_target = format!("http://{LAN_DISCARD_HOST}:{LAN_DISCARD_PORT}/v1");
             let source = MockServer::start().await;
+            // The stop arm keeps the RFC1918 literal: under the default policy
+            // it is undeclared, so the policy must stop the hop synchronously
+            // — no dial outcome involved.
             Mock::given(method("GET"))
-                .respond_with(ResponseTemplate::new(302).insert_header("location", target))
+                .and(path("/lan"))
+                .respond_with(ResponseTemplate::new(302).insert_header("location", lan_target))
+                .mount(&source)
+                .await;
+            // The follow arm redirects to the loopback listener: that dial's
+            // outcome is the code's, never the runner's.
+            let followed_target = format!("{}/v1", destination.uri());
+            Mock::given(method("GET"))
+                .and(path("/follow"))
+                .respond_with(ResponseTemplate::new(302).insert_header("location", followed_target))
                 .mount(&source)
                 .await;
 
@@ -644,7 +674,7 @@ mod tests {
                 .build()
                 .expect("test client must build");
             let stopped = denied
-                .get(source.uri())
+                .get(format!("{}/lan", source.uri()))
                 .send()
                 .await
                 .expect("a stopped hop surfaces the 302 itself");
@@ -658,19 +688,29 @@ mod tests {
                 .secure_client_with_policy(
                     wreq::Client::builder().connect_timeout(std::time::Duration::from_secs(2)),
                     false,
-                    &lan_policy(&["10.0.0.0/8"], &[]),
+                    &lan_policy(&["127.0.0.0/8"], &[]),
                 )
                 .build()
                 .expect("test client must build");
-            let err = allowed
-                .get(source.uri())
+            let followed = allowed
+                .get(format!("{}/follow", source.uri()))
                 .send()
                 .await
-                .expect_err("an allowlisted hop is followed and then fails at CONNECT");
-            let rendered = format!("{err:?}");
-            assert!(
-                !rendered.contains("302"),
-                "the hop was followed, so the 302 must not be the terminal answer: {rendered}"
+                .expect("a permitted hop is followed all the way to its destination");
+            assert_eq!(
+                followed.status().as_u16(),
+                200,
+                "the allowlisted hop is followed, so the destination answers — \
+                 the 302 is not the terminal answer"
+            );
+            let received = destination
+                .received_requests()
+                .await
+                .expect("wiremock logs requests by default");
+            assert_eq!(
+                received.len(),
+                1,
+                "exactly the redirected hop reached the destination"
             );
         }
 
