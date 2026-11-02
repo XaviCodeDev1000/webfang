@@ -192,4 +192,36 @@ mod tests {
         let result = resolve_asset_paths(md, md_dir, &assets);
         assert!(result.contains("images/photo.png"));
     }
+
+    /// CHARACTERIZATION test — see #2579. This pins the CURRENT, possibly
+    /// unwanted behaviour of `ENABLE_WIKILINKS` in `resolve_asset_paths`. It is
+    /// NOT a specification: dropping the brackets (`[[a]]` -> `a`) and the empty
+    /// output for `[[a|]]` are artefacts of the serializer, not a contract.
+    ///
+    /// Do NOT "fix" these expectations by flipping the flag, and do not treat
+    /// them as the desired output: resolve #2579 and update them deliberately.
+    ///
+    /// With the flag on, pulldown turns `[[a]]` into a Link tag this serializer
+    /// never handles, so the brackets are dropped and only `a` survives.
+    /// Turning the flag off would preserve `[[...]]` verbatim instead, so these
+    /// assertions fail loudly rather than letting the export change silently.
+    #[test]
+    fn test_characterizes_input_wikilink_downgrade_in_asset_paths() {
+        let md_dir = Path::new("/tmp/out");
+        let assets = vec![DownloadedAsset {
+            url: "https://example.com/img.png".to_string(),
+            local_path: "/tmp/out/images/img.png".to_string(),
+            asset_type: "image".to_string(),
+            size: 1,
+        }];
+        for (input, expected) in [
+            ("[[a]]", "a"),
+            ("[[a|b]]", "b"),
+            ("![[img.png]]", "![img.png](img.png)"),
+            ("[[a|]]", ""),
+        ] {
+            let result = resolve_asset_paths(input, md_dir, &assets);
+            assert_eq!(result, format!("{expected}\n\n"), "input: {input}");
+        }
+    }
 }

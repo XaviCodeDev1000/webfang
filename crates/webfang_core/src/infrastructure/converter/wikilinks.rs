@@ -877,4 +877,33 @@ mod tests {
             "same-domain link must still convert, got: {result}"
         );
     }
+
+    /// CHARACTERIZATION test — see #2579. This pins the CURRENT, possibly
+    /// unwanted behaviour of `ENABLE_WIKILINKS` on wikilink syntax arriving in
+    /// the INPUT. It is NOT a specification: `[](a)` for `[[a|]]` is an
+    /// artefact of the serializer, not a contract anyone asked for.
+    ///
+    /// Do NOT "fix" these expectations by flipping the flag, and do not treat
+    /// them as the desired output: resolve #2579 and update them deliberately.
+    ///
+    /// With the flag on, pulldown parses `[[a|b]]` as a link whose destination
+    /// is `"a"` and whose label is `"b"`, and `keep_original_link` re-emits it
+    /// as CommonMark `[b](a)`. Turning the flag off makes `[[...]]` survive
+    /// verbatim instead, so these assertions fail loudly rather than letting
+    /// the export change silently.
+    #[test]
+    fn test_characterizes_input_wikilink_downgrade_to_commonmark() {
+        for (input, expected) in [
+            ("[[a]]", "[a](a)"),
+            ("[[a|b]]", "[b](a)"),
+            ("![[img.png]]", "![img.png](img.png)"),
+            ("[[a|]]", "[](a)"),
+        ] {
+            assert_eq!(
+                convert_wiki_links(input, "example.com"),
+                expected,
+                "input: {input}"
+            );
+        }
+    }
 }
