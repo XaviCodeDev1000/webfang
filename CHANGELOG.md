@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.3] - 2026-11-02
+
+
+### 📦 Dependencies
+
+- Update Cargo.lock dependencies
+
+### 🔧 Fixed
+
+- Update pulldown-cmark to 0.13.6 (RUSTSEC-2026-0433) ([#2578](https://github.com/XaviCodeDev1000/webfang/pull/2578))
 ## [7.3.2] - 2026-11-02
 
 
