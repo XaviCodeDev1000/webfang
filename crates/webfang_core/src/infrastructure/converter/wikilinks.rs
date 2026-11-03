@@ -120,11 +120,11 @@ fn should_convert_wikilink(url_str: &str, base_domain: &str) -> Option<String> {
 pub fn convert_wiki_links(content: &str, base_domain: &str) -> String {
     let mut options = Options::all();
     options.remove(Options::ENABLE_SMART_PUNCTUATION);
-    // Disable footnotes and definition lists — they corrupt existing
-    // [[wiki-link]] syntax by interpreting `[^...]` and trailing `:` markers
-    // as structural elements (issue #590, bug #6).
-    options.remove(Options::ENABLE_FOOTNOTES);
-    options.remove(Options::ENABLE_DEFINITION_LIST);
+    // Footnotes and definition lists corrupt existing [[wiki-link]] syntax
+    // (#590, bug #6). Wikilinks are off: pulldown rewrites `[[x]]` into broken
+    // `[x](x)` links, and webfang emits wiki-links, never parses them (#2579).
+    options.remove(Options::ENABLE_FOOTNOTES | Options::ENABLE_DEFINITION_LIST);
+    options.remove(Options::ENABLE_WIKILINKS);
 
     let parser = Parser::new_ext(content, options);
     transform_and_serialize(parser, base_domain)
