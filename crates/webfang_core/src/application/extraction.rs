@@ -155,7 +155,9 @@ fn serialize_matches(
         fragment
     };
 
-    Some(absolutize_urls(&fragment, base_url))
+    Some(crate::application::fragment_urls::absolutize_urls(
+        &fragment, base_url,
+    ))
 }
 
 /// Whether a matched tag only means something inside a `<table>`.
@@ -164,53 +166,6 @@ fn serialize_matches(
 /// synthetic wrapper below would be wrong for it.
 fn needs_table_context(tag: &str) -> bool {
     matches!(tag, "tr" | "td" | "th" | "thead" | "tbody" | "tfoot")
-}
-
-/// Resolve `href`/`src` attributes in `fragment` against `base_url`.
-///
-/// Fragment-only links are left alone: rewriting `#top` into an absolute URL
-/// changes what the link means. Values `Url::join` cannot resolve keep their
-/// original text rather than losing the link, and a rewriter failure returns
-/// the fragment untouched — the fragment is never dropped on the floor.
-fn absolutize_urls(fragment: &str, base_url: &url::Url) -> String {
-    use lol_html::{element, RewriteStrSettings};
-
-    let settings = RewriteStrSettings {
-        element_content_handlers: vec![
-            element!("a[href]", |el| {
-                resolve_attr(el, "href", base_url);
-                Ok(())
-            }),
-            element!("img[src]", |el| {
-                resolve_attr(el, "src", base_url);
-                Ok(())
-            }),
-            element!("source[src]", |el| {
-                resolve_attr(el, "src", base_url);
-                Ok(())
-            }),
-            element!("video[poster]", |el| {
-                resolve_attr(el, "poster", base_url);
-                Ok(())
-            }),
-        ],
-        ..RewriteStrSettings::default()
-    };
-
-    lol_html::rewrite_str(fragment, settings).unwrap_or_else(|_| fragment.to_owned())
-}
-
-/// Rewrite one attribute in place when it resolves against `base_url`.
-fn resolve_attr(el: &mut lol_html::html_content::Element<'_, '_>, attr: &str, base_url: &url::Url) {
-    let Some(raw) = el.get_attribute(attr) else {
-        return;
-    };
-    if raw.starts_with('#') {
-        return;
-    }
-    if let Ok(resolved) = base_url.join(&raw) {
-        let _ = el.set_attribute(attr, resolved.as_str());
-    }
 }
 
 /// Emit the fallback warning and build a [`ExtractResult::Fallback`] carrying
