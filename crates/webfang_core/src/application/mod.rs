@@ -18,6 +18,7 @@ pub mod extraction;
 pub mod http_client;
 pub mod llm_extraction;
 
+pub mod fragment_markdown;
 pub mod fragment_urls;
 pub mod pipeline;
 pub mod progress_observer;

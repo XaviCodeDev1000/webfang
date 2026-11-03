@@ -7,6 +7,6 @@ title: 'Document: [127.0.0.1]'
 url: http://127.0.0.1:<PORT>/
 ---
 
-Row One Column One Substantive Cell Text
-
-Row One Column Two Substantive Text
+| Column 1                                 | Column 2                            |
+| ---------------------------------------- | ----------------------------------- |
+| Row One Column One Substantive Cell Text | Row One Column Two Substantive Text |

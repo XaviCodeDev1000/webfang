@@ -155,6 +155,9 @@ fn serialize_matches(
         fragment
     };
 
+    // #2540: prepare the fragment ONCE, so the stored `html` and the Markdown
+    // derived from it can never disagree about a table's shape.
+    let fragment = crate::application::fragment_markdown::with_header(&fragment);
     Some(crate::application::fragment_urls::absolutize_urls(
         &fragment, base_url,
     ))
@@ -768,186 +771,10 @@ mod tests {
 
 /// #2534: the `--selector` fragment must be a function of the selector, not of
 /// Readability. These tables pin the serialization contract (HTML) and the
-/// Markdown the user actually receives (through the same converter the CLI
-/// writes with, `file_saver.rs`).
+/// Markdown the user actually receives, through the same
+/// [`crate::application::fragment_markdown::to_markdown`] the selector path
+/// writes with (#2540 moved this off a bare `HtmdConverter` so the header
+/// synthesis is part of what is asserted).
 #[cfg(test)]
-mod selector_serialization {
-    use super::*;
-    use crate::domain::ports::MarkdownConverter;
-    use crate::infrastructure::converter::htmd_converter::HtmdConverter;
-
-    const BASE: &str = "https://example.com/docs/page.html";
-
-    /// Pure serialization: what the fragment looks like before any converter.
-    struct HtmlCase {
-        name: &'static str,
-        html: &'static str,
-        selector: &'static str,
-        /// `None` means the selector matched nothing.
-        expected: Option<&'static str>,
-    }
-
-    #[test]
-    fn selector_fragment_html_table() {
-        let cases = [
-            HtmlCase {
-                name: "nested_div_emitted_once",
-                html: r#"<div class="outer"><div class="inner">x</div></div>"#,
-                selector: "div",
-                expected: Some(r#"<div class="outer"><div class="inner">x</div></div>"#),
-            },
-            HtmlCase {
-                name: "relative_href_and_img_src",
-                html: r#"<a href="/root">a</a><img src="img.png">"#,
-                selector: "a, img",
-                expected: Some(
-                    "<a href=\"https://example.com/root\">a</a>\n\n\
-                     <img src=\"https://example.com/docs/img.png\">",
-                ),
-            },
-            HtmlCase {
-                name: "unresolvable_schemes_untouched",
-                html: r##"<a href="mailto:a@b.co">m</a><a href="#top">t</a><a href="javascript:void(0)">j</a>"##,
-                selector: "a",
-                expected: Some(
-                    "<a href=\"mailto:a@b.co\">m</a>\n\n\
-                     <a href=\"#top\">t</a>\n\n\
-                     <a href=\"javascript:void(0)\">j</a>",
-                ),
-            },
-            HtmlCase {
-                name: "two_siblings_joined_by_blank_line",
-                html: "<p>one</p><p>two</p>",
-                selector: "p",
-                expected: Some("<p>one</p>\n\n<p>two</p>"),
-            },
-            HtmlCase {
-                name: "no_match_is_none",
-                html: "<p>x</p>",
-                selector: "blockquote",
-                expected: None,
-            },
-        ];
-
-        let base = url::Url::parse(BASE).expect("BASE is a valid absolute URL");
-        let mut failures = Vec::new();
-        for case in cases {
-            let document = scraper::Html::parse_document(case.html);
-            let selector = scraper::Selector::parse(case.selector)
-                .expect("every table selector is a valid CSS selector");
-            let actual = serialize_matches(&document, &selector, &base);
-            if actual.as_deref() != case.expected {
-                failures.push(format!(
-                    "case `{}`\n  expected: {:?}\n  actual:   {:?}",
-                    case.name, case.expected, actual
-                ));
-            }
-        }
-        assert!(
-            failures.is_empty(),
-            "{} selector case(s) diverged:\n{}",
-            failures.len(),
-            failures.join("\n---\n")
-        );
-    }
-
-    /// What the user receives in the `.md`: fragment → the production converter.
-    struct MdCase {
-        name: &'static str,
-        html: &'static str,
-        selector: &'static str,
-        expected: &'static str,
-    }
-
-    #[test]
-    fn selector_fragment_markdown_table() {
-        let cases = [
-            MdCase {
-                name: "h3",
-                html: "<h3>Section</h3>",
-                selector: "h3",
-                expected: "### Section",
-            },
-            MdCase {
-                name: "table",
-                html: "<table><thead><tr><th>Name</th><th>Value</th></tr></thead>\
-                       <tbody><tr><td>Foo</td><td>42</td></tr></tbody></table>",
-                selector: "table",
-                // A real GFM table: the whole point of bypassing Readability.
-                expected: "| Name | Value |\n| ---- | ----- |\n| Foo  | 42    |",
-            },
-            MdCase {
-                name: "characterize_li_orphan_bullet",
-                html: "<li>one</li><li>two</li>",
-                selector: "li",
-                // Characterization: htmd falls back to a bullet when the parent
-                // is not <ol>, so an orphan <li> still renders as a list item.
-                expected: "*   one\n*   two",
-            },
-            MdCase {
-                name: "characterize_tr_inside_table",
-                html: "<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>",
-                selector: "tr",
-                // Characterization: the synthetic <table><tbody> keeps the cell
-                // boundary as a paragraph break, but htmd still emits no table
-                // (it needs a <thead> to build the header row).
-                expected: "a\n\nb",
-            },
-            MdCase {
-                name: "characterize_two_tr_in_one_tbody",
-                html: "<table><tbody><tr><td>a</td><td>b</td></tr>\
-                       <tr><td>c</td><td>d</td></tr></tbody></table>",
-                selector: "tr",
-                // Characterization: every matched row lands in ONE synthetic
-                // table, and htmd still emits no table — only cell text, one
-                // paragraph per cell. Multi-row is the common case, so the
-                // limitation is stated for it, not for the single-row one.
-                expected: "a\n\nb\n\nc\n\nd",
-            },
-            MdCase {
-                name: "characterize_td_inside_table",
-                html: "<table><tbody><tr><td>a</td></tr></tbody></table>",
-                selector: "td",
-                // Characterization: a lone cell has no row to belong to.
-                expected: "a",
-            },
-            MdCase {
-                name: "characterize_strong_inline_separator",
-                html: "<strong>a</strong><strong>b</strong>",
-                selector: "strong",
-                // Characterization: HTML collapses the blank line between two
-                // inline matches into a space, so both end up in one paragraph.
-                expected: "**a** **b**",
-            },
-        ];
-
-        let base = url::Url::parse(BASE).expect("BASE is a valid absolute URL");
-        let converter = HtmdConverter;
-        let mut failures = Vec::new();
-        for case in cases {
-            let document = scraper::Html::parse_document(case.html);
-            let selector = scraper::Selector::parse(case.selector)
-                .expect("every table selector is a valid CSS selector");
-            let Some(fragment) = serialize_matches(&document, &selector, &base) else {
-                failures.push(format!(
-                    "case `{}` matched nothing — fixture is wrong, not the code",
-                    case.name
-                ));
-                continue;
-            };
-            let markdown = converter.convert(&fragment);
-            if markdown.trim() != case.expected {
-                failures.push(format!(
-                    "case `{}`\n  fragment: {fragment}\n  markdown:\n{markdown}",
-                    case.name
-                ));
-            }
-        }
-        assert!(
-            failures.is_empty(),
-            "{} markdown case(s) diverged:\n{}",
-            failures.len(),
-            failures.join("\n---\n")
-        );
-    }
-}
+#[path = "selector_serialization_tests.rs"]
+mod selector_serialization;
