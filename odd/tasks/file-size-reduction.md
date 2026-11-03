@@ -13,6 +13,9 @@ El listado vigente NO se copia acá (estado mutable): la fuente de verdad es
 
 - Split por seams reales, nunca por aritmética de líneas. Un split que rompe
   cohesión es peor que el archivo gordo, y el reviewer lo ve.
+- Dos sombreros, nunca mezclados: cada split revisa lógica, eficiencia,
+  seguridad y mantenibilidad, pero los cambios semánticos se separan o se
+  acotan y se declaran; el PR dice qué fue movimiento y qué fue corrección.
 - Comportamiento preservado: `refactor(scope)` puro, tests verdes por unidad
   de trabajo, snapshots intactos. El descenso del baseline viaja en el MISMO
   PR que el split que lo produce — la review ve el descenso medible junto al
@@ -71,12 +74,56 @@ origin/main@fb411dac (2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
 5. **Cerrar en el ratchet**: `--update` a las partes que quedaron >500 pero
    más chicas; `--remove` a las <=500; parte nueva >500 = seguir partiendo o
    entrada revisada.
+6. **Revisión compañera obligatoria**: revisar lo movido con las cuatro lentes
+   (lógica, eficiencia, seguridad, mantenibilidad) y dejar el resultado en el
+   PR; "sin hallazgos" es una respuesta válida, pero debe ser explícita.
+
+## Protocolo de revisión por misión (dos sombreros)
+
+El split sigue siendo mecánico por defecto. La revisión existe para detectar
+deuda y riesgos reales, no para reescribir el sistema dentro del PR.
+
+1. **Caracterizar antes de mover**: fijar comportamiento con tests/snapshots
+   existentes o agregar caracterización mínima si faltan. Sin red, no hay split.
+2. **Movimiento primero**: extracción mecánica con tests verdes entre commits.
+   Si el cambio exige editar semántica para que compile, primero se resuelve
+   la dependencia o se detiene la misión y se decide el seam correcto.
+3. **Revisión por lentes** sobre el código movido:
+   - **Lógica**: errores tragados, límites, estados imposibles, defaults
+     silenciosos, manejo de `None`/`Err`, invariantes del seam.
+   - **Eficiencia**: clones/asignaciones obvias, parseos repetidos, loops
+     cuadráticos en hot paths, locks amplios; solo se actúa con medición o
+     reducción clara de complejidad.
+   - **Seguridad**: inputs externos, redirects/SSRF, paths, credenciales,
+     permisos, temp files, prompt injection; todo fix exige test negativo.
+   - **Mantenibilidad**: nombres, tamaño de función, duplicación, acoplamiento,
+     cohesión del módulo extraído.
+4. **Triaje de hallazgos**:
+   - **Bloqueante** (correctness/security que impide corte seguro): detener el
+     split o resolverlo en un cambio separado con test de regresión.
+   - **Mejora chica y local**: puede acompañar como commit separado; el PR la
+     lista bajo "Corregido / mejorado" con evidencia.
+   - **Especulativa, amplia o transversal**: issue nuevo; no entra por la
+     puerta de servicio en el split.
+5. **Presupuesto de cambio semántico**: si lo no mecánico supera ~20–30% del
+   diff del split, la entrega se parte o se extrae la corrección a otro PR.
+6. **Reglas de evidencia**:
+   - lógica = test rojo → verde;
+   - seguridad = test negativo que reproduce el caso;
+   - performance = medición antes/después o complejidad claramente inferior;
+   - refactor = snapshots/tests intactos y diff explicable.
+7. **Fuera del seam**: hallazgos en archivos no tocados se anotan como issue, no
+   se "aprovechan" silenciosamente.
 
 ## Gobernanza
 
 - Cada split = issue propia + PR con `Closes part of #2584` (el paraguas del
   programa), label `type:refactor` (el vocabulario exacto vive en
   `scripts/auto_label_type.sh --map`), base `main`, entrega secuencial.
+- Cada split declara en el PR dos listas: `Movido sin cambios` y
+  `Corregido / mejorado` (aunque la segunda sea "sin hallazgos"). Toda
+  corrección semántica enlaza su test/issue; el reviewer ve separado qué fue
+  refactor y qué cambió comportamiento.
 - Batching por ola: Ola 0 se batchea (misma base, archivos disjuntos —
   `scripts/ci_pr_overlap.sh` verifica el no-solape; ~4 archivos por batch);
   Ola 1 es una misión por monstruo, sin batch (engine.rs puede llevar 2–3
@@ -91,7 +138,12 @@ origin/main@fb411dac (2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
 ## Qué no haremos
 
 - Perseguir los 500 en archivos cohesionados por diseño.
-- Mezclar splits con cambios de comportamiento en el mismo commit.
+- Mezclar splits con cambios de comportamiento en el mismo commit — y, salvo
+  inseparabilidad acotada, tampoco esconderlos en el mismo PR sin lista y tests.
+- Seguridad sin test negativo, lógica sin rojo→verde y performance sin medida o
+  reducción clara de complejidad.
+- "Ya que estoy" fuera del seam: hallazgos ajenos se registran como issue, no
+  se cuelan en el split.
 - Copiar el listado de ofensores a prosa (el baseline es la fuente).
 
 ## Log
@@ -108,3 +160,14 @@ origin/main@fb411dac (2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
   salen ahora de la query jq; la prosa conserva solo las bandas. Se agregan:
   política de batching por ola, regla net-zero para grandfathered, y el
   binario `jscpd` pinneado (5.4.0) en lugar de `npx`.
+- L4 (2026-11-03): tras revisar el informe del agente, se decide que cada
+  misión de split gane mantenibilidad sin volver el PR no revisable. Decisión
+  de usuario: "vamos a actualizar lo que ha hecho el agente para ganar las
+  dos cosas a la vez: el repositorio baja su deuda estructural y no convertís
+  cada split en una fiesta de cambios no revisables." Se agrega el Protocolo
+  de revisión por misión: dos sombreros (movimiento mecánico vs corrección),
+  revisión obligatoria por lentes con resultado explícito, triaje de
+  bloqueantes/mejoras locales/especulativas, presupuesto ~20–30% para cambio
+  semántico, reglas de evidencia (rojo→verde, test negativo, medida o
+  complejidad menor) y registro de hallazgos ajenos como issues. El PR de
+  cada split declara `Movido sin cambios` y `Corregido / mejorado`.
