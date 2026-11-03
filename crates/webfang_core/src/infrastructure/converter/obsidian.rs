@@ -57,6 +57,9 @@ pub fn resolve_asset_paths(
 
     let mut options = Options::all();
     options.remove(Options::ENABLE_SMART_PUNCTUATION);
+    // Wikilinks are off: pulldown rewrites `[[x]]` into broken `[x](x)` links,
+    // and webfang emits wiki-links, never parses them (#2579).
+    options.remove(Options::ENABLE_WIKILINKS);
 
     let parser = Parser::new_ext(content, options);
     transform_images_and_serialize(parser, &asset_map)
@@ -193,20 +196,16 @@ mod tests {
         assert!(result.contains("images/photo.png"));
     }
 
-    /// CHARACTERIZATION test — see #2579. This pins the CURRENT, possibly
-    /// unwanted behaviour of `ENABLE_WIKILINKS` in `resolve_asset_paths`. It is
-    /// NOT a specification: dropping the brackets (`[[a]]` -> `a`) and the empty
-    /// output for `[[a|]]` are artefacts of the serializer, not a contract.
+    /// Regression test for #2579. Wikilink syntax arriving in the INPUT must
+    /// survive `resolve_asset_paths` untouched.
     ///
-    /// Do NOT "fix" these expectations by flipping the flag, and do not treat
-    /// them as the desired output: resolve #2579 and update them deliberately.
-    ///
-    /// With the flag on, pulldown turns `[[a]]` into a Link tag this serializer
-    /// never handles, so the brackets are dropped and only `a` survives.
-    /// Turning the flag off would preserve `[[...]]` verbatim instead, so these
-    /// assertions fail loudly rather than letting the export change silently.
+    /// `Options::all()` used to enable `ENABLE_WIKILINKS` implicitly, so
+    /// pulldown parsed `[[a]]` as a Link tag this serializer never handles: the
+    /// brackets were dropped (`a`) and `[[a|]]` vanished entirely. The flag is
+    /// now removed explicitly, so scraped content that already contains
+    /// Obsidian syntax is exported verbatim instead of being rewritten.
     #[test]
-    fn test_characterizes_input_wikilink_downgrade_in_asset_paths() {
+    fn test_input_wikilinks_are_preserved_in_asset_paths() {
         let md_dir = Path::new("/tmp/out");
         let assets = vec![DownloadedAsset {
             url: "https://example.com/img.png".to_string(),
@@ -214,19 +213,14 @@ mod tests {
             asset_type: "image".to_string(),
             size: 1,
         }];
-        for (input, expected) in [
-            ("[[a]]", "a"),
-            ("[[a|b]]", "b"),
-            ("![[img.png]]", "![img.png](img.png)"),
-            ("[[a|]]", ""),
-        ] {
+        for input in ["[[a]]", "[[a|b]]", "![[img.png]]", "[[a|]]"] {
             let result = resolve_asset_paths(input, md_dir, &assets);
-            assert_eq!(result, format!("{expected}\n\n"), "input: {input}");
+            assert_eq!(result, format!("{input}\n\n"), "input: {input}");
         }
     }
 
-    /// CHARACTERIZATION test — see #2579. This pins the CURRENT, possibly
-    /// unwanted behaviour of `ENABLE_WIKILINKS` in `convert_wiki_links`.
+    /// Regression test for #2579. Wikilink syntax arriving in the INPUT must
+    /// survive `convert_wiki_links` untouched.
     ///
     /// It lives here, not in `wikilinks.rs`, because that file is grandfathered
     /// by the file-size ratchet (`scripts/check_file_size.sh`): a baseline entry
@@ -234,20 +228,15 @@ mod tests {
     /// `convert_wiki_links` is re-exported by this module, so the coverage is
     /// identical.
     ///
-    /// NOT a specification: `[](a)` for `[[a|]]` is an artefact of the
-    /// serializer. Do NOT "fix" these by flipping the flag; resolve #2579.
+    /// Before #2579 the flag was on and these inputs were degraded: `[[a]]`
+    /// became the broken `[a](a)`, and `[[a|]]` lost its label entirely.
     #[test]
-    fn test_characterizes_input_wikilink_downgrade_to_commonmark() {
-        for (input, expected) in [
-            ("[[a]]", "[a](a)"),
-            ("[[a|b]]", "[b](a)"),
-            ("![[img.png]]", "![img.png](img.png)"),
-            ("[[a|]]", "[](a)"),
-        ] {
+    fn test_input_wikilinks_are_preserved_by_convert_wiki_links() {
+        for input in ["[[a]]", "[[a|b]]", "![[img.png]]", "[[a|]]"] {
             assert_eq!(
                 convert_wiki_links(input, "example.com"),
-                expected,
-                "input: {input}"
+                input,
+                "input wikilink must be preserved verbatim: {input}"
             );
         }
     }
