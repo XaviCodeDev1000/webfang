@@ -113,7 +113,7 @@
       "path": "crates/webfang_core/tests/adaptive_selector_integration.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 6,
+      "test_count": 7,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
@@ -1040,7 +1040,7 @@
       "path": "crates/webfang_core/tests/scraper_service_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 54,
+      "test_count": 56,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"

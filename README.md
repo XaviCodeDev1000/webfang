@@ -187,6 +187,7 @@ What differs from a run without a selector:
 | `author` | byline, then document metadata | document metadata only |
 | `date` | document metadata, then Readability's `published_time` as a fallback | document metadata (the same cascade; no Readability fallback) |
 | `excerpt` | first paragraph or meta description | empty |
+| minimum-content guard | fails when the extraction is under 50 characters | **not applied** — a short heading is a legitimate answer to `--selector h3` |
 
 Two details worth knowing:
 

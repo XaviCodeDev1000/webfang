@@ -23,12 +23,19 @@ use std::sync::Arc;
 use webfang_core::application::adaptive_engine::{
     AdaptiveSelectorEngine, AdaptiveSelectorOptions, RepairStatus,
 };
+use webfang_core::application::scraper_service::scrape_with_config;
 use webfang_core::domain::dom_inspector::{
     DomInspectorPort, DomStructureReport, SelectorSuggestion,
 };
 use webfang_core::domain::semantic_inspector::{
     SemanticContext, SemanticInspectorPort, SemanticMatch, TierSource,
 };
+use webfang_core::domain::CorrelationId;
+use webfang_core::ScraperConfig;
+
+#[path = "common/mock_http.rs"]
+mod mock_http;
+use crate::mock_http::MockHttpClient;
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -246,5 +253,65 @@ async fn test_semaphore_timeout_skips_tier2() {
     assert!(
         outcome.trace.as_ref().unwrap().tier2_score.is_none(),
         "Tier 2 should not be called when no semantic provider"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #2553: a repaired selector takes the selector path, not Readability
+// ---------------------------------------------------------------------------
+
+/// #2553 — a selector that only matches AFTER repair must still take the
+/// selector path: no Readability, no minimum-content guard.
+///
+/// `.missing` matches nothing, so `extract_with_selector` reports `Fallback`;
+/// `adaptive_selector_repair` then suggests `.present`, which does match, and
+/// the repaired result is `Matched` — so `selector_supplied_fragment` is true.
+/// Drop the `if repaired.is_matched()` handoff and the fallback is returned
+/// instead, Readability runs over the whole document and the body prose leaks
+/// into the content.
+#[tokio::test]
+async fn issue_2553_repaired_selector_takes_the_selector_path() {
+    let html = "<html><body>\
+        <div class=\"present\">Repaired content</div>\
+        <p>Body prose that Readability would keep, and the selector path must drop.</p>\
+        </body></html>";
+    let url = url::Url::parse("https://example.com/post").expect("valid test URL");
+    let mock = MockHttpClient::new().with_ok_response(url.as_str(), html);
+
+    let inspector = Arc::new(MockDomInspector {
+        suggestions: vec![SelectorSuggestion {
+            selector: ".present".to_owned(),
+            score: 0.92,
+        }],
+    });
+    let engine = AdaptiveSelectorEngine::new(inspector, None, AdaptiveSelectorOptions::default());
+    let config = ScraperConfig {
+        selector: ".missing".to_owned(),
+        ..ScraperConfig::default()
+    };
+    let root = CorrelationId::new();
+
+    let outcome = scrape_with_config(
+        &mock,
+        &url,
+        &config,
+        None,
+        None,
+        Some(&engine),
+        None,
+        false,
+        &root,
+    )
+    .await
+    .expect("a repaired selector must yield content");
+
+    let content = &outcome.results[0].content;
+    assert!(
+        content.contains("Repaired content"),
+        "the repaired fragment IS the content, got: {content}"
+    );
+    assert!(
+        !content.contains("Body prose"),
+        "Readability must not run after a repair, got: {content}"
     );
 }
