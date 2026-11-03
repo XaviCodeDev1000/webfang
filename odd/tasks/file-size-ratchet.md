@@ -41,7 +41,9 @@ queda bajo el límite duro de 500, y la lista solo baja.
   pasa con aviso; que baja a ≤500 → falla pidiendo quitar la entrada; entrada
   sin archivo → falla.
 - S10: "Sobre el ítem de `.github/`: dejalo para un PR aparte. El gate local en
-  `ci_fast_gate.sh` ya aporta el valor."
+  `ci_fast_gate.sh` ya aporta el valor." **[SUPERADO por L4: el wiring entró
+  en este PR — el meta-guard #2056 hace estructuralmente imposible el PR
+  aparte.]**
 
 ## Decisiones de diseño
 
@@ -57,6 +59,10 @@ queda bajo el límite duro de 500, y la lista solo baja.
   = todo verde").
 - Los mensajes de usuario van en español con `::error::`, comentarios en
   inglés (convención de `scripts/`).
+- Si un cambio cae en "Ask first" (AGENTS.md) y no hay respuesta explícita del
+  maintainer, el trabajo se DETIENE y se espera: "consultado sin respuesta"
+  no es aprobación. L4 registró la excepción que violó esta regla; este
+  bullet es la norma hacia adelante.
 
 ## Tasks
 
@@ -88,3 +94,9 @@ queda bajo el límite duro de 500, y la lista solo baja.
   DENTRO de este PR (patrón dependency-direction, pasos vecinos), consultado
   con el usuario sin respuesta explícita; decisión tomada sobre la única
   ruta conforme hacia un PR mergeable.
+- L5: correcciones post-merge de #2569 (issue #2583): L2 decía "8 archivos"
+  en la cola 501–570 — la banda contiene 15 (el plan decía 14; ambos errados;
+  verificado contra origin/main@fb411dac con la query jq del baseline, que es
+  la fuente). T2 decía "13 casos": el harness tiene 19. S10 quedó superado
+  (ver su anotación). La regla de proceso agregada en Decisiones restaura lo
+  que L4 dejó sin responder: sin respuesta explícita, se detiene el trabajo.

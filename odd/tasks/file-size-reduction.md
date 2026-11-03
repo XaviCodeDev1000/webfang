@@ -24,23 +24,38 @@ El listado vigente NO se copia acá (estado mutable): la fuente de verdad es
   (candidatos: `error.rs`, `mcp_server/params.rs`, posiblemente
   `cli/args/mod.rs`) no se parten; quedan grandfathered con el porqué en las
   `notes` del JSON. La decisión se toma POR archivo en su misión, no acá.
-- Confirmar que mejoró: líneas con el guard y `cx` con
-  `npx jscpd --complexity` sobre los archivos tocados. Un split que solo
-  mueve código no arregló nada, lo renombró.
+- Net-zero en grandfathered: mientras un archivo esté en el baseline, crecerlo
+  una línea falla el guard — todo cambio que lo toque termina neto en cero o
+  lo parte. Por eso las misiones de Ola 1 se secuencian antes que cualquier
+  feature que necesite tocar esos archivos.
+- Confirmar que mejoró: líneas con el guard y `cx` con `jscpd --complexity`
+  sobre los archivos tocados — el binario pinneado 5.4.0 (instalado con
+  `cargo install jscpd --version 5.4.0 --locked`, ver
+  `scripts/check_duplication.sh`), nunca `npx` (versión sin pin). Un split
+  que solo mueve código no arregló nada, lo renombró.
 
 ## Olas (entrega secuencial; el repo no permite PRs apilados)
 
-- **T1 — Ola 0, calibración:** banda 501–570 líneas, 14 archivos (de
-  `infrastructure/llm/client.rs` 501 a `mcp_server/handlers/url_utils.rs`
-  567). Extracciones chicas y de bajo riesgo; ejercita `--update`/`--remove`
-  y el flujo completo de PR antes de tocar monstruos.
-- **T2 — Ola 1, monstruos >2000:** 9 archivos (~23.6k líneas), uno por
-  misión/PR. `application/crawler/engine.rs` (4063) primero — el peor y el
-  hot path; puede requerir 2–3 PRs secuenciales solo él.
-- **T3 — Ola 2, grandes 1500–2000:** ~11 archivos.
-- **T4 — Ola 3, cola 1000–1500:** ~26 archivos. La banda 500–1000 (la
-  mayoría del baseline) queda cubierta por la regla de AGENTS.md "si lo
-  tocás y ya las excede, partilo" — oportunista, no dedicada.
+Los conteos por banda NO viven en esta prosa: se derivan del baseline (fuente
+de verdad) con la misma query para todas las olas:
+
+    jq '[.file_size_rust.grandfathered[] | select(. >= LO and . <= HI)] | length' \
+      scripts/quality-baselines.json
+
+Bandas: Ola 0 = [501, 570] · oportunista = [571, 999] · Ola 3 = [1000, 1499] ·
+Ola 2 = [1500, 2000] · Ola 1 = (2000, ∞). Snapshot al merge de #2569
+(origin/main@fb411dac, 2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
+
+- **T1 — Ola 0, calibración:** banda [501, 570]. Extracciones chicas y de
+  bajo riesgo; ejercita `--update`/`--remove` y el flujo completo de PR antes
+  de tocar monstruos.
+- **T2 — Ola 1, monstruos >2000:** uno por misión/PR.
+  `application/crawler/engine.rs` primero — el peor y el hot path; puede
+  requerir 2–3 PRs secuenciales solo él.
+- **T3 — Ola 2, grandes [1500, 2000].**
+- **T4 — Ola 3, cola [1000, 1499].** La banda oportunista [571, 999] queda
+  cubierta por la regla de AGENTS.md "si lo tocás y ya las excede, partilo" —
+  oportunista, no dedicada.
 
 ## Método por archivo (por misión, en su worktree)
 
@@ -51,20 +66,24 @@ El listado vigente NO se copia acá (estado mutable): la fuente de verdad es
    estrategia: extract module / extract function / tabla.
 3. **Split por seams**, un commit de unidad por extracción, tests verdes
    entre unidades.
-4. **Verificación doble**: el guard (líneas) + `npx jscpd --complexity` sobre
-   los tocados (`cx` debe bajar de verdad).
+4. **Verificación doble**: el guard (líneas) + `jscpd --complexity` (binario
+   pinneado 5.4.0) sobre los tocados (`cx` debe bajar de verdad).
 5. **Cerrar en el ratchet**: `--update` a las partes que quedaron >500 pero
    más chicas; `--remove` a las <=500; parte nueva >500 = seguir partiendo o
    entrada revisada.
 
 ## Gobernanza
 
-- Cada split = issue propia + PR con `Closes #N`, label `type:refactor` (el
-  vocabulario exacto vive en `scripts/auto_label_type.sh --map`), base
-  `main`, entrega secuencial.
+- Cada split = issue propia + PR con `Closes part of #2584` (el paraguas del
+  programa), label `type:refactor` (el vocabulario exacto vive en
+  `scripts/auto_label_type.sh --map`), base `main`, entrega secuencial.
+- Batching por ola: Ola 0 se batchea (misma base, archivos disjuntos —
+  `scripts/ci_pr_overlap.sh` verifica el no-solape); Ola 1 es una misión por
+  monstruo, sin batch; Ola 2 y Ola 3 se batchean a 2–3 archivos por PR como
+  máximo. El realismo se deriva de esta política (≈25–35 PRs dedicados), no
+  de un número prometido.
 - Cada ola es una misión ODD propia con su worktree y su registro de misión.
-- Realismo: ~25–30 PRs distribuidos en el tiempo. No es un sprint; la
-  catraca garantiza que cada avance es permanente.
+- No es un sprint; la catraca garantiza que cada avance es permanente.
 
 ## Qué no haremos
 
@@ -80,3 +99,9 @@ El listado vigente NO se copia acá (estado mutable): la fuente de verdad es
 - L2: Persistido en el worktree/PR del ratchet (`ci/file-size-ratchet`): el
   PR que introduce el enforcement es el vehículo natural del programa que
   hace descender el baseline.
+- L3: corrección post-merge de #2569 (issue #2583): las olas decían
+  14/9/~11/~26 y L2 del ratchet decía 8 — la partición real sobre
+  origin/main@fb411dac es 15/9/8/30 (más 51 oportunistas) = 113. Los conteos
+  salen ahora de la query jq; la prosa conserva solo las bandas. Se agregan:
+  política de batching por ola, regla net-zero para grandfathered, y el
+  binario `jscpd` pinneado (5.4.0) en lugar de `npx`.
