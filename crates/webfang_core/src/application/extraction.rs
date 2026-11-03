@@ -772,8 +772,8 @@ mod tests {
 /// #2534: the `--selector` fragment must be a function of the selector, not of
 /// Readability. These tables pin the serialization contract (HTML) and the
 /// Markdown the user actually receives, through the same
-/// [`crate::application::fragment_markdown::to_markdown`] the selector path
-/// writes with (#2540 moved this off a bare `HtmdConverter` so the header
+/// [`crate::domain::html_extraction::fallback::extract_text`] the selector
+/// path writes with (#2540 moved this off a bare `HtmdConverter` so the header
 /// synthesis is part of what is asserted).
 #[cfg(test)]
 #[path = "selector_serialization_tests.rs"]
