@@ -34,6 +34,8 @@ Forecast / nota de entrega: los 4 splits + este registro suman más de ~400 lín
 
 ## Log
 
+L6 — 2026-11-03 · corrección CI (commit de seguimiento, rama ya pusheada): la primera corrida de CI puso rojo `Repo guards` → "Intra-crate lint tool tests": el golden set `tools/intra-crate-lint/tests/fixtures/real_tree_sites.txt` no se refrescó en el mismo commit que cambió `crates/webfang_core/src` (contrato de `real_tree.rs`; writer: `scripts/refresh_real_tree_golden.sh`, fail-closed e idempotente). Diagnosticado reproduciendo el test en local: delta 9/9 líneas — sitios de `export/format.rs` y `model_profile/builtins.rs` agregados, números de `export.rs` corridos; `rename.rs`/`registry.rs` no referencian rutas `crate::` y por eso no figuran. **REGLA PARA LOS PRÓXIMOS BATCHES: todo commit que toque `crates/**/src` refresca el golden en el MISMO commit con `bash scripts/refresh_real_tree_golden.sh`.** El remedio ya estaba documentado en Engram (obs #2638).
+
 L1 — Pedido original (verbatim, 2026-11-03):
 
 "Misión: Ola 0 del programa de reducción de file-size (paraguas #2584).
