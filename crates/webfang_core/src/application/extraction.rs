@@ -511,10 +511,10 @@ pub async fn extract_content(
             .await?;
 
             Ok(ScrapedContent {
-                title: url
-                    .host_str()
-                    .ok_or_else(|| ScraperError::invalid_url(format!("URL missing host: {url}")))?
-                    .to_string(),
+                // #2552: `resolve_title` is the single owner of the empty-title
+                // fallback; pre-substituting a bare host here made this branch
+                // disagree with the other two.
+                title: crate::application::resolve_title("", url),
                 content: fallback_content,
                 url: ValidUrl::try_from_url(url.clone())?,
                 excerpt: None,

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use webfang_core::application::extraction::extract_content;
 use webfang_core::application::http_client::{HttpError, HttpResponse, HttpResult};
 use webfang_core::application::scraper_service::{
     detect_spa_content, enforce_robots_policy, extract_with_selector, scrape_multiple_with_limit,
@@ -1779,5 +1780,54 @@ fn issue_2554_srcset_is_absolutized_in_the_selector_fragment() {
     assert!(
         out.contains("https://example.com/w_100,h_100/foto.jpg 480w"),
         "source srcset must be absolute with the URL's comma intact, got: {out}"
+    );
+}
+
+// =====================================================================
+// #2552: resolve_title is the single owner of the empty-title fallback
+// =====================================================================
+
+/// #2552 — a page with no `<title>` gets the SAME title on both routes.
+///
+/// `scraper_service::selector_scraped_content` pre-substituted the bare host
+/// before calling `resolve_title`, so `resolve_title` saw a non-empty string
+/// and never applied its fallback: the MCP / `--single-page` route returned
+/// `example.com` while the crawler's `extract_content` returned
+/// `Document: [example.com]` for the same URL and the same selector. Restore
+/// either pre-emption and the two titles diverge again.
+#[cfg_attr(miri, ignore)] // legible/servo_arc Tree-Borrows UB
+#[tokio::test]
+async fn issue_2552_title_less_page_agrees_across_routes() {
+    let html = r#"<html><body><article>
+            <p>Body text long enough to clear the minimum-content guard, with plenty of words.</p>
+        </article></body></html>"#;
+    let parsed = url::Url::parse("https://example.com/no-title").expect("valid test URL");
+    let root = CorrelationId::new();
+
+    // Route 1: MCP / --single-page.
+    let mock = MockHttpClient::new().with_ok_response(parsed.as_str(), html);
+    let config = ScraperConfig {
+        selector: "article".to_owned(),
+        ..ScraperConfig::default()
+    };
+    let outcome = scrape_with_config(
+        &mock, &parsed, &config, None, None, None, None, false, &root,
+    )
+    .await
+    .expect("the selector fragment must yield content");
+    let scraped_title = outcome.results[0].title.clone();
+
+    // Route 2: the crawler's extract_content.
+    let content = extract_content(html, &parsed, &config, None, None, &root)
+        .await
+        .expect("the selector fragment must yield content");
+
+    assert_eq!(
+        scraped_title, "Document: [example.com]",
+        "resolve_title owns the fallback; the host must not be pre-substituted"
+    );
+    assert_eq!(
+        content.title, scraped_title,
+        "both routes must agree on the title of a title-less page"
     );
 }
