@@ -29,7 +29,7 @@
       "crates/webfang_core/src/application/http_client/client.rs": 1453,
       "crates/webfang_core/src/application/llm_extraction.rs": 677,
       "crates/webfang_core/src/application/rate_limiter.rs": 885,
-      "crates/webfang_core/src/application/scraper_service.rs": 1238,
+      "crates/webfang_core/src/application/scraper_service.rs": 1233,
       "crates/webfang_core/src/application/url_filter.rs": 526,
       "crates/webfang_core/src/application/vault_search.rs": 1076,
       "crates/webfang_core/src/cli/args/ai.rs": 557,

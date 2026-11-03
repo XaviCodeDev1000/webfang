@@ -1040,7 +1040,7 @@
       "path": "crates/webfang_core/tests/scraper_service_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 57,
+      "test_count": 58,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"

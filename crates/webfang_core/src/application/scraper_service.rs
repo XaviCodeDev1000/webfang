@@ -644,12 +644,10 @@ async fn selector_scraped_content(
 ) -> Result<ScrapedContent> {
     let assets = download_asset_urls(asset_urls, config, downloader).await?;
 
-    let selector_title = url.host_str().unwrap_or("unknown_host");
+    // #2552: no host pre-emption — `resolve_title` owns the fallback, so a
+    // title-less page reads `Document: [host]` on every route.
     Ok(ScrapedContent {
-        title: crate::application::resolve_title(
-            preferred_title(original_title, selector_title),
-            url,
-        ),
+        title: crate::application::resolve_title(original_title, url),
         content: fallback::extract_text(&fragment),
         url: ValidUrl::try_from_url(url.clone())?,
         excerpt: None,
@@ -756,13 +754,10 @@ async fn build_scraped_content(
                 correlation,
             )?;
 
-            let fallback_title = url.host_str().unwrap_or("unknown_host").to_string();
             Ok(ScrapedContent {
-                // H1 FIX: Use title from original DOM, falling back to host-based fallback
-                title: crate::application::resolve_title(
-                    preferred_title(original_title, &fallback_title),
-                    url,
-                ),
+                // H1 FIX: the document title, or `resolve_title`'s fallback —
+                // never a pre-substituted host (#2552).
+                title: crate::application::resolve_title(original_title, url),
                 content: fallback_content,
                 url: ValidUrl::try_from_url(url.clone())?,
                 excerpt: None,
