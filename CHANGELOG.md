@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.4] - 2026-11-03
+
+
+### 🔧 Fixed
+
+- Preserve input wikilinks instead of rewriting them to broken links ([#2586](https://github.com/XaviCodeDev1000/webfang/pull/2586))
 ## [7.3.3] - 2026-11-02
 
 
