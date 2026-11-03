@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use webfang_core::application::http_client::{HttpError, HttpResponse, HttpResult};
 use webfang_core::application::scraper_service::{
     detect_spa_content, enforce_robots_policy, extract_with_selector, scrape_multiple_with_limit,
-    scrape_with_config, scrape_with_readability, MAX_INSTRUMENTED_BODY_SIZE, MIN_CONTENT_CHARS,
+    scrape_with_config, scrape_with_readability, ScrapeOutcome, MAX_INSTRUMENTED_BODY_SIZE,
+    MIN_CONTENT_CHARS,
 };
 use webfang_core::domain::{
     CorrelationId, DomInspectorPort, ExtractResult, ScrapedContent, SelectorErrorKind,
@@ -887,7 +888,7 @@ fn test_extract_with_selector_matched() {
     );
     assert!(
         !result.as_html().contains("selector-extracted"),
-        "matched HTML should be wrapped in selector-extracted div"
+        "matched HTML must NOT be wrapped in a selector-extracted div"
     );
 }
 
@@ -1661,4 +1662,84 @@ async fn robots_policy_refusal_needs_no_revalidation() {
         .expect_err("a policy-refused verdict must fail the gate");
 
     assert_policy_refusal(&err);
+}
+
+// =====================================================================
+// #2553: the selector path's unasserted branches
+// =====================================================================
+
+/// Serve `html` for `url` and run `scrape_with_config` with `selector`.
+/// Both #2553 selector-path tests share this arrange + act prefix.
+async fn scrape_mocked_with_selector(
+    url: &str,
+    html: &str,
+    selector: &str,
+) -> webfang_core::error::Result<ScrapeOutcome> {
+    let parsed = url::Url::parse(url).expect("valid test URL");
+    let mock = MockHttpClient::new().with_ok_response(parsed.as_str(), html);
+    let config = ScraperConfig {
+        selector: selector.to_owned(),
+        ..ScraperConfig::default()
+    };
+    let root = CorrelationId::new();
+    scrape_with_config(
+        &mock, &parsed, &config, None, None, None, None, false, &root,
+    )
+    .await
+}
+
+/// #2553 — the minimum-content guard must NOT apply to the selector path.
+///
+/// `--selector h3` on a short heading is a legitimate answer, so
+/// `build_scraped_content` returns the fragment without calling
+/// `validate_min_content`. Delete that bypass and this test fails with
+/// `ExtractionFailed` ("contenido insuficiente"), because "Short" is far below
+/// `MIN_CONTENT_CHARS`.
+#[cfg_attr(miri, ignore)] // legible/servo_arc Tree-Borrows UB
+#[tokio::test]
+async fn issue_2553_selector_path_bypasses_the_min_content_guard() {
+    let html = "<html><body><h3>Short</h3>\
+        <p>Body prose that Readability would keep, and the selector must drop.</p>\
+        </body></html>";
+
+    let outcome = scrape_mocked_with_selector("https://example.com/short", html, "h3")
+        .await
+        .expect("a short selector fragment must not trip the minimum-content guard");
+
+    let content = &outcome.results[0].content;
+    assert!(
+        content.contains("Short"),
+        "the matched heading is the content, got: {content}"
+    );
+    assert!(
+        content.chars().count() < MIN_CONTENT_CHARS,
+        "only meaningful below the guard's threshold, got {} chars",
+        content.chars().count()
+    );
+    assert!(
+        !content.contains("Body prose"),
+        "Readability must not run on the selector path, got: {content}"
+    );
+}
+
+/// #2553 — `--selector body` is NOT a supplied fragment: it still goes through
+/// Readability and the minimum-content guard.
+///
+/// `selector_supplied_fragment` exempts `body` because the default selector
+/// also reports `Matched`, so `is_matched()` alone would skip Readability for
+/// every page. Remove the `selector != "body"` half and the guard is bypassed,
+/// turning this near-empty page into an `Ok` result.
+#[cfg_attr(miri, ignore)] // legible/servo_arc Tree-Borrows UB
+#[tokio::test]
+async fn issue_2553_body_selector_still_runs_the_min_content_guard() {
+    let html = "<html><body><div id=\"root\"></div><p>tiny</p></body></html>";
+
+    let err = scrape_mocked_with_selector("https://example.com/shell", html, "body")
+        .await
+        .expect_err("a near-empty page under --selector body must fail the guard");
+
+    assert!(
+        err.to_string().contains("contenido insuficiente"),
+        "the guard's own reason must surface, got: {err}"
+    );
 }
