@@ -24,7 +24,10 @@
 #                        (`crates/*/src/**.rs`, classifier lib_src_changed)
 #                        changed; the FULL lane always runs it. Never AI
 #                        inference, coverage, release builds, or broad
-#                        mutation.
+#                        mutation. Both merge-blocking checks of `gate.needs`
+#                        that used to be absent here (#2559) run too, and
+#                        every run ends with a coverage report naming the
+#                        `gate.needs` jobs the lane did NOT verify.
 #
 # Scope notes:
 #   - The classifier sees committed range refs; uncommitted worktree edits
@@ -62,6 +65,11 @@ CLASSIFIER="$SCRIPT_DIR/ci_path_classifier.sh"
 # Phase 6 timing: start stamp + lane label (set in the dispatch below).
 FAST_GATE_START_SECONDS="$(date +%s)"
 FAST_GATE_LANE="unknown"
+# Lanes that ACTUALLY ran, space separated, for the coverage report (#2559).
+# FAST_GATE_LANE above is the label the timing CSV records (one value, last
+# writer wins); this one is a set, because `docs+ci` runs two lanes and the
+# report has to intersect both.
+FAST_GATE_LANES=""
 FAST_GATE_LOGGED=false
 FAST_GATE_LOG_FILE=""
 
@@ -157,7 +165,9 @@ usage() {
   # introduced (#1262, then the end of the Behaviour paragraph); Scope notes
   # were appended later without updating it. Fixed back to the paragraph
   # boundary and extended for the two header lines added by #1679.
-  sed -n '2,27p' "$0"
+  # #2559 moved the boundary from 27 to 30: the Behaviour paragraph now names
+  # the two checks it used to omit and the coverage report.
+  sed -n '2,30p' "$0"
 }
 
 BASE_REF="origin/main"
@@ -198,6 +208,7 @@ PASS=0
 FAIL=0
 SKIPPED=0
 FAILED_STEPS=()
+SKIPPED_STEPS=()
 
 run_step() {
   local name="$1"
@@ -221,6 +232,10 @@ run_step() {
 skip_step() {
   echo "    SKIP: $1 ($2)"
   SKIPPED=$((SKIPPED + 1))
+  # Recorded, not just counted: the coverage report is the LAST screen, and a
+  # step that skipped must not be described there in the present tense as if it
+  # had run (#2559).
+  SKIPPED_STEPS+=("$1")
 }
 
 # --- classify ------------------------------------------------------------------
@@ -958,6 +973,29 @@ lane_fmt_and_guards() {
   # required CI step.
   run_guard "release feature matrix gate (#2430)" scripts/check_release_feature_matrix.sh \
     bash scripts/check_release_feature_matrix.sh
+  # Two merge-blocking checks that had no local mirror at all (#2559):
+  # `code-quality` fails on the duplication ratchet and `repo-guards` fails on
+  # a stale docs/test-inventory.json. Measured on #2548: this gate printed
+  # GREEN while both were red in CI, so a whole local cycle bought nothing.
+  # The cost is not a reason to leave them out — 0.35 s and 0.17 s measured
+  # 2026-11-02 — so they run unconditionally rather than behind an opt-in flag.
+  #
+  # jscpd is a fail-open SKIP here on purpose: this gate's contract is
+  # "fail-open on a MISSING tool, fail-closed on real findings", and CI
+  # installs the pinned binary. check_duplication.sh still fails closed on its
+  # own when it runs with the wrong detector or an unreadable report.
+  if command -v jscpd >/dev/null 2>&1; then
+    run_guard "duplication ratchet (jscpd v5, #2559)" scripts/check_duplication.sh \
+      bash scripts/check_duplication.sh
+  else
+    skip_step "duplication ratchet (jscpd v5)" \
+      "jscpd not installed (cargo install jscpd --version 5.4.0 --locked)"
+  fi
+  # Hermetic and lane-independent, but it runs HERE because the stale artifact
+  # it catches is produced by a Rust change: #2548 added a test function and
+  # never regenerated the inventory.
+  run_guard "test inventory drift (#2559)" scripts/check_test_inventory.sh \
+    bash scripts/check_test_inventory.sh
   # Issue #1614: the version-marker half of the MCP public-surface policy. The
   # other half (live schema vs the committed fixture) is a test and runs in the
   # cargo lanes; this one needs the base commit, which a test cannot see.
@@ -1141,13 +1179,110 @@ lane_full() {
   run_step "release provenance L1 tests" bash scripts/test_release_provenance.sh
 }
 
+# --- coverage report vs `gate.needs` (#2559) ---------------------------------------
+#
+# A green local gate is not a green CI, and the difference used to be invisible:
+# `check_duplication.sh` and `check_test_inventory.sh` are both merge-blocking
+# and neither ran here, so #2548 went green locally and red in CI. Running those
+# two fixes that instance; this report fixes the CLASS — every run now names the
+# `gate.needs` jobs the lane it ran does not verify. The declaration it reads is
+# cross-checked against `gate.needs` by scripts/test_ci_gate_structure.sh, so a
+# new required producer cannot go missing here in silence either.
+#
+# Report-only: it never touches PASS/FAIL. Making an uncovered job red would
+# block every pre-push on checks that are deliberately main-tier.
+
+lane_list_has() {
+  local list="$1" lane="$2"
+  [[ -z "$list" || "$list" == "-" ]] && return 1
+  # Same normalisation the structure harness applies before it validates a lane
+  # token: a row written `code, full` must mean the same thing to the reader of
+  # the report as it does to the validator that accepted it.
+  list="${list// /}"
+  case ",$list," in
+    *",$lane,"*) return 0 ;;
+  esac
+  return 1
+}
+
+report_gate_coverage() {
+  local table="$SCRIPT_DIR/ci_fast_gate_coverage.tsv"
+  local job full partial note_full note_partial lane state
+  local covered="" partly="" absent="" nowhere=""
+  echo "----------------------------------------"
+  if [[ ! -r "$table" ]]; then
+    echo "fast-gate coverage: UNKNOWN — $table is unreadable, so the gap between this lane and gate.needs cannot be named. Assume this lane verifies less than CI."
+    return 0
+  fi
+  while IFS=$'\t' read -r job full partial note_full note_partial; do
+    case "$job" in '' | '#'*) continue ;; esac
+    # "-" is the column's own "no note" marker, never a note.
+    if [[ "$note_full" == "-" ]]; then note_full=""; fi
+    if [[ "$note_partial" == "-" ]]; then note_partial=""; fi
+    # A job no lane covers at all is a different fact from "not this lane", and
+    # it is the one a reader must not miss: those are the checks that are
+    # ALWAYS theirs to run by hand.
+    if [[ "${full:--}" == "-" && "${partial:--}" == "-" ]]; then
+      nowhere+="$job${note_partial:+ ($note_partial)}, "
+    fi
+    state=""
+    for lane in $FAST_GATE_LANES; do
+      if lane_list_has "$full" "$lane"; then
+        state="covered"
+        break
+      fi
+    done
+    if [[ -z "$state" ]]; then
+      for lane in $FAST_GATE_LANES; do
+        if lane_list_has "$partial" "$lane"; then
+          state="partly"
+          break
+        fi
+      done
+    fi
+    # The note is never dropped: for a covered job it says what ran, and for a
+    # partial or absent one it says what is missing or why nothing runs.
+    case "$state" in
+      covered) covered+="$job${note_full:+ ($note_full)}, " ;;
+      partly) partly+="$job${note_partial:+ ($note_partial)}, " ;;
+      *) absent+="$job${note_partial:+ ($note_partial)}, " ;;
+    esac
+  done <"$table"
+  covered="${covered%, }"
+  partly="${partly%, }"
+  absent="${absent%, }"
+  nowhere="${nowhere%, }"
+  echo "fast-gate coverage vs gate.needs (lanes: ${FAST_GATE_LANES:-none}) — a green local gate is not a green CI:"
+  echo "  covered here: ${covered:-none}"
+  echo "  partial here: ${partly:-none}"
+  echo "  NOT covered here: ${absent:-none}"
+  if [[ -n "$nowhere" ]]; then
+    echo "  no lane covers these, ever: $nowhere"
+  fi
+  # The table is a declaration. Repeating that at the END is the point: the
+  # SKIP lines that make it a non-measurement scrolled past a screen ago, and a
+  # per-job note read as "the ratchet runs" while the ratchet skipped is the
+  # green-local/red-CI gap this report exists to close. So the skipped steps are
+  # NAMED here, not only counted.
+  if [[ "$SKIPPED" -gt 0 ]]; then
+    local skipped_names
+    skipped_names="$(printf '%s, ' "${SKIPPED_STEPS[@]}")"
+    echo "  declaration, not a measurement: $SKIPPED step(s) printed SKIP above and did not run: ${skipped_names%, }"
+  else
+    echo "  declaration, not a measurement: no step was skipped in this run."
+  fi
+  echo "  declaration: $table (drift from gate.needs fails scripts/test_ci_gate_structure.sh)"
+}
+
 # --- dispatch -----------------------------------------------------------------------
 
 if [[ "$all" == "true" ]]; then
   FAST_GATE_LANE="full"
+  FAST_GATE_LANES="full"
   lane_full
 elif [[ "$docs_only" == "true" && "$ci_only" == "true" ]]; then
   FAST_GATE_LANE="docs+ci"
+  FAST_GATE_LANES="docs ci"
   echo "fast-gate note: change is docs+CI only; running docs and CI lanes."
   lane_docs true
   lane_ci
@@ -1157,19 +1292,23 @@ elif [[ "$docs_only" == "true" || "$ci_only" == "true" ]]; then
   fi
   if [[ "$docs_only" == "true" ]]; then
     FAST_GATE_LANE="docs"
+    FAST_GATE_LANES="docs"
     lane_docs true
   fi
   if [[ "$ci_only" == "true" ]]; then
     FAST_GATE_LANE="ci"
+    FAST_GATE_LANES="ci"
     lane_ci
   fi
 elif [[ "$code_changed" != "true" ]]; then
   FAST_GATE_LANE="docs+ci"
+  FAST_GATE_LANES="docs ci"
   echo "fast-gate note: known non-code scope; running cheap docs+CI lanes."
   lane_docs false
   lane_ci
 elif [[ "$code_changed" == "true" ]]; then
   FAST_GATE_LANE="code"
+  FAST_GATE_LANES="code"
   echo "fast-gate lane: CODE (fmt + guards + targeted cargo)"
   lane_fmt_and_guards
   targeted_cargo
@@ -1193,6 +1332,8 @@ elif [[ "$code_changed" == "true" ]]; then
 fi
 
 # --- summary --------------------------------------------------------------------------
+
+report_gate_coverage
 
 echo "----------------------------------------"
 echo "fast-gate summary: PASS=$PASS FAIL=$FAIL SKIP=$SKIPPED"
