@@ -43,8 +43,8 @@ de verdad) con la misma query para todas las olas:
       scripts/quality-baselines.json
 
 Bandas: Ola 0 = [501, 570] · oportunista = [571, 999] · Ola 3 = [1000, 1499] ·
-Ola 2 = [1500, 2000] · Ola 1 = (2000, ∞). Snapshot al merge de #2569
-(origin/main@fb411dac, 2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
+Ola 2 = [1500, 2000] · Ola 1 = (2000, ∞). Snapshot sobre
+origin/main@fb411dac (2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
 
 - **T1 — Ola 0, calibración:** banda [501, 570]. Extracciones chicas y de
   bajo riesgo; ejercita `--update`/`--remove` y el flujo completo de PR antes
@@ -78,10 +78,13 @@ Ola 2 = [1500, 2000] · Ola 1 = (2000, ∞). Snapshot al merge de #2569
   programa), label `type:refactor` (el vocabulario exacto vive en
   `scripts/auto_label_type.sh --map`), base `main`, entrega secuencial.
 - Batching por ola: Ola 0 se batchea (misma base, archivos disjuntos —
-  `scripts/ci_pr_overlap.sh` verifica el no-solape); Ola 1 es una misión por
-  monstruo, sin batch; Ola 2 y Ola 3 se batchean a 2–3 archivos por PR como
-  máximo. El realismo se deriva de esta política (≈25–35 PRs dedicados), no
-  de un número prometido.
+  `scripts/ci_pr_overlap.sh` verifica el no-solape; ~4 archivos por batch);
+  Ola 1 es una misión por monstruo, sin batch (engine.rs puede llevar 2–3
+  PRs propios); Ola 2 y Ola 3 se batchean a 2–3 archivos por PR como máximo.
+  La cuenta, sobre los conteos del snapshot (C0..C3 = 15/9/8/30):
+  ⌈C0/4⌉ + (C1..C1+2) + ⌈C2/3⌉..⌈C2/2⌉ + ⌈C3/3⌉..⌈C3/2⌉ ≈ 4 + 9–11 + 3–4 +
+  10–15 ≈ 26–34 PRs dedicados. La fórmula es la fuente; el número, su
+  resultado sobre el snapshot — se re-deriva cuando el baseline baje.
 - Cada ola es una misión ODD propia con su worktree y su registro de misión.
 - No es un sprint; la catraca garantiza que cada avance es permanente.
 
