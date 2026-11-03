@@ -1743,3 +1743,41 @@ async fn issue_2553_body_selector_still_runs_the_min_content_guard() {
         "the guard's own reason must surface, got: {err}"
     );
 }
+
+// =====================================================================
+// #2554: srcset candidates in the selector fragment
+// =====================================================================
+
+/// #2554 — `srcset` candidates must be absolute in the selector fragment.
+///
+/// `absolutize_urls` rewrote `img[src]`, `source[src]` and `video[poster]` but
+/// not `srcset`, so a responsive image kept an absolute `src` and relative
+/// candidates — and the candidate list is the half renderers actually pick.
+/// Delete either handler and the corresponding attribute stays relative; the
+/// comma inside `/w_100,h_100/` also proves the candidates are not split on
+/// commas.
+#[cfg_attr(miri, ignore)] // legible/servo_arc Tree-Borrows UB
+#[test]
+fn issue_2554_srcset_is_absolutized_in_the_selector_fragment() {
+    let html = r#"<html><body><article>
+            <img src="/hero.jpg" srcset="/hero.jpg 1x, /hero@2x.jpg 2x">
+            <picture><source srcset="/w_100,h_100/foto.jpg 480w"></picture>
+        </article></body></html>"#;
+
+    let result = extract_with_selector(html, "article", &base(), None);
+    assert!(result.is_matched(), "article must match");
+    let out = result.as_html();
+
+    assert!(
+        out.contains("https://example.com/hero.jpg 1x"),
+        "img srcset first candidate must be absolute, got: {out}"
+    );
+    assert!(
+        out.contains("https://example.com/hero@2x.jpg 2x"),
+        "img srcset second candidate must be absolute, got: {out}"
+    );
+    assert!(
+        out.contains("https://example.com/w_100,h_100/foto.jpg 480w"),
+        "source srcset must be absolute with the URL's comma intact, got: {out}"
+    );
+}
