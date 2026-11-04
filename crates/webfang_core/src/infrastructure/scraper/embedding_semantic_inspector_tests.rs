@@ -10,10 +10,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::embedding_semantic_inspector::EmbeddingSemanticInspector;
-use crate::domain::dom_inspector::SelectorErrorKind;
 use crate::domain::embedding_port::{cosine_similarity_fail_closed, EmbeddingPort};
 use crate::domain::semantic_inspector::{
-    BoxFuture, SemanticContext, SemanticInspectorPort, SemanticMatch, TierSource,
+    BoxFuture, SemanticContext, SemanticInspectorPort, TierSource,
 };
 use crate::error::SemanticError;
 
