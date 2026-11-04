@@ -16,4 +16,6 @@ pub mod embedding_semantic_inspector;
 pub mod readability;
 
 #[cfg(test)]
+mod dom_inspector_tests;
+#[cfg(test)]
 mod embedding_semantic_inspector_tests;
