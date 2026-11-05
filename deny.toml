@@ -122,6 +122,16 @@ ignore = [
     # Expires: 2027-03-20
     { id = "RUSTSEC-2025-0052", reason = "async-std 1.13.2 unmaintained; transitive via chromiumoxide 0.7 behind the optional chromium feature of webfang_core, with no maintained alternative available" },
 
+    # RUSTSEC-2026-0441 (pin-utils 0.1.0, severity: unmaintained)
+    # Same chain as async-std above: chromiumoxide 0.7 -> async-tungstenite
+    # 0.27 -> async-std 1.13.2 -> pin-utils 0.1.0, behind the optional
+    # `chromium` feature. pin-utils is trait-only utility code with no
+    # parsing or I/O surface, and 0.1.0 is its final release: no maintained
+    # successor exists. Upgrade waits on chromiumoxide dropping async-std.
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0441
+    # Expires: 2027-05-05
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils 0.1.0 unmaintained; via chromiumoxide 0.7 -> async-tungstenite -> async-std behind the optional chromium feature of webfang_core; trait-only utility, no parsing or I/O surface, 0.1.0 is the final release" },
+
     # RUSTSEC-2026-0173 (proc-macro-error2 2.0.1, severity: unmaintained)
     # Via i18n-embed-fl 0.9.4 <- age 0.11.5 (wizard identity encryption in
     # webfang_core). Non-optional age dependency; the author confirmed the
