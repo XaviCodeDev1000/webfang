@@ -1431,6 +1431,11 @@ infrastructure/downloader/resource_governor.rs	196	inline	crate::domain::budget:
 infrastructure/downloader/resource_governor.rs	199	inline	crate::domain::budget::derivation::RamThresholds::default
 infrastructure/downloader/resource_governor.rs	201	inline	crate::domain::budget::derivation::MaxChromeDecision::Allow
 infrastructure/downloader/resource_governor.rs	205	inline	crate::domain::budget::derivation::MaxChromeDecision::Deny
+infrastructure/downloader/resource_governor/tests.rs	13	use	crate::domain::budget::BudgetModel
+infrastructure/downloader/resource_governor/tests.rs	13	use	crate::domain::budget::BudgetOverrides
+infrastructure/downloader/resource_governor/tests.rs	13	use	crate::domain::budget::detector::FixedDetector
+infrastructure/downloader/resource_governor/tests.rs	23	inline	crate::domain::budget::tiers::MaxChromeInstances::get
+infrastructure/downloader/resource_governor/tests.rs	144	use	crate::infrastructure::observability::FileTraceLayer
 infrastructure/downloader/spa_detector.rs	24	use	crate::domain::waf::InspectionContext
 infrastructure/downloader/spa_detector.rs	25	use	crate::infrastructure::http::waf_engine::WafInspector
 infrastructure/downloader/system_ram_probe.rs	29	use	crate::domain::ram_probe_port::RamProbePort
