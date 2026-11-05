@@ -34,6 +34,9 @@
 #   * every tool the gate can invoke in the exercised lanes is STUBBED on
 #     PATH (cargo, rustfmt, rustdoc, cargo-clippy, cargo-nextest, ...) and the
 #     stub records its own path and argv in a log the harness asserts on;
+#     the ONE exception is the DELEGATING stub for shellcheck, which execs
+#     the real binary resolved at setup (issue #2606): B51/A15 exercise real
+#     analysis semantics, but must never inherit the HOST's tool resolution;
 #   * CARGO_TARGET_DIR points at an EMPTY scratch dir, and the harness
 #     asserts it is still empty when it finishes;
 #   * the scratch lives on DISK. /tmp is a tmpfs on this machine, so a scratch
@@ -155,6 +158,44 @@ exit 0
 STUB
   chmod +x "$STUB_DIR/$stub_name"
 done
+
+# The shellcheck stub is DELEGATING, unlike the toolchain stubs above: B51/A15
+# exercise the gate's shellcheck step with REAL shellcheck semantics (a file
+# whose comment line begins with "shellcheck" must be read as a directive, and
+# a clean script must pass), so a canned exit-0 stub would pin nothing. What
+# the harness must NOT inherit is the HOST's tool RESOLUTION: on a
+# version-manager host the PATH's `shellcheck` can be a per-CWD shim that
+# exits 1 from any directory without a version config (issue #2606: the mise
+# shim reds B51/A15 from inside the fixtures while CI is green on the same
+# commits). So the REAL binary is resolved ONCE here — `mise -C "$REPO_ROOT"`
+# reads this repository's own config regardless of the caller's CWD, and on a
+# host without mise the plain PATH lookup is CI's pinned binary (aqua pin in
+# mise.toml == SC_VERSION). With neither, the stub fails 127 loudly: "resolved
+# but broken" is a harness-environment defect, never a green gate.
+REAL_SHELLCHECK=""
+if command -v mise >/dev/null 2>&1; then
+  REAL_SHELLCHECK="$(mise -C "$REPO_ROOT" which shellcheck 2>/dev/null)" || REAL_SHELLCHECK=""
+fi
+if [ -z "$REAL_SHELLCHECK" ] || [ ! -x "$REAL_SHELLCHECK" ]; then
+  REAL_SHELLCHECK="$(command -v shellcheck 2>/dev/null)" || REAL_SHELLCHECK=""
+fi
+if [ -n "$REAL_SHELLCHECK" ] && [ ! -x "$REAL_SHELLCHECK" ]; then
+  REAL_SHELLCHECK=""
+fi
+cat >"$STUB_DIR/shellcheck" <<STUB
+#!/usr/bin/env bash
+# Fixture stub (DELEGATING, issue #2606): records the invocation, then execs
+# the REAL shellcheck resolved at harness setup. Never resolve shellcheck
+# from PATH inside the fixture — a per-CWD shim (mise) exits 1 there.
+printf '%s\t%s\t%s\n' "\$(basename "\$0")" "\$0" "\$*" >>"\$WEBFANG_GATE_STUB_LOG"
+REAL="$REAL_SHELLCHECK"
+if [ -n "\$REAL" ] && [ -x "\$REAL" ]; then
+  exec "\$REAL" "\$@"
+fi
+echo "shellcheck-stub: no real shellcheck was resolved at setup (issue #2606)" >&2
+exit 127
+STUB
+chmod +x "$STUB_DIR/shellcheck"
 
 # --- fixtures -----------------------------------------------------------------
 #
