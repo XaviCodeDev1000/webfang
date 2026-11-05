@@ -1542,8 +1542,8 @@ infrastructure/llm/client.rs	11	use	crate::error::Result
 infrastructure/llm/client.rs	11	use	crate::error::ScraperError
 infrastructure/llm/client.rs	103	inline	crate::domain::ssrf_guard::ssrf_guard
 infrastructure/llm/client.rs	164	inline	crate::domain::body_cap::read_body_capped
-infrastructure/llm/client_tests.rs	2	use	crate::error::ErrorClass
-infrastructure/llm/client_tests.rs	50	inline	crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV
+infrastructure/llm/client_tests.rs	9	use	crate::error::ErrorClass
+infrastructure/llm/client_tests.rs	57	inline	crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV
 infrastructure/llm/provider.rs	15	use	crate::domain::auth_source::AuthError
 infrastructure/llm/provider.rs	16	use	crate::domain::llm_port::LlmPort
 infrastructure/llm/provider.rs	17	use	crate::infrastructure::llm::client::OpenAiLlmClient
