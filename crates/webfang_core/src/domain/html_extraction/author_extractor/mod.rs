@@ -23,20 +23,17 @@
 use std::sync::LazyLock;
 
 use scraper::{Html, Selector};
-use serde_json::Value;
 
 use super::{non_empty, text_content, SEL_JSONLD};
+use jsonld::{author_from_jsonld, strip_byline_prefix};
+
+mod jsonld;
 
 /// Maximum length of a plausible author name.
 ///
 /// CSS-class candidates longer than this are almost certainly containers
 /// (a whole paragraph or a footer) rather than a name, so they are skipped.
 const MAX_AUTHOR_LEN: usize = 100;
-
-/// Leading byline prefixes stripped from CSS-class candidates.
-///
-/// Ordered longest-first so "Written by" wins over "by".
-const BYLINE_PREFIXES: &[&str] = &["written by", "por", "by"];
 
 // All selectors below are compile-time-constant strings, so `Selector::parse`
 // cannot fail at runtime; each `expect` documents a true invariant.
@@ -230,51 +227,6 @@ pub fn extract_author_from_document(
     legible_byline
         .map(|b| b.trim().to_string())
         .filter(|b| !b.is_empty())
-}
-
-/// Resolve an author name from a raw JSON-LD block.
-fn author_from_jsonld(json: &str) -> Option<String> {
-    let value: Value = serde_json::from_str(json).ok()?;
-    find_author(&value)
-}
-
-/// Recursively search a JSON-LD value for an `author` field.
-fn find_author(value: &Value) -> Option<String> {
-    match value {
-        Value::Object(map) => {
-            if let Some(name) = map.get("author").and_then(author_name) {
-                return Some(name);
-            }
-            map.get("@graph").and_then(find_author)
-        },
-        Value::Array(items) => items.iter().find_map(find_author),
-        _ => None,
-    }
-}
-
-/// Coerce an `author` JSON value (string, object, or array) into a name.
-fn author_name(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => non_empty(s),
-        Value::Object(map) => map.get("name").and_then(Value::as_str).and_then(non_empty),
-        Value::Array(items) => items.iter().find_map(author_name),
-        _ => None,
-    }
-}
-
-/// Strip a leading byline prefix ("By ", "Written by ", "Por ") if present.
-fn strip_byline_prefix(s: &str) -> String {
-    let trimmed = s.trim();
-    let lower = trimmed.to_lowercase();
-    for prefix in BYLINE_PREFIXES {
-        let Some(rest) = lower.strip_prefix(prefix) else {
-            continue;
-        };
-        if rest.starts_with(' ') || rest.starts_with('\u{a0}') {
-            return trimmed[prefix.len()..].trim().to_string();
-        }
-    }
-    trimmed.to_string()
 }
 
 #[cfg(all(test, not(miri)))]

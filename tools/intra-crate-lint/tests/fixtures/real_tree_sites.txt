@@ -1537,6 +1537,8 @@ infrastructure/llm/client.rs	11	use	crate::error::Result
 infrastructure/llm/client.rs	11	use	crate::error::ScraperError
 infrastructure/llm/client.rs	103	inline	crate::domain::ssrf_guard::ssrf_guard
 infrastructure/llm/client.rs	164	inline	crate::domain::body_cap::read_body_capped
+infrastructure/llm/client_tests.rs	2	use	crate::error::ErrorClass
+infrastructure/llm/client_tests.rs	50	inline	crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV
 infrastructure/llm/provider.rs	15	use	crate::domain::auth_source::AuthError
 infrastructure/llm/provider.rs	16	use	crate::domain::llm_port::LlmPort
 infrastructure/llm/provider.rs	17	use	crate::infrastructure::llm::client::OpenAiLlmClient
@@ -1612,6 +1614,13 @@ infrastructure/scraper/embedding_semantic_inspector.rs	57	use	crate::domain::sem
 infrastructure/scraper/embedding_semantic_inspector.rs	57	use	crate::domain::semantic_inspector::SemanticMatch
 infrastructure/scraper/embedding_semantic_inspector.rs	57	use	crate::domain::semantic_inspector::TierSource
 infrastructure/scraper/embedding_semantic_inspector.rs	60	use	crate::error::SemanticError
+infrastructure/scraper/embedding_semantic_inspector_tests.rs	13	use	crate::domain::embedding_port::EmbeddingPort
+infrastructure/scraper/embedding_semantic_inspector_tests.rs	13	use	crate::domain::embedding_port::cosine_similarity_fail_closed
+infrastructure/scraper/embedding_semantic_inspector_tests.rs	14	use	crate::domain::semantic_inspector::BoxFuture
+infrastructure/scraper/embedding_semantic_inspector_tests.rs	14	use	crate::domain::semantic_inspector::SemanticContext
+infrastructure/scraper/embedding_semantic_inspector_tests.rs	14	use	crate::domain::semantic_inspector::SemanticInspectorPort
+infrastructure/scraper/embedding_semantic_inspector_tests.rs	14	use	crate::domain::semantic_inspector::TierSource
+infrastructure/scraper/embedding_semantic_inspector_tests.rs	17	use	crate::error::SemanticError
 infrastructure/scraper/readability.rs	6	use	crate::error::Result
 infrastructure/scraper/readability.rs	6	use	crate::error::ScraperError
 infrastructure/semantic_cleaner.rs	23	use	crate::domain::embedding_port::EmbeddingPort
