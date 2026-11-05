@@ -691,10 +691,10 @@ application/vault_search.rs	23	use	crate::domain::text_chunker::TextChunker
 application/vault_search.rs	24	use	crate::error::ScraperError
 cli/args/ai.rs	66	inline	crate::domain::options_spec::ai::MAX_CHARS::parse_uint
 cli/args/ai.rs	70	inline	crate::domain::options_spec::ai::MAX_CHARS::parse_error
-cli/args/ai.rs	319	use	crate::cli::spec_command::extract
-cli/args/ai.rs	336	use	crate::cli::spec_command::extract
-cli/args/ai.rs	367	inline	crate::cli::spec_command::ai_args
-cli/args/ai.rs	368	inline	crate::cli::spec_command::Headings::Applied
+cli/args/ai.rs	164	use	crate::cli::spec_command::extract
+cli/args/ai.rs	181	use	crate::cli::spec_command::extract
+cli/args/ai.rs	212	inline	crate::cli::spec_command::ai_args
+cli/args/ai.rs	213	inline	crate::cli::spec_command::Headings::Applied
 cli/args/crawler.rs	1	use	crate::domain::config::ConcurrencyConfig
 cli/args/crawler.rs	2	use	crate::domain::options_spec::crawler
 cli/args/crawler.rs	3	use	crate::domain::post_load_wait::PostLoadWait
