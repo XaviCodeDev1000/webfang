@@ -1,8 +1,8 @@
 //! Tests for `DefaultDomInspector` and `NoOpInspector`.
 //!
 //! Extracted from `dom_inspector.rs` to bring it under the ~500-line
-//! file-size rule. Movement is verbatim; imports adjusted from
-//! `use super::*` to explicit paths against `super::dom_inspector`.
+//! file-size rule. Movement is verbatim; imports rewritten from
+//! `use super::*` to explicit crate-absolute paths.
 //!
 //! The Tree Borrows UB / Miri gating comment on `default_dom_inspector_tests`
 //! is load-bearing documentation — preserved unchanged.

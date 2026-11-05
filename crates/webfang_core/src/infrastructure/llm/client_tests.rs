@@ -1,3 +1,10 @@
+//! Tests for the `OpenAiLlmClient` wreq adapter (wiremock-backed).
+//!
+//! Extracted from `client.rs` to bring it under the ~500-line file-size
+//! rule. Movement is verbatim; the module path `client::tests` is
+//! preserved via the `#[path]` sibling declaration, and the `use super::*`
+//! imports resolve identically from the sibling module.
+
 use super::*;
 use crate::error::ErrorClass;
 use wiremock::matchers::{header, method, path};

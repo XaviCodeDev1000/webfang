@@ -691,10 +691,10 @@ application/vault_search.rs	23	use	crate::domain::text_chunker::TextChunker
 application/vault_search.rs	24	use	crate::error::ScraperError
 cli/args/ai.rs	66	inline	crate::domain::options_spec::ai::MAX_CHARS::parse_uint
 cli/args/ai.rs	70	inline	crate::domain::options_spec::ai::MAX_CHARS::parse_error
-cli/args/ai.rs	319	use	crate::cli::spec_command::extract
-cli/args/ai.rs	336	use	crate::cli::spec_command::extract
-cli/args/ai.rs	367	inline	crate::cli::spec_command::ai_args
-cli/args/ai.rs	368	inline	crate::cli::spec_command::Headings::Applied
+cli/args/ai.rs	164	use	crate::cli::spec_command::extract
+cli/args/ai.rs	181	use	crate::cli::spec_command::extract
+cli/args/ai.rs	212	inline	crate::cli::spec_command::ai_args
+cli/args/ai.rs	213	inline	crate::cli::spec_command::Headings::Applied
 cli/args/crawler.rs	1	use	crate::domain::config::ConcurrencyConfig
 cli/args/crawler.rs	2	use	crate::domain::options_spec::crawler
 cli/args/crawler.rs	3	use	crate::domain::post_load_wait::PostLoadWait
@@ -1431,6 +1431,11 @@ infrastructure/downloader/resource_governor.rs	196	inline	crate::domain::budget:
 infrastructure/downloader/resource_governor.rs	199	inline	crate::domain::budget::derivation::RamThresholds::default
 infrastructure/downloader/resource_governor.rs	201	inline	crate::domain::budget::derivation::MaxChromeDecision::Allow
 infrastructure/downloader/resource_governor.rs	205	inline	crate::domain::budget::derivation::MaxChromeDecision::Deny
+infrastructure/downloader/resource_governor/tests.rs	13	use	crate::domain::budget::BudgetModel
+infrastructure/downloader/resource_governor/tests.rs	13	use	crate::domain::budget::BudgetOverrides
+infrastructure/downloader/resource_governor/tests.rs	13	use	crate::domain::budget::detector::FixedDetector
+infrastructure/downloader/resource_governor/tests.rs	23	inline	crate::domain::budget::tiers::MaxChromeInstances::get
+infrastructure/downloader/resource_governor/tests.rs	144	use	crate::infrastructure::observability::FileTraceLayer
 infrastructure/downloader/spa_detector.rs	24	use	crate::domain::waf::InspectionContext
 infrastructure/downloader/spa_detector.rs	25	use	crate::infrastructure::http::waf_engine::WafInspector
 infrastructure/downloader/system_ram_probe.rs	29	use	crate::domain::ram_probe_port::RamProbePort
@@ -1537,8 +1542,8 @@ infrastructure/llm/client.rs	11	use	crate::error::Result
 infrastructure/llm/client.rs	11	use	crate::error::ScraperError
 infrastructure/llm/client.rs	103	inline	crate::domain::ssrf_guard::ssrf_guard
 infrastructure/llm/client.rs	164	inline	crate::domain::body_cap::read_body_capped
-infrastructure/llm/client_tests.rs	2	use	crate::error::ErrorClass
-infrastructure/llm/client_tests.rs	50	inline	crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV
+infrastructure/llm/client_tests.rs	9	use	crate::error::ErrorClass
+infrastructure/llm/client_tests.rs	57	inline	crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV
 infrastructure/llm/provider.rs	15	use	crate::domain::auth_source::AuthError
 infrastructure/llm/provider.rs	16	use	crate::domain::llm_port::LlmPort
 infrastructure/llm/provider.rs	17	use	crate::infrastructure::llm::client::OpenAiLlmClient

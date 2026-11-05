@@ -208,6 +208,11 @@ impl LlmPort for OpenAiLlmClient {
     }
 }
 
+// Test-module wiring for a FILE-module parent: `#[path]` points at the
+// sibling file explicitly while preserving the `client::tests` module path.
+// Directory-module parents (e.g. `scraper/mod.rs`) declare their test
+// siblings as plain `mod` items instead; both forms are valid, and the
+// difference is the parent's shape (issue #2614).
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
