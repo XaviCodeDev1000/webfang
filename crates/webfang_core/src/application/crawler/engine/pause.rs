@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::domain::CrawlerConfig;
 
-/// Why one bounded wait in [`Engine::crawl_loop`] returned (#2313).
+/// Why one bounded wait in `Engine::crawl_loop` returned (#2313).
 ///
 /// The distinction is the whole point of the fix: a wait that produced a
 /// completion is progress, a wait with nothing to await is an autoscale pause,

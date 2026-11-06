@@ -23,7 +23,7 @@ use crate::domain::JsStrategy;
 ///
 /// Transitional view (P6-2, #1291): after slice 4 the engine itself is built
 /// only from a validated `CrawlSession`; this
-/// struct remains as the public options DTO for [`crawl_site_with_options`],
+/// struct remains as the public options DTO for [`crawl_site_with_options`](super::crawl_site_with_options),
 /// consumed via `TransportPolicy::from(&options)`. Its deprecation is the
 /// declared destination but a separate act — the signed design requires its
 /// own `type:breaking-change` decision plus a caller migration (CLI discovery,
@@ -99,13 +99,13 @@ pub struct EngineOptions {
     /// `None` (the default) keeps the metadata-only crawl: bodies are
     /// discarded after link extraction. `Some` wires the sink through the
     /// SAME engine path — checkpoint-only, capture-only, and both all
-    /// converge in [`crawl_site_with_options`]; no second entry function.
+    /// converge in [`crawl_site_with_options`](super::crawl_site_with_options); no second entry function.
     pub content_sink: Option<Arc<dyn CrawlContentSink>>,
     /// Run-scoped token bucket shared by every engine of one run (#1428).
     ///
     /// `None` (the default) keeps the historical behavior: `build_machinery`
     /// mints a fresh limiter per engine. `Some` makes
-    /// [`crawl_site_with_options`] adopt it instead, so `--delay-ms` paces
+    /// [`crawl_site_with_options`](super::crawl_site_with_options) adopt it instead, so `--delay-ms` paces
     /// across engines — batch runs one engine per URL, and a per-engine
     /// bucket restores a full burst per URL, making cross-URL spacing
     /// structurally impossible. Carried by `Clone` (one `Arc` clone per
