@@ -30,10 +30,10 @@ Propuesta de slice para el PR 1 (pendiente de OK, S7). Un commit de unidad por e
 |----|-------|-------|------|--------|--------|
 | T0 | CodeGraph explore + codedb outline: callers, blast radius, driver real | S5 | inline | done | (evidencia en Log L3; sin commit: no toca código) |
 | T1 | Registro de misión + espejo Engram | S1,S2 | inline | done | (este archivo; sin commit aún) |
-| T2 | `EngineOptions` + `Debug` + `Default` (L1721–1847, ~127) → `engine/options.rs`, con `pub use` desde `engine.rs` | S3,S6,S8 | propuesta | pending OK | — |
-| T3 | Primitivas de pausa: `WaitOutcome`, `PauseVerdict`, `PauseWatchdog`, `PauseTracker` (L165–258, ~95) → `engine/pause.rs` | S3,S6,S8 | propuesta | pending OK | — |
-| T4 | `--update` descendente de `engine.rs` en el baseline (sigue >500); guard + `jscpd --complexity` + golden + suite | S6,S8 | propuesta | pending OK | — |
-| T5 | Verificación por cuatro lentes sobre lo movido; resultado explícito en el PR | S6 | propuesta | pending OK | — |
+| T2 | `EngineOptions` + `Debug` + `Default` → `engine/options.rs` (171 líneas), con `pub use engine::EngineOptions` | S3,S6,S8 | delegada al padre (inline) | done | 834af8bd |
+| T3 | Primitivas de pausa: `WaitOutcome`, `PauseVerdict`, `PauseWatchdog`, `PauseTracker` → `engine/pause.rs` (110 líneas), con `pub use` desde `engine.rs` | S3,S6,S8 | delegada al padre (inline) | done | 834af8bd |
+| T4 | Ratchet: `engine.rs` 4063→3814 (`--update`, sigue grandfathered); duplicación `jscpd --complexity` 8316≤8325 OK; golden intra-crate refrescado; suite verde | S6,S8 | delegada al padre (inline) | done | 834af8bd |
+| T5 | Verificación por cuatro lentes sobre lo movido; resultado explícito en el PR | S6 | — | pendiente (pre-PR, requiere OK) | — |
 | T6 | PR 2 y siguientes (provisional): cluster de checkpoint (~240), lifecycle/run/shutdown (~400), crawl-loop/wait (~300), entry points (~310), `mod tests` inline (~1843) | S3,S4 | propuesta | sin planificar | — |
 
 Forecast: PR 1 mueve ~220 líneas ⇒ ~440 authored (borrar+crear), en la banda de la heurística de ~400. El `mod tests` (1843) queda fuera del PR 1 a propósito: moverlo entero haría el diff no revisable, y el criterio de Ola 0 S12 prefiere seam de producción cuando existe y es limpio.
@@ -65,3 +65,5 @@ L3 — Evidencia de exploración sobre `840cc94d` (CodeGraph explore + codedb ou
 - Restricción de visibilidad: los `impl Engine` leen campos privados de `Engine`, así que los módulos extraídos deben ser **hijos** de `engine` (`engine/*.rs`), no hermanos en `crawler/`. Un módulo hijo sí accede a los privados del padre.
 
 L4 — Decisiones de encuadre: (a) SIN batch, confirmado contra S4 y contra el cierre de Ola 0 (`main` en `840cc94d` = PR #2619); (b) `error.rs` queda para SU misión, no entra acá; (c) sin Agent tool disponible en esta sesión (ToolSearch devuelve sólo `Workflow`, que exige opt-in explícito), la exploración se hizo inline con CodeGraph/CodeDB en llamadas acotadas — degradación documentada, sin worker delegado.
+
+L5 — PR 1 ejecutado y commiteado (834af8bd, 2026-11-06). Movimiento mecánico: `EngineOptions`+`Debug`+`Default` → `engine/options.rs` (171) y las primitivas de pausa (`WaitOutcome`/`PauseVerdict`/`PauseWatchdog`/`PauseTracker`) → `engine/pause.rs` (110); `engine.rs` 4063→3814. `pub use engine::EngineOptions` y `pub use engine::pause::{...}` preservan el path público y el re-export de `crawler/mod.rs`. Visibilidad forzada a `pub` en los ítems movidos (campos y métodos de `PauseTracker`/`PauseWatchdog`, y los tipos) porque el loop y `engine::tests` los referencian a través del límite de módulo — único cambio fuera de "mover sin tocar". Verificación: `cargo check -p webfang_core` limpio; `cargo nextest run -p webfang_core --lib crawler::engine` 40/40 ok; tests de integración `engine_options_1369` + `engine_js_strategy_timeout_test` + `integration_engine_tests` ok; duplicación `jscpd 5.4.0` 8316≤8325; golden intra-crate refrescado en el mismo commit (S8). Ratchet `--update` engine.rs 4063→3814 (sigue grandfathered, >2000). Falta T5 (4 lentes) y push/PR con OK explícito.
