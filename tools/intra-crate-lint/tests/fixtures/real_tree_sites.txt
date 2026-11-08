@@ -331,6 +331,14 @@ application/crawler/engine/crawl_loop.rs	16	use	crate::application::crawler::cra
 application/crawler/engine/crawl_loop.rs	16	use	crate::application::crawler::crawl_task::run_crawl_task
 application/crawler/engine/crawl_loop.rs	17	use	crate::application::crawler::crawl_task_ctx::CrawlTaskCtx
 application/crawler/engine/crawl_loop.rs	18	use	crate::domain::CrawlError
+application/crawler/engine/crawl_loop/tests.rs	2	use	crate::application::crawler::engine::tests::entry_off
+application/crawler/engine/crawl_loop/tests.rs	2	use	crate::application::crawler::engine::tests::nz
+application/crawler/engine/crawl_loop/tests.rs	2	use	crate::application::crawler::engine::tests::session_engine
+application/crawler/engine/crawl_loop/tests.rs	3	use	crate::domain::budget::BudgetModel
+application/crawler/engine/crawl_loop/tests.rs	3	use	crate::domain::budget::BudgetOverrides
+application/crawler/engine/crawl_loop/tests.rs	4	use	crate::domain::CrawlerConfig
+application/crawler/engine/crawl_loop/tests.rs	86	inline	crate::domain::budget::clamp::MAX_CONCURRENCY_CEILING
+application/crawler/engine/crawl_loop/tests.rs	153	inline	crate::domain::budget::detector::SystemDetector
 application/crawler/engine/entry.rs	14	use	crate::application::crawler::session::CrawlIdentity
 application/crawler/engine/entry.rs	14	use	crate::application::crawler::session::CrawlPorts
 application/crawler/engine/entry.rs	14	use	crate::application::crawler::session::CrawlSession

@@ -310,3 +310,7 @@ impl Engine {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(not(miri))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+mod tests;
