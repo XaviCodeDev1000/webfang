@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.4] - 2026-11-08
+
+
+### 🏗️ Architecture Improvements
+
+- Split the four Ola 0 batch 1 files under the ~500-line rule ([#2601](https://github.com/XaviCodeDev1000/webfang/pull/2601))
+- Ola 0 batch 2 — four files under the ~500-line rule ([#2612](https://github.com/XaviCodeDev1000/webfang/pull/2612))
+- Ola 0 batch 3 — four files under the ~500-line rule ([#2618](https://github.com/XaviCodeDev1000/webfang/pull/2618))
+- Split engine.rs into six child modules under the ~500-line rule ([#2622](https://github.com/XaviCodeDev1000/webfang/pull/2622))
+- Extract crawl-loop budget tests into engine/crawl_loop/tests.rs ([#2625](https://github.com/XaviCodeDev1000/webfang/pull/2625))
+
+### 🔧 Fixed
+
+- Preserve input wikilinks instead of rewriting them to broken links ([#2586](https://github.com/XaviCodeDev1000/webfang/pull/2586))
+- Absolutize srcset URLs in the selector fragment ([#2592](https://github.com/XaviCodeDev1000/webfang/pull/2592))
+- Title-less pages now read "Document: [host]" on every route ([#2595](https://github.com/XaviCodeDev1000/webfang/pull/2595))
+- Synthesize a header row for headerless tables under --selector ([#2598](https://github.com/XaviCodeDev1000/webfang/pull/2598))
+
+### 🧪 Testing
+
+- Cover the selector-path branches that skip Readability ([#2589](https://github.com/XaviCodeDev1000/webfang/pull/2589))
 ## [7.3.3] - 2026-11-02
 
 
