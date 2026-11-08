@@ -835,7 +835,7 @@ mod tests {
     /// trait object reaches the spawned workers (ban/cooldown state must be
     /// visible to every consumer, #1075; wiring fix coverage, #1291).
     #[derive(Debug, Default)]
-    pub(super) struct FakeSessionPort {
+    struct FakeSessionPort {
         acquires: std::sync::atomic::AtomicUsize,
         successes: std::sync::atomic::AtomicUsize,
     }
@@ -872,7 +872,7 @@ mod tests {
     /// strategy, robots ignored (mirrors the pre-session direct constructor
     /// the 3.F tests used). `pool` injects through the ports, the single
     /// production injection point since the #1291 wiring fix.
-    pub(super) fn pool_session(
+    fn pool_session(
         config: CrawlerConfig,
         pool: Option<Arc<FakeSessionPort>>,
         session_pool_enabled: bool,
