@@ -69,15 +69,33 @@ not_contains "scripts/verify-release-signatures.sh" "$OLD_OWNER"
 
 # Current-facing files must point at the new repository. CHANGELOG.md and
 # docs/adr/ are historical records and are intentionally excluded.
-mapfile -t stale < <(
-  grep -RIn \
-    --include='*.md' --include='*.yml' --include='*.yaml' \
-    --include='*.sh' --include='*.toml' --include='*.json' \
-    --exclude-dir='.git' --exclude-dir='target' --exclude-dir='adr' \
-    --exclude-dir='evidence' --exclude-dir='odd' \
-    --exclude='CHANGELOG.md' \
-    -F -- "$OLD_OWNER" . 2>/dev/null || true
-)
+#
+# Scan the TRACKED set via `git grep` — the set CI sees (#2587). A plain
+# `grep -R` has no notion of .gitignore, so any gitignored generated artifact
+# still carrying the old owner (e.g. docs/book/) reds this guard locally
+# while CI stays green. `git grep` ignores untracked files entirely, so an
+# untracked scratch file can no longer red the gate either.
+# The historical dirs are excluded at the root AND at any depth: a
+# `**/evidence/**` pathspec alone does not match the top-level `evidence/`
+# (verified — the issue's draft pattern still matched tracked evidence/ and
+# odd/ files, which would have red in CI).
+# git grep exits 1 when nothing matches (clean) and >1 when the scan could
+# not run — the latter is a failure, never a clean result (B53).
+stale_output=""
+grep_rc=0
+stale_output="$(git grep -I -n -F -- "$OLD_OWNER" -- \
+  '*.md' '*.yml' '*.yaml' '*.sh' '*.toml' '*.json' \
+  ':(exclude)adr/**' ':(exclude)**/adr/**' \
+  ':(exclude)evidence/**' ':(exclude)**/evidence/**' \
+  ':(exclude)odd/**' ':(exclude)**/odd/**' \
+  ':(exclude)CHANGELOG.md' ':(exclude)**/CHANGELOG.md')" || grep_rc=$?
+if [[ "$grep_rc" -gt 1 ]]; then
+  fail "release owner scan could not run (git grep exit $grep_rc)"
+fi
+stale=()
+if [[ -n "$stale_output" ]]; then
+  mapfile -t stale <<<"$stale_output"
+fi
 if [[ ${#stale[@]} -eq 0 ]]; then
   pass "no stale owner references outside the historical allowlist"
 else
