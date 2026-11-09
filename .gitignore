@@ -137,6 +137,10 @@ zed-settings.json
 # path; never versionable — the global git ignore is the primary cover,
 # this is belt-and-braces for fresh clones whose bootstrap creates it).
 .envrc
+# mise per-tree overrides — the live per-tree build-policy channel since the
+# 2026-11-08 direnv→mise migration (same class as .envrc: personal overrides
+# carrying per-machine absolute paths, never versionable).
+mise.local.toml
 
 # Logs
 *.log
