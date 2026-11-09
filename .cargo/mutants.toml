@@ -31,6 +31,11 @@
 # matrix moved from 64 to 96. Re-measure before trusting the number again: the
 # scope grows with every extension, and this count is a measurement, not a
 # promise.
+#
+# Measured (2026-11-09, #2560): widening the scope to the extraction spine
+# (below) adds 141 mutants (extraction.rs 25, scraper_service.rs 28,
+# html_extraction/** 88) for 1640 total — 17.1 per shard at 96 ways, still
+# under the ~20-mutant wall draw, so the weekly matrix stays at 96 shards.
 
 examine_globs = [
   # 2026-08 scope: the original 6 gated hot paths.
@@ -59,6 +64,12 @@ examine_globs = [
   # adapters layer, the inbound side of the hexagon no glob reached before.
   "crates/webfang_core/src/application/export_factory.rs",
   "crates/webfang_core/src/adapters/**",
+  # 2026-11 scope (#2560): the extraction spine — the product spine the
+  # PR-diff gate never examined (0 mutants for diffs there: No mutants to
+  # filter). No commit, comment or issue recorded a deliberate exclusion.
+  "crates/webfang_core/src/application/extraction.rs",
+  "crates/webfang_core/src/application/scraper_service.rs",
+  "crates/webfang_core/src/domain/html_extraction/**",
 ]
 
 # Re-exports and module glue add no mutation signal.
