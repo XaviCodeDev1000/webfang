@@ -95,7 +95,8 @@ console-subscriber = "0.4"
 
 # SQLite persistence
 rusqlite = { version = "0.31", features = ["bundled", "chrono", "uuid"] }
-deadpool-sqlite = "0.8"
+deadpool = { version = "0.12", default-features = false, features = ["managed", "rt_tokio_1"] }
+deadpool-sync = "0.1"
 
 # Observability
 tracing-tree = "0.4"

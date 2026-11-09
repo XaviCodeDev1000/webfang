@@ -15,7 +15,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
-use deadpool_sqlite::{Config, Hook, HookError, Manager, Pool, Runtime};
+use super::pool::{Config, Hook, HookError, Manager, Pool, Runtime};
 use rusqlite::Connection;
 
 use crate::domain::note_repository::{
@@ -196,7 +196,7 @@ fn migrate_to_current(conn: &Connection) -> Result<(), ScraperError> {
 // Pool construction
 // ============================================================================
 
-/// Build a WAL-mode SQLite connection pool backed by [`deadpool_sqlite`].
+/// Build a WAL-mode SQLite connection pool backed by [`super::pool`].
 ///
 /// `pool_size` is clamped to at least 1 (the caller — `ElasticConfig` — already
 /// applies the frozen `cpu_cores`/floor-4 sizing). The parent directory of
@@ -934,6 +934,7 @@ mod tests {
     #[cfg(not(miri))]
     mod sqlite {
         use super::*;
+        use crate::infrastructure::persistence::pool::Object;
 
         /// Build a fresh pool over a temp-file DB and run the schema.
         async fn fresh_pool(size: usize) -> (TempDir, Pool) {
@@ -1180,6 +1181,28 @@ mod tests {
             assert_eq!(pragma_int(&pool, "cache_size").await, -4000);
         }
 
+        /// With more than one connection, the `post_create` hook must run for
+        /// every connection, not just the first one. Hold all four objects at
+        /// once so each is created fresh, then read `journal_mode` from each.
+        #[tokio::test]
+        async fn test_wal_pragmas_applied_to_every_pooled_connection() {
+            let (_dir, pool) = fresh_pool(4).await;
+
+            let mut conns = Vec::new();
+            for _ in 0..4 {
+                conns.push(pool.get().await.expect("get"));
+            }
+
+            for conn in &conns {
+                let mode: String = conn
+                    .interact(|c| c.query_row("PRAGMA journal_mode", [], |row| row.get(0)))
+                    .await
+                    .expect("interact")
+                    .expect("query");
+                assert_eq!(mode, "wal", "every pooled connection must be in WAL mode");
+            }
+        }
+
         #[tokio::test]
         async fn test_db_file_created_when_absent() {
             let dir = TempDir::new().expect("tempdir");
@@ -1198,6 +1221,30 @@ mod tests {
             let (_dir, pool) = fresh_pool(8).await;
             let status = pool.status();
             assert_eq!(status.max_size, 8, "pool max_size must honor configuration");
+        }
+
+        /// A pool with `max_size = 1` must recycle the single connection: two
+        /// sequential `get` calls hand out the same pooled object, not a fresh
+        /// one. If `Manager::recycle` rejects the connection, deadpool creates a
+        /// new object and the `ObjectId` changes — that is the regression this
+        /// pins.
+        #[tokio::test]
+        async fn test_pool_recycles_connection_with_max_size_one() {
+            let pool = create_memory_pool().expect("create_memory_pool");
+            SqliteVectorRepository::setup_schema(&pool)
+                .await
+                .expect("setup_schema");
+
+            let first = pool.get().await.expect("first get");
+            let first_id = Object::id(&first);
+            drop(first);
+
+            let second = pool.get().await.expect("second get");
+            assert_eq!(
+                Object::id(&second),
+                first_id,
+                "max_size=1 must recycle and reuse the same pooled object"
+            );
         }
 
         #[tokio::test]

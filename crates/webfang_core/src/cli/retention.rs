@@ -252,7 +252,10 @@ mod tests {
     }
 
     #[cfg(feature = "persistence")]
-    async fn test_pool_with_rows() -> (tempfile::TempDir, deadpool_sqlite::Pool) {
+    async fn test_pool_with_rows() -> (
+        tempfile::TempDir,
+        crate::infrastructure::persistence::pool::Pool,
+    ) {
         let tmp = tempfile::TempDir::new().expect("tmp");
         let db_path = tmp.path().join("crawl.db");
         let pool = crate::infrastructure::persistence::create_pool(&db_path, 1).expect("pool");
@@ -287,7 +290,7 @@ mod tests {
     }
 
     #[cfg(feature = "persistence")]
-    async fn count_rows(pool: &deadpool_sqlite::Pool) -> u64 {
+    async fn count_rows(pool: &crate::infrastructure::persistence::pool::Pool) -> u64 {
         pool.get()
             .await
             .expect("conn")

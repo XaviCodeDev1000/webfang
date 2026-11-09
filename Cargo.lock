@@ -1457,17 +1457,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deadpool-sqlite"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f9cc6210316f8b7ced394e2a5d2833ce7097fb28afb5881299c61bc18e8e0e9"
-dependencies = [
- "deadpool",
- "deadpool-sync",
- "rusqlite",
-]
-
-[[package]]
 name = "deadpool-sync"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5557,7 +5546,8 @@ dependencies = [
  "crc32fast",
  "criterion",
  "dashmap 6.2.1",
- "deadpool-sqlite",
+ "deadpool",
+ "deadpool-sync",
  "dirs",
  "encoding_rs",
  "fs2",
