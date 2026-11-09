@@ -41,9 +41,9 @@ del `.md` escrito (análogo al flush-proof del export.jsonl). Verificar en WU co
 
 ## Tasks
 
-T1 (S1,S3) `application/batch/spool_export.rs::convert_spool` — extract_batch_content delega. Route: inline. Commit: <sha>
-T2 (S3) subcomando `recover` (args/mod.rs, dispatch main.rs, commands/recover.rs, exit codes 74/3/69+strict). Route: inline. Commit: <sha>
-T3 (S3) tests recover: fixture→.md idénticos a batch, corrupta, inexistente(74), --strict, offset>0, snapshot. Route: inline. Commit: <sha>
+T1 (S1,S3) `application/batch/spool_export.rs::convert_spool` — extract_batch_content delega. Route: inline. Commit: 2aaa44d6
+T2 (S3) subcomando `recover` (args/mod.rs, dispatch main.rs, commands/recover.rs, exit codes 74/3/69+strict). Route: inline. Commit: 485c13f7
+T3 (S3) tests recover: fixture→.md idénticos a batch, corrupta, inexistente(74), --strict, offset>0, snapshot. Route: inline. Commit: 485c13f7
 T4 (S1) gate completo + ci_fast_gate + PR slice 1. Route: inline. Commit: <sha>
 T5 (S6,S9) WU1: progress.rs + adquisición unificada (fd lockeado, tabla colapsada, Busy→75). Route: inline. Commit: <sha>
 T6 (S6) WU2: flush por página + durable_bytes. Route: inline. Commit: <sha>
@@ -83,3 +83,15 @@ escribir sin soltar lock; OrphanSpool crea spool nuevo; fstat/stat nativo); cada
 L8 (2026-11-09, spike #0): D2/COMMITTED = status + output_location + content_hash + sin last_error +
 attempts≥1 — todo batch-producible via cadena de `CommitSession::commit_item`; infra `cli/crash_points`
 existe para tests de crash-windows; store de batch no se lee a mitad de corrida (hoy no-op). VERDE.
+L9 (2026-11-09, implementación T1-T3, desvíos menores del plan y hallazgos): (a) convert_spool quedó
+dividido en `convert_spool` (puro, sin escritura) + `save_converted` (escritura) — extract_batch_content
+NO debe escribir (eso vive en export_phase) y el doble-save rompería el assert anti-duplicación del
+slice 2; recover compone ambas. (b) Fixtures de test requieren cuerpo sustancial: el guard de contenido
+mínimo #706 rechaza páginas chicas en la rama de éxito de Readability. (c) HALLAZGO ENTORNO:
+`cargo doc` bajo el shim de mbx (~/.local/share/mbx/bin/cargo) ICEa deterministamente
+(scoped-tls panic en rustdoc CrateInfo::read_many); con el cargo real (~/.cargo/bin/cargo) compila
+limpio. Diagnóstico: árbol limpio en HEAD también ICEa; main solo "pasaba" por cache. Todos los `doc`
+locales de esta sesión corren con cargo real. (d) Reader: `read_until` reemplaza `Lines` — UTF-8
+inválido ahora es Codec (corrupto-skipeable) y no Io (fatal): cambio aprobado por el diseño
+"decodificación tolerante". T1: 2aaa44d6 (+492/−44). T2/T3: 485c13f7 — 6/6 tests recover incl. árbol
+idéntico a export batch real; snapshot aceptado.
