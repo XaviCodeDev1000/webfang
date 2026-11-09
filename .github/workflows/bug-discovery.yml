@@ -105,7 +105,7 @@ jobs:
           set -o pipefail
           cargo nextest run --workspace --all-features --run-ignored only --no-fail-fast \
             --profile discovery \
-            -E 'not(test(/session_pool/) | test(/vault_detector/) | test(/cli_binary_test/) | test(/sitemap_entry_max_pages_truncates_many_url_fixture/))' \
+            -E '!(test(/session_pool/) | test(/vault_detector/) | test(/cli_binary_test/) | test(/sitemap_entry_max_pages_truncates_many_url_fixture/))' \
             2>&1 | tee /tmp/ignored-tests-nextest.log
       - name: Publish failure names
         if: always()
