@@ -117,6 +117,12 @@ pub struct BoundedFileSink {
     captured: AtomicUsize,
     dropped: AtomicUsize,
     buffer: usize,
+    /// Bytes of the spool handed to the OS by the writer's `flush()` — the
+    /// durable-bytes watermark (WU2, #2611). Updated by the writer task after
+    /// every per-page flush; read by the incremental flush to decide how far
+    /// conversion may proceed. `flush()` is an OS handoff, NOT an fsync, so
+    /// this watermark is best-effort by contract (design S6).
+    durable_bytes: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl std::fmt::Debug for BoundedFileSink {
@@ -169,11 +175,19 @@ impl BoundedFileSink {
         let (tx, rx) = mpsc::channel(buffer);
         let backlog = Arc::new(Backlog::new(max_backlog_bytes));
         let cancel = CancellationToken::new();
+        let durable_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         // Supervised: the JoinHandle is stored in `Self.writer` and joined in
         // `finish()`, which surfaces a JoinError as BoundedSinkError::Writer.
         #[allow(clippy::disallowed_methods)]
         let writer = tokio::spawn(
-            spool_writer(file, rx, Arc::clone(&backlog), cancel.clone()).in_current_span(),
+            spool_writer(
+                file,
+                rx,
+                Arc::clone(&backlog),
+                cancel.clone(),
+                Arc::clone(&durable_bytes),
+            )
+            .in_current_span(),
         );
 
         info!(
@@ -192,6 +206,7 @@ impl BoundedFileSink {
             captured: AtomicUsize::new(0),
             dropped: AtomicUsize::new(0),
             buffer,
+            durable_bytes,
         })
     }
 
@@ -222,6 +237,23 @@ impl BoundedFileSink {
     #[must_use]
     pub fn dropped(&self) -> usize {
         self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// Bytes of the spool the writer has handed to the OS (WU2, #2611).
+    ///
+    /// Every page append ends with a `flush()`, so this watermark always sits
+    /// on a record boundary: re-reading the spool up to it yields only complete
+    /// records. It is the offset the incremental flush converts from and the
+    /// sidecar persists as `watermark_bytes`.
+    ///
+    /// Best-effort by contract (design S6): `flush()` hands bytes to the OS
+    /// page cache, it is NOT an fsync — a power loss may still truncate the
+    /// file behind this number. That residual risk is accepted and documented;
+    /// the recovery paths (`recover`, OrphanSpool) treat the tail with doubt.
+    #[must_use]
+    pub fn durable_bytes(&self) -> u64 {
+        self.durable_bytes
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Request that the background writer stop and flush what it holds.
@@ -521,16 +553,36 @@ async fn spool_writer(
     mut rx: mpsc::Receiver<CapturedPage>,
     backlog: Arc<Backlog>,
     cancel: CancellationToken,
+    durable_bytes: std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) -> Result<usize, BoundedSinkError> {
+    use std::sync::atomic::Ordering;
+
     let mut writer = BufWriter::new(file);
     let mut written = 0usize;
 
     loop {
         while let Ok(page) = rx.try_recv() {
             write_page(&mut writer, &page, &mut written).await?;
+            // WU2 (#2611): hand the page's bytes to the OS and publish the
+            // durable position BEFORE waiting for more work. A SIGKILL between
+            // two pages can then lose at most the page being written, never
+            // the ones already flushed — the watermark the incremental flush
+            // converts from stays honest.
+            writer.flush().await?;
+            durable_bytes.store(
+                writer.get_ref().metadata().await.map_or(0, |m| m.len()),
+                Ordering::Release,
+            );
         }
         for page in backlog.drain() {
             write_page(&mut writer, &page, &mut written).await?;
+            // Same per-page durability as the channel path above: the backlog
+            // drains page by page, so the watermark advances with it.
+            writer.flush().await?;
+            durable_bytes.store(
+                writer.get_ref().metadata().await.map_or(0, |m| m.len()),
+                Ordering::Release,
+            );
         }
 
         // Only a closed channel can end the stream, and only once it is closed,
@@ -555,6 +607,11 @@ async fn spool_writer(
             next = rx.recv() => {
                 if let Some(page) = next {
                     write_page(&mut writer, &page, &mut written).await?;
+                    writer.flush().await?;
+                    durable_bytes.store(
+                        writer.get_ref().metadata().await.map_or(0, |m| m.len()),
+                        Ordering::Release,
+                    );
                 }
                 // `None`: every sender is gone. Loop to drain the backlog and
                 // re-check the exit condition rather than breaking here.
@@ -957,5 +1014,90 @@ mod tests {
             .await
             .expect_err("missing spool must fail");
         assert!(matches!(err, BoundedSinkError::Io(_)));
+    }
+
+    // ===== WU2 (#2611): the durable-bytes watermark =====
+
+    /// The watermark is 0 on a fresh sink: no page has been handed to the OS,
+    /// so an incremental flush started right after construction converts from
+    /// the beginning (nothing) — it must never see a stale non-zero offset.
+    #[tokio::test]
+    async fn durable_bytes_starts_at_zero() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sink = sink_in(&dir, 4).await;
+        assert_eq!(sink.durable_bytes(), 0, "fresh sink has no durable bytes");
+    }
+
+    /// After a flush, the watermark equals the spool's on-disk length and sits
+    /// on a record boundary: every byte before it is a complete JSONL line.
+    #[tokio::test]
+    async fn durable_bytes_track_flushed_pages_and_end_on_record_boundaries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sink = sink_in(&dir, 4).await;
+
+        sink.capture("https://example.com/a", "<p>a</p>");
+        // Current-thread runtime: the writer has not run yet, so the watermark
+        // must still be 0 even though capture() returned.
+        assert_eq!(
+            sink.durable_bytes(),
+            0,
+            "unflushed capture publishes nothing"
+        );
+
+        sink.finish().await.expect("flush");
+        let spool_len = tokio::fs::metadata(sink.spool_path())
+            .await
+            .expect("spool meta")
+            .len();
+        assert_eq!(
+            sink.durable_bytes(),
+            spool_len,
+            "after the final flush the watermark equals the file length"
+        );
+
+        // Record-boundary proof: converting from the watermark yields every
+        // page and reaches EOF without a partial record.
+        let mut reader = CapturedPageReader::open_at(sink.spool_path(), spool_len)
+            .await
+            .expect("reopen at watermark");
+        assert!(
+            reader
+                .next_page()
+                .await
+                .expect("decode from watermark")
+                .is_none(),
+            "the watermark is the end of the last complete record"
+        );
+    }
+
+    /// The watermark never REGRESSES during the run and never exceeds the
+    /// real file length: each update is a measurement of the file itself.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn durable_bytes_are_monotonic_during_capture() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let sink = Arc::new(sink_in(&dir, 1).await);
+
+        let mut seen = 0u64;
+        for i in 0..16 {
+            sink.capture(&format!("https://example.com/{i}"), "<p>body</p>");
+            // yield so the writer can drain what it holds.
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            let now = sink.durable_bytes();
+            assert!(
+                now >= seen,
+                "watermark regressed: {seen} -> {now} after page {i}"
+            );
+            let file_len = tokio::fs::metadata(sink.spool_path())
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+            assert!(
+                now <= file_len,
+                "watermark {now} passed the real file length {file_len}"
+            );
+            seen = now;
+        }
+        sink.finish().await.expect("flush");
+        assert!(sink.durable_bytes() >= seen);
     }
 }

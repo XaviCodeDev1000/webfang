@@ -14,7 +14,7 @@
       "crates/webfang_core/src/application/container.rs": 1554,
       "crates/webfang_core/src/application/crawl_options.rs": 616,
       "crates/webfang_core/src/application/crawl_result_repository.rs": 1097,
-      "crates/webfang_core/src/application/crawler/bounded_sink.rs": 961,
+      "crates/webfang_core/src/application/crawler/bounded_sink.rs": 1103,
       "crates/webfang_core/src/application/crawler/checkpoint.rs": 971,
       "crates/webfang_core/src/application/crawler/crawl_scheduler.rs": 645,
       "crates/webfang_core/src/application/crawler/crawl_task.rs": 1461,
