@@ -415,6 +415,30 @@ pub enum Commands {
     /// The provider is what a run actually uses; the profile metadata is
     /// historical (ADR-0004 step 4) and no run consumes it.
     Show,
+    /// Recover pages from a stranded batch capture spool into markdown files
+    ///
+    /// A batch killed before its clean close leaves every captured page in the
+    /// raw `.webfang-batch-capture.jsonl` spool with ZERO `.md` files on disk
+    /// (#2611). This command converts every complete record through the SAME
+    /// extraction and writer pipeline the batch export uses — same filenames,
+    /// same frontmatter, atomic per file.
+    ///
+    /// Note: extraction options come from the flags below ONLY. The options of
+    /// the original run are not recorded in the spool, so output can diverge
+    /// from what that run would have written if it used a non-default
+    /// `--selector` or `--ignore-waf`.
+    Recover {
+        /// Path to the stranded capture spool (`.webfang-batch-capture.jsonl`)
+        #[arg(long, value_name = "FILE")]
+        spool: std::path::PathBuf,
+        /// Directory the recovered `.md` files are written to
+        #[arg(short = 'o', long, value_name = "DIR")]
+        output: std::path::PathBuf,
+        /// Exit non-zero when any record is corrupt or fails extraction
+        /// (default: report them and exit 0 as long as something converted)
+        #[arg(long)]
+        strict: bool,
+    },
 }
 
 /// Carrier for the values `doctor` / `show` read, so diagnostics can name

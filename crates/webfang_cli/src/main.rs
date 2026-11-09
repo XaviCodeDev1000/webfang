@@ -87,6 +87,7 @@ async fn dispatch_subcommand(args: &Args) -> CliExit {
         Some(Commands::Connect { .. }) => handle_connect(args).await,
         Some(Commands::Doctor) => handle_doctor(args).await,
         Some(Commands::Show) => handle_show(args),
+        Some(Commands::Recover { .. }) => handle_recover(args).await,
         // Callers only reach here when a subcommand is present.
         None => CliExit::Success,
     }
@@ -333,6 +334,21 @@ fn handle_show(args: &Args) -> CliExit {
     let config_path = resolve_config_path();
     let sub = subcommand_args(args);
     webfang_core::cli::commands::show::run(&sub, &config_path)
+}
+
+/// Handle the `recover` subcommand (#2611): convert a stranded batch capture
+/// spool into the `.md` files its clean close never wrote. Runs before any
+/// config/preflight like the other subcommands — it consumes no config.
+async fn handle_recover(args: &Args) -> CliExit {
+    let Some(Commands::Recover {
+        spool,
+        output,
+        strict,
+    }) = args.subcommand.as_ref()
+    else {
+        return CliExit::UsageError("recover invocado sin sus argumentos".into());
+    };
+    webfang_core::cli::commands::recover::run(spool, output, *strict).await
 }
 
 /// A stable, readable provider id derived from the endpoint URL.
