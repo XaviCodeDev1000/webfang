@@ -109,6 +109,14 @@ fn selector_fragment_markdown_table() {
             expected: "| Name | Value |\n| ---- | ----- |\n| Foo  | 42    |",
         },
         MdCase {
+            name: "synthesize_header_with_caption",
+            html: "<table><caption>Tarifas</caption><tr><td>a</td><td>b</td></tr></table>",
+            selector: "table",
+            // #2602: the synthetic <thead> goes after <caption>, and the
+            // converter still builds a real GFM table for that order.
+            expected: "Tarifas\n| Column 1 | Column 2 |\n| -------- | -------- |\n| a        | b        |",
+        },
+        MdCase {
             name: "characterize_li_orphan_bullet",
             html: "<li>one</li><li>two</li>",
             selector: "li",
@@ -117,7 +125,7 @@ fn selector_fragment_markdown_table() {
             expected: "*   one\n*   two",
         },
         MdCase {
-            name: "characterize_tr_inside_table",
+            name: "synthesize_header_for_matched_row",
             html: "<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>",
             selector: "tr",
             // #2540: the synthetic <table><tbody> keeps the cell boundary,
@@ -126,7 +134,7 @@ fn selector_fragment_markdown_table() {
             expected: "| Column 1 | Column 2 |\n| -------- | -------- |\n| a        | b        |",
         },
         MdCase {
-            name: "characterize_two_tr_in_one_tbody",
+            name: "synthesize_header_shared_across_matched_rows",
             html: "<table><tbody><tr><td>a</td><td>b</td></tr>\
                    <tr><td>c</td><td>d</td></tr></tbody></table>",
             selector: "tr",
