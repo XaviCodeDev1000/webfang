@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.3.5] - 2026-11-09
+
+
+### 🏗️ Architecture Improvements
+
+- Extract Engine builders into engine/build.rs ([#2628](https://github.com/XaviCodeDev1000/webfang/pull/2628))
 ## [7.3.4] - 2026-11-08
 
 
