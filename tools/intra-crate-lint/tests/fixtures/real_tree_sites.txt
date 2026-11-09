@@ -393,6 +393,15 @@ application/crawler/engine/options.rs	14	use	crate::domain::downloader_factory::
 application/crawler/engine/options.rs	15	use	crate::domain::post_load_wait::PostLoadWait
 application/crawler/engine/options.rs	16	use	crate::domain::JsStrategy
 application/crawler/engine/pause.rs	9	use	crate::domain::CrawlerConfig
+application/crawler/engine/tests/checkpoint.rs	13	inline	crate::domain::persistence::PersistenceMode::Disabled
+application/crawler/engine/tests/checkpoint.rs	28	inline	crate::domain::persistence::PersistenceMode::Checkpoint
+application/crawler/engine/tests/checkpoint.rs	29	inline	crate::domain::persistence::CheckpointCfg
+application/crawler/engine/tests/checkpoint.rs	49	inline	crate::domain::persistence::PersistenceMode::Resume
+application/crawler/engine/tests/checkpoint.rs	61	inline	crate::application::crawler::checkpoint::CheckpointPath::new
+application/crawler/engine/tests/checkpoint.rs	85	inline	crate::application::crawler::session::TransportPolicy
+application/crawler/engine/tests/checkpoint.rs	99	inline	crate::application::crawler::session::CrawlPorts
+application/crawler/engine/tests/checkpoint.rs	105	inline	crate::application::crawler::session::CrawlIdentity
+application/crawler/engine/tests/checkpoint.rs	247	inline	crate::domain::persistence::PersistenceMode::Disabled
 application/crawler/ports.rs	24	use	crate::application::crawler::collector::CrawlMessage
 application/crawler/ports.rs	24	use	crate::application::crawler::collector::ResultsCollector
 application/crawler/ports.rs	25	use	crate::application::pipeline::PipelineExecutor
