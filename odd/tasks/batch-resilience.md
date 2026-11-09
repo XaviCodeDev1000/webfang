@@ -120,3 +120,12 @@ descartado. Slice 2 (T5-T10) arranca desde main a875d9f5 (PR #2631 mergeado) en 
 "implementar resume de cero" — el resume batch ya funciona en main; WU4 se reencuadra a: preservar
 el resume existente (build_batch_resume_store → CommitSession) bajo el arranque unificado del
 sidecar, y comprobar S9 (content_hash del COMMITTED de flush) contra `CommitSession::decide`.
+L12 (2026-11-09, WU1 implementado — desvío declarado): `application/batch/progress.rs` (2e149d40):
+BatchProgressV1 + SpoolIdentity + ExtractionOptions (selector es String en ScraperConfig, no Option —
+desvío del plan v7 que asumía Option; se registra `Some(selector)` siempre) + SidecarState/LockState +
+decide_sweep puro con la tabla colapsada + `spool_first_line_sha256` (hash de la primera línea con
+`\n`; cola rota sin `\n` = sin identidad) + `orphan_spool_path` timestamped + 13 tests unit. El clamp
+de watermark a `spool.len_bytes` está dentro de decide_sweep (aprobado: offset>len solo por
+manipulación externa). Pendiente para WU1 completo: adquisición unificada del fd (open create+append →
+try_lock → decide → mismo fd al sink) que sustituye a `sweep_stale_batch_spool`; se hace en el commit
+siguiente junto con la integración CLI (WU1b).
