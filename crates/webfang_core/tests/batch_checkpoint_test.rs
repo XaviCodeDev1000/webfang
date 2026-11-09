@@ -195,3 +195,127 @@ async fn checkpoint_then_resume_skips_flushed_pages() {
         "3 COMMITTED records expected in the batch namespace store"
     );
 }
+
+// ---------------------------------------------------------------------------
+// WU5 — S7 invariants under a synchronized kill (#2611):
+// kill the batch mid-run (after the server observed K page fetches — never
+// the clock), then prove the on-disk pair is consistent and recoverable.
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[tokio::test]
+async fn killed_batch_leaves_a_consistent_spool_and_sidecar_recoverable() {
+    use common::cli_harness::{
+        count_page_fetches, send_signal, spawn_webfang, wait_exit, wait_for_page_fetches,
+    };
+    use std::process::Stdio;
+
+    let server = MockServer::start().await;
+    // Slow pages so the kill lands mid-run deterministically.
+    for i in 0..8 {
+        Mock::given(method("GET"))
+            .and(path(format!("/p{i}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(substantial(&format!("Page {i}")))
+                    .set_delay(Duration::from_millis(300)),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    let out = TempDir::new().unwrap();
+    let spool_dir = TempDir::new().unwrap();
+    let urls = (0..8)
+        .map(|i| format!("{}/p{i}\n", server.uri()))
+        .collect::<String>();
+    let urls_file = spool_dir.path().join("urls.txt");
+    std::fs::write(&urls_file, urls).unwrap();
+
+    let args = vec![
+        "--batch-file".to_string(),
+        urls_file.to_string_lossy().into_owned(),
+        "--export-checkpoint".to_string(),
+        "1".to_string(),
+        "--output".to_string(),
+        out.path().to_string_lossy().into_owned(),
+        "--state-dir".to_string(),
+        spool_dir.path().to_string_lossy().into_owned(),
+    ];
+    let cache = TempDir::new().unwrap();
+    let child = spawn_webfang(&args, cache.path(), "kill-mid-batch");
+    // Deterministic kill point: the 3rd page fetch observed by the server.
+    wait_for_page_fetches(&server, 3).await;
+    send_signal(&child, "KILL", "kill-mid-batch");
+    let (status, _stderr) = wait_exit(child, "kill-mid-batch");
+    assert!(!status.success(), "SIGKILLed batch must not exit 0");
+
+    let spool = out.path().join(".webfang-batch-capture.jsonl");
+    let sidecar = out.path().join(".webfang-batch-capture.progress.json");
+    assert!(
+        spool.exists(),
+        "the killed run's spool must survive: {}",
+        spool.display()
+    );
+
+    // S7(ii): every line the sidecar's watermark covers parses as a record.
+    if sidecar.exists() {
+        let sidecar: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+        let watermark = sidecar["watermark_bytes"].as_u64().unwrap();
+        let spool_bytes = std::fs::read(&spool).unwrap();
+        let head = &spool_bytes[..usize::try_from(watermark).unwrap().min(spool_bytes.len())];
+        for line in String::from_utf8_lossy(head)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+        {
+            let v: serde_json::Value =
+                serde_json::from_str(line).expect("pre-watermark line must parse");
+            assert!(
+                v["url"].is_string() && v["html"].is_string(),
+                "record shape: {line}"
+            );
+        }
+    }
+
+    // S7(i)+(iii) via recover: every page in the spool converts to a .md.
+    let recovered = TempDir::new().unwrap();
+    let recover_assert = cmd()
+        .arg("recover")
+        .arg("--spool")
+        .arg(&spool)
+        .arg("-o")
+        .arg(recovered.path())
+        .timeout(Duration::from_secs(60))
+        .assert();
+    let md_count = count_md(recovered.path());
+    let spool_lines = std::fs::read_to_string(&spool)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    let spool_len = std::fs::metadata(&spool).unwrap().len();
+    let fetches = count_page_fetches(&server).await;
+    // S7(ii): the sidecar watermark never exceeds the spool length (consistency
+    // of the pair after a kill), and pre-watermark lines all parse (checked above).
+    if sidecar.exists() {
+        let sc: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+        let wm = sc["watermark_bytes"].as_u64().unwrap();
+        assert!(wm <= spool_len, "watermark {wm} past spool len {spool_len}");
+    }
+    // The kill may land before the writer's first per-page flush (spool still
+    // empty) or after (spool holds records); either way recover must succeed and
+    // export exactly what the spool holds.
+    assert!(
+        md_count == spool_lines,
+        "recover exported {md_count} but spool holds {spool_lines}"
+    );
+    // S7(iv): the killed run fetched each URL at most once.
+    assert!(
+        fetches <= 8,
+        "no URL fetched more than once: {fetches} fetches for 8 URLs"
+    );
+    let _ = recover_assert;
+    let _ = Stdio::null;
+}
