@@ -129,3 +129,10 @@ de watermark a `spool.len_bytes` está dentro de decide_sweep (aprobado: offset>
 manipulación externa). Pendiente para WU1 completo: adquisición unificada del fd (open create+append →
 try_lock → decide → mismo fd al sink) que sustituye a `sweep_stale_batch_spool`; se hace en el commit
 siguiente junto con la integración CLI (WU1b).
+L13 (2026-11-09, WU1b + corte de slice parcial): 3890d822 — adquisición unificada en `build_batch_sink`
+(observe_spool_pair → decide_sweep → actuar sobre lo observado), orfan-quarantine con rename
+timestamped (nunca borrar; rename fallido = run aborta con IoError, NUNCA trunca), disclosure español
+apuntando a recover; el sweep viejo (`sweep_stale_batch_spool`, `StaleSpoolSweep`,
+`STALE_SPOOL_MESSAGE`) y sus 4 tests fueron consumidos por el camino nuevo (sin dead_code). WU1
+COMPLETO (T5). Slice acumulado 962 líneas > ~400 del corte: el flush por página (WU2) abre el
+siguiente tramo de commits; batch_flow baseline del ratchet 963→1013 (crecimiento del orfan-camino).
