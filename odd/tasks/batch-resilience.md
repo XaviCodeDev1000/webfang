@@ -44,7 +44,7 @@ del `.md` escrito (análogo al flush-proof del export.jsonl). Verificar en WU co
 T1 (S1,S3) `application/batch/spool_export.rs::convert_spool` — extract_batch_content delega. Route: inline. Commit: 2aaa44d6
 T2 (S3) subcomando `recover` (args/mod.rs, dispatch main.rs, commands/recover.rs, exit codes 74/3/69+strict). Route: inline. Commit: 485c13f7
 T3 (S3) tests recover: fixture→.md idénticos a batch, corrupta, inexistente(74), --strict, offset>0, snapshot. Route: inline. Commit: 485c13f7
-T4 (S1) gate completo + ci_fast_gate + PR slice 1. Route: inline. Commit: 2258dfdf+dcee477e+2c44a317+66c34957 (gate local GREEN 40/0/2; PR pendiente)
+T4 (S1) gate completo + ci_fast_gate + PR slice 1. Route: inline. Commit: 2258dfdf+dcee477e+2c44a317+66c34957 (gate local GREEN 40/0/2; PR #2631 abierto)
 T5 (S6,S9) WU1: progress.rs + adquisición unificada (fd lockeado, tabla colapsada, Busy→75). Route: inline. Commit: <sha>
 T6 (S6) WU2: flush por página + durable_bytes. Route: inline. Commit: <sha>
 T7 (S2,S4,S6) WU3: --export-checkpoint + tarea de flush (watch, tick 120s, spawn_blocking, cierre timeout 30s). Route: inline. Commit: <sha>
