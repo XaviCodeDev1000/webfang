@@ -170,3 +170,8 @@ L18 (2026-11-09, WU5 completo): test de invariantes S7 con SIGKILL sincronizado 
 observado por wiremock, nunca el reloj): spool sobrevive, watermark ≤ len(spool), líneas
 pre-watermark parsean, recover exporta exactamente lo que el spool tiene, cero doble descarga.
 Gate local GREEN 40/0/2. T5-T9 DONE. Falta T10: PR slice 2 (Closes #2611).
+L19 (2026-11-09, T10 — PR slice 2 abierto): PR #2643 (feat/batch-resilience → main,
+`Closes #2611`, label type:feature, mergeable). CI corriendo; primer run falló en
+repo-guards por el golden set intra-crate (1836 vs 1768 sites) — refrescado con
+scripts/refresh_real_tree_golden.sh en 7f4999fe y pusheado. Pendiente: merge cuando
+quede verde (decisión del maintainer).
