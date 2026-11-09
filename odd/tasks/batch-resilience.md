@@ -111,3 +111,12 @@ lo reconstruyó en 42 s y el gate corrió con `PATH=/home/xavi/.cargo/bin:$PATH`
 FAIL=0 SKIP=2, GREEN; cobertura leída (code lane: test-core partial y doc-quality partial son las
 excepciones conocidas). Tests focalizados: spool_export 5/5, bounded_sink 13/13, image_rewrite 6/6,
 recover_test 24/24, provider_id 3/3. PR slice 1 pendiente de autorización de push/publicación.
+L11 (2026-11-09, cierre #2609 + arranque slice 2): #2609 cerrado con decisión de producto Camino 1
+(persistir estado) — verificación experimental del 2026-11-09: `--batch-file --resume --state-dir`
+escribe records COMMITTED en el state-dir y el relanzamiento salta las URLs (no re-descarga, no
+re-exporta); `build_batch_resume_store` ya existía en main (rollup 20b27990). Camino 2 (exit 78)
+descartado. Slice 2 (T5-T10) arranca desde main a875d9f5 (PR #2631 mergeado) en worktree
+`webfang-worktrees/feat-batch-resilience`. Nota: el doc de especificación ya no incluye WU4 como
+"implementar resume de cero" — el resume batch ya funciona en main; WU4 se reencuadra a: preservar
+el resume existente (build_batch_resume_store → CommitSession) bajo el arranque unificado del
+sidecar, y comprobar S9 (content_hash del COMMITTED de flush) contra `CommitSession::decide`.
