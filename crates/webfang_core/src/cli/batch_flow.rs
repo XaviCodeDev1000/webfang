@@ -1026,50 +1026,19 @@ mod tests {
         );
     }
 
-    /// Capture-subscriber harness, so the acquisition's DISCLOSURE can be read
-    /// rather than reviewed (DF-L1, #1615; slice 2 orphan quarantine).
-    #[derive(Clone)]
-    struct SpoolCaptureWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for SpoolCaptureWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .expect("capture buffer lock is never poisoned")
-                .extend_from_slice(buf);
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// Run an async closure under an in-memory `tracing` subscriber and return
-    /// what it logged.
+    /// Run an async closure under the SHARED capturing subscriber
+    /// ([`crate::infrastructure::observability::test_log_capture::LogBuffer`] —
+    /// the same helper every other test module uses, so the capture writer is
+    /// written once in the crate) and return what it logged plus the value.
     async fn capture_logs<T, F, Fut>(f: F) -> (String, T)
     where
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = T>,
     {
-        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let subscriber = {
-            let sink = std::sync::Arc::clone(&buf);
-            tracing_subscriber::fmt()
-                .with_writer(move || SpoolCaptureWriter(std::sync::Arc::clone(&sink)))
-                .with_ansi(false)
-                .finish()
-        };
-        // Thread-local default: the sweep runs on this thread, and installing a
-        // global subscriber here would leak into every other test in the crate.
-        let _guard = tracing::subscriber::set_default(subscriber);
+        use crate::infrastructure::observability::test_log_capture::LogBuffer;
+        let (buffer, _guard) = LogBuffer::capture();
         let value = f().await;
-        let text = String::from_utf8(
-            buf.lock()
-                .expect("capture buffer lock is never poisoned")
-                .clone(),
-        )
-        .expect("tracing writes UTF-8");
-        (text, value)
+        (buffer.text(), value)
     }
 
     // --- Slice 2 (WU1): the unified spool acquisition (observe → decide → act).
