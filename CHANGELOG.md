@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.0] - 2026-11-09
+
+
+### 🎉 Added
+
+- Webfang recover — stranded batch spool to markdown ([#2611](https://github.com/XaviCodeDev1000/webfang/pull/2611)) ([#2631](https://github.com/XaviCodeDev1000/webfang/pull/2631))
+
+### 🏗️ Architecture Improvements
+
+- Extract Engine builders into engine/build.rs ([#2628](https://github.com/XaviCodeDev1000/webfang/pull/2628))
 ## [7.3.4] - 2026-11-08
 
 
