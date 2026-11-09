@@ -74,6 +74,24 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     }
 }
 
+/// Relative markdown path for a URL — exactly the path `save_as_markdown`
+/// joins under the output dir. The `./output/` prefix of
+/// [`OutputPath::to_full_path`] is stripped here so every consumer (the saver
+/// itself, spool recovery reporting, future flush bookkeeping) computes the
+/// SAME path from the same code.
+///
+/// # Errors
+///
+/// Returns the URL-parse error when the URL cannot produce an output path;
+/// callers decide their own fallback (the saver writes `index.md`).
+pub(crate) fn markdown_relative_path(
+    url: &str,
+) -> std::result::Result<String, crate::adapters::url_path::OutputPathError> {
+    let output_path = OutputPath::from_url_with_query(url)?;
+    let full_path_str = output_path.to_full_path();
+    Ok(full_path_str.trim_start_matches("./output/").to_string())
+}
+
 /// Save scraped results to output directory
 ///
 /// # Arguments
@@ -111,8 +129,8 @@ fn save_as_markdown(
     use std::fs;
 
     for item in results {
-        let output_path: OutputPath = match OutputPath::from_url_with_query(item.url.as_str()) {
-            Ok(p) => p,
+        let full_path = match markdown_relative_path(item.url.as_str()) {
+            Ok(relative) => output_dir.join(relative),
             Err(e) => {
                 warn!(
                     url = %item.url,
@@ -126,10 +144,6 @@ fn save_as_markdown(
                 continue;
             },
         };
-
-        let full_path_str = output_path.to_full_path();
-        let relative_path = full_path_str.trim_start_matches("./output/");
-        let full_path = output_dir.join(relative_path);
         let md_file_dir = full_path.parent().unwrap_or(output_dir);
         if let Some(parent) = full_path.parent() {
             fs::create_dir_all(parent)?;

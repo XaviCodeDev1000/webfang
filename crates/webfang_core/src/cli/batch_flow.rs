@@ -515,9 +515,10 @@ async fn run_batch_elastic(
 ///
 /// # Errors
 ///
-/// Returns [`CliExit`] when the capture spool cannot be read or decoded.
-/// Per-page failures are collected in the `failures` vec instead of aborting
-/// the whole batch.
+/// Returns [`CliExit`] when the capture spool cannot be opened or read.
+/// Per-page failures (extraction errors and corrupt records) are collected
+/// in the `failures` vec / skipped counter instead of aborting the whole
+/// batch — the same page-vs-I/O split the recovery path uses (#2611).
 async fn extract_batch_content(
     sink: &BoundedFileSink,
     opts: &CrawlOptions,
@@ -528,40 +529,34 @@ async fn extract_batch_content(
     ),
     CliExit,
 > {
-    let scraper_config = ScraperConfig::default()
-        .with_output_dir(resolve_persistence_root(opts))
-        .with_selector(opts.crawl.selector.clone())
-        .with_ignore_waf(opts.crawl.ignore_waf);
-
-    let root_correlation = domain::CorrelationId::new();
-    let mut results = Vec::new();
-    let mut failures: Vec<(String, crate::error::ScraperError)> = Vec::new();
+    let output_dir = resolve_persistence_root(opts);
+    let cfg = crate::application::batch::spool_export::SpoolExportConfig {
+        output_dir: output_dir.clone(),
+        scraper: ScraperConfig::default()
+            .with_output_dir(output_dir)
+            .with_selector(opts.crawl.selector.clone())
+            .with_ignore_waf(opts.crawl.ignore_waf),
+    };
 
     let mut reader = sink.reader().await.map_err(|e| {
         error!(error = %e, "batch capture spool could not be opened");
         CliExit::IoError(format!("No se pudo leer el contenido capturado: {e}"))
     })?;
 
-    while let Some(page) = reader.next_page().await.map_err(|e| {
-        error!(error = %e, "batch capture spool could not be decoded");
-        CliExit::IoError(format!("No se pudo leer el contenido capturado: {e}"))
-    })? {
-        let page_correlation = root_correlation.child();
-        // Single shared conversion path (P6-2/F-16, #1290): the same helper
-        // MCP's session export feeds — identical DTO by construction.
-        match crate::application::crawler::content_sink::extract_page_content(
-            &page,
-            &scraper_config,
-            &page_correlation,
-        )
+    // Single shared conversion path (P6-2/F-16, #1290): the same helper
+    // `recover` and the incremental flush feed — identical DTO by
+    // construction. Conversion only: writing stays in `export_phase`.
+    let outcome = crate::application::batch::spool_export::convert_spool(&mut reader, &cfg)
         .await
-        {
-            Ok(content) => results.push(content),
-            Err((url, e)) => failures.push((url, e)),
-        }
-    }
+        .map_err(|e| {
+            error!(error = %e, "batch capture spool could not be converted");
+            CliExit::IoError(format!("No se pudo leer el contenido capturado: {e}"))
+        })?;
 
-    Ok((results, failures))
+    Ok((
+        outcome.converted.into_iter().map(|c| c.content).collect(),
+        outcome.failed,
+    ))
 }
 
 /// Print the batch completion summary and log each failed URL.
