@@ -140,3 +140,12 @@ L14 (2026-11-09, WU2 completo): 9a6e508e — `BoundedFileSink::durable_bytes` (A
 flusha por página (canal, backlog y recv) y publica la longitud real del archivo (metadata().len())
 con Ordering Release/Acquire; watermark en frontera de registro, monótono, 0 al arrancar; contrato
 best-effort documentado (flush ≠ fsync). bounded_sink baseline 961→1103. 16/16 tests bounded_sink.
+L15 (2026-11-09, WU3 core — flag + flush library): `cli/batch_flush.rs` — flush_spool_tail (tail
+conversion via convert_spool + save_results en spawn_blocking; SpoolRead conserva el watermark del
+llamador, OutputWrite también: retry re-exporta la misma cola atómicamente por archivo),
+running/write/read/clear_sidecar (temp+rename), batch_namespace = batch-<hash8(output_dir)>.
+Flag `--export-checkpoint <N>` (default 0 = desactivado) plumeado en 4 capas: options_spec/export.rs
+(BATCH_CONCURRENCY→EXPORT_CHECKPOINT en GROUP, DefaultValue::Uint(0), uint_unbounded) → args/export.rs
+→ args/mod.rs → BatchOptions.export_checkpoint. 5 tests batch_flush. Falta WU3-integración: la tarea
+de flush (watch/tick 120s/spawn_blocking/cierre timeout 30s) que LLAMA a flush_spool_tail durante la
+corrida, y WU5 (export_phase incremental + tests S7).
