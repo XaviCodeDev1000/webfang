@@ -156,3 +156,13 @@ spec_command: binding u64 para export_checkpoint. Tests: batch_checkpoint_test (
 todas + sidecar; N=0 sin sidecar), 31 lib + 204 behave verdes. Baselines actualizados; inventory y
 cli-reference regenerados. WU3 DONE (T7). Falta WU4 (resume bajo arranque unificado + S9) y WU5
 (export_phase incremental + tests S7) antes del gate T10.
+L17 (2026-11-09, WU4 completo + bugs reales encontrados y corregidos):
+(a) filter_committed_batch aplica el gate tipado ANTES del fetch (S7 iv verificado: 2 URLs × 2
+corridas = 2 hits HTTP totales); all-filtered = exit 0 no-op. (b) El flush commitea cada página en el
+store namespace batch-<hash8(output_dir)>; S9 RESUELTA contra CommitSession::decide: content_hash =
+sha256(content) (igual que checksum_sha256 del export.jsonl), NO los bytes del .md — la asunción del
+plan estaba equivocada y quedó corregida aquí. (c) El cierre limpio prende el gate resume cuando
+checkpoint>0 para saltar lo ya flusheado (sin doble append). (d) Bugs: el sidecar quedaba vivo tras el
+cierre limpio → falso orphan (fix: clear_sidecar en cierre + spool vacío = Nothing sin importar el
+sidecar); filter_committed_batch reconstruía el manager SIN el sink → spool vacío (fix: re-adjuntar
+sink+correlation). Gate local GREEN 40/0/2; dup 8317≤8325; snapshots de --help aceptados.
