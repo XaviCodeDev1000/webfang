@@ -18,7 +18,7 @@ use std::path::Path;
 use tracing::{info, instrument, warn};
 
 use crate::application::batch::spool_export::{
-    convert_spool, save_converted, SpoolExportConfig, SpoolExportError,
+    convert_spool, save_converted, SpoolExportConfig, SpoolExportError, SpoolExportOutcome,
 };
 use crate::application::crawler::bounded_sink::CapturedPageReader;
 use crate::cli::error::CliExit;
@@ -68,29 +68,7 @@ pub async fn run(spool: &Path, output: &Path, strict: bool) -> CliExit {
         Ok(outcome) => outcome,
         Err(SpoolExportError::SpoolRead { source, partial }) => {
             // Keep the work already converted, then fail honestly.
-            let saved = save_converted(
-                &partial.converted,
-                output,
-                &OutputFormat::Markdown,
-                &ObsidianOptions::default(),
-            )
-            .await;
-            let saved_note = match saved {
-                Ok(()) => format!(
-                    " Se escribieron {} páginas convertidas antes del fallo.",
-                    partial.converted.len()
-                ),
-                Err(save_err) => format!(
-                    " Además, no se pudieron escribir las {} páginas ya convertidas: {save_err}",
-                    partial.converted.len()
-                ),
-            };
-            warn!(error = %source, converted = partial.converted.len(), "recover spool read failed");
-            return CliExit::IoError(format!(
-                "No se pudo leer el spool {}: {source}.{saved_note} \
-                 El spool queda en disco; reintentá más tarde con webfang recover.",
-                spool.display()
-            ));
+            return read_failure_exit(spool, output, source, partial).await;
         },
         // Unreachable from convert_spool (only save_converted produces it),
         // but the match must stay total and honest.
@@ -138,6 +116,47 @@ pub async fn run(spool: &Path, output: &Path, strict: bool) -> CliExit {
 
     print_summary(spool, output, &outcome);
 
+    exit_for_outcome(spool, &outcome, strict)
+}
+
+/// Save the pages converted before a spool read failure, then build the
+/// honest `74` exit: what was written, what could not be, and that the spool
+/// stays on disk for a later attempt.
+async fn read_failure_exit(
+    spool: &Path,
+    output: &Path,
+    source: std::io::Error,
+    partial: SpoolExportOutcome,
+) -> CliExit {
+    let saved = save_converted(
+        &partial.converted,
+        output,
+        &OutputFormat::Markdown,
+        &ObsidianOptions::default(),
+    )
+    .await;
+    let saved_note = match saved {
+        Ok(()) => format!(
+            " Se escribieron {} páginas convertidas antes del fallo.",
+            partial.converted.len()
+        ),
+        Err(save_err) => format!(
+            " Además, no se pudieron escribir las {} páginas ya convertidas: {save_err}",
+            partial.converted.len()
+        ),
+    };
+    warn!(error = %source, converted = partial.converted.len(), "recover spool read failed");
+    CliExit::IoError(format!(
+        "No se pudo leer el spool {}: {source}.{saved_note} \
+         El spool queda en disco; reintentá más tarde con webfang recover.",
+        spool.display()
+    ))
+}
+
+/// Exit contract for a completed conversion: nothing recovered is either a
+/// failure (the spool had input) or an empty spool; `--strict` downgrades any
+/// page failure to `69`.
+fn exit_for_outcome(spool: &Path, outcome: &SpoolExportOutcome, strict: bool) -> CliExit {
     if outcome.converted.is_empty() {
         let saw_input = !outcome.failed.is_empty() || outcome.skipped_corrupt > 0;
         if saw_input {
