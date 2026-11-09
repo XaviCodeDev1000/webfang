@@ -86,7 +86,7 @@ impl McpHandler {
 }
 
 /// Chromium-enabled path: run the core engine and surface failures as honest
-/// Spanish errors (spec R5). Refs in the returned `Content::text` are
+/// Spanish errors (spec R5). Refs in the returned `ContentBlock::text` are
 /// snapshot-scoped; callers MUST re-snapshot after any page mutation or
 /// selector change before reusing a prior `eN` (R7 stale-ref contract).
 #[cfg(feature = "chromium")]

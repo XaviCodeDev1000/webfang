@@ -46,7 +46,10 @@ pub mod validation;
 use futures::FutureExt;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::ServerHandler;
-use rmcp::model::{CallToolResult, Content, ListToolsResult, ServerCapabilities, ServerInfo, Tool};
+use rmcp::model::{
+    CallToolResponse, CallToolResult, ContentBlock, ListToolsResult, ServerCapabilities,
+    ServerConfig, Tool,
+};
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer};
 
@@ -313,7 +316,7 @@ impl ServerHandler for McpHandler {
         &self,
         request: rmcp::model::CallToolRequestParams,
         context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<CallToolResponse, McpError> {
         let tool_name = request.name.clone();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         match AssertUnwindSafe(self.tool_router.call(tcc))
@@ -327,9 +330,9 @@ impl ServerHandler for McpHandler {
                     panic.payload = %render_panic_payload(payload.as_ref()),
                     "MCP tool panicked — contained as a tool error; session worker survives"
                 );
-                Ok(CallToolResult::error(vec![Content::text(
-                    PANIC_CONTAINED_TOOL_ERROR,
-                )]))
+                Ok(CallToolResponse::Complete(CallToolResult::error(vec![
+                    ContentBlock::text(PANIC_CONTAINED_TOOL_ERROR),
+                ])))
             },
         }
     }
@@ -341,8 +344,7 @@ impl ServerHandler for McpHandler {
     ) -> Result<ListToolsResult, McpError> {
         Ok(ListToolsResult {
             tools: self.tool_router.list_all(),
-            meta: None,
-            next_cursor: None,
+            ..ListToolsResult::default()
         })
     }
 
@@ -350,8 +352,8 @@ impl ServerHandler for McpHandler {
         self.tool_router.get(name).cloned()
     }
 
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(rmcp::model::Implementation::from_build_env())
     }
 }

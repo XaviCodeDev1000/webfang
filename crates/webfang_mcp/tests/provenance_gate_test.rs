@@ -5,14 +5,14 @@
 //! This is a STRUCTURAL gate in the same spirit as
 //! `scripts/check_dependency_direction.sh` (#513): it parses the source tree
 //! at test time (via `CARGO_MANIFEST_DIR`) and fails when the invariant
-//! "the only sanctioned `Content::text` constructors live in
+//! "the only sanctioned `ContentBlock::text` constructors live in
 //! `mcp_server::provenance`, and every tool description carries the standard
 //! injection notice" regresses. It does NOT reason about runtime behavior —
 //! it just makes the provenance invariant mechanical.
 //!
 //! - Gate 1: no file under `src/mcp_server/handlers/` may contain the literal
-//!   `CallToolResult::success(vec![Content::text(` / `CallToolResult::error(`
-//!   `vec![Content::text(` — and, stronger, no bare `Content::text(` at all.
+//!   `CallToolResult::success(vec![ContentBlock::text(` / `CallToolResult::error(`
+//!   `vec![ContentBlock::text(` — and, stronger, no bare `ContentBlock::text(` at all.
 //! - Gate 2: every `#[tool(` registration's description block must contain
 //!   the standard notice sentence exported as
 //!   `webfang_mcp::mcp_server::provenance::INJECTION_NOTICE`. Counting is
@@ -64,11 +64,11 @@ fn handlers_never_construct_tool_content_directly() {
         checked += 1;
         let source = read_source(&path);
         for forbidden in [
-            "CallToolResult::success(vec![Content::text(",
-            "CallToolResult::error(vec![Content::text(",
-            "CallToolResult::error(vec![Content::text(",
-            "CallToolResult::success(vec![Content::text(",
-            "Content::text(",
+            "CallToolResult::success(vec![ContentBlock::text(",
+            "CallToolResult::error(vec![ContentBlock::text(",
+            "CallToolResult::error(vec![ContentBlock::text(",
+            "CallToolResult::success(vec![ContentBlock::text(",
+            "ContentBlock::text(",
         ] {
             assert!(
                 !source.contains(forbidden),
@@ -135,7 +135,7 @@ fn provenance_module_still_owns_the_sanctioned_constructors() {
         "pub fn untrusted_text(",
         "pub fn local_text(",
         "pub fn neutralized_error(",
-        "CallToolResult::success(vec![Content::text(",
+        "CallToolResult::success(vec![ContentBlock::text(",
         "pub const INJECTION_NOTICE",
         "pub const MAX_UNTRUSTED_BYTES",
     ] {

@@ -108,7 +108,7 @@ smallvec = "1.13"
 wide = "0.7"
 
 # MCP features
-rmcp = { version = "1.7", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+rmcp = { version = "3.9", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
 axum = "0.8"
 tower = "0.5"
 # `catch-panic` backs the MCP outermost panic-containment layer (#1611, F2).

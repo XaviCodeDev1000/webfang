@@ -356,9 +356,14 @@ async fn test_session_works_without_initialized_notification() {
 // ============================================================================
 
 /// Verify that sending a non-initialize request without session ID
-/// returns 422 (not a crash or 500).
+/// returns 400 (not a crash or 500).
+///
+/// Status changed with the rmcp 3.9 upgrade (#2639): the session gate used to
+/// answer `422` (Unprocessable Entity) and since rmcp 3.6.0 (#1377) it answers
+/// `400 Bad Request: Session ID is required`. The contract webfang pins is "the
+/// gate answers before JSON-RPC dispatch", not the exact code.
 #[tokio::test]
-async fn test_no_session_id_returns_422() {
+async fn issue_2639_no_session_id_returns_400() {
     let (base_url, _handle) = start_test_server().await;
     let client = Client::new();
 
@@ -383,13 +388,13 @@ async fn test_no_session_id_returns_422() {
 
     assert_eq!(
         status.as_u16(),
-        422,
-        "non-init request without session ID should return 422, got {}: {}",
+        400,
+        "non-init request without session ID should return 400, got {}: {}",
         status,
         &body[..body.len().min(500)]
     );
     assert!(
-        body.contains("initialize"),
-        "error message should mention initialize, got: {body}"
+        body.contains("Session ID is required"),
+        "error message should name the missing session, got: {body}"
     );
 }

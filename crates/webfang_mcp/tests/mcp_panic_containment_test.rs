@@ -40,7 +40,7 @@ mod common;
 use common::*;
 
 use rmcp::handler::server::tool::{ToolCallContext, ToolRoute};
-use rmcp::model::{CallToolResult, JsonObject, Tool};
+use rmcp::model::{CallToolResponse, JsonObject, Tool};
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, tower::StreamableHttpService,
 };
@@ -103,7 +103,7 @@ fn panic_probe_tool_attribute() -> Tool {
 /// its own `.await` would.
 fn panic_probe_route<'a>(
     _context: ToolCallContext<'a, McpHandler>,
-) -> Pin<Box<dyn Future<Output = Result<CallToolResult, McpError>> + Send + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<CallToolResponse, McpError>> + Send + 'a>> {
     Box::pin(async {
         panic!("{PANIC_MARKER}: deliberate tool panic");
     })
