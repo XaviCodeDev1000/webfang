@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.4.1] - 2026-11-09
+
+
+### 🔧 Fixed
+
+- Header synthesis covers caption, thead, ragged and uppercase tables (#2602, #2603) ([#2635](https://github.com/XaviCodeDev1000/webfang/pull/2635))
 ## [7.4.0] - 2026-11-09
 
 
