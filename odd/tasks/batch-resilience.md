@@ -136,3 +136,7 @@ apuntando a recover; el sweep viejo (`sweep_stale_batch_spool`, `StaleSpoolSweep
 `STALE_SPOOL_MESSAGE`) y sus 4 tests fueron consumidos por el camino nuevo (sin dead_code). WU1
 COMPLETO (T5). Slice acumulado 962 líneas > ~400 del corte: el flush por página (WU2) abre el
 siguiente tramo de commits; batch_flow baseline del ratchet 963→1013 (crecimiento del orfan-camino).
+L14 (2026-11-09, WU2 completo): 9a6e508e — `BoundedFileSink::durable_bytes` (Arc<AtomicU64>): el writer
+flusha por página (canal, backlog y recv) y publica la longitud real del archivo (metadata().len())
+con Ordering Release/Acquire; watermark en frontera de registro, monótono, 0 al arrancar; contrato
+best-effort documentado (flush ≠ fsync). bounded_sink baseline 961→1103. 16/16 tests bounded_sink.
