@@ -531,7 +531,6 @@ async fn extract_batch_content(
 > {
     let output_dir = resolve_persistence_root(opts);
     let cfg = crate::application::batch::spool_export::SpoolExportConfig {
-        output_dir: output_dir.clone(),
         scraper: ScraperConfig::default()
             .with_output_dir(output_dir)
             .with_selector(opts.crawl.selector.clone())

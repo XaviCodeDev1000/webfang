@@ -18,14 +18,15 @@ use std::path::Path;
 use tracing::{info, instrument, warn};
 
 use crate::application::batch::spool_export::{
-    convert_spool, save_converted, SpoolExportConfig, SpoolExportError, SpoolExportOutcome,
+    convert_spool, ConvertedPage, SpoolExportConfig, SpoolExportError, SpoolExportOutcome,
 };
 use crate::application::crawler::bounded_sink::CapturedPageReader;
 use crate::cli::error::CliExit;
 use crate::domain::config::ScraperConfig;
 use crate::domain::CorrelationId;
+use crate::error::ScraperError;
 use crate::infrastructure::observability::error_logging::log_scrape_error;
-use crate::infrastructure::output::file_saver::ObsidianOptions;
+use crate::infrastructure::output::file_saver::{save_results, ObsidianOptions};
 use crate::OutputFormat;
 
 /// Run the recovery of one spool file into one output directory.
@@ -45,7 +46,6 @@ pub async fn run(spool: &Path, output: &Path, strict: bool) -> CliExit {
     let started = std::time::Instant::now();
 
     let cfg = SpoolExportConfig {
-        output_dir: output.to_path_buf(),
         // Slice 1: options come from defaults only — the original run's
         // options are not recorded in the spool, and the sidecar that will
         // carry them (slice 2) does not exist yet. Divergence is documented
@@ -117,6 +117,31 @@ pub async fn run(spool: &Path, output: &Path, strict: bool) -> CliExit {
     print_summary(spool, output, &outcome);
 
     exit_for_outcome(spool, &outcome, strict)
+}
+
+/// Write converted pages through the repo's single saver
+/// ([`save_results`]) — blocking filesystem work on the blocking pool.
+///
+/// # Errors
+///
+/// Returns [`SpoolExportError::OutputIo`] when any file write fails. Files
+/// before the failing one may already be on disk (the saver writes
+/// atomically per file); the caller reports the failure and keeps the spool.
+async fn save_converted(
+    converted: &[ConvertedPage],
+    output_dir: &Path,
+    format: &OutputFormat,
+    obsidian: &ObsidianOptions,
+) -> Result<(), SpoolExportError> {
+    let contents: Vec<crate::domain::ScrapedContent> =
+        converted.iter().map(|c| c.content.clone()).collect();
+    let output_dir = output_dir.to_path_buf();
+    let format = *format;
+    let obsidian = obsidian.clone();
+    tokio::task::spawn_blocking(move || save_results(&contents, &output_dir, &format, &obsidian))
+        .await
+        .map_err(|join| SpoolExportError::OutputIo(ScraperError::Io(std::io::Error::other(join))))?
+        .map_err(SpoolExportError::OutputIo)
 }
 
 /// Save the pages converted before a spool read failure, then build the

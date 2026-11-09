@@ -12,10 +12,9 @@
 //!   byte watermark and writes + commits per chunk.
 //!
 //! Conversion and writing are deliberately separate steps:
-//! [`convert_spool`] is pure (no filesystem writes), so the batch phase can
-//! convert without writing, and [`save_converted`] is the only step that
-//! touches the output directory. A consumer that needs the page-vs-I/O
-//! distinction (#2611) composes both itself.
+//! [`convert_spool`] is pure (no filesystem writes), and the caller owns
+//! writing the converted pages through the repo's single saver. A consumer
+//! that needs the page-vs-I/O distinction (#2611) composes both itself.
 //!
 //! # Watermark contract
 //!
@@ -27,8 +26,6 @@
 //! [`SpoolExportError::SpoolRead`], and the caller must fall back to the
 //! previous checkpoint.
 
-use std::path::{Path, PathBuf};
-
 use tracing::warn;
 
 use crate::application::crawler::bounded_sink::{BoundedSinkError, CapturedPageReader};
@@ -36,18 +33,10 @@ use crate::application::crawler::content_sink::extract_page_content;
 use crate::domain::config::ScraperConfig;
 use crate::domain::{CorrelationId, ScrapedContent};
 use crate::error::ScraperError;
-use crate::infrastructure::output::file_saver::{
-    markdown_relative_path, save_results, ObsidianOptions,
-};
-use crate::OutputFormat;
 
 /// Configuration for spool conversion.
 #[derive(Debug, Clone)]
 pub struct SpoolExportConfig {
-    /// Directory the converted pages would be written to. Only used to
-    /// report [`ConvertedPage::output_path`] — [`convert_spool`] itself
-    /// writes nothing.
-    pub output_dir: PathBuf,
     /// Extraction options (selector, WAF handling, …) applied to every page.
     pub scraper: ScraperConfig,
 }
@@ -57,11 +46,8 @@ pub struct SpoolExportConfig {
 pub struct ConvertedPage {
     /// Source URL of the page.
     pub url: String,
-    /// Extracted content, ready for [`save_converted`].
+    /// Extracted content, ready for the caller's writer.
     pub content: ScrapedContent,
-    /// Path [`save_converted`] will write for this page — computed by the
-    /// same helper the saver uses, so reporting and writing cannot diverge.
-    pub output_path: PathBuf,
 }
 
 /// Result of converting a spool (or a byte range of one) into content.
@@ -116,8 +102,9 @@ pub enum SpoolExportError {
 ///
 /// # Errors
 ///
-/// Returns [`SpoolExportError::SpoolRead`] when the spool cannot be read and
-/// [`SpoolExportError::OutputIo`] can only come from [`save_converted`].
+/// Returns [`SpoolExportError::SpoolRead`] when the spool cannot be read.
+/// Writing the converted pages is the caller's step; its I/O failures are
+/// [`SpoolExportError::OutputIo`], produced by that writer.
 pub async fn convert_spool(
     reader: &mut CapturedPageReader,
     cfg: &SpoolExportConfig,
@@ -153,13 +140,9 @@ pub async fn convert_spool(
         let page_correlation = root_correlation.child();
         match extract_page_content(&page, &cfg.scraper, &page_correlation).await {
             Ok(content) => {
-                let output_path = markdown_relative_path(&page.url)
-                    .map(|relative| cfg.output_dir.join(relative))
-                    .unwrap_or_else(|_| cfg.output_dir.join("index.md"));
                 outcome.converted.push(ConvertedPage {
                     url: page.url.clone(),
                     content,
-                    output_path,
                 });
             },
             Err((url, e)) => outcome.failed.push((url, e)),
@@ -168,30 +151,6 @@ pub async fn convert_spool(
 
     outcome.consumed_bytes = reader.consumed_bytes();
     Ok(outcome)
-}
-
-/// Write converted pages through the repo's single saver
-/// ([`save_results`]) — blocking filesystem work on the blocking pool.
-///
-/// # Errors
-///
-/// Returns [`SpoolExportError::OutputIo`] when any file write fails. Files
-/// before the failing one may already be on disk (the saver writes
-/// atomically per file); the caller reports the failure and keeps the spool.
-pub async fn save_converted(
-    converted: &[ConvertedPage],
-    output_dir: &Path,
-    format: &OutputFormat,
-    obsidian: &ObsidianOptions,
-) -> Result<(), SpoolExportError> {
-    let contents: Vec<ScrapedContent> = converted.iter().map(|c| c.content.clone()).collect();
-    let output_dir = output_dir.to_path_buf();
-    let format = *format;
-    let obsidian = obsidian.clone();
-    tokio::task::spawn_blocking(move || save_results(&contents, &output_dir, &format, &obsidian))
-        .await
-        .map_err(|join| SpoolExportError::OutputIo(ScraperError::Io(std::io::Error::other(join))))?
-        .map_err(SpoolExportError::OutputIo)
 }
 
 /// Reduce a [`BoundedSinkError`] to its I/O core for the [`SpoolExportError`]
@@ -209,6 +168,7 @@ fn bounded_error_io(e: BoundedSinkError) -> std::io::Error {
 mod tests {
     use super::*;
     use crate::application::crawler::content_sink::CapturedPage;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn page(url: &str, html: &str) -> CapturedPage {
@@ -242,11 +202,20 @@ mod tests {
         serde_json::to_string(&page).expect("serialize page")
     }
 
-    fn config(dir: &TempDir) -> SpoolExportConfig {
+    fn config() -> SpoolExportConfig {
         SpoolExportConfig {
-            output_dir: dir.path().join("out"),
             scraper: ScraperConfig::default(),
         }
+    }
+
+    /// Seed a spool and convert it from offset 0.
+    async fn convert_lines(lines: &[std::string::String]) -> (TempDir, SpoolExportOutcome, u64) {
+        let (dir, path, total) = seed_spool(lines).await;
+        let mut reader = CapturedPageReader::open(&path).await.expect("open");
+        let outcome = convert_spool(&mut reader, &config())
+            .await
+            .expect("convert");
+        (dir, outcome, total)
     }
 
     #[tokio::test]
@@ -293,24 +262,22 @@ mod tests {
 
     #[tokio::test]
     async fn convert_spool_counts_corrupt_records_and_reports_watermark() {
-        let (_dir, path, total) = seed_spool(&[
+        let (dir, outcome, total) = convert_lines(&[
             valid_line("https://example.test/a", "A"),
             "{broken".to_string(),
             valid_line("https://example.test/b", "B"),
         ])
         .await;
-        let workdir = TempDir::new().expect("temp out dir");
-        let cfg = config(&workdir);
-
-        let mut reader = CapturedPageReader::open(&path).await.expect("open");
-        let outcome = convert_spool(&mut reader, &cfg).await.expect("convert");
 
         assert_eq!(outcome.converted.len(), 2);
         assert_eq!(outcome.skipped_corrupt, 1);
         assert!(outcome.failed.is_empty());
         assert_eq!(outcome.consumed_bytes, total, "full spool consumed");
-        // convert_spool is pure: nothing written under the output dir.
-        assert!(!cfg.output_dir.exists(), "conversion must not write files");
+        // convert_spool is pure: the spool directory gained no output file.
+        let entries = std::fs::read_dir(dir.path())
+            .expect("read spool dir")
+            .count();
+        assert_eq!(entries, 1, "conversion must not write files");
     }
 
     #[tokio::test]
@@ -318,8 +285,7 @@ mod tests {
         let first = valid_line("https://example.test/a", "A");
         let second = valid_line("https://example.test/b", "B");
         let (_dir, path, total) = seed_spool(&[first.clone(), second]).await;
-        let workdir = TempDir::new().expect("temp out dir");
-        let cfg = config(&workdir);
+        let cfg = config();
         let boundary = first.len() as u64 + 1;
 
         let mut reader = CapturedPageReader::open_at(&path, boundary)
@@ -334,45 +300,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn save_converted_writes_files_at_the_reported_paths() {
-        let (_dir, path, _total) =
-            seed_spool(&[valid_line("https://example.test/docs/guia", "Guía")]).await;
-        let workdir = TempDir::new().expect("temp out dir");
-        let cfg = config(&workdir);
-
-        let mut reader = CapturedPageReader::open(&path).await.expect("open");
-        let outcome = convert_spool(&mut reader, &cfg).await.expect("convert");
-        assert_eq!(outcome.converted.len(), 1);
-
-        save_converted(
-            &outcome.converted,
-            &cfg.output_dir,
-            &OutputFormat::Markdown,
-            &ObsidianOptions::default(),
-        )
-        .await
-        .expect("save");
-
-        let written = &outcome.converted[0].output_path;
-        assert!(written.exists(), "reported path must be the written path");
-        let body = std::fs::read_to_string(written).expect("read md");
-        assert!(body.starts_with("---"), "frontmatter first");
-        assert!(body.contains("Guía"), "converted body present");
-    }
-
-    #[tokio::test]
     async fn failed_extraction_is_collected_not_fatal() {
-        let (_dir, path, total) = seed_spool(&[
+        let (_dir, outcome, total) = convert_lines(&[
             valid_line("https://example.test/a", "A"),
             // Empty body: extraction cannot produce content from it.
             serde_json::to_string(&page("https://example.test/empty", "")).expect("serialize"),
         ])
         .await;
-        let workdir = TempDir::new().expect("temp out dir");
-        let cfg = config(&workdir);
-
-        let mut reader = CapturedPageReader::open(&path).await.expect("open");
-        let outcome = convert_spool(&mut reader, &cfg).await.expect("convert");
 
         assert_eq!(outcome.converted.len(), 1);
         assert_eq!(outcome.failed.len(), 1, "empty page collected as failure");
