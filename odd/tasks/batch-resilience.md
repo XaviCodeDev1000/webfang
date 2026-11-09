@@ -175,3 +175,9 @@ L19 (2026-11-09, T10 — PR slice 2 abierto): PR #2643 (feat/batch-resilience �
 repo-guards por el golden set intra-crate (1836 vs 1768 sites) — refrescado con
 scripts/refresh_real_tree_golden.sh en 7f4999fe y pusheado. Pendiente: merge cuando
 quede verde (decisión del maintainer).
+L20 (2026-11-09, T10 — PR #2643 verde): tras el fix del golden set intra-crate
+(7f4999fe) y la de-duplicación del harness de logs (8a47dc6c, LogBuffer compartido),
+todos los workflows del PR están en success (CI, PR Validation, Mutation Testing,
+Docs); mergeStateStatus CLEAN, mergeable MERGEABLE, label type:feature, Closes #2611.
+El job "Artifact guards" queda en estado fantasma pending a nivel check-rollup aun
+con run success — el merge es decisión del maintainer: scripts/merge-when-green.sh 2643 --queue.
