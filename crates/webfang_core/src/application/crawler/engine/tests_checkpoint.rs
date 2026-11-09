@@ -1,4 +1,10 @@
+use super::tests::{entry_off, session_engine};
 use super::*;
+use crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY;
+use crate::domain::persistence::{CheckpointCfg, PersistenceMode};
+use url::Url;
+use wiremock::matchers::path;
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // ——— PersistenceMode::with_persistence wiring (5c) ———
 

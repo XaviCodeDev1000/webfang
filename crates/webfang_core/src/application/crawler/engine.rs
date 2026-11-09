@@ -63,6 +63,8 @@ pub use entry::crawl_site_with_options;
 pub use entry::{crawl_site, crawl_site_capturing};
 
 mod build;
+#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+mod tests_checkpoint;
 
 /// Shared shutdown signal — set to `true` when SIGINT/SIGTERM received.
 type ShutdownSignal = Arc<AtomicBool>;
@@ -507,7 +509,7 @@ mod tests {
     use crate::domain::budget::tiers::{BurstPermits, CrawlConcurrency};
     use crate::domain::budget::{BudgetModel, BudgetOverrides};
     use crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY;
-    use crate::domain::persistence::{CheckpointCfg, PersistenceMode};
+    use crate::domain::persistence::PersistenceMode;
     use crate::domain::session_port::SessionPort;
     use crate::domain::CrawlError;
     use tracing_subscriber::layer::SubscriberExt;
@@ -954,8 +956,6 @@ mod tests {
             "shim sink and content_sink option must capture identical pages"
         );
     }
-
-    mod checkpoint;
 
     /// ADR-0012 sub-slice 3.B-1c — the autoscale loop MUST read RAM via the
     /// injected [`RamProbePort`], not via a hardcoded `ResourceGovernor` static
