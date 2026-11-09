@@ -416,6 +416,29 @@ pub(crate) async fn export_phase(
     ai_cleaner: Option<std::sync::Arc<dyn SemanticCleaner>>,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> CliExit {
+    export_phase_with_resume(
+        results,
+        opts,
+        state_store,
+        ai_cleaner,
+        cancel,
+        opts.crawl.resume,
+    )
+    .await
+}
+
+/// [`export_phase`] with an explicit resume-gate flag. The batch path uses
+/// this to turn the gate ON when `--export-checkpoint` flushed pages during
+/// the run, so the clean close skips the already-COMMITTED ones instead of
+/// double-appending them (#2611 WU4).
+pub(crate) async fn export_phase_with_resume(
+    results: std::sync::Arc<[domain::ScrapedContent]>,
+    opts: &CrawlOptions,
+    state_store: Option<&dyn StateStorePort>,
+    ai_cleaner: Option<std::sync::Arc<dyn SemanticCleaner>>,
+    cancel: &tokio_util::sync::CancellationToken,
+    resume_gate: bool,
+) -> CliExit {
     if opts.export.output_dir == std::path::Path::new("-") {
         return CliExit::UsageError(
             "\"-o -\" no está soportado para exportación multi-archivo. \
@@ -472,7 +495,7 @@ pub(crate) async fn export_phase(
         vault_path: opts.export.obsidian_vault.as_ref(),
         obsidian_options,
         state_store,
-        resume: opts.crawl.resume,
+        resume: resume_gate,
         cancel: Some(cancel.clone()),
         ai_threshold: opts.ai_config.threshold,
         ai_max_chars: opts.ai_config.max_chars,

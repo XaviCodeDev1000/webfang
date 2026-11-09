@@ -176,7 +176,7 @@
       "path": "crates/webfang_core/tests/batch_checkpoint_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 2,
+      "test_count": 3,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"

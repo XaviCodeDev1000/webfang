@@ -94,7 +94,7 @@ pub struct ExtractionOptions {
 }
 
 impl ExtractionOptions {
-    /// Build from a [`ScraperConfig`] the way `extract_batch_content` does:
+    /// Build from a [`crate::domain::config::ScraperConfig`] the way `extract_batch_content` does:
     /// destructure WITHOUT `..` (L4) so a new config field cannot silently
     /// sneak into the recorded identity without this type learning about it.
     #[must_use]
@@ -105,7 +105,7 @@ impl ExtractionOptions {
         }
     }
 
-    /// Project back onto a fresh [`ScraperConfig`] for a salvage conversion.
+    /// Project back onto a fresh [`crate::domain::config::ScraperConfig`] for a salvage conversion.
     ///
     /// The output directory is NOT part of the identity — the salvage target
     /// is decided by the caller (the sidecar's `output_dir` for an automatic
@@ -210,15 +210,15 @@ pub fn spool_first_line_sha256(bytes: &[u8]) -> Option<String> {
 /// is talking about this file must not choose a destination for its data.
 #[must_use]
 pub fn decide_sweep(sidecar: &SidecarState, spool: &SpoolFileState) -> SweepDecision {
+    // An empty spool holds no data: nothing to salvage, nothing to lose,
+    // whatever the sidecar says (a clean close deletes the spool but a stale
+    // sidecar may linger — that pair is still just "nothing").
+    if spool.len_bytes == 0 {
+        return SweepDecision::Nothing;
+    }
     match sidecar {
         SidecarState::Absent => SweepDecision::Nothing,
-        SidecarState::Unreadable => {
-            if spool.len_bytes == 0 {
-                SweepDecision::Nothing
-            } else {
-                SweepDecision::OrphanSpool
-            }
-        },
+        SidecarState::Unreadable => SweepDecision::OrphanSpool,
         SidecarState::Parsed(sidecar) => {
             let identity_matches = spool.first_line_sha256.is_some()
                 && spool.first_line_sha256 == sidecar.spool.first_line_sha256;

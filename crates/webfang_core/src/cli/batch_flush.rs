@@ -25,6 +25,7 @@
 
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
 use tracing::{info, instrument, warn};
 
 use crate::application::batch::progress::{
@@ -37,10 +38,14 @@ use crate::infrastructure::output::file_saver::{save_results, ObsidianOptions};
 use crate::OutputFormat;
 
 /// Result of one incremental flush of the spool tail.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct FlushOutcome {
     /// Pages converted AND written in this flush.
     pub exported: usize,
+    /// The exported `(url, content)` pairs, for the COMMITTED seam (WU4).
+    /// Cleared before returning when the caller has no store, to keep the
+    /// flush's memory bounded on huge tails.
+    pub pages: Vec<(String, crate::domain::ScrapedContent)>,
     /// Pages whose extraction failed (watermark advanced past them — the
     /// clean close would fail on them identically).
     pub failed: usize,
@@ -129,8 +134,14 @@ pub async fn flush_spool_tail(
         })?
         .map_err(FlushError::OutputWrite)?;
 
+    let pages: Vec<(String, crate::domain::ScrapedContent)> = outcome
+        .converted
+        .iter()
+        .map(|c| (c.url.clone(), c.content.clone()))
+        .collect();
     Ok(FlushOutcome {
-        exported: outcome.converted.len(),
+        exported: pages.len(),
+        pages,
         failed: outcome.failed.len(),
         skipped_corrupt: outcome.skipped_corrupt,
         watermark: outcome.consumed_bytes,
@@ -220,6 +231,55 @@ fn bounded_error_io(
     }
 }
 
+/// Commit one flush's exported pages into the resume store so the next run
+/// (or the clean-close export) skips them as `COMMITTED`-proven.
+///
+/// # S9 resolution (verified against `CommitSession::decide`)
+///
+/// `decide` matches `record.content_hash` against the `export.jsonl`
+/// `checksum_sha256` index, and the exporter stamps that checksum as
+/// **SHA-256 of the `ScrapedContent` text** (`process_single_item`) — NOT
+/// of the `.md` file bytes (frontmatter would change the digest). So the
+/// flush records `sha256(content)`, identical to the clean-close path, and
+/// a flush-committed page skips via its `COMMITTED` status before any hash
+/// comparison anyway. The plan's S9 assumption (hash of the `.md` file) is
+/// corrected here: the `.md` bytes are not the identity the resume gate
+/// compares.
+///
+/// Runs on the blocking pool: `commit_item` → `merge_persist` takes the
+/// store's `flock` and does file I/O.
+pub fn commit_flushed_pages(
+    store: &crate::infrastructure::export::RecordStore,
+    pages: &[(String, crate::domain::ScrapedContent)],
+    output_path: &Path,
+) {
+    use crate::application::export_factory::{CommitSession, ResumeContext};
+    use crate::application::resume::RunId;
+
+    let ctx = ResumeContext::new(store).with_resume(true);
+    let run_id = RunId::new();
+    let mut session = CommitSession::open(Some(&ctx), output_path);
+    for (url, content) in pages {
+        // Same digest the JSONL exporter stamps into `checksum_sha256`.
+        let content_hash = format!("{:x}", Sha256::digest(content.content.as_bytes()));
+        session.commit_item(url, content_hash, output_path.to_path_buf(), &run_id);
+    }
+    session.final_persist();
+}
+
+/// Async wrapper for [`commit_flushed_pages`] on the blocking pool.
+pub async fn commit_flushed_pages_async(
+    store: crate::infrastructure::export::RecordStore,
+    pages: Vec<(String, crate::domain::ScrapedContent)>,
+    output_path: PathBuf,
+) {
+    let _ = tokio::task::spawn_blocking(move || commit_flushed_pages(&store, &pages, &output_path))
+        .await
+        .map_err(|join| {
+            warn!(error = %join, "flush commit task failed — pages stay EXPORTED-not-COMMITTED and re-drive at close")
+        });
+}
+
 /// Compute the run's batch namespace: `batch-<hash8(canonical output key)>`.
 ///
 /// The namespace separates concurrent/resumed batches targeting DIFFERENT
@@ -303,6 +363,9 @@ pub struct FlushWatchParams {
     /// Fired by the caller when the crawl ends (the loop then does its final
     /// bounded flush and exits).
     pub done: tokio_util::sync::CancellationToken,
+    /// Resume store (batch-namespace) the flush COMMITTEDs into, when the
+    /// checkpoint path built one.
+    pub store: Option<crate::infrastructure::export::RecordStore>,
 }
 
 /// Run the checkpoint flush loop alongside the crawl (WU3, #2611).
@@ -326,6 +389,7 @@ pub async fn run_flush_watch(p: FlushWatchParams) {
         checkpoint,
         correlation,
         done,
+        store,
     } = p;
     let spool_path = root.join(crate::cli::batch_flow::BATCH_SPOOL_FILE);
     let watermark: std::sync::Arc<std::sync::atomic::AtomicU64> =
@@ -354,6 +418,7 @@ pub async fn run_flush_watch(p: FlushWatchParams) {
                         let new_watermark = outcome.watermark.min(durable);
                         watermark.store(new_watermark, std::sync::atomic::Ordering::Release);
                         let _ = log_flush(&outcome, &correlation);
+                        commit_flush(&store, &output_dir, &outcome).await;
                         persist_sidecar(&root, &spool_identity, &output_dir, &extraction, new_watermark).await;
                     },
                     Err(e) => {
@@ -386,6 +451,7 @@ pub async fn run_flush_watch(p: FlushWatchParams) {
         Ok(Ok(Ok(outcome))) => {
             let new_watermark = outcome.watermark.min(durable);
             let _ = log_flush(&outcome, &correlation);
+            commit_flush(&store, &output_dir, &outcome).await;
             persist_sidecar(
                 &root,
                 &spool_identity,
@@ -417,6 +483,26 @@ pub async fn run_flush_watch(p: FlushWatchParams) {
             );
         },
     }
+}
+
+/// COMMITTED-seam for one flush (WU4): persist every exported page into the
+/// batch-namespace store so the clean close and a `--resume` relaunch skip
+/// it. Order per page is the design's `.md` → COMMITTED → watermark; the
+/// watermark advance happens in the caller after this returns.
+async fn commit_flush(
+    store: &Option<crate::infrastructure::export::RecordStore>,
+    output_dir: &Path,
+    outcome: &FlushOutcome,
+) {
+    let Some(store) = store else { return };
+    if outcome.pages.is_empty() {
+        return;
+    }
+    // output_location points at the RAG export the clean close appends to;
+    // the flush itself wrote `.md` files, and the record's status (not the
+    // hash index) is what makes the close skip the page.
+    let output_path = output_dir.join("export.jsonl");
+    commit_flushed_pages_async(store.clone(), outcome.pages.clone(), output_path).await;
 }
 
 /// The honest close failure: the spool is CONSERVED and the operator is told

@@ -22,7 +22,7 @@ use crate::cli::discovery_phase::base_crawler_config_builder;
 use crate::cli::elastic::{build_elastic_ingestion, run_elastic_ingestion};
 use crate::cli::error::CliExit;
 use crate::cli::exit_codes::{batch_exit_code, report_phase};
-use crate::cli::orchestrator::{export_phase, output_vectors_gate, resolve_persistence_root};
+use crate::cli::orchestrator::{output_vectors_gate, resolve_persistence_root};
 use crate::domain;
 use crate::domain::config::ScraperConfig;
 use crate::domain::http_config::HttpClientConfig;
@@ -82,6 +82,9 @@ pub(crate) async fn run_batch(
 
     let extracted = extract_batch_content(&sink, &opts).await;
     discard_batch_spool(&sink).await;
+    // The spool is gone: the sidecar describing it goes with it, so the next
+    // run's acquisition sees a clean pair instead of a stale sidecar.
+    let _ = crate::cli::batch_flush::clear_sidecar(&resolve_persistence_root(&opts)).await;
     let (results, failures) = match extracted {
         Ok(pair) => pair,
         Err(e) => return e,
@@ -116,7 +119,11 @@ pub(crate) async fn run_batch(
     // engine reports blocks through `summary` — so pass 0.
     let _ = report_phase(&results, &failures, 0, opts.verbosity);
 
-    let export_exit = export_phase(
+    // WU4: with `--export-checkpoint` the flush already COMMITTED the
+    // flushed pages into the batch-namespace store; turn the resume gate
+    // on at the clean close so they skip instead of double-appending.
+    let resume_gate = opts.crawl.resume || opts.batch.export_checkpoint > 0;
+    let export_exit = crate::cli::orchestrator::export_phase_with_resume(
         std::sync::Arc::clone(&results),
         &opts,
         state_store.as_deref(),
@@ -126,6 +133,7 @@ pub(crate) async fn run_batch(
         // above, and now the export observes that same one. The batch flow
         // does not mint a token of its own.
         cancel,
+        resume_gate,
     )
     .await;
 
@@ -171,6 +179,14 @@ async fn run_batch_crawl(
     let sink = std::sync::Arc::new(build_batch_sink(opts).await?);
     let manager =
         prepare_batch_manager(opts, tls_emulation, sink.clone(), root_correlation).await?;
+
+    // Resume filtered EVERYTHING: nothing to crawl, nothing to flush — a
+    // clean no-op (exit 0), not "no content" 69. The export phase below still
+    // runs over an empty result set and commits nothing new.
+    if manager.url_count() == 0 && opts.crawl.resume {
+        info!("resume: all batch URLs already processed — nothing to crawl");
+        return Ok((BatchManagerSummary::default(), sink));
+    }
 
     // WU3 (#2611): when `--export-checkpoint <N>` is set, run the flush watch
     // alongside the crawl so a killed run loses at most the pages captured
@@ -223,6 +239,13 @@ fn spawn_flush_watch(
     if checkpoint == 0 {
         return None;
     }
+
+    // The flush COMMITTEDs each exported page into the batch-namespace
+    // store so the clean close (and a --resume relaunch) skips it (WU4).
+    let store = match build_batch_resume_store(opts) {
+        Ok(Some(s)) => Some(crate::cli::scrape_flow::record_store_bridge(&*s)),
+        _ => None,
+    };
 
     let root = resolve_persistence_root(opts);
     let output_dir = resolve_persistence_root(opts);
@@ -278,6 +301,7 @@ fn spawn_flush_watch(
             checkpoint,
             correlation: root_correlation.clone(),
             done,
+            store,
         },
     ));
     Some(handle)
@@ -337,12 +361,31 @@ async fn prepare_batch_manager(
     let crawler_config = build_batch_crawler_config(opts, tls_emulation, &budget)?;
     let manager = load_batch_manager(opts, crawler_config, &budget)
         .await?
-        .with_content_sink(sink)
+        .with_content_sink(sink.clone())
         .with_correlation(root_correlation.clone());
 
+    // WU4 (#2609/#2611): with `--resume`, drop the URLs whose records are
+    // COMMITTED-proven in the batch store BEFORE any fetch — a relaunch must
+    // not re-download pages the previous run already exported (S7 iv: zero
+    // double downloads). Runs on the blocking pool: the store read takes
+    // the flock and does file I/O.
+    let had_urls_before_resume_filter = manager.url_count() > 0;
+    let manager = if opts.crawl.resume {
+        filter_committed_batch(manager, opts, sink, root_correlation).await?
+    } else {
+        manager
+    };
+
     if manager.url_count() == 0 {
-        error!("No URLs provided for batch processing");
-        return Err(CliExit::UsageError("No URLs provided".into()));
+        if had_urls_before_resume_filter {
+            // Every input URL is already COMMITTED: the batch has nothing to
+            // do, and that is a SUCCESS (exit 0), not a usage error — same
+            // contract as the crawl-classic resume (#2609).
+            info!("resume: all batch URLs already processed, nothing pending");
+        } else {
+            error!("No URLs provided for batch processing");
+            return Err(CliExit::UsageError("No URLs provided".into()));
+        }
     }
 
     info!(
@@ -352,6 +395,75 @@ async fn prepare_batch_manager(
     );
 
     Ok(manager)
+}
+
+/// Filter the batch URL list down to the not-yet-COMMITTED ones (WU4).
+///
+/// Uses the SAME typed gate as the crawl-classic resume
+/// ([`crate::application::resume::filter_committed`]) against the batch
+/// store, so a relaunched `--resume` batch skips exactly the pages a
+/// previous run committed — including pages a checkpoint flush committed
+/// mid-run. All-skipped is NOT an error here: the run exits through the
+/// normal empty-batch path, which reports success with zero work.
+async fn filter_committed_batch(
+    manager: BatchManager,
+    opts: &CrawlOptions,
+    sink: std::sync::Arc<BoundedFileSink>,
+    root_correlation: &domain::CorrelationId,
+) -> Result<BatchManager, CliExit> {
+    let store = match build_batch_resume_store(opts) {
+        Ok(Some(s)) => crate::cli::scrape_flow::record_store_bridge(&*s),
+        _ => return Ok(manager),
+    };
+    let urls = manager.urls();
+    let parsed: Vec<url::Url> = urls
+        .iter()
+        .filter_map(|u| url::Url::parse(u).ok())
+        .collect();
+    let total = parsed.len();
+    let manager_urls = manager.urls();
+    let (pending, _run_id) = {
+        let store = store.clone();
+        let parsed = parsed.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::application::resume::filter_committed(
+                parsed,
+                &store as &dyn crate::domain::persistence::RecordStorePort,
+            )
+        })
+        .await
+        .map_err(|e| CliExit::IoError(format!("No se pudo leer el estado de resume: {e}")))?
+    };
+    let pending_set: std::collections::HashSet<String> =
+        pending.iter().map(|u| u.as_str().to_string()).collect();
+    let kept: Vec<String> = manager_urls
+        .into_iter()
+        .filter(|u| {
+            url::Url::parse(u)
+                .map(|p| pending_set.contains(p.as_str()))
+                .unwrap_or(true)
+        })
+        .collect();
+    let skipped = total.saturating_sub(kept.len());
+    if skipped > 0 {
+        info!(
+            skipped,
+            total, "resume: skipping URLs already COMMITTED in the batch store"
+        );
+    }
+    let budget = crate::domain::budget::BudgetModel::build(
+        opts.budget_overrides,
+        &crate::domain::budget::detector::SystemDetector,
+    );
+    // Rebuild the manager over the pending URLs with a fresh config — the
+    // crawler_config was consumed by load_batch_manager, so rebuild it.
+    let tls_emulation = resolve_batch_tls_emulation(opts)?;
+    let crawler_config = build_batch_crawler_config(opts, tls_emulation, &budget)?;
+    Ok(
+        BatchManager::from_urls(kept, crawler_config, budget.batch().nonzero())
+            .with_content_sink(sink)
+            .with_correlation(root_correlation.clone()),
+    )
 }
 
 /// Flush the capture spool and fail loudly when the batch produced nothing.
@@ -565,15 +677,29 @@ async fn discard_batch_spool(sink: &BoundedFileSink) {
 
 /// Build the resume state store for `--resume` (#637) so `export_phase`
 /// can mark each already-crawled URL as processed. Returns `None` when
-/// `--resume` is off.
+/// neither `--resume` nor `--export-checkpoint` is on.
 ///
-/// The factory is lazy and infallible, so this always succeeds when resume
-/// is on; the `Result` keeps the `CliExit::IoError` route for a future
+/// # Namespace (design L3, WU4)
+///
+/// With `--export-checkpoint` active the store lives under
+/// `batch-<hash8(output_dir)>` — a COMMITTED must mean "exported to THIS
+/// output dir", so two batches targeting different output dirs never skip
+/// against each other's records. Plain `--resume` (no checkpoint) keeps
+/// the legacy host-derived domain so existing state files keep working
+/// (#2609 verified against that layout).
+///
+/// The factory is lazy and infallible, so this always succeeds when either
+/// flag is on; the `Result` keeps the `CliExit::IoError` route for a future
 /// eager factory.
 fn build_batch_resume_store(
     opts: &CrawlOptions,
 ) -> Result<Option<std::sync::Arc<dyn StateStorePort>>, CliExit> {
-    if !opts.crawl.resume {
+    let checkpoint = opts.batch.export_checkpoint;
+    // WU4: the checkpoint flush COMMITTEDs into the batch-namespace store even
+    // without --resume, so the clean close can skip what the flush already
+    // exported (no double append). Plain --resume (no checkpoint) keeps the
+    // legacy host-derived domain for existing state files (#2609).
+    if !opts.crawl.resume && checkpoint == 0 {
         return Ok(None);
     }
     let state_dir = opts
@@ -581,7 +707,11 @@ fn build_batch_resume_store(
         .state_dir
         .clone()
         .unwrap_or_else(crate::cli::scrape_flow::resolve_default_state_dir);
-    let domain = opts.url.host_str().unwrap_or("batch").to_string();
+    let domain = if checkpoint > 0 {
+        crate::cli::batch_flush::batch_namespace(&resolve_persistence_root(opts))
+    } else {
+        opts.url.host_str().unwrap_or("batch").to_string()
+    };
     Ok(Some(crate::application::container::build_state_store(
         state_dir, &domain,
     )))
