@@ -80,11 +80,13 @@ impl managed::Manager for Manager {
             ));
         }
         let recycle_count = self.recycle_count.fetch_add(1, Ordering::Relaxed);
-        let n: usize = conn
-            .interact(move |conn| conn.query_row("SELECT $1", [recycle_count], |row| row.get(0)))
+        // `rusqlite 0.41` no longer implements `ToSql` for `usize`/`u64`.
+        let expected = recycle_count as i64;
+        let n: i64 = conn
+            .interact(move |conn| conn.query_row("SELECT $1", [expected], |row| row.get(0)))
             .await
             .map_err(|e| RecycleError::message(format!("{}", e)))??;
-        if n == recycle_count {
+        if n == expected {
             Ok(())
         } else {
             Err(RecycleError::message("Recycle count mismatch"))

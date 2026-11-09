@@ -94,7 +94,7 @@ indicatif = { version = "0.17", features = ["improved_unicode"] }
 console-subscriber = "0.4"
 
 # SQLite persistence
-rusqlite = { version = "0.31", features = ["bundled", "chrono", "uuid"] }
+rusqlite = { version = "0.41.1", features = ["bundled", "chrono", "uuid"] }
 deadpool = { version = "0.12", default-features = false, features = ["managed", "rt_tokio_1"] }
 deadpool-sync = "0.1"
 

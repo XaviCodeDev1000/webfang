@@ -290,7 +290,7 @@ mod tests {
     }
 
     #[cfg(feature = "persistence")]
-    async fn count_rows(pool: &crate::infrastructure::persistence::pool::Pool) -> u64 {
+    async fn count_rows(pool: &crate::infrastructure::persistence::pool::Pool) -> i64 {
         pool.get()
             .await
             .expect("conn")
@@ -301,7 +301,7 @@ mod tests {
                           (SELECT count(*) FROM notes) + \
                           (SELECT count(*) FROM note_chunks)",
                     [],
-                    |r| r.get::<_, u64>(0),
+                    |r| r.get::<_, i64>(0),
                 )
             })
             .await
