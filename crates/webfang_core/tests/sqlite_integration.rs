@@ -14,6 +14,7 @@
 
 use tempfile::TempDir;
 use webfang_core::domain::VectorRepository;
+use webfang_core::infrastructure::persistence::pool::Object;
 use webfang_core::infrastructure::persistence::sqlite::{
     create_memory_pool, create_pool, setup_schema, SqliteVectorRepository,
 };
@@ -276,5 +277,53 @@ async fn test_sqlite_rows_pass_integrity_check_after_reopen() {
             Some(format!("https://example.com/page{idx}")),
             "row {idx} must survive the reopen"
         );
+    }
+}
+
+// ===== POOL LIFECYCLE =====
+
+/// A pool with `max_size = 1` must recycle the single connection: two
+/// sequential `get` calls hand out the same pooled object, not a fresh one.
+/// If `Manager::recycle` rejects the connection, deadpool creates a new object
+/// and the `ObjectId` changes — that is the regression this pins.
+#[tokio::test]
+async fn test_pool_recycles_connection_with_max_size_one() {
+    let pool = create_memory_pool().unwrap();
+    setup_schema(&pool).await.unwrap();
+
+    let first = pool.get().await.unwrap();
+    let first_id = Object::id(&first);
+    drop(first);
+
+    let second = pool.get().await.unwrap();
+    assert_eq!(
+        Object::id(&second),
+        first_id,
+        "max_size=1 must recycle and reuse the same pooled object"
+    );
+}
+
+/// With more than one connection, the `post_create` hook must run for every
+/// connection, not just the first one. Hold all four objects at once so each is
+/// created fresh, then read `journal_mode` from each.
+#[tokio::test]
+async fn test_wal_pragmas_applied_to_every_pooled_connection() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("pool-pragmas.db");
+    let pool = create_pool(&db_path, 4).unwrap();
+    setup_schema(&pool).await.unwrap();
+
+    let mut conns = Vec::new();
+    for _ in 0..4 {
+        conns.push(pool.get().await.unwrap());
+    }
+
+    for conn in &conns {
+        let mode: String = conn
+            .interact(|c| c.query_row("PRAGMA journal_mode", [], |row| row.get(0)))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(mode, "wal", "every pooled connection must be in WAL mode");
     }
 }
