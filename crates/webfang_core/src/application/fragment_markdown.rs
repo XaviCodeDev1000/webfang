@@ -20,6 +20,10 @@
 /// while inserting into the serialized HTML needs the rewriter (`lol_html`),
 /// which has no child queries. Tables are matched between the passes by
 /// document order, which both parsers agree on.
+///
+/// If the rewrite fails, the fragment is returned unchanged and the failure
+/// is logged: the fallback keeps extraction alive, but the synthesis is then
+/// silently absent from the output, so the degradation must be observable.
 pub(crate) fn with_header(fragment: &str) -> String {
     if !fragment.contains("<table") {
         return fragment.to_owned();
@@ -47,7 +51,19 @@ pub(crate) fn with_header(fragment: &str) -> String {
         })],
         ..lol_html::RewriteStrSettings::default()
     };
-    lol_html::rewrite_str(fragment, settings).unwrap_or_else(|_| fragment.to_owned())
+    match lol_html::rewrite_str(fragment, settings) {
+        Ok(rewritten) => rewritten,
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                stage = "extract",
+                tables = headers.len(),
+                fragment_len = fragment.len(),
+                "synthetic header insertion failed; returning fragment unchanged"
+            );
+            fragment.to_owned()
+        },
+    }
 }
 
 /// The `<thead>` a table needs, or `None` when it must be left alone.
@@ -75,11 +91,19 @@ fn header_for_table(table: &scraper::ElementRef<'_>) -> Option<String> {
     Some(format!("<thead><tr>{cells}</tr></thead>"))
 }
 
-/// Parse a compile-time-constant selector; the literals below cannot fail.
+/// Parse a selector from a call-site literal.
+///
+/// The signature accepts any string at runtime; nothing here checks at
+/// compile time that it is valid CSS. The contract is a call-site
+/// convention: every caller in this module passes a static literal, so an
+/// invalid literal panics in tests instead of reaching production — the
+/// `expect` below is that panic, kept loud on purpose.
 fn selector(css: &str) -> scraper::Selector {
     #[allow(clippy::expect_used)]
     let parsed = scraper::Selector::parse(css)
-        // LCOV_EXCL_LINE defensive: compile-time selector — a constant literal
+        // LCOV_EXCL_LINE defensive: call-site convention — every caller passes
+        // a static literal, so an invalid literal is a test-time bug, not a
+        // runtime input. Keep the panic loud; there is no compile-time check.
         .expect("invariant: the selector literals in this module are valid CSS");
     parsed
 }
