@@ -31,11 +31,14 @@
 #                   carries it and always reports, even when no shard ran.
   #   - mutants-weekly: weekly baseline over the full hot-path scope, split into
   #                   96 deterministic shards (--shard k/96, --no-shuffle, k
-  #                   0-based). The shards partition the 1477 hot-path mutants
-  #                   MEASURED on 2026-10-22 with `cargo mutants --list` over
-  #                   the current scope — ~15.4 per shard, under the ~20-mutant
+  #                   0-based). The shards partition the 1640 hot-path mutants
+  #                   MEASURED on 2026-11-09 with `cargo mutants --list` over
+  #                   the current scope — ~17.1 per shard, under the ~20-mutant
   #                   per-shard draw at which 14 shards hit the 90-minute wall
   #                   (#1436), so each job finishes well inside the timeout.
+  #                   #2560 widened the scope to the extraction spine (+141
+  #                   mutants); 17.1/shard still clears the wall draw, so the
+  #                   matrix stays at 96 shards.
   #                   Report-only. The previous 64-way split drew ~23.1 mutants
   #                   per shard — ABOVE that wall draw — so #1844 rebalanced the
   #                   matrix from 64 to 96. The ~600 figure this header carried
