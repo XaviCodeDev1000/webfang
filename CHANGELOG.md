@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.0] - 2026-11-09
+
+
+### 🎉 Added
+
+- Batch checkpoint flush + resume under unified spool acquisition ([#2611](https://github.com/XaviCodeDev1000/webfang/pull/2611)) ([#2643](https://github.com/XaviCodeDev1000/webfang/pull/2643))
+
+### 🏗️ Architecture Improvements
+
+- Extract engine checkpoint tests into engine/tests/checkpoint.rs ([#2637](https://github.com/XaviCodeDev1000/webfang/pull/2637))
+- Extract engine session-pool tests into engine/tests_pool.rs ([#2648](https://github.com/XaviCodeDev1000/webfang/pull/2648))
+
+### 📦 Dependencies
+
+- Upgrade rmcp 1.8.0 to 3.9.0 (RUSTSEC-2026-0462) ([#2642](https://github.com/XaviCodeDev1000/webfang/pull/2642))
+
+### 🔧 Fixed
+
+- Header synthesis covers caption, thead, ragged and uppercase tables (#2602, #2603) ([#2635](https://github.com/XaviCodeDev1000/webfang/pull/2635))
 ## [7.4.0] - 2026-11-09
 
 
