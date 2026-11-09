@@ -2168,9 +2168,8 @@ mod tests {
     // first. Each registry test therefore captures the winner after its own arm
     // and asserts only the order- and race-independent invariant — once armed,
     // no later set replaces it (#996).
-    // A minimal guard that never rewrites the builder. Shared by the
-    // object-safety and keep-first tests: both need a valid `SsrfGuard`, and
-    // two identical copies of these two methods were an exact jscpd clone.
+    // NoopGuard proves the sealed trait object is dyn-safe. Never arm it in
+    // the registry: a no-op there disarms every later client (#2626).
     struct NoopGuard;
     impl sealed::Sealed for NoopGuard {}
     impl SsrfGuard for NoopGuard {
@@ -2204,13 +2203,14 @@ mod tests {
 
     #[test]
     fn registry_is_keep_first() {
-        let fake1: Arc<dyn SsrfGuard> = Arc::new(NoopGuard);
-        set_ssrf_guard(fake1);
+        // Arm the real guard, not a no-op: this registry is process-global,
+        // so a sentinel here would disarm every later client (#2626).
+        set_ssrf_guard(Arc::new(DefaultSsrfGuard) as Arc<dyn SsrfGuard>);
         // Read after our own arm, so this is a registry value and never the
         // fallback: our guard when this test armed an unarmed registry, or a
         // sibling's guard in a shared `cargo test` process.
         let winner = ssrf_guard();
-        set_ssrf_guard(Arc::new(NoopGuard));
+        set_ssrf_guard(Arc::new(DefaultSsrfGuard) as Arc<dyn SsrfGuard>);
         assert!(
             Arc::ptr_eq(&ssrf_guard(), &winner),
             "a later set must not replace the already-armed guard (#996)"

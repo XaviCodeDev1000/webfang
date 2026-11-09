@@ -1176,43 +1176,21 @@ mod tests {
     /// guard the registry already holds. The winner is captured after this
     /// test's own arm rather than assumed, because the registry is
     /// process-global and unresettable: nextest starts each test unarmed (so
-    /// the winner is exactly the sentinel and the test also proves it
+    /// the winner is exactly our arm and the test also proves it
     /// survives `Container::new`), while plain `cargo test` shares one
     /// process where a sibling may have armed it first.
     #[cfg_attr(miri, ignore = "btls-sys FFI (wreq Client) not supported by Miri")]
     #[tokio::test]
     async fn test_container_ssrf_guard_arming_is_keep_first() {
-        #[derive(Debug, Default)]
-        struct SentinelGuard;
-        impl crate::domain::ssrf_guard::sealed::Sealed for SentinelGuard {}
-        impl crate::domain::ssrf_guard::SsrfGuard for SentinelGuard {
-            fn secure_client(&self, builder: wreq::ClientBuilder) -> wreq::ClientBuilder {
-                builder // test sentinel: no guard behavior
-            }
-
-            fn secure_client_with_loopback(
-                &self,
-                builder: wreq::ClientBuilder,
-                _allow_loopback: bool,
-            ) -> wreq::ClientBuilder {
-                builder // test sentinel: no guard behavior
-            }
-
-            fn secure_client_with_policy(
-                &self,
-                builder: wreq::ClientBuilder,
-                _allow_loopback: bool,
-                _policy: &crate::domain::network_policy::NetworkPolicy,
-            ) -> wreq::ClientBuilder {
-                builder // test sentinel: no guard behavior
-            }
-        }
-
-        let sentinel: std::sync::Arc<dyn crate::domain::ssrf_guard::SsrfGuard> =
-            std::sync::Arc::new(SentinelGuard);
-        crate::domain::ssrf_guard::set_ssrf_guard(sentinel);
+        // Arm the production default guard, not a no-op sentinel: the
+        // registry is process-global and keep-first, so a behavior-less
+        // sentinel armed here would win the race and leave every later
+        // client in this `cargo test` process unguarded (#2626).
+        let guard: std::sync::Arc<dyn crate::domain::ssrf_guard::SsrfGuard> =
+            std::sync::Arc::new(crate::domain::ssrf_guard::DefaultSsrfGuard);
+        crate::domain::ssrf_guard::set_ssrf_guard(guard);
         // Captured after our own arm, so this is a registry value and not
-        // the fallback: the sentinel when this test armed an unarmed
+        // the fallback: the armed guard when this test armed an unarmed
         // registry, or a sibling's guard in a shared `cargo test` process.
         let winner = crate::domain::ssrf_guard::ssrf_guard();
 
