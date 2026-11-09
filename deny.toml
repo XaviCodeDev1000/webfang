@@ -203,18 +203,6 @@ ignore = [
     # Expires: 2027-03-20
     { id = "RUSTSEC-2026-0406", reason = "zstd-safe 7.2.4 zstdmt is not enabled; only remaining consumer is wreq-util static emulation compression" },
 
-    # RUSTSEC-2026-0462 (rmcp 1.8.0, severity: vulnerability, DoS)
-    # Unbounded response-body buffering in rmcp's Streamable HTTP *clients*
-    # (transport-streamable-http-client-reqwest and -unix-socket). WebFang runs
-    # rmcp as a SERVER (features server, macros, schemars,
-    # transport-streamable-http-server; no client transport enabled
-    # anywhere in the workspace), so the vulnerable code is not compiled
-    # into this graph. Fixed upstream only in >=3.9.0; staying on 1.x until
-    # a major migration is decided.
-    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0462
-    # Expires: 2027-05-09
-    { id = "RUSTSEC-2026-0462", reason = "rmcp 1.8.0 unbounded buffering is in Streamable HTTP client transports (transport-streamable-http-client-reqwest/-unix-socket); WebFang enables only server features (server, macros, schemars, transport-streamable-http-server), so the vulnerable code is not compiled here; fixed only in >=3.9.0, major migration pending" },
-
     # RUSTSEC-2026-0459 (libsqlite3-sys 0.28.0 / CVE-2026-119375)
     # SQLite <3.54.0 can return uninitialized page-cache bytes when a process
     # opens a DB file together with a sibling WAL of a different page size

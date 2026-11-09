@@ -324,15 +324,16 @@ async fn off_endpoint_posts_consume_no_session_budget() {
 
 /// The cap is charged by rmcp's own allocation trigger, which is broader than a
 /// well-formed `initialize`: rmcp creates the session BEFORE it validates the
-/// message, so a session-less POST of anything else is answered 422 and still
+/// message, so a session-less POST of anything else is answered 400 and still
 /// leaves an entry in the session map. A cap that only counted `initialize`
 /// would leave that vector uncapped.
 ///
 /// Over-counting is the safe direction (shed load, never admit it), and it
-/// never changes a status code the transport already owns: the framework's 422
-/// is still what an under-cap client sees.
+/// never changes a status code the transport already owns: the framework's 400
+/// is still what an under-cap client sees (422 before the rmcp 3.9 upgrade,
+/// #2639; rmcp 3.6.0 #1377 moved the session gate to 400).
 #[tokio::test]
-async fn a_sessionless_non_initialize_post_is_charged_and_still_answered_422() {
+async fn a_sessionless_non_initialize_post_is_charged_and_still_answered_400() {
     let (base_url, _handle) = start_capped_server(1, MAX_WINDOW.as_secs()).await;
     let client = Client::new();
 
@@ -340,12 +341,12 @@ async fn a_sessionless_non_initialize_post_is_charged_and_still_answered_422() {
     let (status, session) =
         post_sessionless(&client, &base_url, &mcp_request("tools/list", json!({}))).await;
     assert_eq!(
-        status, 422,
+        status, 400,
         "the framework owns this answer, the cap must not shadow it: {status}"
     );
     assert!(
         session.is_none(),
-        "a 422 allocates no usable session: {session:?}"
+        "a 400 allocates no usable session: {session:?}"
     );
 
     // It was charged anyway, so the single slot is spent.

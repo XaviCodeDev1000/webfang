@@ -1,9 +1,9 @@
 //! Provenance envelope — the ONLY sanctioned constructors for MCP
-//! `Content::text` responses.
+//! `ContentBlock::text` responses.
 //!
 //! Every tool result that carries (or derives from) third-party text is DATA
 //! addressed to an agent that may itself be prompt-injected. This module owns
-//! the only two sanctioned `Content::text` constructors:
+//! the only two sanctioned `ContentBlock::text` constructors:
 //!
 //! - [`untrusted_text`] — neutralizes the body, enforces a byte cap with a
 //!   visible truncation marker, and wraps it in the UNTRUSTED provenance
@@ -41,7 +41,7 @@
 //! sample), so a remote body cannot predict the `---- END UNTRUSTED <nonce>`
 //! line of the very response it travels in.
 
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 /// Standard tool-description sentence (PI-4): every `#[tool]` description must
 /// carry it. The provenance gate test counts this sentence against the number
@@ -232,7 +232,7 @@ pub fn untrusted_text(origin: &Origin, body: &str) -> CallToolResult {
                 neutral_len,
                 "provenance: untrusted tool response wrapped in envelope"
             );
-            CallToolResult::success(vec![Content::text(text)])
+            CallToolResult::success(vec![ContentBlock::text(text)])
         },
     }
 }
@@ -254,7 +254,7 @@ pub fn local_text(body: &str) -> CallToolResult {
         neutral_len,
         "provenance: local tool response neutralized (no envelope)"
     );
-    CallToolResult::success(vec![Content::text(text)])
+    CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
 /// Neutralize a body that leaves the MCP channel for persistent storage
@@ -290,7 +290,7 @@ pub fn neutralized_error(message: &str) -> CallToolResult {
         neutral_len,
         "provenance: error text neutralized"
     );
-    CallToolResult::error(vec![Content::text(text)])
+    CallToolResult::error(vec![ContentBlock::text(text)])
 }
 
 /// Inverse of the envelope: extract the raw body between the

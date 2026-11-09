@@ -28,7 +28,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use rmcp::handler::server::tool::{ToolCallContext, ToolRoute, ToolRouter};
-use rmcp::model::{CallToolResult, JsonObject, Tool};
+use rmcp::model::{CallToolResponse, JsonObject, Tool};
 use rmcp::ErrorData as McpError;
 
 use super::McpHandler;
@@ -105,6 +105,6 @@ fn probe_tool_attribute() -> Tool {
 /// `.await`).
 fn panic_probe_route<'a>(
     _context: ToolCallContext<'a, McpHandler>,
-) -> Pin<Box<dyn Future<Output = Result<CallToolResult, McpError>> + Send + 'a>> {
+) -> Pin<Box<dyn Future<Output = Result<CallToolResponse, McpError>> + Send + 'a>> {
     Box::pin(async { panic!("{PANIC_PROBE_MESSAGE}") })
 }

@@ -165,14 +165,15 @@ async fn unknown_method_on_live_session_is_jsonrpc_32601() {
 }
 
 /// P5-1 explanation of the reported symptom: the very same method, POSTed
-/// **without** a session id, is answered `422` with plain text by rmcp's stateful
+/// **without** a session id, is answered `400` with plain text by rmcp's stateful
 /// session gate — the request never reaches JSON-RPC at all.
 ///
 /// This is the case the issue's probe exercised. It agrees with the contract
-/// already pinned in `mcp_lifecycle_test.rs::test_no_session_id_returns_422`, so
-/// the two suites must keep moving together.
+/// already pinned in `mcp_lifecycle_test.rs::issue_2639_no_session_id_returns_400`, so
+/// the two suites must keep moving together. The code was 422 before the rmcp
+/// 3.9 upgrade (#2639); rmcp 3.6.0 (#1377) moved the session gate to 400.
 #[tokio::test]
-async fn sessionless_unknown_method_is_framework_422_before_jsonrpc() {
+async fn sessionless_unknown_method_is_framework_400_before_jsonrpc() {
     let (base_url, client, _session_id, _handle) = live_session().await;
 
     let (status, text) = post_rpc(
@@ -184,8 +185,8 @@ async fn sessionless_unknown_method_is_framework_422_before_jsonrpc() {
     .await;
 
     assert_eq!(
-        status, 422,
-        "a session-less non-initialize POST must hit rmcp's session gate (422), got {status}: {text}"
+        status, 400,
+        "a session-less non-initialize POST must hit rmcp's session gate (400), got {status}: {text}"
     );
     assert!(
         !text.contains("-32601"),
@@ -193,8 +194,8 @@ async fn sessionless_unknown_method_is_framework_422_before_jsonrpc() {
          object may appear: {text}"
     );
     assert!(
-        text.contains("initialize"),
-        "the 422 must name what the client actually got wrong (no session), got: {text}"
+        text.contains("Session ID is required"),
+        "the 400 must name what the client actually got wrong (no session), got: {text}"
     );
 }
 

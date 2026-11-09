@@ -357,15 +357,16 @@ async fn test_no_session_id_handled() {
     let status = response.status();
     let body = response.text().await.unwrap();
 
-    // The stateful transport answers this with 422 and nothing else
-    // (`mcp_lifecycle_test.rs::test_no_session_id_returns_422` pins the exact
+    // The stateful transport answers this with 400 and nothing else
+    // (`mcp_lifecycle_test.rs::issue_2639_no_session_id_returns_400` pins the exact
     // status and message; `mcp_transport_contract_test.rs` pins the same gate for
     // other shapes). Accepting "any 4xx" here is what let a contract change slide
-    // through unnoticed in #1294.
+    // through unnoticed in #1294. The code was 422 before the rmcp 3.9 upgrade
+    // (#2639): rmcp 3.6.0 (#1377) moved the session gate to 400.
     assert_eq!(
         status.as_u16(),
-        422,
-        "request without a session id must be 422, got {}: {}",
+        400,
+        "request without a session id must be 400, got {}: {}",
         status,
         &body[..body.len().min(500)]
     );
