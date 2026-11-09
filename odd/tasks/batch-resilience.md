@@ -149,3 +149,10 @@ Flag `--export-checkpoint <N>` (default 0 = desactivado) plumeado en 4 capas: op
 → args/mod.rs → BatchOptions.export_checkpoint. 5 tests batch_flush. Falta WU3-integración: la tarea
 de flush (watch/tick 120s/spawn_blocking/cierre timeout 30s) que LLAMA a flush_spool_tail durante la
 corrida, y WU5 (export_phase incremental + tests S7).
+L16 (2026-11-09, WU3 completo): `run_flush_watch` (FlushWatchParams, 8 args→struct por clippy
+too_many_arguments) cableado en run_batch_crawl vía spawn_flush_watch; tick 120s, flush en
+spawn_blocking, cierre con timeout 30s y spool conservado en fallo (mensaje español con recover).
+spec_command: binding u64 para export_checkpoint. Tests: batch_checkpoint_test (2 behave: N=2 exporta
+todas + sidecar; N=0 sin sidecar), 31 lib + 204 behave verdes. Baselines actualizados; inventory y
+cli-reference regenerados. WU3 DONE (T7). Falta WU4 (resume bajo arranque unificado + S9) y WU5
+(export_phase incremental + tests S7) antes del gate T10.
