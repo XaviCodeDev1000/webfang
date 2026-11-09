@@ -5,7 +5,7 @@
       "minor": "7.4",
       "state": "STABLE",
       "branch": null,
-      "latest": "7.4.0",
+      "latest": "7.4.1",
       "released_at": "2026-11-09T03:27:03+00:00",
       "accepts": [
         "bugfix",
