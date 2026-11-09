@@ -166,3 +166,7 @@ checkpoint>0 para saltar lo ya flusheado (sin doble append). (d) Bugs: el sideca
 cierre limpio → falso orphan (fix: clear_sidecar en cierre + spool vacío = Nothing sin importar el
 sidecar); filter_committed_batch reconstruía el manager SIN el sink → spool vacío (fix: re-adjuntar
 sink+correlation). Gate local GREEN 40/0/2; dup 8317≤8325; snapshots de --help aceptados.
+L18 (2026-11-09, WU5 completo): test de invariantes S7 con SIGKILL sincronizado (3er fetch
+observado por wiremock, nunca el reloj): spool sobrevive, watermark ≤ len(spool), líneas
+pre-watermark parsean, recover exporta exactamente lo que el spool tiene, cero doble descarga.
+Gate local GREEN 40/0/2. T5-T9 DONE. Falta T10: PR slice 2 (Closes #2611).
