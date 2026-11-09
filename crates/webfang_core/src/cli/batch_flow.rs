@@ -22,7 +22,7 @@ use crate::cli::discovery_phase::base_crawler_config_builder;
 use crate::cli::elastic::{build_elastic_ingestion, run_elastic_ingestion};
 use crate::cli::error::CliExit;
 use crate::cli::exit_codes::{batch_exit_code, report_phase};
-use crate::cli::orchestrator::{export_phase, output_vectors_gate, resolve_persistence_root};
+use crate::cli::orchestrator::{output_vectors_gate, resolve_persistence_root};
 use crate::domain;
 use crate::domain::config::ScraperConfig;
 use crate::domain::http_config::HttpClientConfig;
@@ -82,6 +82,9 @@ pub(crate) async fn run_batch(
 
     let extracted = extract_batch_content(&sink, &opts).await;
     discard_batch_spool(&sink).await;
+    // The spool is gone: the sidecar describing it goes with it, so the next
+    // run's acquisition sees a clean pair instead of a stale sidecar.
+    let _ = crate::cli::batch_flush::clear_sidecar(&resolve_persistence_root(&opts)).await;
     let (results, failures) = match extracted {
         Ok(pair) => pair,
         Err(e) => return e,
@@ -116,7 +119,11 @@ pub(crate) async fn run_batch(
     // engine reports blocks through `summary` — so pass 0.
     let _ = report_phase(&results, &failures, 0, opts.verbosity);
 
-    let export_exit = export_phase(
+    // WU4: with `--export-checkpoint` the flush already COMMITTED the
+    // flushed pages into the batch-namespace store; turn the resume gate
+    // on at the clean close so they skip instead of double-appending.
+    let resume_gate = opts.crawl.resume || opts.batch.export_checkpoint > 0;
+    let export_exit = crate::cli::orchestrator::export_phase_with_resume(
         std::sync::Arc::clone(&results),
         &opts,
         state_store.as_deref(),
@@ -126,6 +133,7 @@ pub(crate) async fn run_batch(
         // above, and now the export observes that same one. The batch flow
         // does not mint a token of its own.
         cancel,
+        resume_gate,
     )
     .await;
 
@@ -172,8 +180,34 @@ async fn run_batch_crawl(
     let manager =
         prepare_batch_manager(opts, tls_emulation, sink.clone(), root_correlation).await?;
 
+    // Resume filtered EVERYTHING: nothing to crawl, nothing to flush — a
+    // clean no-op (exit 0), not "no content" 69. The export phase below still
+    // runs over an empty result set and commits nothing new.
+    if manager.url_count() == 0 && opts.crawl.resume {
+        info!("resume: all batch URLs already processed — nothing to crawl");
+        return Ok((BatchManagerSummary::default(), sink));
+    }
+
+    // WU3 (#2611): when `--export-checkpoint <N>` is set, run the flush watch
+    // alongside the crawl so a killed run loses at most the pages captured
+    // since the last checkpoint instead of the whole batch.
+    let flush_done = tokio_util::sync::CancellationToken::new();
+    let flush_task = spawn_flush_watch(opts, sink.clone(), flush_done.clone(), root_correlation);
+
     let summary = manager.process_all_summary_cancellable(cancel).await;
     log_batch_summary(&summary, root_correlation);
+
+    // The crawl is over: stop the watch loop and let its FINAL flush (bounded
+    // by FLUSH_SHUTDOWN_TIMEOUT) run before the sink closes.
+    flush_done.cancel();
+    if let Some(handle) = flush_task {
+        let _ = tokio::time::timeout(
+            crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
+                .saturating_add(std::time::Duration::from_secs(1)),
+            handle,
+        )
+        .await;
+    }
 
     if cancel.is_cancelled() {
         warn!("shutdown requested — exporting the pages captured so far");
@@ -186,6 +220,91 @@ async fn run_batch_crawl(
     flush_batch_sink(&sink).await?;
 
     Ok((summary, sink))
+}
+
+/// Spawn the checkpoint flush watch when `--export-checkpoint` is on, else
+/// return `None`. The sidecar is written at startup (offset 0) with the
+/// spool's identity, so the next run's acquisition can attribute this spool.
+fn spawn_flush_watch(
+    opts: &CrawlOptions,
+    sink: std::sync::Arc<BoundedFileSink>,
+    done: tokio_util::sync::CancellationToken,
+    root_correlation: &domain::CorrelationId,
+) -> Option<tokio::task::JoinHandle<()>> {
+    use crate::application::batch::progress::{
+        spool_first_line_sha256, ExtractionOptions, SpoolIdentity,
+    };
+
+    let checkpoint = opts.batch.export_checkpoint;
+    if checkpoint == 0 {
+        return None;
+    }
+
+    // The flush COMMITTEDs each exported page into the batch-namespace
+    // store so the clean close (and a --resume relaunch) skips it (WU4).
+    let store = match build_batch_resume_store(opts) {
+        Ok(Some(s)) => Some(crate::cli::scrape_flow::record_store_bridge(&*s)),
+        _ => None,
+    };
+
+    let root = resolve_persistence_root(opts);
+    let output_dir = resolve_persistence_root(opts);
+    let spool_path = root.join(BATCH_SPOOL_FILE);
+
+    // Identity of the spool this run is writing: empty at startup (the sink
+    // was just created/truncated), so `first_line_sha256` is None — the
+    // sidecar written now records `None` and is only authoritative until the
+    // first page lands. The flush loop refreshes the identity once the first
+    // line exists (see run_flush_watch's persist_sidecar call after the first
+    // successful flush).
+    let identity = match std::fs::read(&spool_path) {
+        Ok(bytes) => SpoolIdentity {
+            first_line_sha256: spool_first_line_sha256(&bytes),
+        },
+        Err(_) => SpoolIdentity {
+            first_line_sha256: None,
+        },
+    };
+
+    // Persist the startup sidecar (offset 0) synchronously BEFORE the crawl so
+    // a kill in the first seconds still leaves an attributable artifact.
+    let extraction = ExtractionOptions {
+        selector: Some(opts.crawl.selector.clone()),
+        ignore_waf: opts.crawl.ignore_waf,
+    };
+    let startup_sidecar =
+        crate::cli::batch_flush::running_sidecar(&identity, &output_dir, &extraction, 0);
+    let startup_root = root.clone();
+    let _ = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build();
+        if let Ok(rt) = rt {
+            let _ = rt.block_on(crate::cli::batch_flush::write_sidecar(
+                &startup_root,
+                &startup_sidecar,
+            ));
+        }
+    })
+    .join();
+
+    // Supervised: the handle is joined in run_batch_crawl under a timeout
+    // right after the crawl finishes (the watch's own final flush).
+    #[allow(clippy::disallowed_methods)]
+    let handle = tokio::spawn(crate::cli::batch_flush::run_flush_watch(
+        crate::cli::batch_flush::FlushWatchParams {
+            sink,
+            spool_identity: identity,
+            root,
+            output_dir,
+            extraction,
+            checkpoint,
+            correlation: root_correlation.clone(),
+            done,
+            store,
+        },
+    ));
+    Some(handle)
 }
 
 /// Warn when crawl-expansion flags are set on a `--batch` run (#1215).
@@ -242,12 +361,31 @@ async fn prepare_batch_manager(
     let crawler_config = build_batch_crawler_config(opts, tls_emulation, &budget)?;
     let manager = load_batch_manager(opts, crawler_config, &budget)
         .await?
-        .with_content_sink(sink)
+        .with_content_sink(sink.clone())
         .with_correlation(root_correlation.clone());
 
+    // WU4 (#2609/#2611): with `--resume`, drop the URLs whose records are
+    // COMMITTED-proven in the batch store BEFORE any fetch — a relaunch must
+    // not re-download pages the previous run already exported (S7 iv: zero
+    // double downloads). Runs on the blocking pool: the store read takes
+    // the flock and does file I/O.
+    let had_urls_before_resume_filter = manager.url_count() > 0;
+    let manager = if opts.crawl.resume {
+        filter_committed_batch(manager, opts, sink, root_correlation).await?
+    } else {
+        manager
+    };
+
     if manager.url_count() == 0 {
-        error!("No URLs provided for batch processing");
-        return Err(CliExit::UsageError("No URLs provided".into()));
+        if had_urls_before_resume_filter {
+            // Every input URL is already COMMITTED: the batch has nothing to
+            // do, and that is a SUCCESS (exit 0), not a usage error — same
+            // contract as the crawl-classic resume (#2609).
+            info!("resume: all batch URLs already processed, nothing pending");
+        } else {
+            error!("No URLs provided for batch processing");
+            return Err(CliExit::UsageError("No URLs provided".into()));
+        }
     }
 
     info!(
@@ -257,6 +395,75 @@ async fn prepare_batch_manager(
     );
 
     Ok(manager)
+}
+
+/// Filter the batch URL list down to the not-yet-COMMITTED ones (WU4).
+///
+/// Uses the SAME typed gate as the crawl-classic resume
+/// ([`crate::application::resume::filter_committed`]) against the batch
+/// store, so a relaunched `--resume` batch skips exactly the pages a
+/// previous run committed — including pages a checkpoint flush committed
+/// mid-run. All-skipped is NOT an error here: the run exits through the
+/// normal empty-batch path, which reports success with zero work.
+async fn filter_committed_batch(
+    manager: BatchManager,
+    opts: &CrawlOptions,
+    sink: std::sync::Arc<BoundedFileSink>,
+    root_correlation: &domain::CorrelationId,
+) -> Result<BatchManager, CliExit> {
+    let store = match build_batch_resume_store(opts) {
+        Ok(Some(s)) => crate::cli::scrape_flow::record_store_bridge(&*s),
+        _ => return Ok(manager),
+    };
+    let urls = manager.urls();
+    let parsed: Vec<url::Url> = urls
+        .iter()
+        .filter_map(|u| url::Url::parse(u).ok())
+        .collect();
+    let total = parsed.len();
+    let manager_urls = manager.urls();
+    let (pending, _run_id) = {
+        let store = store.clone();
+        let parsed = parsed.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::application::resume::filter_committed(
+                parsed,
+                &store as &dyn crate::domain::persistence::RecordStorePort,
+            )
+        })
+        .await
+        .map_err(|e| CliExit::IoError(format!("No se pudo leer el estado de resume: {e}")))?
+    };
+    let pending_set: std::collections::HashSet<String> =
+        pending.iter().map(|u| u.as_str().to_string()).collect();
+    let kept: Vec<String> = manager_urls
+        .into_iter()
+        .filter(|u| {
+            url::Url::parse(u)
+                .map(|p| pending_set.contains(p.as_str()))
+                .unwrap_or(true)
+        })
+        .collect();
+    let skipped = total.saturating_sub(kept.len());
+    if skipped > 0 {
+        info!(
+            skipped,
+            total, "resume: skipping URLs already COMMITTED in the batch store"
+        );
+    }
+    let budget = crate::domain::budget::BudgetModel::build(
+        opts.budget_overrides,
+        &crate::domain::budget::detector::SystemDetector,
+    );
+    // Rebuild the manager over the pending URLs with a fresh config — the
+    // crawler_config was consumed by load_batch_manager, so rebuild it.
+    let tls_emulation = resolve_batch_tls_emulation(opts)?;
+    let crawler_config = build_batch_crawler_config(opts, tls_emulation, &budget)?;
+    Ok(
+        BatchManager::from_urls(kept, crawler_config, budget.batch().nonzero())
+            .with_content_sink(sink)
+            .with_correlation(root_correlation.clone()),
+    )
 }
 
 /// Flush the capture spool and fail loudly when the batch produced nothing.
@@ -291,129 +498,147 @@ async fn flush_batch_sink(sink: &BoundedFileSink) -> Result<(), CliExit> {
 }
 
 /// File name of the batch capture spool, under the run's persistence root.
-const BATCH_SPOOL_FILE: &str = ".webfang-batch-capture.jsonl";
+pub(crate) const BATCH_SPOOL_FILE: &str = ".webfang-batch-capture.jsonl";
 
-/// Spanish disclosure for a spool left behind by a run that did not finish
-/// (DF-L1, #1615).
+/// Spanish disclosure for a spool quarantined as an orphan (slice 2, #2611).
 ///
-/// The spool holds EVERY page body the run fetched, verbatim. Deleting it is
-/// best-effort, so a crash — SIGKILL, OOM, panic, power loss — leaves it on
-/// disk with nothing scheduled to remove it. That is a data-residue and
-/// disk-usage problem, not just hygiene, and the operator cannot see a
-/// dotfile they were never told existed. So the leftover is named, sized and
-/// located before it goes.
-const STALE_SPOOL_MESSAGE: &str =
-    "Se encontró un archivo temporal de captura de una ejecución anterior que no finalizó. \
-Contiene el texto completo de las páginas descargadas y se ha eliminado. \
-Bórrelo manualmente si persiste.";
+/// The data is NOT deleted — it is renamed aside and the operator is pointed
+/// at `webfang recover`, which can turn it back into `.md` files.
+const ORPHAN_SPOOL_MESSAGE: &str = "Se encontró un archivo temporal de captura de una ejecución anterior que no se puede atribuir a esta corrida (sin sidecar utilizable o con identidad que no coincide). NO se eliminó: se movió a la ruta indicada. Recuperá las páginas con: webfang recover --spool <ruta> -o <dir>";
 
-/// Outcome of the startup sweep for a spool left by a previous run.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StaleSpoolSweep {
-    /// Bytes the leftover occupied on disk, for the disclosure.
-    reclaimed_bytes: u64,
-    /// Whether the file was actually removed. A `false` here means the
-    /// disclosure is still owed to the operator, so it is tracked rather than
-    /// inferred.
-    removed: bool,
-}
+/// Observe the sidecar + spool pair at the given root (the pure decision's
+/// inputs) without mutating anything.
+async fn observe_spool_pair(
+    root: &std::path::Path,
+) -> (
+    crate::application::batch::progress::SidecarState,
+    crate::application::batch::progress::SpoolFileState,
+) {
+    use crate::application::batch::progress::{
+        spool_first_line_sha256, BatchProgressV1, SidecarState, BATCH_PROGRESS_FILE,
+    };
 
-/// Sweep a batch capture spool left behind by a run that never finished
-/// (DF-L1, #1615).
-///
-/// # Why this runs where it does, and not at every startup
-///
-/// The obvious stronger version — sweep on every CLI start — is unsafe. The
-/// spool path is derived from the persistence root, so two concurrent
-/// `webfang` processes sharing an output directory would have the second one
-/// delete the first one's in-flight spool, turning a recoverable run into a
-/// failed one. Distinguishing them needs a lock or an age heuristic, and both
-/// are worse than the problem.
-///
-/// Sweeping in the batch path, immediately before the same path is truncated,
-/// is safe by construction: the file is about to be overwritten regardless, so
-/// the sweep can only reclaim space and disclose what it reclaimed. It cannot
-/// destroy a live run, and it needs no concurrency reasoning at all.
-///
-/// The residue therefore persists until the next BATCH run, which is stated
-/// here rather than left for an operator to discover. A run that crashes and is
-/// never followed by another batch keeps its spool, and the disclosure tells
-/// them exactly which file to delete.
-///
-/// The size is read BEFORE the unlink, because afterwards there is nothing to
-/// measure — and a disclosure that cannot say how much it reclaimed is a much
-/// weaker prompt to go looking.
-async fn sweep_stale_batch_spool(spool_path: &std::path::Path) -> StaleSpoolSweep {
-    let metadata = match tokio::fs::metadata(spool_path).await {
-        Ok(m) => m,
-        // No leftover is the normal case, not a failure worth reporting.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return StaleSpoolSweep {
-                reclaimed_bytes: 0,
-                removed: true,
-            };
-        },
-        Err(e) => {
-            tracing::debug!(
-                error = %e,
-                spool = %spool_path.display(),
-                "stale batch spool could not be inspected"
-            );
-            return StaleSpoolSweep {
-                reclaimed_bytes: 0,
-                removed: false,
-            };
+    let spool_path = root.join(BATCH_SPOOL_FILE);
+    let sidecar_path = root.join(BATCH_PROGRESS_FILE);
+
+    let sidecar = match tokio::fs::read(&sidecar_path).await {
+        Err(_) => SidecarState::Absent,
+        Ok(bytes) => match serde_json::from_slice::<BatchProgressV1>(&bytes) {
+            Ok(parsed) => SidecarState::Parsed(Box::new(parsed)),
+            Err(_) => SidecarState::Unreadable,
         },
     };
 
-    let reclaimed_bytes = metadata.len();
-    let removed = match tokio::fs::remove_file(spool_path).await {
-        Ok(()) => true,
+    let spool = match tokio::fs::read(&spool_path).await {
+        Err(_) => crate::application::batch::progress::SpoolFileState {
+            len_bytes: 0,
+            first_line_sha256: None,
+        },
+        Ok(bytes) => crate::application::batch::progress::SpoolFileState {
+            len_bytes: bytes.len() as u64,
+            first_line_sha256: spool_first_line_sha256(&bytes),
+        },
+    };
+
+    (sidecar, spool)
+}
+
+/// Quarantine a leftover spool whose data cannot be attributed (L5: a sidecar
+/// that does not describe the spool must not choose its destination).
+///
+/// Renames the spool to a timestamped sibling — NEVER deletes — and discloses
+/// the path, size and the recover remedy in Spanish. Returns where the orphan
+/// went so the acquisition outcome can carry it.
+async fn quarantine_orphan_spool(
+    spool_path: &std::path::Path,
+) -> Option<(std::path::PathBuf, u64)> {
+    use crate::application::batch::progress::orphan_spool_path;
+
+    let metadata = match tokio::fs::metadata(spool_path).await {
+        Ok(m) => m,
+        // Nothing on disk: no orphan to quarantine.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
         Err(e) => {
-            // The operator still has the file, so the disclosure is still owed.
-            // This is a `warn` and not a `debug` for exactly that reason: the
-            // old code logged removal failure at debug level, which is how a
-            // residue nobody was told about stayed invisible.
             tracing::warn!(
                 error = %e,
                 spool = %spool_path.display(),
-                user_message = STALE_SPOOL_MESSAGE,
-                "a batch capture spool from an unfinished run could not be removed"
+                "orphan spool could not be inspected before quarantine"
             );
-            false
+            return None;
         },
     };
+    let orphan_bytes = metadata.len();
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let orphan_path = orphan_spool_path(spool_path, now_secs);
 
-    if removed {
-        // Disclosed in Spanish for the operator; the structured fields stay
-        // English so the event is queryable in the JSONL trace.
-        tracing::warn!(
-            spool = %spool_path.display(),
-            reclaimed_bytes,
-            user_message = STALE_SPOOL_MESSAGE,
-            "removed a batch capture spool left behind by an unfinished run"
-        );
-    }
-
-    StaleSpoolSweep {
-        reclaimed_bytes,
-        removed,
+    match tokio::fs::rename(spool_path, &orphan_path).await {
+        Ok(()) => {
+            tracing::warn!(
+                spool = %spool_path.display(),
+                orphan = %orphan_path.display(),
+                orphan_bytes,
+                user_message = ORPHAN_SPOOL_MESSAGE,
+                "quarantined an unattributable batch capture spool"
+            );
+            Some((orphan_path, orphan_bytes))
+        },
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                spool = %spool_path.display(),
+                user_message = ORPHAN_SPOOL_MESSAGE,
+                "an unattributable batch capture spool could not be moved aside; it stays in place"
+            );
+            None
+        },
     }
 }
 
-/// Create the disk-backed capture sink for a batch run.
+/// Create the disk-backed capture sink for a batch run through the UNIFIED
+/// acquisition path (slice 2, WU1): observe → decide → act on the SAME data
+/// the pure table saw, THEN hand a fresh sink its spool path.
 ///
-/// The spool lives under the run's persistence root so it shares the run's
-/// storage budget (and lands inside the vault when `--quick-save` or an
-/// explicit `--vault` redirects the base, #638/#762) and is cleaned up by
-/// [`discard_batch_spool`] once extraction is done — or, if the run never
-/// finishes, by [`sweep_stale_batch_spool`] on the next batch run (DF-L1).
+/// Order pinned by the design (L7): spool identity and the sidecar are read
+/// BEFORE anything truncates; the decision is the pure [`decide_sweep`]; an
+/// orphan is renamed aside (never deleted, never salvage-able by this run)
+/// and the new run gets a fresh spool at the original path. Salvage itself
+/// belongs to the flush seam (WU3) — acquisition only records what was
+/// decided so the flush can act on it.
 async fn build_batch_sink(opts: &CrawlOptions) -> Result<BoundedFileSink, CliExit> {
-    let spool_path = resolve_persistence_root(opts).join(BATCH_SPOOL_FILE);
-    // Before anything writes: reclaim and disclose whatever an unfinished run
-    // left. `BoundedFileSink::new` truncates this same path immediately after,
-    // so the sweep is a disclosure of residue rather than a deletion decision.
-    sweep_stale_batch_spool(&spool_path).await;
+    use crate::application::batch::progress::decide_sweep;
+
+    let root = resolve_persistence_root(opts);
+    let spool_path = root.join(BATCH_SPOOL_FILE);
+
+    let (sidecar_state, spool_state) = observe_spool_pair(&root).await;
+    match decide_sweep(&sidecar_state, &spool_state) {
+        crate::application::batch::progress::SweepDecision::OrphanSpool => {
+            // Data without a usable description: quarantine and start fresh.
+            let quarantined = quarantine_orphan_spool(&spool_path).await;
+            if quarantined.is_none() && spool_state.len_bytes > 0 {
+                // The rename failed and the residue still sits in the spool
+                // path. This run must NOT truncate it (that would destroy
+                // unattributable data): fail the run loudly instead.
+                return Err(CliExit::IoError(format!(
+                    "No se pudo apartar el spool huérfano en {}. Bórralo o recupéralo con \
+                     webfang recover antes de relanzar el batch.",
+                    spool_path.display()
+                )));
+            }
+        },
+        crate::application::batch::progress::SweepDecision::SalvageFromOffset { .. } => {
+            // WU3 wires the flush-side salvage; acquisition records the
+            // decision in the structured log so it is queryable now.
+            tracing::info!(
+                spool = %spool_path.display(),
+                "salvageable spool detected — flush-side salvage pending WU3"
+            );
+        },
+        crate::application::batch::progress::SweepDecision::Nothing => {},
+    }
+
     // One buffered page per concurrent crawl, plus headroom, keeps the writer
     // from becoming the bottleneck without unbounding memory. The bound derives
     // from the budget model's Operation.batch tier (task 2.5c).
@@ -437,9 +662,9 @@ async fn build_batch_sink(opts: &CrawlOptions) -> Result<BoundedFileSink, CliExi
 /// Remove the batch capture spool once its pages have been extracted.
 ///
 /// Best-effort: a leftover spool is noise, not a failure of the run. If THIS
-/// removal fails, the residue is not invisible either — [`sweep_stale_batch_spool`]
-/// discloses any survivor on the next batch run, which is the same remedy the
-/// crash case gets.
+/// removal fails, the residue is not invisible either — the next batch run's
+/// acquisition path discloses or quarantines any survivor, which is the same
+/// remedy the crash case gets.
 async fn discard_batch_spool(sink: &BoundedFileSink) {
     if let Err(e) = tokio::fs::remove_file(sink.spool_path()).await {
         tracing::debug!(
@@ -452,15 +677,29 @@ async fn discard_batch_spool(sink: &BoundedFileSink) {
 
 /// Build the resume state store for `--resume` (#637) so `export_phase`
 /// can mark each already-crawled URL as processed. Returns `None` when
-/// `--resume` is off.
+/// neither `--resume` nor `--export-checkpoint` is on.
 ///
-/// The factory is lazy and infallible, so this always succeeds when resume
-/// is on; the `Result` keeps the `CliExit::IoError` route for a future
+/// # Namespace (design L3, WU4)
+///
+/// With `--export-checkpoint` active the store lives under
+/// `batch-<hash8(output_dir)>` — a COMMITTED must mean "exported to THIS
+/// output dir", so two batches targeting different output dirs never skip
+/// against each other's records. Plain `--resume` (no checkpoint) keeps
+/// the legacy host-derived domain so existing state files keep working
+/// (#2609 verified against that layout).
+///
+/// The factory is lazy and infallible, so this always succeeds when either
+/// flag is on; the `Result` keeps the `CliExit::IoError` route for a future
 /// eager factory.
 fn build_batch_resume_store(
     opts: &CrawlOptions,
 ) -> Result<Option<std::sync::Arc<dyn StateStorePort>>, CliExit> {
-    if !opts.crawl.resume {
+    let checkpoint = opts.batch.export_checkpoint;
+    // WU4: the checkpoint flush COMMITTEDs into the batch-namespace store even
+    // without --resume, so the clean close can skip what the flush already
+    // exported (no double append). Plain --resume (no checkpoint) keeps the
+    // legacy host-derived domain for existing state files (#2609).
+    if !opts.crawl.resume && checkpoint == 0 {
         return Ok(None);
     }
     let state_dir = opts
@@ -468,7 +707,11 @@ fn build_batch_resume_store(
         .state_dir
         .clone()
         .unwrap_or_else(crate::cli::scrape_flow::resolve_default_state_dir);
-    let domain = opts.url.host_str().unwrap_or("batch").to_string();
+    let domain = if checkpoint > 0 {
+        crate::cli::batch_flush::batch_namespace(&resolve_persistence_root(opts))
+    } else {
+        opts.url.host_str().unwrap_or("batch").to_string()
+    };
     Ok(Some(crate::application::container::build_state_store(
         state_dir, &domain,
     )))
@@ -662,7 +905,10 @@ async fn load_batch_manager_from_stdin(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_batch_crawler_config, run_batch};
+    use super::{
+        build_batch_crawler_config, build_batch_sink, observe_spool_pair, quarantine_orphan_spool,
+        run_batch, BATCH_SPOOL_FILE,
+    };
     use crate::application::crawl_options::CrawlOptions;
     use crate::cli::error::CliExit;
     use crate::CrawlerConfig;
@@ -780,184 +1026,194 @@ mod tests {
         );
     }
 
-    /// Capture-subscriber harness, so the sweep's DISCLOSURE can be read rather
-    /// than reviewed (DF-L1, #1615).
-    #[derive(Clone)]
-    struct SpoolCaptureWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for SpoolCaptureWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .expect("capture buffer lock is never poisoned")
-                .extend_from_slice(buf);
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// Run an async closure under an in-memory `tracing` subscriber and return
-    /// what it logged.
-    async fn capture_logs<F, Fut>(f: F) -> (String, ())
+    /// Run an async closure under the SHARED capturing subscriber
+    /// ([`crate::infrastructure::observability::test_log_capture::LogBuffer`] —
+    /// the same helper every other test module uses, so the capture writer is
+    /// written once in the crate) and return what it logged plus the value.
+    async fn capture_logs<T, F, Fut>(f: F) -> (String, T)
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ()>,
+        Fut: std::future::Future<Output = T>,
     {
-        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let subscriber = {
-            let sink = std::sync::Arc::clone(&buf);
-            tracing_subscriber::fmt()
-                .with_writer(move || SpoolCaptureWriter(std::sync::Arc::clone(&sink)))
-                .with_ansi(false)
-                .finish()
+        use crate::infrastructure::observability::test_log_capture::LogBuffer;
+        let (buffer, _guard) = LogBuffer::capture();
+        let value = f().await;
+        (buffer.text(), value)
+    }
+
+    // --- Slice 2 (WU1): the unified spool acquisition (observe → decide → act).
+
+    use crate::application::batch::progress::{
+        BatchProgressV1, ExtractionOptions, SidecarState, SpoolIdentity, BATCH_PROGRESS_FILE,
+    };
+
+    /// Seed a sidecar describing the CURRENT first line of the spool at `dir`.
+    async fn seed_matching_sidecar(dir: &tempfile::TempDir, watermark: u64) {
+        let spool_bytes = tokio::fs::read(dir.path().join(BATCH_SPOOL_FILE))
+            .await
+            .expect("read spool");
+        let first_line = crate::application::batch::progress::spool_first_line_sha256(&spool_bytes);
+        let sidecar = BatchProgressV1 {
+            version: 1,
+            spool: SpoolIdentity {
+                first_line_sha256: first_line,
+            },
+            output_dir: dir.path().join("out"),
+            extraction_options: ExtractionOptions {
+                selector: Some("body".to_string()),
+                ignore_waf: false,
+            },
+            watermark_bytes: watermark,
         };
-        // Thread-local default: the sweep runs on this thread, and installing a
-        // global subscriber here would leak into every other test in the crate.
-        let _guard = tracing::subscriber::set_default(subscriber);
-        f().await;
-        let text = String::from_utf8(
-            buf.lock()
-                .expect("capture buffer lock is never poisoned")
-                .clone(),
-        )
-        .expect("tracing writes UTF-8");
-        (text, ())
-    }
-
-    /// Run the sweep and return BOTH its verdict and what it logged.
-    async fn sweep_capturing(spool: &std::path::Path) -> (super::StaleSpoolSweep, String) {
-        let result = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let sink = std::sync::Arc::clone(&result);
-        let path = spool.to_path_buf();
-        let (logs, _) = capture_logs(|| async move {
-            let outcome = super::sweep_stale_batch_spool(&path).await;
-            *sink.lock().expect("result lock is never poisoned") = Some(outcome);
-        })
-        .await;
-        let outcome = result
-            .lock()
-            .expect("result lock is never poisoned")
-            .take()
-            .expect("the closure always records its outcome");
-        (outcome, logs)
-    }
-
-    /// #1615 DF-L1 — a spool left by a run that never finished is reclaimed AND
-    /// disclosed. The residue is the point: it holds every page body the dead
-    /// run fetched, so a fix that deleted it silently would still leave the
-    /// operator unable to know their disk grew.
-    #[tokio::test]
-    async fn a_leftover_spool_is_reclaimed_and_disclosed() {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let spool = dir.path().join(super::BATCH_SPOOL_FILE);
-        // Stand in for the dead run's spool: identifiable page bodies.
         tokio::fs::write(
-            &spool,
-            "{\"url\":\"https://a.example\",\"body\":\"PAGE\"}\n".repeat(64),
+            dir.path().join(BATCH_PROGRESS_FILE),
+            serde_json::to_vec(&sidecar).expect("serialize sidecar"),
         )
         .await
-        .expect("seed a leftover spool");
-        let seeded_len = tokio::fs::metadata(&spool).await.expect("size").len();
-        assert!(seeded_len > 0, "the seeded leftover must not be empty");
-
-        let (sweep, logs) = sweep_capturing(&spool).await;
-
-        assert!(sweep.removed, "the leftover must be removed");
-        assert_eq!(
-            sweep.reclaimed_bytes, seeded_len,
-            "the disclosure must size the residue it reclaimed"
-        );
-        assert!(!spool.exists(), "the spool must be gone from disk");
-        assert!(
-            logs.contains(super::STALE_SPOOL_MESSAGE),
-            "the operator must be told their disk held page bodies: {logs}"
-        );
-
-        // And the normal case is silent: no leftover must not cry wolf.
-        let (_quiet_sweep, quiet_logs) = sweep_capturing(&spool).await;
-        assert!(
-            !quiet_logs.contains(super::STALE_SPOOL_MESSAGE),
-            "a run with no leftover must not claim one: {quiet_logs}"
-        );
+        .expect("write sidecar");
     }
 
-    /// The Spanish copy is the operator-facing half and is asserted as text,
-    /// because a disclosure nobody can read is not a disclosure. The structured
-    /// fields stay English so the event is greppable and queryable.
+    /// `observe_spool_pair` must feed the pure table EXACTLY what is on disk:
+    /// a matching sidecar parses, a corrupt one is Unreadable, and the spool
+    /// identity is the first-line hash.
     #[tokio::test]
-    async fn the_disclosure_names_the_cause_and_the_size() {
+    async fn observe_reads_sidecar_state_and_spool_identity() {
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let spool = dir.path().join(super::BATCH_SPOOL_FILE);
-        tokio::fs::write(&spool, b"residue").await.expect("seed");
+        tokio::fs::write(dir.path().join(BATCH_SPOOL_FILE), b"{\"url\":\"a\"}\nrest")
+            .await
+            .expect("seed spool");
 
-        let (_sweep, logs) = sweep_capturing(&spool).await;
-
-        for fragment in [
-            "no finalizó",
-            "texto completo de las páginas",
-            "se ha eliminado",
-        ] {
-            assert!(
-                logs.contains(fragment),
-                "the Spanish disclosure must say {fragment:?}: {logs}"
-            );
-        }
+        // Absent sidecar.
+        let (sidecar, spool) = observe_spool_pair(dir.path()).await;
+        assert_eq!(sidecar, SidecarState::Absent);
         assert!(
-            logs.contains("unfinished run"),
-            "the event must be greppable in English: {logs}"
+            spool.first_line_sha256.is_some(),
+            "a full line has identity"
         );
+        assert_eq!(
+            spool.len_bytes,
+            b"{\"url\":\"a\"}\nrest".len() as u64,
+            "the observed length is the real file length"
+        );
+
+        // Corrupt sidecar → Unreadable (NOT absent — the distinction is the
+        // whole point of the table).
+        tokio::fs::write(dir.path().join(BATCH_PROGRESS_FILE), b"{broken")
+            .await
+            .expect("seed bad sidecar");
+        let (sidecar, _) = observe_spool_pair(dir.path()).await;
+        assert_eq!(sidecar, SidecarState::Unreadable);
+
+        // Valid sidecar → Parsed with its content.
+        seed_matching_sidecar(&dir, 7).await;
+        let (sidecar, _) = observe_spool_pair(dir.path()).await;
         assert!(
-            logs.contains("reclaimed_bytes="),
-            "the reclaimed size must be a queryable field: {logs}"
+            matches!(sidecar, SidecarState::Parsed(_)),
+            "got {sidecar:?}"
         );
     }
 
-    /// The one case the sweep must NOT absorb silently: a file it could not
-    /// remove. The operator still has the residue, so the disclosure is still
-    /// owed — and the pre-existing removal path logged that at `debug`, which is
-    /// how a residue nobody was told about stayed invisible.
+    /// An orphan spool is renamed aside — never deleted — and the disclosure
+    /// names the path, the size and the recover remedy in Spanish.
+    #[tokio::test]
+    async fn an_unattributable_spool_is_quarantined_and_disclosed() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let spool = dir.path().join(BATCH_SPOOL_FILE);
+        let body = "{\"url\":\"https://a.example\",\"body\":\"PAGE\"}\n".repeat(8);
+        tokio::fs::write(&spool, &body)
+            .await
+            .expect("seed leftover");
+        // Unreadable sidecar + non-empty spool = OrphanSpool by the table.
+        tokio::fs::write(dir.path().join(BATCH_PROGRESS_FILE), b"{broken")
+            .await
+            .expect("seed bad sidecar");
+
+        let (logs, orphan) = capture_logs(|| {
+            let spool = spool.clone();
+            async move { quarantine_orphan_spool(&spool).await }
+        })
+        .await;
+
+        let (orphan_path, orphan_bytes) = orphan.expect("the orphan must be moved aside");
+        assert!(!spool.exists(), "the original path is free for the new run");
+        assert!(orphan_path.exists(), "the data survives under the new name");
+        assert_eq!(
+            orphan_bytes,
+            body.len() as u64,
+            "the disclosure must size the residue"
+        );
+        assert_eq!(
+            orphan_path.parent(),
+            spool.parent(),
+            "the orphan stays in the same directory"
+        );
+        assert!(orphan_path.to_string_lossy().contains(".orphaned"));
+        assert!(logs.contains("no se puede atribuir"), "{logs}");
+        assert!(logs.contains("NO se eliminó"), "{logs}");
+        assert!(logs.contains("webfang recover"), "{logs}");
+    }
+
+    /// A missing spool is not an orphan: the acquisition is a no-op.
+    #[tokio::test]
+    async fn a_missing_spool_quarantines_nothing() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let orphan = quarantine_orphan_spool(&dir.path().join(BATCH_SPOOL_FILE)).await;
+        assert!(orphan.is_none(), "nothing on disk, nothing to quarantine");
+    }
+
+    /// The full acquisition on a CLEAN root (no spool, no sidecar) must let a
+    /// fresh run start: the sink is built and the spool path is the original.
+    #[tokio::test]
+    async fn acquisition_on_a_clean_root_starts_a_fresh_sink() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let mut opts = CrawlOptions::default();
+        opts.export.output_dir = dir.path().to_path_buf();
+
+        let sink = build_batch_sink(&opts).await.expect("sink on clean root");
+        assert_eq!(
+            sink.spool_path(),
+            dir.path().join(BATCH_SPOOL_FILE),
+            "the spool lands at the canonical path"
+        );
+    }
+
+    /// An orphan whose rename fails must ABORT the run rather than truncate:
+    /// truncating the spool path would destroy unattributable data (L5).
     #[tokio::test]
     #[cfg(unix)]
-    async fn a_spool_that_cannot_be_removed_is_still_disclosed() {
+    async fn an_unmovable_orphan_fails_the_run_instead_of_truncating() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let spool = dir.path().join(super::BATCH_SPOOL_FILE);
-        tokio::fs::write(&spool, b"residue").await.expect("seed");
-        // Make the CONTAINING directory read-only: the file itself stays
-        // writable, so the failure is the unlink rather than the inspection.
-        let mut perms = std::fs::metadata(dir.path())
-            .expect("dir meta")
-            .permissions();
+        let spool = dir.path().join(BATCH_SPOOL_FILE);
+        tokio::fs::write(&spool, b"unattributable data")
+            .await
+            .expect("seed");
+        tokio::fs::write(dir.path().join(BATCH_PROGRESS_FILE), b"{broken")
+            .await
+            .expect("bad sidecar");
+        // Read-only directory: the rename out must fail.
+        let mut perms = std::fs::metadata(dir.path()).expect("dir").permissions();
         perms.set_mode(0o500);
-        std::fs::set_permissions(dir.path(), perms).expect("chmod dir");
+        std::fs::set_permissions(dir.path(), perms).expect("chmod");
 
-        let (sweep, logs) = sweep_capturing(&spool).await;
+        let mut opts = CrawlOptions::default();
+        opts.export.output_dir = dir.path().to_path_buf();
+        let exit = build_batch_sink(&opts).await;
 
-        // Restore before asserting, so a failure does not leave a locked dir.
-        let mut perms = std::fs::metadata(dir.path())
-            .expect("dir meta")
-            .permissions();
+        // Restore before asserting so a failure never leaves a locked dir.
+        let mut perms = std::fs::metadata(dir.path()).expect("dir").permissions();
         perms.set_mode(0o700);
-        std::fs::set_permissions(dir.path(), perms).expect("restore dir");
+        std::fs::set_permissions(dir.path(), perms).expect("restore");
 
         assert!(
-            !sweep.removed,
-            "an unremovable spool must be reported as NOT removed"
+            matches!(exit, Err(CliExit::IoError(_))),
+            "an unmovable orphan must fail the run, got {exit:?}"
         );
-        assert!(
-            spool.exists(),
-            "the residue is still on disk, which is why the disclosure is owed"
-        );
-        assert!(
-            logs.contains("could not be removed"),
-            "a failed removal must be a warn, not a debug nobody sees: {logs}"
-        );
-        assert!(
-            logs.contains(super::STALE_SPOOL_MESSAGE),
-            "the operator must still be told the residue is there: {logs}"
+        let kept = tokio::fs::read(&spool).await.expect("spool intact");
+        assert_eq!(
+            kept, b"unattributable data",
+            "the unattributable data must survive byte for byte"
         );
     }
 }

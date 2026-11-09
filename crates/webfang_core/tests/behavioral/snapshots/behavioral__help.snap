@@ -401,6 +401,12 @@ Batch Processing:
           
           [env: WEBFANG_BATCH_CONCURRENCY=]
 
+      --export-checkpoint <EXPORT_CHECKPOINT>
+          Flush captured pages to markdown every N pages during a batch (0 = only at the clean close)
+          
+          [env: WEBFANG_EXPORT_CHECKPOINT=]
+          [default: 0]
+
 Item Pipeline:
       --pipeline
           Enable item pipeline processing (validate → clean → output)

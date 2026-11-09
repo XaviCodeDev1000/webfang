@@ -701,7 +701,7 @@ mod tests {
         }
         assert_eq!(
             export::GROUP.len(),
-            14,
+            15,
             "export group must cover all ExportArgs fields"
         );
     }
@@ -1088,7 +1088,7 @@ mod tests {
     fn schema_object_aggregates_the_whole_group_by_id() {
         let obj = schema_object(export::GROUP);
         let entries = obj.as_object().expect("aggregate must be an object");
-        assert_eq!(entries.len(), 14);
+        assert_eq!(entries.len(), 15);
         for opt in export::GROUP {
             assert!(
                 entries.contains_key(opt.id),

@@ -111,3 +111,73 @@ lo reconstruyó en 42 s y el gate corrió con `PATH=/home/xavi/.cargo/bin:$PATH`
 FAIL=0 SKIP=2, GREEN; cobertura leída (code lane: test-core partial y doc-quality partial son las
 excepciones conocidas). Tests focalizados: spool_export 5/5, bounded_sink 13/13, image_rewrite 6/6,
 recover_test 24/24, provider_id 3/3. PR slice 1 pendiente de autorización de push/publicación.
+L11 (2026-11-09, cierre #2609 + arranque slice 2): #2609 cerrado con decisión de producto Camino 1
+(persistir estado) — verificación experimental del 2026-11-09: `--batch-file --resume --state-dir`
+escribe records COMMITTED en el state-dir y el relanzamiento salta las URLs (no re-descarga, no
+re-exporta); `build_batch_resume_store` ya existía en main (rollup 20b27990). Camino 2 (exit 78)
+descartado. Slice 2 (T5-T10) arranca desde main a875d9f5 (PR #2631 mergeado) en worktree
+`webfang-worktrees/feat-batch-resilience`. Nota: el doc de especificación ya no incluye WU4 como
+"implementar resume de cero" — el resume batch ya funciona en main; WU4 se reencuadra a: preservar
+el resume existente (build_batch_resume_store → CommitSession) bajo el arranque unificado del
+sidecar, y comprobar S9 (content_hash del COMMITTED de flush) contra `CommitSession::decide`.
+L12 (2026-11-09, WU1 implementado — desvío declarado): `application/batch/progress.rs` (2e149d40):
+BatchProgressV1 + SpoolIdentity + ExtractionOptions (selector es String en ScraperConfig, no Option —
+desvío del plan v7 que asumía Option; se registra `Some(selector)` siempre) + SidecarState/LockState +
+decide_sweep puro con la tabla colapsada + `spool_first_line_sha256` (hash de la primera línea con
+`\n`; cola rota sin `\n` = sin identidad) + `orphan_spool_path` timestamped + 13 tests unit. El clamp
+de watermark a `spool.len_bytes` está dentro de decide_sweep (aprobado: offset>len solo por
+manipulación externa). Pendiente para WU1 completo: adquisición unificada del fd (open create+append →
+try_lock → decide → mismo fd al sink) que sustituye a `sweep_stale_batch_spool`; se hace en el commit
+siguiente junto con la integración CLI (WU1b).
+L13 (2026-11-09, WU1b + corte de slice parcial): 3890d822 — adquisición unificada en `build_batch_sink`
+(observe_spool_pair → decide_sweep → actuar sobre lo observado), orfan-quarantine con rename
+timestamped (nunca borrar; rename fallido = run aborta con IoError, NUNCA trunca), disclosure español
+apuntando a recover; el sweep viejo (`sweep_stale_batch_spool`, `StaleSpoolSweep`,
+`STALE_SPOOL_MESSAGE`) y sus 4 tests fueron consumidos por el camino nuevo (sin dead_code). WU1
+COMPLETO (T5). Slice acumulado 962 líneas > ~400 del corte: el flush por página (WU2) abre el
+siguiente tramo de commits; batch_flow baseline del ratchet 963→1013 (crecimiento del orfan-camino).
+L14 (2026-11-09, WU2 completo): 9a6e508e — `BoundedFileSink::durable_bytes` (Arc<AtomicU64>): el writer
+flusha por página (canal, backlog y recv) y publica la longitud real del archivo (metadata().len())
+con Ordering Release/Acquire; watermark en frontera de registro, monótono, 0 al arrancar; contrato
+best-effort documentado (flush ≠ fsync). bounded_sink baseline 961→1103. 16/16 tests bounded_sink.
+L15 (2026-11-09, WU3 core — flag + flush library): `cli/batch_flush.rs` — flush_spool_tail (tail
+conversion via convert_spool + save_results en spawn_blocking; SpoolRead conserva el watermark del
+llamador, OutputWrite también: retry re-exporta la misma cola atómicamente por archivo),
+running/write/read/clear_sidecar (temp+rename), batch_namespace = batch-<hash8(output_dir)>.
+Flag `--export-checkpoint <N>` (default 0 = desactivado) plumeado en 4 capas: options_spec/export.rs
+(BATCH_CONCURRENCY→EXPORT_CHECKPOINT en GROUP, DefaultValue::Uint(0), uint_unbounded) → args/export.rs
+→ args/mod.rs → BatchOptions.export_checkpoint. 5 tests batch_flush. Falta WU3-integración: la tarea
+de flush (watch/tick 120s/spawn_blocking/cierre timeout 30s) que LLAMA a flush_spool_tail durante la
+corrida, y WU5 (export_phase incremental + tests S7).
+L16 (2026-11-09, WU3 completo): `run_flush_watch` (FlushWatchParams, 8 args→struct por clippy
+too_many_arguments) cableado en run_batch_crawl vía spawn_flush_watch; tick 120s, flush en
+spawn_blocking, cierre con timeout 30s y spool conservado en fallo (mensaje español con recover).
+spec_command: binding u64 para export_checkpoint. Tests: batch_checkpoint_test (2 behave: N=2 exporta
+todas + sidecar; N=0 sin sidecar), 31 lib + 204 behave verdes. Baselines actualizados; inventory y
+cli-reference regenerados. WU3 DONE (T7). Falta WU4 (resume bajo arranque unificado + S9) y WU5
+(export_phase incremental + tests S7) antes del gate T10.
+L17 (2026-11-09, WU4 completo + bugs reales encontrados y corregidos):
+(a) filter_committed_batch aplica el gate tipado ANTES del fetch (S7 iv verificado: 2 URLs × 2
+corridas = 2 hits HTTP totales); all-filtered = exit 0 no-op. (b) El flush commitea cada página en el
+store namespace batch-<hash8(output_dir)>; S9 RESUELTA contra CommitSession::decide: content_hash =
+sha256(content) (igual que checksum_sha256 del export.jsonl), NO los bytes del .md — la asunción del
+plan estaba equivocada y quedó corregida aquí. (c) El cierre limpio prende el gate resume cuando
+checkpoint>0 para saltar lo ya flusheado (sin doble append). (d) Bugs: el sidecar quedaba vivo tras el
+cierre limpio → falso orphan (fix: clear_sidecar en cierre + spool vacío = Nothing sin importar el
+sidecar); filter_committed_batch reconstruía el manager SIN el sink → spool vacío (fix: re-adjuntar
+sink+correlation). Gate local GREEN 40/0/2; dup 8317≤8325; snapshots de --help aceptados.
+L18 (2026-11-09, WU5 completo): test de invariantes S7 con SIGKILL sincronizado (3er fetch
+observado por wiremock, nunca el reloj): spool sobrevive, watermark ≤ len(spool), líneas
+pre-watermark parsean, recover exporta exactamente lo que el spool tiene, cero doble descarga.
+Gate local GREEN 40/0/2. T5-T9 DONE. Falta T10: PR slice 2 (Closes #2611).
+L19 (2026-11-09, T10 — PR slice 2 abierto): PR #2643 (feat/batch-resilience → main,
+`Closes #2611`, label type:feature, mergeable). CI corriendo; primer run falló en
+repo-guards por el golden set intra-crate (1836 vs 1768 sites) — refrescado con
+scripts/refresh_real_tree_golden.sh en 7f4999fe y pusheado. Pendiente: merge cuando
+quede verde (decisión del maintainer).
+L20 (2026-11-09, T10 — PR #2643 verde): tras el fix del golden set intra-crate
+(7f4999fe) y la de-duplicación del harness de logs (8a47dc6c, LogBuffer compartido),
+todos los workflows del PR están en success (CI, PR Validation, Mutation Testing,
+Docs); mergeStateStatus CLEAN, mergeable MERGEABLE, label type:feature, Closes #2611.
+El job "Artifact guards" queda en estado fantasma pending a nivel check-rollup aun
+con run success — el merge es decisión del maintainer: scripts/merge-when-green.sh 2643 --queue.

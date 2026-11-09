@@ -173,6 +173,15 @@
       "tier": "ai_model_semantic"
     },
     {
+      "path": "crates/webfang_core/tests/batch_checkpoint_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 4,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/batch_delay_pacing.rs",
       "crate": "webfang_core",
       "area": "core",

@@ -133,6 +133,10 @@ pub struct BatchOptions {
     /// Maximum concurrent URLs in batch mode (explicit operator value;
     /// `None` = derived from the budget model).
     pub concurrency: Option<usize>,
+    /// Flush the capture spool to markdown every N pages (WU3, #2611).
+    /// `0` = disabled — pages convert only at the clean close (slice-1
+    /// behavior, the historical default).
+    pub export_checkpoint: u64,
 }
 
 // ============================================================================

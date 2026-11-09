@@ -165,6 +165,7 @@ fn args_with_all_fields_set() -> Args {
             batch: true,
             batch_file: Some(std::path::PathBuf::from("/tmp/urls.txt")),
             batch_concurrency: Some(8),
+            export_checkpoint: 0,
             pipeline: true,
             pipeline_output: webfang_core::domain::config::PipelineOutputFormat::None,
             retention_days: 30,

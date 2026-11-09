@@ -126,7 +126,7 @@ pub(crate) struct CommitSession<'a> {
 }
 
 impl<'a> CommitSession<'a> {
-    fn open(ctx: Option<&'a ResumeContext<'a>>, output_path: &std::path::Path) -> Self {
+    pub(crate) fn open(ctx: Option<&'a ResumeContext<'a>>, output_path: &std::path::Path) -> Self {
         let records = ctx.map_or_else(DomainRecords::new, |c| load_preserving(c.store));
         let (hash_index, report) = build_content_hash_index(output_path);
         Self {
@@ -341,7 +341,7 @@ impl<'a> CommitSession<'a> {
     }
 
     /// D3 steps 2–5 for one successfully flushed item.
-    fn commit_item(
+    pub(crate) fn commit_item(
         &mut self,
         url: &str,
         content_hash: String,
