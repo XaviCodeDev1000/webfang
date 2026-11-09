@@ -109,6 +109,14 @@ fn selector_fragment_markdown_table() {
             expected: "| Name | Value |\n| ---- | ----- |\n| Foo  | 42    |",
         },
         MdCase {
+            name: "synthesize_header_with_caption",
+            html: "<table><caption>Tarifas</caption><tr><td>a</td><td>b</td></tr></table>",
+            selector: "table",
+            // #2602: the synthetic <thead> goes after <caption>, and the
+            // converter still builds a real GFM table for that order.
+            expected: "Tarifas\n| Column 1 | Column 2 |\n| -------- | -------- |\n| a        | b        |",
+        },
+        MdCase {
             name: "characterize_li_orphan_bullet",
             html: "<li>one</li><li>two</li>",
             selector: "li",
