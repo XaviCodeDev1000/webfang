@@ -309,9 +309,9 @@ application/crawler/engine.rs	46	use	crate::domain::CorrelationId
 application/crawler/engine.rs	46	use	crate::domain::CrawlerConfig
 application/crawler/engine.rs	46	use	crate::domain::JsStrategy
 application/crawler/engine.rs	46	use	crate::domain::post_load_wait::PostLoadWait
-application/crawler/engine.rs	346	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
-application/crawler/engine.rs	386	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
-application/crawler/engine.rs	388	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
+application/crawler/engine.rs	348	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
+application/crawler/engine.rs	388	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
+application/crawler/engine.rs	390	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::BincodeCheckpoint
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::CheckpointPath
 application/crawler/engine/build.rs	17	use	crate::application::crawler::collector::ResultsCollector
@@ -405,6 +405,8 @@ application/crawler/engine/tests_checkpoint.rs	91	inline	crate::application::cra
 application/crawler/engine/tests_checkpoint.rs	105	inline	crate::application::crawler::session::CrawlPorts
 application/crawler/engine/tests_checkpoint.rs	111	inline	crate::application::crawler::session::CrawlIdentity
 application/crawler/engine/tests_checkpoint.rs	253	inline	crate::domain::persistence::PersistenceMode::Disabled
+application/crawler/engine/tests_pool.rs	170	use	crate::application::crawler::content_sink::CrawlContentSink
+application/crawler/engine/tests_pool.rs	170	use	crate::application::crawler::content_sink::InMemoryContentSink
 application/crawler/ports.rs	24	use	crate::application::crawler::collector::CrawlMessage
 application/crawler/ports.rs	24	use	crate::application::crawler::collector::ResultsCollector
 application/crawler/ports.rs	25	use	crate::application::pipeline::PipelineExecutor
