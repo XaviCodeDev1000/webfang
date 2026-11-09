@@ -104,6 +104,18 @@ fn exit_code(output: &std::process::Output) -> i32 {
     output.status.code().expect("process terminated by signal")
 }
 
+/// The shared partial-corruption fixture: one valid page plus raw `extra`
+/// lines in the stranded spool, recovered into `<scratch>/out`.
+fn recover_with_lines(extra: &[&str], flags: &[&str]) -> (TempDir, std::process::Output, PathBuf) {
+    let scratch = TempDir::new().expect("temp dir");
+    let mut lines = vec![spool_line("https://example.test/a")];
+    lines.extend(extra.iter().map(|line| (*line).to_string()));
+    let spool = seed_stranded_spool(&scratch, &lines);
+    let out = scratch.path().join("out");
+    let output = run_recover(&spool, &out, flags);
+    (scratch, output, out)
+}
+
 fn stdout_of(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -171,17 +183,7 @@ async fn recover_tree_matches_a_real_batch_export() {
 /// A corrupt record is a PAGE failure: counted, reported, never fatal (#2611).
 #[test]
 fn recover_skips_corrupt_lines_and_exits_zero_without_strict() {
-    let scratch = TempDir::new().expect("temp dir");
-    let spool = seed_stranded_spool(
-        &scratch,
-        &[
-            spool_line("https://example.test/a"),
-            "{broken json".to_string(),
-        ],
-    );
-    let out = scratch.path().join("out");
-
-    let output = run_recover(&spool, &out, &[]);
+    let (_scratch, output, out) = recover_with_lines(&["{broken json"], &[]);
 
     assert_eq!(exit_code(&output), 0, "corrupt lines must not fail recover");
     let stdout = stdout_of(&output);
@@ -216,17 +218,7 @@ fn recover_missing_spool_exits_74() {
 /// `--strict` turns a partial recovery into exit `69`.
 #[test]
 fn recover_strict_exits_69_on_partial_success() {
-    let scratch = TempDir::new().expect("temp dir");
-    let spool = seed_stranded_spool(
-        &scratch,
-        &[
-            spool_line("https://example.test/a"),
-            "{broken json".to_string(),
-        ],
-    );
-    let out = scratch.path().join("out");
-
-    let output = run_recover(&spool, &out, &["--strict"]);
+    let (_scratch, output, out) = recover_with_lines(&["{broken json"], &["--strict"]);
 
     assert_eq!(
         exit_code(&output),
@@ -259,17 +251,7 @@ fn recover_all_corrupt_exits_3() {
 /// The operator-facing summary is stable (paths redacted).
 #[test]
 fn recover_summary_is_a_stable_snapshot() {
-    let scratch = TempDir::new().expect("temp dir");
-    let spool = seed_stranded_spool(
-        &scratch,
-        &[
-            spool_line("https://example.test/a"),
-            "{broken json".to_string(),
-        ],
-    );
-    let out = scratch.path().join("out");
-
-    let output = run_recover(&spool, &out, &[]);
+    let (scratch, output, _out) = recover_with_lines(&["{broken json"], &[]);
     let stdout = stdout_of(&output);
 
     assert_snapshot_redacted("recover_summary", scratch.path(), stdout);
