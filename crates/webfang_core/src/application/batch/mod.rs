@@ -19,6 +19,7 @@
 
 pub mod manager;
 pub mod processor;
+pub mod spool_export;
 
 pub use manager::{BatchManager, BatchManagerSummary};
 pub use processor::{BatchProcessor, BatchResult};

@@ -18,8 +18,10 @@ use crate::OutputFormat;
 use std::path::Path;
 use tracing::warn;
 
+mod image_rewrite;
 mod rename;
 
+use image_rewrite::rewrite_image_urls_to_relative;
 use rename::rename_temp_into_place;
 
 /// Convert HTML to Markdown through the repo's single converter path.
@@ -74,6 +76,24 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     }
 }
 
+/// Relative markdown path for a URL — exactly the path `save_as_markdown`
+/// joins under the output dir. The `./output/` prefix of
+/// [`OutputPath::to_full_path`] is stripped here so every consumer (the saver
+/// itself, spool recovery reporting, future flush bookkeeping) computes the
+/// SAME path from the same code.
+///
+/// # Errors
+///
+/// Returns the URL-parse error when the URL cannot produce an output path;
+/// callers decide their own fallback (the saver writes `index.md`).
+pub(crate) fn markdown_relative_path(
+    url: &str,
+) -> std::result::Result<String, crate::adapters::url_path::OutputPathError> {
+    let output_path = OutputPath::from_url_with_query(url)?;
+    let full_path_str = output_path.to_full_path();
+    Ok(full_path_str.trim_start_matches("./output/").to_string())
+}
+
 /// Save scraped results to output directory
 ///
 /// # Arguments
@@ -111,8 +131,8 @@ fn save_as_markdown(
     use std::fs;
 
     for item in results {
-        let output_path: OutputPath = match OutputPath::from_url_with_query(item.url.as_str()) {
-            Ok(p) => p,
+        let full_path = match markdown_relative_path(item.url.as_str()) {
+            Ok(relative) => output_dir.join(relative),
             Err(e) => {
                 warn!(
                     url = %item.url,
@@ -126,10 +146,6 @@ fn save_as_markdown(
                 continue;
             },
         };
-
-        let full_path_str = output_path.to_full_path();
-        let relative_path = full_path_str.trim_start_matches("./output/");
-        let full_path = output_dir.join(relative_path);
         let md_file_dir = full_path.parent().unwrap_or(output_dir);
         if let Some(parent) = full_path.parent() {
             fs::create_dir_all(parent)?;
@@ -189,51 +205,6 @@ fn save_as_markdown(
     }
 
     Ok(())
-}
-
-/// Rewrite absolute image URLs in markdown to relative paths.
-///
-/// Scans for `![alt](https://...)` patterns and rewrites to `![alt](./relative/path)`.
-/// Used as a fallback when `--download-images` is not enabled and `item.assets` is empty.
-fn rewrite_image_urls_to_relative(content: &str, _md_file_dir: &Path) -> String {
-    use regex::Regex;
-
-    // Match ![alt text](url) where url is absolute
-    // Static regex is a compile-time constant; parsing cannot fail.
-    #[allow(clippy::expect_used)]
-    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"!\[([^\]]*)\]\((https?://[^)]+)\)")
-            // LCOV_EXCL_LINE defensive: compile-time-regex — static pattern is a constant, parse cannot fail
-            .expect("static image-markdown regex is valid")
-    });
-
-    RE.replace_all(content, |caps: &regex::Captures| {
-        let alt = &caps[1];
-        let url = &caps[2];
-
-        // Parse the URL to extract the path
-        if let Ok(parsed) = url::Url::parse(url) {
-            let path = parsed.path();
-            // Create a relative path from md_file_dir to the image
-            // For simplicity, use the last 2 segments as the relative path
-            let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-            let rel_path = if segments.len() >= 2 {
-                format!(
-                    "./{}/{}",
-                    segments[segments.len() - 2],
-                    segments[segments.len() - 1]
-                )
-            } else if segments.len() == 1 {
-                format!("./{}", segments[0])
-            } else {
-                url.to_string()
-            };
-            format!("![{alt}]({rel_path})")
-        } else {
-            caps[0].to_string()
-        }
-    })
-    .to_string()
 }
 
 /// Save results as plain text files with structured format
@@ -435,55 +406,5 @@ mod tests {
         assert_eq!(arr.len(), 2, "both runs must be present");
         assert_eq!(arr[0]["title"], "First");
         assert_eq!(arr[1]["title"], "Second");
-    }
-
-    // === rewrite_image_urls_to_relative tests ===
-
-    #[test]
-    fn test_rewrite_single_image_url_to_relative() {
-        let content = "![alt](https://example.com/img/photo.png)";
-        let dir = Path::new("/output/example.com");
-        let result = rewrite_image_urls_to_relative(content, dir);
-        assert_eq!(result, "![alt](./img/photo.png)");
-    }
-
-    #[test]
-    fn test_rewrite_deeply_nested_image_url() {
-        let content = "![alt](https://example.com/a/b/c.png)";
-        let dir = Path::new("/output/example.com");
-        let result = rewrite_image_urls_to_relative(content, dir);
-        assert_eq!(result, "![alt](./b/c.png)");
-    }
-
-    #[test]
-    fn test_rewrite_non_url_images_unchanged() {
-        let content = "![alt](./local/image.png)";
-        let dir = Path::new("/output/example.com");
-        let result = rewrite_image_urls_to_relative(content, dir);
-        assert_eq!(result, "![alt](./local/image.png)");
-    }
-
-    #[test]
-    fn test_rewrite_empty_content_returns_empty() {
-        let content = "";
-        let dir = Path::new("/output");
-        let result = rewrite_image_urls_to_relative(content, dir);
-        assert_eq!(result, "");
-    }
-
-    #[test]
-    fn test_rewrite_multiple_images() {
-        let content = "First ![a](https://example.com/x.png) then ![b](https://example.com/y.jpg)";
-        let dir = Path::new("/output/example.com");
-        let result = rewrite_image_urls_to_relative(content, dir);
-        assert_eq!(result, "First ![a](./x.png) then ![b](./y.jpg)");
-    }
-
-    #[test]
-    fn test_rewrite_single_segment_path() {
-        let content = "![alt](https://example.com/photo.png)";
-        let dir = Path::new("/output/example.com");
-        let result = rewrite_image_urls_to_relative(content, dir);
-        assert_eq!(result, "![alt](./photo.png)");
     }
 }

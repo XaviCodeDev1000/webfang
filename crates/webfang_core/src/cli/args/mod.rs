@@ -385,37 +385,9 @@ pub struct Args {
     pub llm: LlmArgs,
 }
 
-/// Subcommands.
-#[derive(Debug, clap::Subcommand)]
-pub enum Commands {
-    /// Generate shell completion scripts
-    Completions {
-        /// Shell to generate completions for
-        #[arg(value_enum)]
-        shell: Shell,
-    },
-    /// Detect and validate a remote embedding endpoint, then write its config
-    Connect {
-        /// Base URL of the OpenAI-compatible embeddings endpoint.
-        #[arg(value_name = "URL", value_parser = crate::cli::args::crawler::parse_seed_url)]
-        url: ValidUrl,
-        /// Model id the endpoint serves. Required: the remote adapter refuses
-        /// to build without one (the endpoint demands it on every request).
-        #[arg(long, value_name = "MODEL")]
-        model: String,
-        /// Provider id to register. Defaults to a generated `connect-<hex>`.
-        #[arg(long, value_name = "ID")]
-        id: Option<String>,
-    },
-    /// Diagnose the embedding path — config, credential, network, budget
-    Doctor,
-    /// Dump the effective embeddings provider, the configured budget, and the
-    /// historical model-profile metadata
-    ///
-    /// The provider is what a run actually uses; the profile metadata is
-    /// historical (ADR-0004 step 4) and no run consumes it.
-    Show,
-}
+mod commands;
+
+pub use commands::Commands;
 
 /// Carrier for the values `doctor` / `show` read, so diagnostics can name
 /// their provenance instead of emitting anonymous numbers.

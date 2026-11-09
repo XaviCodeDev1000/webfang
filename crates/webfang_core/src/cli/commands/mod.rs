@@ -16,6 +16,7 @@
 mod blocks;
 pub mod connect;
 pub mod doctor;
+pub mod recover;
 pub mod show;
 
 use crate::application::crawl_options::CrawlOptions;

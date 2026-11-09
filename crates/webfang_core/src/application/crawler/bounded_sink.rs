@@ -54,7 +54,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -586,44 +586,9 @@ async fn write_page(
     Ok(())
 }
 
-/// Streaming reader over a spool written by [`BoundedFileSink`].
-///
-/// Yields one [`CapturedPage`] at a time so the consumer never materializes the
-/// whole batch in memory.
-#[derive(Debug)]
-pub struct CapturedPageReader {
-    lines: tokio::io::Lines<BufReader<tokio::fs::File>>,
-}
+mod reader;
 
-impl CapturedPageReader {
-    /// Open the spool at `path`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`BoundedSinkError::Io`] when the file cannot be opened.
-    pub async fn open(path: &Path) -> Result<Self, BoundedSinkError> {
-        let file = tokio::fs::File::open(path).await?;
-        Ok(Self {
-            lines: BufReader::new(file).lines(),
-        })
-    }
-
-    /// Read the next captured page, or `None` at end of spool.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`BoundedSinkError::Io`] on a read failure or
-    /// [`BoundedSinkError::Codec`] when a line is not a valid record.
-    pub async fn next_page(&mut self) -> Result<Option<CapturedPage>, BoundedSinkError> {
-        while let Some(line) = self.lines.next_line().await? {
-            if line.trim().is_empty() {
-                continue;
-            }
-            return Ok(Some(serde_json::from_str(&line)?));
-        }
-        Ok(None)
-    }
-}
+pub use reader::CapturedPageReader;
 
 #[cfg(test)]
 mod tests {

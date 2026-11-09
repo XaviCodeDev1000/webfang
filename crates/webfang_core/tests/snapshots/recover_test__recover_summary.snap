@@ -1,0 +1,10 @@
+---
+source: crates/webfang_core/tests/recover_test.rs
+expression: redacted
+---
+Recuperación de spool completada
+  Spool: <OUT_DIR>/.webfang-batch-capture.jsonl
+  Destino: <OUT_DIR>/out
+  Convertidas: 1
+  Fallidas: 0
+  Corruptas: 1

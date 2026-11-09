@@ -6,7 +6,7 @@
   "file_size_rust": {
     "hard_limit": 500,
     "grandfathered": {
-      "crates/webfang_cli/src/main.rs": 1212,
+      "crates/webfang_cli/src/main.rs": 1169,
       "crates/webfang_core/src/adapters/downloader/mod.rs": 2008,
       "crates/webfang_core/src/adapters/url_path.rs": 895,
       "crates/webfang_core/src/application/adaptive_engine/real.rs": 755,
@@ -14,7 +14,7 @@
       "crates/webfang_core/src/application/container.rs": 1554,
       "crates/webfang_core/src/application/crawl_options.rs": 616,
       "crates/webfang_core/src/application/crawl_result_repository.rs": 1097,
-      "crates/webfang_core/src/application/crawler/bounded_sink.rs": 996,
+      "crates/webfang_core/src/application/crawler/bounded_sink.rs": 961,
       "crates/webfang_core/src/application/crawler/checkpoint.rs": 971,
       "crates/webfang_core/src/application/crawler/crawl_scheduler.rs": 645,
       "crates/webfang_core/src/application/crawler/crawl_task.rs": 1461,
@@ -32,8 +32,8 @@
       "crates/webfang_core/src/application/scraper_service.rs": 1233,
       "crates/webfang_core/src/application/vault_search.rs": 1076,
       "crates/webfang_core/src/cli/args/crawler.rs": 1366,
-      "crates/webfang_core/src/cli/args/mod.rs": 1042,
-      "crates/webfang_core/src/cli/batch_flow.rs": 969,
+      "crates/webfang_core/src/cli/args/mod.rs": 1014,
+      "crates/webfang_core/src/cli/batch_flow.rs": 963,
       "crates/webfang_core/src/cli/commands/connect.rs": 1974,
       "crates/webfang_core/src/cli/config.rs": 853,
       "crates/webfang_core/src/cli/discovery_phase.rs": 636,

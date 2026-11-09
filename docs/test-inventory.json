@@ -992,6 +992,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/recover_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 6,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/remote_embedding_resilience_test.rs",
       "crate": "webfang_core",
       "area": "ai",
