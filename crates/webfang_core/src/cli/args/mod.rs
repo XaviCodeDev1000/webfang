@@ -593,6 +593,7 @@ impl From<Args> for crate::application::crawl_options::CrawlOptions {
                 enabled: args.export.batch || args.export.batch_file.is_some(),
                 batch_file: args.export.batch_file,
                 concurrency: args.export.batch_concurrency,
+                export_checkpoint: args.export.export_checkpoint,
             },
             asset_naming: args.crawler.asset_naming,
             download_concurrency: args.crawler.download_concurrency,

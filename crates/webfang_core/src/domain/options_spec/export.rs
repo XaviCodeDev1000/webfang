@@ -227,6 +227,26 @@ pub const BATCH_CONCURRENCY: OptionSpec = OptionSpec {
     value_delimiter: None,
 };
 
+/// `--export-checkpoint <N>` — flush the captured spool to markdown every N
+/// pages (#2611). 0 = disabled (export only at the clean close).
+pub const EXPORT_CHECKPOINT: OptionSpec = OptionSpec {
+    id: "export_checkpoint",
+    value_name: "EXPORT_CHECKPOINT",
+    long: "export-checkpoint",
+    short: None,
+    aliases: &[],
+    env: Some("WEBFANG_EXPORT_CHECKPOINT"),
+    default: Some(DefaultValue::Uint(0)),
+    help: "Flush captured pages to markdown every N pages during a batch (0 = only at the clean close)",
+    heading: Some("Batch Processing"),
+    kind: ValueKind::uint_unbounded(),
+    visible_aliases: &[],
+    nullable: false,
+    description_override: None,
+    feature_gate: None,
+    value_delimiter: None,
+};
+
 /// `--pipeline`
 pub const PIPELINE: OptionSpec = OptionSpec {
     id: "pipeline",
@@ -299,6 +319,7 @@ pub const GROUP: &[OptionSpec] = &[
     BATCH,
     BATCH_FILE,
     BATCH_CONCURRENCY,
+    EXPORT_CHECKPOINT,
     PIPELINE,
     PIPELINE_OUTPUT,
     RETENTION_DAYS,

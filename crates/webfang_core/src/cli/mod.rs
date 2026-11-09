@@ -5,6 +5,7 @@
 /// CLI argument definitions using clap derive macros.
 pub mod args;
 pub mod batch_flow;
+pub mod batch_flush;
 pub mod commands;
 pub mod completions;
 pub mod config;
