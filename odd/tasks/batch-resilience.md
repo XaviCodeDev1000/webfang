@@ -44,7 +44,7 @@ del `.md` escrito (análogo al flush-proof del export.jsonl). Verificar en WU co
 T1 (S1,S3) `application/batch/spool_export.rs::convert_spool` — extract_batch_content delega. Route: inline. Commit: 2aaa44d6
 T2 (S3) subcomando `recover` (args/mod.rs, dispatch main.rs, commands/recover.rs, exit codes 74/3/69+strict). Route: inline. Commit: 485c13f7
 T3 (S3) tests recover: fixture→.md idénticos a batch, corrupta, inexistente(74), --strict, offset>0, snapshot. Route: inline. Commit: 485c13f7
-T4 (S1) gate completo + ci_fast_gate + PR slice 1. Route: inline. Commit: <sha>
+T4 (S1) gate completo + ci_fast_gate + PR slice 1. Route: inline. Commit: 2258dfdf+dcee477e+2c44a317+66c34957 (gate local GREEN 40/0/2; PR pendiente)
 T5 (S6,S9) WU1: progress.rs + adquisición unificada (fd lockeado, tabla colapsada, Busy→75). Route: inline. Commit: <sha>
 T6 (S6) WU2: flush por página + durable_bytes. Route: inline. Commit: <sha>
 T7 (S2,S4,S6) WU3: --export-checkpoint + tarea de flush (watch, tick 120s, spawn_blocking, cierre timeout 30s). Route: inline. Commit: <sha>
@@ -95,3 +95,19 @@ locales de esta sesión corren con cargo real. (d) Reader: `read_until` reemplaz
 inválido ahora es Codec (corrupto-skipeable) y no Io (fatal): cambio aprobado por el diseño
 "decodificación tolerante". T1: 2aaa44d6 (+492/−44). T2/T3: 485c13f7 — 6/6 tests recover incl. árbol
 idéntico a export batch real; snapshot aceptado.
+L10 (2026-11-09, T4 gate): `ci_fast_gate.sh` rojo en 6 pasos y cómo se cerró cada uno. (a) intra-crate
+direction: `spool_export.rs` importaba `ObsidianOptions`/`markdown_relative_path`/`save_results` desde
+infrastructure; fix 2258dfdf — `save_converted` se movió a `cli/commands/recover.rs` (application queda
+pura), `SpoolExportConfig` perdió `output_dir`, `ConvertedPage` perdió `output_path`, y el variante
+`OutputIo` se conserva porque el CLI lo construye. (b) file size: 4 archivos sobre el ratchet
+(main.rs 1228>1212, args/mod.rs 1066>1042, bounded_sink.rs 1049>996, file_saver.rs 503>500); fix
+dcee477e — splits a `provider_id.rs`, `args/commands.rs`, `bounded_sink/reader.rs`,
+`file_saver/image_rewrite.rs`; baseline bajado a 1169/1014/961/963. (c) duplication 8352>8325; fix
+dcee477e+2c44a317 (helper de tests): helper `recover_with_lines` en recover_test.rs y tests de spool_export
+reescritos sobre `convert_lines`; quedó 8297≤8325. (d) test inventory desactualizado: regenerado en
+66c34957. (e) nextest unit fallaba por link (`R_X86_64_32 ... recompile with -fPIC` en
+`libbtls_sys`): el rlib envenenado lo había dejado el shim mbx; `cargo clean -p btls-sys` + cargo real
+lo reconstruyó en 42 s y el gate corrió con `PATH=/home/xavi/.cargo/bin:$PATH`. Gate final: PASS=40
+FAIL=0 SKIP=2, GREEN; cobertura leída (code lane: test-core partial y doc-quality partial son las
+excepciones conocidas). Tests focalizados: spool_export 5/5, bounded_sink 13/13, image_rewrite 6/6,
+recover_test 24/24, provider_id 3/3. PR slice 1 pendiente de autorización de push/publicación.
