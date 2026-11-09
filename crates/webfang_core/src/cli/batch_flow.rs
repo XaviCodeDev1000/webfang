@@ -172,8 +172,26 @@ async fn run_batch_crawl(
     let manager =
         prepare_batch_manager(opts, tls_emulation, sink.clone(), root_correlation).await?;
 
+    // WU3 (#2611): when `--export-checkpoint <N>` is set, run the flush watch
+    // alongside the crawl so a killed run loses at most the pages captured
+    // since the last checkpoint instead of the whole batch.
+    let flush_done = tokio_util::sync::CancellationToken::new();
+    let flush_task = spawn_flush_watch(opts, sink.clone(), flush_done.clone(), root_correlation);
+
     let summary = manager.process_all_summary_cancellable(cancel).await;
     log_batch_summary(&summary, root_correlation);
+
+    // The crawl is over: stop the watch loop and let its FINAL flush (bounded
+    // by FLUSH_SHUTDOWN_TIMEOUT) run before the sink closes.
+    flush_done.cancel();
+    if let Some(handle) = flush_task {
+        let _ = tokio::time::timeout(
+            crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
+                .saturating_add(std::time::Duration::from_secs(1)),
+            handle,
+        )
+        .await;
+    }
 
     if cancel.is_cancelled() {
         warn!("shutdown requested — exporting the pages captured so far");
@@ -186,6 +204,83 @@ async fn run_batch_crawl(
     flush_batch_sink(&sink).await?;
 
     Ok((summary, sink))
+}
+
+/// Spawn the checkpoint flush watch when `--export-checkpoint` is on, else
+/// return `None`. The sidecar is written at startup (offset 0) with the
+/// spool's identity, so the next run's acquisition can attribute this spool.
+fn spawn_flush_watch(
+    opts: &CrawlOptions,
+    sink: std::sync::Arc<BoundedFileSink>,
+    done: tokio_util::sync::CancellationToken,
+    root_correlation: &domain::CorrelationId,
+) -> Option<tokio::task::JoinHandle<()>> {
+    use crate::application::batch::progress::{
+        spool_first_line_sha256, ExtractionOptions, SpoolIdentity,
+    };
+
+    let checkpoint = opts.batch.export_checkpoint;
+    if checkpoint == 0 {
+        return None;
+    }
+
+    let root = resolve_persistence_root(opts);
+    let output_dir = resolve_persistence_root(opts);
+    let spool_path = root.join(BATCH_SPOOL_FILE);
+
+    // Identity of the spool this run is writing: empty at startup (the sink
+    // was just created/truncated), so `first_line_sha256` is None — the
+    // sidecar written now records `None` and is only authoritative until the
+    // first page lands. The flush loop refreshes the identity once the first
+    // line exists (see run_flush_watch's persist_sidecar call after the first
+    // successful flush).
+    let identity = match std::fs::read(&spool_path) {
+        Ok(bytes) => SpoolIdentity {
+            first_line_sha256: spool_first_line_sha256(&bytes),
+        },
+        Err(_) => SpoolIdentity {
+            first_line_sha256: None,
+        },
+    };
+
+    // Persist the startup sidecar (offset 0) synchronously BEFORE the crawl so
+    // a kill in the first seconds still leaves an attributable artifact.
+    let extraction = ExtractionOptions {
+        selector: Some(opts.crawl.selector.clone()),
+        ignore_waf: opts.crawl.ignore_waf,
+    };
+    let startup_sidecar =
+        crate::cli::batch_flush::running_sidecar(&identity, &output_dir, &extraction, 0);
+    let startup_root = root.clone();
+    let _ = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build();
+        if let Ok(rt) = rt {
+            let _ = rt.block_on(crate::cli::batch_flush::write_sidecar(
+                &startup_root,
+                &startup_sidecar,
+            ));
+        }
+    })
+    .join();
+
+    // Supervised: the handle is joined in run_batch_crawl under a timeout
+    // right after the crawl finishes (the watch's own final flush).
+    #[allow(clippy::disallowed_methods)]
+    let handle = tokio::spawn(crate::cli::batch_flush::run_flush_watch(
+        crate::cli::batch_flush::FlushWatchParams {
+            sink,
+            spool_identity: identity,
+            root,
+            output_dir,
+            extraction,
+            checkpoint,
+            correlation: root_correlation.clone(),
+            done,
+        },
+    ));
+    Some(handle)
 }
 
 /// Warn when crawl-expansion flags are set on a `--batch` run (#1215).
@@ -291,7 +386,7 @@ async fn flush_batch_sink(sink: &BoundedFileSink) -> Result<(), CliExit> {
 }
 
 /// File name of the batch capture spool, under the run's persistence root.
-const BATCH_SPOOL_FILE: &str = ".webfang-batch-capture.jsonl";
+pub(crate) const BATCH_SPOOL_FILE: &str = ".webfang-batch-capture.jsonl";
 
 /// Spanish disclosure for a spool quarantined as an orphan (slice 2, #2611).
 ///

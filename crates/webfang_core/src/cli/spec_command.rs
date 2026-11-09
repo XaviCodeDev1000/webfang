@@ -255,7 +255,8 @@ fn numeric_binding(id: &str) -> Option<ValueParser> {
         | "backoff_base_ms"
         | "backoff_max_ms"
         | "max_file_size"
-        | "checkpoint_interval" => Some(ValueParser::from(clap::value_parser!(u64))),
+        | "checkpoint_interval"
+        | "export_checkpoint" => Some(ValueParser::from(clap::value_parser!(u64))),
         "verbose" | "sitemap_depth" => Some(ValueParser::from(clap::value_parser!(u8))),
         "max_retries" | "retention_days" => Some(ValueParser::from(clap::value_parser!(u32))),
         _ => None,

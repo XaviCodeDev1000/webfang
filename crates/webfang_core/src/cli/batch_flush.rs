@@ -23,7 +23,7 @@
 //! `CommitSession::decide` matches against the `export.jsonl` hash index, so
 //! a resume that finds a pre-watermark COMMITTED skips it for this output.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tracing::{info, instrument, warn};
 
@@ -257,6 +257,179 @@ pub fn log_flush(outcome: &FlushOutcome, correlation: &CorrelationId) -> String 
         );
     }
     summary
+}
+
+/// Safety tick between watermark polls while the crawl runs (WU3).
+pub const FLUSH_WATCH_TICK: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Grace period the final flush gets on shutdown before the run proceeds
+/// anyway (design S6: cierre con timeout 30 s y mensaje de spool conservado).
+pub const FLUSH_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// One sidecar update: identity + watermark, persisted atomically.
+async fn persist_sidecar(
+    root: &Path,
+    identity: &crate::application::batch::progress::SpoolIdentity,
+    output_dir: &Path,
+    extraction: &ExtractionOptions,
+    watermark: u64,
+) {
+    let sidecar = running_sidecar(identity, output_dir, extraction, watermark);
+    if let Err(e) = write_sidecar(root, &sidecar).await {
+        // A sidecar write failure degrades NEXT-run salvage to OrphanSpool
+        // quarantine; it must never kill the live run.
+        warn!(error = %e, "batch progress sidecar could not be written");
+    }
+}
+
+/// Everything the flush watch needs, bundled (the function had 8 args,
+/// past the clippy threshold — one struct keeps the call site readable).
+pub struct FlushWatchParams {
+    /// The live capture sink (its `captured()` / `durable_bytes()` drive the
+    /// loop).
+    pub sink: std::sync::Arc<crate::application::crawler::bounded_sink::BoundedFileSink>,
+    /// Identity of the spool this run is writing.
+    pub spool_identity: crate::application::batch::progress::SpoolIdentity,
+    /// Persistence root holding the spool + sidecar.
+    pub root: PathBuf,
+    /// Output directory the flush exports into.
+    pub output_dir: PathBuf,
+    /// Extraction options replayed on the tail (recorded in the sidecar).
+    pub extraction: ExtractionOptions,
+    /// Pages-between-flushes threshold (`--export-checkpoint`).
+    pub checkpoint: u64,
+    /// Run-root identity for the structured flush logs.
+    pub correlation: CorrelationId,
+    /// Fired by the caller when the crawl ends (the loop then does its final
+    /// bounded flush and exits).
+    pub done: tokio_util::sync::CancellationToken,
+}
+
+/// Run the checkpoint flush loop alongside the crawl (WU3, #2611).
+///
+/// Every time `captured_now - captured_flushed >= checkpoint` (polled on the
+/// safety tick), the spool tail past the watermark is converted + written and
+/// the sidecar advances. Ends when `done` fires; the CALLER then runs the
+/// final flush under [`FLUSH_SHUTDOWN_TIMEOUT`] — this task never races the
+/// sink's own `finish()`.
+///
+/// Failure policy: a flush error is logged and retried on the next threshold
+/// crossing; the watermark stays where the last SUCCESSFUL flush left it, so
+/// no page is lost or double-exported (S6 ordering).
+pub async fn run_flush_watch(p: FlushWatchParams) {
+    let FlushWatchParams {
+        sink,
+        spool_identity,
+        root,
+        output_dir,
+        extraction,
+        checkpoint,
+        correlation,
+        done,
+    } = p;
+    let spool_path = root.join(crate::cli::batch_flow::BATCH_SPOOL_FILE);
+    let watermark: std::sync::Arc<std::sync::atomic::AtomicU64> =
+        std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let mut interval = tokio::time::interval(FLUSH_WATCH_TICK);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = done.cancelled() => break,
+            _ = interval.tick() => {
+                let captured = u64::try_from(sink.captured()).unwrap_or(u64::MAX);
+                let flushed = watermark.load(std::sync::atomic::Ordering::Acquire);
+                if checkpoint == 0 || captured.saturating_sub(flushed) < checkpoint {
+                    continue;
+                }
+                // The writer's durable watermark is the only safe conversion
+                // point: pages still in the channel/backlog are NOT on disk.
+                let durable = sink.durable_bytes().max(flushed);
+                match flush_spool_tail(&spool_path, flushed, &output_dir, &extraction).await {
+                    Ok(outcome) => {
+                        // Clamp to what the writer vouches for: pages converted
+                        // from bytes BEYOND the durable watermark would mark
+                        // unflushed data as exported.
+                        let new_watermark = outcome.watermark.min(durable);
+                        watermark.store(new_watermark, std::sync::atomic::Ordering::Release);
+                        let _ = log_flush(&outcome, &correlation);
+                        persist_sidecar(&root, &spool_identity, &output_dir, &extraction, new_watermark).await;
+                    },
+                    Err(e) => {
+                        warn!(error = %e, watermark = flushed, "checkpoint flush failed — will retry on the next threshold crossing");
+                    },
+                }
+            },
+        }
+    }
+
+    // Crawl finished (or shutdown requested): one LAST flush of everything
+    // the writer made durable, bounded by the shutdown timeout. Runs on the
+    // blocking pool so a slow disk cannot wedge the async runtime.
+    let flushed = watermark.load(std::sync::atomic::Ordering::Acquire);
+    let durable = sink.durable_bytes().max(flushed);
+    if durable <= flushed {
+        return;
+    }
+    let attempt = {
+        let spool_path = spool_path.clone();
+        let output_dir = output_dir.clone();
+        let extraction = extraction.clone();
+        tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(async move {
+                flush_spool_tail(&spool_path, flushed, &output_dir, &extraction).await
+            })
+        })
+    };
+    match tokio::time::timeout(FLUSH_SHUTDOWN_TIMEOUT, attempt).await {
+        Ok(Ok(Ok(outcome))) => {
+            let new_watermark = outcome.watermark.min(durable);
+            let _ = log_flush(&outcome, &correlation);
+            persist_sidecar(
+                &root,
+                &spool_identity,
+                &output_dir,
+                &extraction,
+                new_watermark,
+            )
+            .await;
+        },
+        Ok(Ok(Err(e))) => {
+            log_final_flush_failure(&spool_path, flushed, &e);
+        },
+        Ok(Err(join)) => {
+            let e = FlushError::OutputWrite(crate::error::ScraperError::Io(std::io::Error::other(
+                join.to_string(),
+            )));
+            log_final_flush_failure(&spool_path, flushed, &e);
+        },
+        Err(_) => {
+            // The 30 s budget ran out: the spool is CONSERVED (never deleted
+            // on a failed close) and the operator is told where their data is.
+            log_final_flush_failure(
+                &spool_path,
+                flushed,
+                &FlushError::SpoolRead {
+                    source: std::io::Error::other("el flush final excedió el timeout de 30 s"),
+                    written: 0,
+                },
+            );
+        },
+    }
+}
+
+/// The honest close failure: the spool is CONSERVED and the operator is told
+/// where their data is and how to turn it back into markdown.
+fn log_final_flush_failure(spool_path: &Path, watermark: u64, error: &FlushError) {
+    warn!(
+        error = %error,
+        spool = %spool_path.display(),
+        watermark,
+        user_message = "El cierre de la corrida no pudo exportar todo el spool pendiente. \
+    El archivo se conserva; recuperá las páginas con: webfang recover --spool <ruta> -o <dir>",
+        "final flush did not complete — spool conserved"
+    );
 }
 
 #[cfg(test)]
