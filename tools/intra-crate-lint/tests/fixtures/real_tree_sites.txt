@@ -309,9 +309,9 @@ application/crawler/engine.rs	46	use	crate::domain::CorrelationId
 application/crawler/engine.rs	46	use	crate::domain::CrawlerConfig
 application/crawler/engine.rs	46	use	crate::domain::JsStrategy
 application/crawler/engine.rs	46	use	crate::domain::post_load_wait::PostLoadWait
-application/crawler/engine.rs	347	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
-application/crawler/engine.rs	387	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
-application/crawler/engine.rs	389	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
+application/crawler/engine.rs	346	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
+application/crawler/engine.rs	386	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
+application/crawler/engine.rs	388	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::BincodeCheckpoint
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::CheckpointPath
 application/crawler/engine/build.rs	17	use	crate::application::crawler::collector::ResultsCollector
