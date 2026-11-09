@@ -19,7 +19,7 @@ use crate::application::crawler::crawl_scheduler::CrawlScheduler;
 use crate::application::crawler::ports::TerminationSource;
 use crate::application::crawler::session::CrawlSession;
 use crate::application::rate_limiter::SharedRateLimiter;
-use crate::domain::budget::BudgetModel;
+use crate::domain::budget::{BudgetModel, DomainSlots};
 use crate::domain::cookie_bridge::CookieBridge;
 use crate::domain::ram_probe_port::system_default;
 use crate::domain::session_port::SessionPoolConfig;
@@ -162,11 +162,7 @@ impl Engine {
         // the model's Domain tier (task 2.2c); the 2s cooldown is the backoff
         // base delay — the same shape the pre-session entry derived.
         if session.ports.session_pool.is_none() && transport.session_pool_enabled {
-            let pool_cfg = SessionPoolConfig {
-                base_delay: Duration::from_secs(2),
-                pool_size: engine.budget.domain(),
-                ..SessionPoolConfig::default()
-            };
+            let pool_cfg = derive_session_pool_config(engine.budget.domain());
             session.ports.session_pool = Some(
                 crate::application::container::build_crawl_session_pool(pool_cfg),
             );
@@ -211,5 +207,45 @@ impl Engine {
         )?;
         engine.session = Some(session);
         Ok(engine)
+    }
+}
+
+/// Derive the session-pool configuration installed when the transport flag
+/// requests a pool and the session carries none.
+///
+/// Only two knobs are run-derived: the slot count mirrors the budget model's
+/// `Domain` tier (task 2.2c) and the backoff base keeps the historical 2s
+/// cooldown. Everything else keeps [`SessionPoolConfig::default`].
+///
+/// Kept as a free function so the derivation is testable without a full
+/// session build: with the `..Default::default()` fill alone, deleting
+/// either derived field still compiles and silently falls back to a
+/// different value, which no behavioral test of the returned pool observes.
+fn derive_session_pool_config(domain_slots: DomainSlots) -> SessionPoolConfig {
+    SessionPoolConfig {
+        base_delay: Duration::from_secs(2),
+        pool_size: domain_slots,
+        ..SessionPoolConfig::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::derive_session_pool_config;
+    use crate::domain::budget::DomainSlots;
+
+    /// Mutation gate (#2628): both run-derived knobs are pinned, and the
+    /// slot count is asserted against a NON-default `Domain` tier so a
+    /// silently-defaulted 8 cannot pass.
+    #[test]
+    fn derived_session_pool_config_pins_domain_slots_and_base_delay() {
+        let slots = DomainSlots::new(3).expect("three slots is non-zero");
+
+        let config = derive_session_pool_config(slots);
+
+        assert_eq!(config.pool_size, slots);
+        assert_eq!(config.base_delay, Duration::from_secs(2));
     }
 }

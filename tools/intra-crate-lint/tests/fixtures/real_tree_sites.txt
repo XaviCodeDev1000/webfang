@@ -312,6 +312,7 @@ application/crawler/engine/build.rs	19	use	crate::application::crawler::ports::T
 application/crawler/engine/build.rs	20	use	crate::application::crawler::session::CrawlSession
 application/crawler/engine/build.rs	21	use	crate::application::rate_limiter::SharedRateLimiter
 application/crawler/engine/build.rs	22	use	crate::domain::budget::BudgetModel
+application/crawler/engine/build.rs	22	use	crate::domain::budget::DomainSlots
 application/crawler/engine/build.rs	23	use	crate::domain::cookie_bridge::CookieBridge
 application/crawler/engine/build.rs	24	use	crate::domain::ram_probe_port::system_default
 application/crawler/engine/build.rs	25	use	crate::domain::session_port::SessionPoolConfig
@@ -322,11 +323,11 @@ application/crawler/engine/build.rs	26	use	crate::domain::JsStrategy
 application/crawler/engine/build.rs	47	inline	crate::domain::budget::detector::SystemDetector
 application/crawler/engine/build.rs	75	inline	crate::application::container::build_robots_fetcher
 application/crawler/engine/build.rs	150	inline	crate::application::container::build_termination_source
-application/crawler/engine/build.rs	171	inline	crate::application::container::build_crawl_session_pool
-application/crawler/engine/build.rs	185	inline	crate::domain::persistence::PersistenceMode::Checkpoint
-application/crawler/engine/build.rs	186	inline	crate::domain::persistence::PersistenceMode::Full
-application/crawler/engine/build.rs	195	inline	crate::domain::persistence::PersistenceMode::Disabled
-application/crawler/engine/build.rs	196	inline	crate::domain::persistence::PersistenceMode::Resume
+application/crawler/engine/build.rs	167	inline	crate::application::container::build_crawl_session_pool
+application/crawler/engine/build.rs	181	inline	crate::domain::persistence::PersistenceMode::Checkpoint
+application/crawler/engine/build.rs	182	inline	crate::domain::persistence::PersistenceMode::Full
+application/crawler/engine/build.rs	191	inline	crate::domain::persistence::PersistenceMode::Disabled
+application/crawler/engine/build.rs	192	inline	crate::domain::persistence::PersistenceMode::Resume
 application/crawler/engine/checkpoint.rs	15	use	crate::application::crawler::checkpoint::BannedDomain
 application/crawler/engine/checkpoint.rs	15	use	crate::application::crawler::checkpoint::BincodeCheckpoint
 application/crawler/engine/checkpoint.rs	15	use	crate::application::crawler::checkpoint::CURRENT_CHECKPOINT_VERSION
