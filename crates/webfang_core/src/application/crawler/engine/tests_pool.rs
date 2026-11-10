@@ -1,4 +1,4 @@
-use super::tests::{entry_off, pool_session, FakeSessionPort};
+use super::tests_common::{entry_off, pool_session, FakeSessionPort};
 use super::*;
 use url::Url;
 use wiremock::matchers::{method, path};

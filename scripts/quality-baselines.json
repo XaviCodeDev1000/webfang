@@ -19,7 +19,6 @@
       "crates/webfang_core/src/application/crawler/crawl_scheduler.rs": 645,
       "crates/webfang_core/src/application/crawler/crawl_task.rs": 1461,
       "crates/webfang_core/src/application/crawler/discovery.rs": 1026,
-      "crates/webfang_core/src/application/crawler/engine.rs": 781,
       "crates/webfang_core/src/application/crawler/ports.rs": 748,
       "crates/webfang_core/src/application/crawler/session.rs": 1006,
       "crates/webfang_core/src/application/crawler/sitemap_discovery.rs": 1400,

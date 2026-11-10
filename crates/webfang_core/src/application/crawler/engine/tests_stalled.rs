@@ -1,4 +1,6 @@
-use super::tests::{entry_off, loop_harness, nz, pool_session, session_engine, TEST_WATCHDOG};
+use super::tests_common::{
+    entry_off, loop_harness, nz, pool_session, session_engine, TEST_WATCHDOG,
+};
 use super::*;
 use crate::application::crawler::crawl_task_ctx::CrawlTaskCtx;
 use crate::domain::CrawlError;
