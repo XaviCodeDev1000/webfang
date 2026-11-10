@@ -3,7 +3,7 @@
 #
 #   1. review-gate.sh (#1036): consulted first with stdin closed (</dev/null)
 #      and WITHOUT exec so its exit code is propagated — a BLOCK here stops
-#      the push before the main gate runs.
+#      the push before the main gate runs. Tool failures fail open.
 #   2. main-push-gate.sh (#1091): fed the buffered ref-update list so it reads
 #      git's stdin contract unchanged (#1154).
 #

@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
-# Pre-commit delivery gate — consults the Gentle AI review receipt (#1036).
+# Pre-commit delivery gate — reports the Gentle AI review verdict (#1036).
+# Fail-open when the verdict is missing, failed, timed out, or unparseable.
 exec "$(dirname "$0")/review-gate.sh" pre-commit
