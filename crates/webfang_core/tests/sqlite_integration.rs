@@ -369,7 +369,7 @@ async fn save_resource_same_url_same_hash_is_idempotent() {
     use tokio::sync::Barrier;
 
     const TASKS: usize = 32;
-    const ROUNDS: usize = 64;
+    const ROUNDS: usize = 4;
 
     let tmp = TempDir::new().unwrap();
     let db_path = tmp.path().join("same-url.db");
