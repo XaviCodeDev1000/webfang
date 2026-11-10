@@ -6,7 +6,7 @@ Fuente de verdad: `.github/support.json`. Este archivo es una vista generada.
 
 | Línea | Estado | Última | Rama | Admite |
 |---|---|---|---|---|
-| 7.5 | STABLE | 7.5.1 | — | bugfix, security |
+| 7.5 | STABLE | 7.5.2 | — | bugfix, security |
 | 7.4 | MAINTENANCE | 7.4.0 | — | security |
 | 7.3 | EOL | 7.3.4 | — | — |
 | 7.2 | EOL | 7.2.0 | — | — |
