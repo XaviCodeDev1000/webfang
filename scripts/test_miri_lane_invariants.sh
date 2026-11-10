@@ -59,6 +59,95 @@ expect_rc() {
   printf 'OK: %s\n' "$what"
 }
 
+# write_ub_surfaces <root> — the GREEN shape of every declared UB-surface
+# entry: each file whose tests match its marker carries either a module-level
+# gate or a per-test gate. `scraper_service.rs` is NOT written here: the caller
+# decides its shape, because the pre-fix shape of THAT module is the original
+# RED control. Every file below is a real fixture, never a comment: a check that
+# only ever sees its red shape is not proven to accept the green one.
+write_ub_surfaces() {
+  local root="$1"
+  mkdir -p "$root/crates/webfang_core/src/application/batch" \
+    "$root/crates/webfang_core/src/infrastructure/converter" \
+    "$root/crates/webfang_core/src/domain"
+
+  # html_cleaner: every test routes through clean_html — module-level gate.
+  cat >"$root/crates/webfang_core/src/domain/html_cleaner.rs" <<'EOF'
+#[cfg(all(test, not(miri)))]
+mod tests {
+    #[test]
+    fn clean_removes_scripts_and_preserves_content() {
+        let cleaned = clean_html("<p>x</p>");
+        assert!(cleaned.contains("x"));
+    }
+}
+EOF
+
+  # htmd_converter: same shape — the pre-pass is part of the adapter contract.
+  cat >"$root/crates/webfang_core/src/infrastructure/converter/htmd_converter.rs" <<'EOF'
+#[cfg(all(test, not(miri)))]
+mod tests {
+    #[test]
+    fn converts_headings_to_atx() {
+        let md = HtmdConverter.convert("<h1>Main Title</h1>");
+        assert!(md.contains("# Main Title"), "got: {md}");
+    }
+}
+EOF
+
+  # spool_export: the conversion tests are gated per test, the reader-only ones
+  # are not — they never convert a page, so they never reach the cleaner.
+  cat >"$root/crates/webfang_core/src/application/batch/spool_export.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn reader_tracks_bytes_and_resumes_at_offset() {
+        let _ = valid_line("https://example.test/a", "A");
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB through clean_html; the reader never converts a page")]
+    async fn convert_spool_counts_corrupt_records_and_reports_watermark() {
+        let _ = convert_lines(&[valid_line("https://example.test/a", "A")]).await;
+    }
+}
+EOF
+
+  # keyring_store: the real-keyring build is gated, the configuration test is not.
+  cat >"$root/crates/webfang_core/src/domain/keyring_store.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_production_store_addresses_the_legacy_key() {
+        let store = super::store().expect("store");
+        assert_eq!(store.delimiters.len(), 3);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "keyctl (syscall 250) building the kernel-keyring Cred is not supported by Miri")]
+    fn the_real_keyring_key_is_byte_identical_to_the_legacy_key() {
+        let store = super::store().expect("store");
+        let _ = store.build(SERVICE, ACCOUNT, None);
+    }
+}
+EOF
+}
+
+# red_surface <name> <file> <what it must reject> <body> — a tree whose ONLY
+# violation is <what>. Every other entry keeps its green shape, so a red can
+# only come from the entry under test: a control that passes for several
+# reasons at once proves nothing.
+red_surface() {
+  local name="$1" file="$2" what="$3" body="$4"
+  local r="$T/red-$name"
+  rm -rf "$r"
+  write_ub_surfaces "$r"
+  mkdir -p "$r/$(dirname "$file")"
+  printf '%s\n' "$body" >"$r/$file"
+  run_guard "$r" check_ub_attribution
+  expect_rc "RED control: check_ub_attribution $what ($file)" 1 "$?"
+}
+
 printf '== Miri lane invariants (%s)\n' "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
@@ -151,6 +240,10 @@ cp "$FIX/crates/webfang_core/src/application/scraper_service.rs" \
 cp "$FIX/crates/webfang_core/src/application/scraper_service.rs" \
   "$FIX/crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs"
 
+# Every OTHER declared UB surface stays GREEN in this tree: the red below can
+# only come from the un-gated 2xx test of scraper_service.rs.
+write_ub_surfaces "$FIX"
+
 # NEGATION: a Miri job that skips a whole submodule with no written reason of
 # its own must be REJECTED. Before the fix (#2235) the skip-net of #1423 was
 # accepted, and it deleted a whole test tree per entry — with it, the UB
@@ -195,6 +288,7 @@ EOF
 for owned in wreq_downloader obscura_downloader chromiumoxide_downloader resource_governor; do
   printf '// fixture\n' >"$VACUITY/crates/webfang_core/src/infrastructure/downloader/$owned.rs"
 done
+write_ub_surfaces "$VACUITY"
 run_guard "$VACUITY" check_ub_attribution
 expect_rc "RED control: check_ub_attribution rejects a fixture whose marker disappeared" 1 "$?"
 
@@ -204,6 +298,103 @@ expect_rc "RED control: check_ub_attribution rejects a fixture whose marker disa
 # either — this is the positive control that keeps the RED controls honest.
 run_guard "$FIX" check_core_filter
 expect_rc "RED control: check_core_filter accepts a fixture that covers application::" 0 "$?"
+
+# ---------------------------------------------------------------------------
+# RED controls for the declared UB-surface table (opened by run 42560983718)
+#
+# The pre-fix shape above is `scraper_service.rs`. The 2026-11-09 scheduled run
+# aborted THREE of four Miri jobs on three entry points the guard did not
+# declare — `htmd_converter`, `spool_export` and `keyring_store` — so the lane
+# stayed red while the invariant above still reported green. Each control below
+# proves ONE entry of `UB_SURFACE_ENTRIES` is really inspected, in both of its
+# failure shapes: a test that reaches the surface with no gate, and a
+# module-level gate that was REMOVED.
+# ---------------------------------------------------------------------------
+
+# spool_export: a conversion test with no gate reaches clean_html.
+red_surface "spool" "crates/webfang_core/src/application/batch/spool_export.rs" \
+'rejects an unguarded conversion test' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn convert_spool_counts_corrupt_records_and_reports_watermark() {
+        let _ = convert_lines(&[valid_line("https://example.test/a", "A")]).await;
+    }
+}'
+
+# htmd_converter: the module-level gate is gone, so every test is unguarded.
+red_surface "converter" "crates/webfang_core/src/infrastructure/converter/htmd_converter.rs" \
+'rejects a converter module whose Miri gate was removed' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn converts_headings_to_atx() {
+        let md = HtmdConverter.convert("<h1>Main Title</h1>");
+        assert!(md.contains("# Main Title"), "got: {md}");
+    }
+}'
+
+# html_cleaner: the same removal on the module the pattern came from.
+red_surface "cleaner" "crates/webfang_core/src/domain/html_cleaner.rs" \
+'rejects a cleaner module whose Miri gate was removed' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn clean_removes_scripts_and_preserves_content() {
+        let cleaned = clean_html("<p>x</p>");
+        assert!(cleaned.contains("x"));
+    }
+}'
+
+# keyring_store: an un-gated test that builds a real kernel-keyring credential.
+red_surface "keyring" "crates/webfang_core/src/domain/keyring_store.rs" \
+'rejects an unguarded real-keyring build' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_real_keyring_key_is_byte_identical_to_the_legacy_key() {
+        let store = super::store().expect("store");
+        let _ = store.build(SERVICE, ACCOUNT, None);
+    }
+}'
+
+# Vacuity, per entry: the marker of spool_export disappears (its conversion
+# tests are renamed away). The invariant must FAIL instead of inspecting
+# nothing — the same honesty the scrape-use-case marker already had.
+red_surface "spool-vacuity" "crates/webfang_core/src/application/batch/spool_export.rs" \
+'rejects a file whose conversion marker disappeared' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn reader_tracks_bytes_and_resumes_at_offset() {
+        let _ = valid_line("https://example.test/a", "A");
+    }
+}'
+
+# Stale exemption: the exempt test no longer exists while the marker still
+# matches a GATED test — so the only thing that can fail here is the staleness
+# check. An exemption is a claim about a test that exists.
+red_surface "stale-exemption" "crates/webfang_core/src/application/scraper_service.rs" \
+'rejects a stale exemption whose test no longer exists' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB (servo/stylo#210)")]
+    fn scrape_span_records_success_outcome_and_result_count() {
+        let _ = scrape_with_config();
+    }
+}'
+
+# One-line body: `fn x() { … }` carries its code on the fn line. Dropping
+# that tail lets a one-line unguarded test reach the UB surface invisibly —
+# the invariant would report green over a lane that still aborts.
+red_surface "spool-oneline" "crates/webfang_core/src/application/batch/spool_export.rs" \
+'rejects an unguarded one-line conversion test' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn convert_spool_counts_corrupt_records_and_reports_watermark() { let _ = convert_lines(&[]).await; }
+}'
 
 if [ "$FAILURES" -ne 0 ]; then
   printf 'FAIL: the harness cannot detect the pre-fix shape\n'

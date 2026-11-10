@@ -18,13 +18,18 @@ set -uo pipefail
 #   3. The `Miri (core)` filter still covers the module of the attributed UB
 #      (`application::`). The detection stays Miri's: the aliasing model is
 #      never disabled globally to make the lane green.
-#   4. The test in `application/scraper_service.rs` that REACHES the UB
-#      surface (a 2xx response — the only path that gets to `clean_html` →
-#      `lol_html::rewrite_str`) carries a PER-TEST gate, so the UB is
-#      attributed to a test instead of aborting the whole lane. A test that
-#      drives the use case WITHOUT reaching that surface is listed in the
-#      nominal allowlist below, with the reason and the evidence that keep it
-#      ungated: an invariant that holds by accident is not an invariant.
+#   4. Every test that REACHES a declared UB surface carries a PER-TEST gate
+#      (or lives in a `mod tests` excluded from Miri at the module level), so
+#      the UB is attributed to a test instead of aborting the whole lane. The
+#      surfaces are the DECLARED table `UB_SURFACE_ENTRIES` below — one entry per
+#      (file, marker) that physically reaches an interpreter-hostile primitive:
+#      `clean_html` → `lol_html::rewrite_str` (the servo_arc Tree-Borrows UB,
+#      tracker servo/stylo#210) and the `keyctl` syscall that builds a real
+#      kernel-keyring credential. A test that matches the scrape marker WITHOUT
+#      reaching the surface (the non-2xx arm) is listed in the nominal allowlist
+#      with the reason and the evidence that keep it ungated: an invariant that
+#      holds by accident is not an invariant. A new surface — every scheduled run
+#      that went red opened one — is ADDED to the table, never silenced.
 #
 # This guard is STATIC: pure text over the checked-out tree. No cargo, no
 # Miri, no network, no repo state touched. Exit 0 = every invariant holds;
@@ -64,15 +69,38 @@ OWNED_MODULES=(
 # Miri jobs of ci.yml that run the UB detector.
 MIRI_JOBS=(miri miri-infra-fast miri-infra-slow)
 
-# The tests of the module of the attributed UB that drive the scrape use case
-# WITHOUT reaching the UB surface. Each entry is
-#   <test name>|<reason it does not reach the surface>|<evidence>
-# A test that drives the use case and is neither gated nor listed here is a
-# FAIL: the invariant is explicit on purpose, never satisfied by accident.
+# The tests that match the scrape-use-case marker WITHOUT reaching the UB
+# surface (the non-2xx arm: fetch_html rejects it before the cleaner runs).
+# Each entry is
+#   <file>~<test name>~<reason it does not reach the surface>~<evidence>
+# A test that matches and is neither gated nor listed here is a FAIL: the
+# invariant is explicit on purpose, never satisfied by accident.
 # A listed test that no longer exists is a FAIL too: a stale exemption is a
 # lie nobody can evaluate.
 UB_SURFACE_EXEMPT=(
-  "scrape_span_records_error_outcome_with_error_class|the 404 arm returns before clean_html (fetch_html rejects every non-2xx status before the cleaner)|scoped Miri run of 2026-10-22: 2 passed, 0 failed, 1 ignored"
+  "crates/webfang_core/src/application/scraper_service.rs~scrape_span_records_error_outcome_with_error_class~the 404 arm returns before clean_html (fetch_html rejects every non-2xx status before the cleaner)~scoped Miri run of 2026-10-22: 2 passed, 0 failed, 1 ignored"
+)
+
+# The DECLARED UB surface: one entry per (file, marker) that physically reaches
+# an interpreter-hostile primitive. Each entry is
+#   <file>~<marker>~<requires a 2xx status: 0|1>~<what the marker reaches>
+# <marker> is an awk ERE matched against the body of every test of the file.
+# Adding a surface here is MANDATORY when a new scheduled run goes red on one:
+# the 2026-11-09 run aborted three of four Miri jobs on three entry points that
+# were NOT in the table, which is why the lane had never gone green.
+#   - `clean_html` → `lol_html::rewrite_str`: the servo_arc `HeaderSlice`
+#     Tree-Borrows UB (tracker servo/stylo#210, still open). It lives in the
+#     dependency and not in our cleaning logic, so the test that only exercises
+#     the contract AROUND it is gated — the aliasing model is never disabled.
+#   - `keyctl` (syscall 250): Miri cannot execute the syscall at all. That is a
+#     property of the interpreter, so the test that needs a real kernel keyring
+#     is gated and the configuration contract it also verifies stays ungated.
+UB_SURFACE_ENTRIES=(
+  "crates/webfang_core/src/domain/html_cleaner.rs~clean_html~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/application/scraper_service.rs~scrape_with_config~1~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/infrastructure/converter/htmd_converter.rs~HtmdConverter.convert|converter.convert~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/application/batch/spool_export.rs~convert_lines|convert_spool~0~extract_page_content → clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/domain/keyring_store.rs~store.build|default_store.build~0~keyctl (syscall 250) building a real kernel-keyring credential"
 )
 
 # ---------------------------------------------------------------------------
@@ -88,14 +116,21 @@ UB_SURFACE_EXEMPT=(
 # not a gate.
 miri_gates() {
   awk '
-    function flush(   txt) {
+    function flush(   txt, cmt) {
       if (!in_gate) return
       txt = buf
-      has_str = (txt ~ /ignore[[:space:]]*=[[:space:]]*"[^"]+"/) ? 1 : 0
-      has_form = (txt ~ /ignore[[:space:]]*=[[:space:]]*"/) ? 1 : 0
-      printf "%d|%d|%d|%d|%d\n", start_line, end_line, has_str, has_comment, has_form
+      cmt = has_comment
       buf = ""
       in_gate = 0
+      has_comment = 0
+      # Only a Miri gate is the business of this guard; any other cfg_attr is
+      # ignored. Both shapes count — one line, or the multi-line form rustfmt
+      # writes when the reason is long — because a reason that only exists in
+      # the multi-line form must still be verifiable.
+      if (txt !~ /cfg_attr\([[:space:]]*miri/) return
+      has_str = (txt ~ /ignore[[:space:]]*=[[:space:]]*"[^"]+"/) ? 1 : 0
+      has_form = (txt ~ /ignore[[:space:]]*=[[:space:]]*"/) ? 1 : 0
+      printf "%d|%d|%d|%d|%d\n", start_line, end_line, has_str, cmt, has_form
     }
     {
       line = $0
@@ -114,7 +149,7 @@ miri_gates() {
         }
         next
       }
-      if (line ~ /cfg_attr\([[:space:]]*miri/) {
+      if (line ~ /cfg_attr\(/) {
         in_gate = 1
         buf = line
         start_line = NR
@@ -301,8 +336,14 @@ check_core_filter() {
 # "reaches the UB surface" when it does so with a 2xx response — the only
 # path that gets to `clean_html` → `lol_html::rewrite_str` (fetch_html
 # rejects every non-2xx status before the cleaner runs).
+# test_gates <file> <marker> <requires a 2xx status: 0|1> — one record per test
+# function of the file: <name>|<matches marker>|<reaches the surface>|<has gate>.
+# A test "reaches the surface" when it matches <marker> and, when the entry
+# demands it, its body builds a 2xx response — the only path that gets to
+# `clean_html` → `lol_html::rewrite_str` (fetch_html rejects every non-2xx
+# status before the cleaner runs).
 test_gates() {
-  awk '
+  awk -v marker="$2" -v need_status="$3" '
     function brackets(text,   scrub, n, m) {
       scrub = text
       gsub(/"[^"]*"/, "\"\"", scrub)
@@ -316,11 +357,11 @@ test_gates() {
       if (text ~ /\/\/[^[:space:]]/) return 1
       return 0
     }
-    function flush_fn(   body_has, reaches) {
+    function flush_fn(   matched, reaches) {
       if (fn_name == "") return
-      body_has = (body ~ /scrape_with_config[[:space:]]*\(/) ? 1 : 0
-      reaches = (body_has && body ~ /status:[[:space:]]*2[0-9][0-9]/) ? 1 : 0
-      printf "%s|%d|%d|%d\n", fn_name, body_has, reaches, fn_gate
+      matched = (body ~ marker) ? 1 : 0
+      reaches = (matched && (need_status != "1" || body ~ /status:[[:space:]]*2[0-9][0-9]/)) ? 1 : 0
+      printf "%s|%d|%d|%d\n", fn_name, matched, reaches, fn_gate
       fn_name = ""
       body = ""
       fn_gate = 0
@@ -348,7 +389,15 @@ test_gates() {
         if (!is_test) fn_name = ""
         fn_gate = pending_gate
         pending_gate = 0
-        body = ""
+        # A one-line body (`fn x() { … }`) keeps its code on the fn line.
+        # Discarding that tail makes the marker miss such a test entirely, and
+        # the invariant would inspect nothing while reporting green.
+        if (fn_name != "") {
+          rest = substr(line, RSTART + RLENGTH)
+          body = (rest ~ /[^[:space:]]/) ? rest : ""
+        } else {
+          body = ""
+        }
         attrs = ""
         attr_depth = 0
         next
@@ -363,70 +412,112 @@ test_gates() {
   ' "$1"
 }
 
+# module_gated <file> — 1 when the file's `mod tests` is excluded from Miri
+# builds at the module level (`#[cfg(all(test, not(miri)))]`). That shape is a
+# gate too — the repo's own precedent for a module whose every test routes
+# through the UB surface (`domain::html_cleaner::tests`) — and must not be
+# mistaken for a missing one.
+module_gated() {
+  awk '
+    /^[[:space:]]*#\[/ { attr = attr $0 "\n"; next }
+    /^[[:space:]]*(pub[[:space:]]+)?mod[[:space:]]+tests/ {
+      if (attr ~ /not\([[:space:]]*miri[[:space:]]*\)/) found = 1
+      attr = ""
+      next
+    }
+    { attr = "" }
+    END { print (found == 1) ? 1 : 0 }
+  ' "$1"
+}
+
+# in_exempt_list <file> <test> — 0 when an exemption entry names exactly that
+# file/test pair. Matched with awk on the `~` separator, never with a regex
+# over the path: a `.` in a path is a literal, not a wildcard.
+in_exempt_list() {
+  printf '%s\n' "${UB_SURFACE_EXEMPT[@]:-}" |
+    awk -v f="$1" -v n="$2" -F'~' '$1 == f && $2 == n { found = 1 } END { exit found ? 0 : 1 }'
+}
+
 check_ub_attribution() {
   local root="$1"
-  local file="$root/crates/webfang_core/src/application/scraper_service.rs"
   local rc=0
-  local name drives reaches gated
-  local entry entry_name entry_reason entry_evidence
-  local marker_hits=0
+  local entry file marker need_status surface
+  local name matched reaches gated module_gate marker_hits
+  local exempt_file exempt_name exempt_reason exempt_evidence
   local -a test_names=()
+  local all_tests=""
 
-  if [ ! -f "$file" ]; then
-    printf 'FAIL: check_ub_attribution: file not found: %s\n' "$file"
-    return 1
-  fi
-
-  while IFS='|' read -r name drives reaches gated; do
-    [ -n "$name" ] || continue
-    test_names+=("$name")
-    if [ "$drives" = "1" ]; then
-      marker_hits=$((marker_hits + 1))
-    fi
-    if [ "$reaches" = "1" ] && [ "$gated" != "1" ]; then
-      printf 'FAIL: check_ub_attribution: %s reaches the UB surface (clean_html → lol_html::rewrite_str) without a per-test Miri gate — the UB would abort the whole lane instead of being attributed\n' "$name"
+  for entry in "${UB_SURFACE_ENTRIES[@]}"; do
+    file="${entry%%~*}"
+    marker="$(printf '%s' "$entry" | cut -d'~' -f2)"
+    need_status="$(printf '%s' "$entry" | cut -d'~' -f3)"
+    surface="$(printf '%s' "$entry" | cut -d'~' -f4-)"
+    if [ ! -f "$root/$file" ]; then
+      printf 'FAIL: check_ub_attribution: declared UB surface not found: %s\n' "$file"
       rc=1
       continue
     fi
-    if [ "$drives" = "1" ] && [ "$reaches" != "1" ] && [ "$gated" != "1" ]; then
-      # Drives the use case without reaching the UB surface: it needs a
-      # NOMINAL exemption, with the reason and the evidence.
-      if ! printf '%s\n' "${UB_SURFACE_EXEMPT[@]:-}" | grep -q "^$name|"; then
-        printf 'FAIL: check_ub_attribution: %s drives the scrape use case without a per-test Miri gate and without a nominal exemption — the exemption list is the only way to leave it ungated\n' "$name"
+    module_gate="$(module_gated "$root/$file")"
+    marker_hits=0
+    test_names=()
+    while IFS='|' read -r name matched reaches gated; do
+      [ -n "$name" ] || continue
+      test_names+=("$name")
+      all_tests+="$file~$name"$'\n'
+      [ "$matched" = "1" ] && marker_hits=$((marker_hits + 1))
+      # A module-level gate covers every test of the module: there is nothing
+      # per-test to demand there.
+      [ "$module_gate" = "1" ] && continue
+      if [ "$reaches" = "1" ] && [ "$gated" != "1" ]; then
+        printf 'FAIL: check_ub_attribution: %s reaches the UB surface (%s) without a per-test Miri gate — the UB would abort the whole lane instead of being attributed\n' "$name" "$surface"
         rc=1
-      else
-        printf 'OK: check_ub_attribution: %s is nominally exempt (does not reach the UB surface)\n' "$name"
+        continue
       fi
+      if [ "$need_status" = "1" ] && [ "$matched" = "1" ] && [ "$reaches" != "1" ] && [ "$gated" != "1" ]; then
+        # Matches the marker without reaching the surface: it needs a NOMINAL
+        # exemption, with the reason and the evidence.
+        if in_exempt_list "$file" "$name"; then
+          printf 'OK: check_ub_attribution: %s is nominally exempt (matches the marker without reaching the surface)\n' "$name"
+        else
+          printf 'FAIL: check_ub_attribution: %s matches %s without a per-test Miri gate and without a nominal exemption — the exemption list is the only way to leave it ungated\n' "$name" "$marker"
+          rc=1
+        fi
+      fi
+    done < <(test_gates "$root/$file" "$marker" "$need_status")
+
+    if [ "$module_gate" = "1" ]; then
+      printf 'OK: check_ub_attribution: %s is gated at the module level\n' "$file"
+      continue
     fi
-  done < <(test_gates "$file")
 
-  # Vacuity guard: the marker that says "this test drives the scrape use
-  # case" must still match SOMETHING. A rename of the use case would leave
-  # the invariant green while it inspects nothing.
-  if [ "$marker_hits" -eq 0 ]; then
-    printf 'FAIL: check_ub_attribution: the marker scrape_with_config( matches no test in %s — the marker disappeared and the invariant is not looking at anything\n' "$file"
-    rc=1
-  fi
-
-  # A stale exemption is a lie nobody can evaluate: the test it names must
-  # still exist.
-  for entry in "${UB_SURFACE_EXEMPT[@]:-}"; do
-    [ -n "$entry" ] || continue
-    entry_name="${entry%%|*}"
-    entry_reason="$(printf '%s' "$entry" | cut -d'|' -f2)"
-    entry_evidence="$(printf '%s' "$entry" | cut -d'|' -f3-)"
-    if [ -z "$entry_reason" ] || [ -z "$entry_evidence" ]; then
-      printf 'FAIL: check_ub_attribution: the exemption of %s carries no reason or no evidence\n' "$entry_name"
+    # Vacuity guard: the marker must still match SOMETHING. A rename of the use
+    # case would leave the invariant green while it inspects nothing.
+    if [ "$marker_hits" -eq 0 ]; then
+      printf 'FAIL: check_ub_attribution: the marker %s matches no test in %s — the marker disappeared and the invariant is not looking at anything\n' "$marker" "$file"
       rc=1
     fi
-    if ! printf '%s\n' "${test_names[@]:-}" | grep -qx -- "$entry_name"; then
-      printf 'FAIL: check_ub_attribution: stale exemption: %s no longer exists in the file — prune the entry\n' "$entry_name"
+  done
+
+  # A stale exemption is a lie nobody can evaluate: the test it names must
+  # still exist in the file it names.
+  for entry in "${UB_SURFACE_EXEMPT[@]:-}"; do
+    [ -n "$entry" ] || continue
+    exempt_file="${entry%%~*}"
+    exempt_name="$(printf '%s' "$entry" | cut -d'~' -f2)"
+    exempt_reason="$(printf '%s' "$entry" | cut -d'~' -f3)"
+    exempt_evidence="$(printf '%s' "$entry" | cut -d'~' -f4-)"
+    if [ -z "$exempt_reason" ] || [ -z "$exempt_evidence" ]; then
+      printf 'FAIL: check_ub_attribution: the exemption of %s carries no reason or no evidence\n' "$exempt_name"
+      rc=1
+    fi
+    if ! printf '%s' "$all_tests" | awk -v f="$exempt_file" -v n="$exempt_name" -F'~' '$1 == f && $2 == n { found = 1 } END { exit found ? 0 : 1 }'; then
+      printf 'FAIL: check_ub_attribution: stale exemption: %s no longer exists in %s — prune the entry\n' "$exempt_name" "$exempt_file"
       rc=1
     fi
   done
 
   if [ "$rc" -eq 0 ]; then
-    printf 'OK: check_ub_attribution: the test that reaches the UB surface carries a per-test Miri gate\n'
+    printf 'OK: check_ub_attribution: every test that reaches a declared UB surface is gated\n'
   fi
   return "$rc"
 }
