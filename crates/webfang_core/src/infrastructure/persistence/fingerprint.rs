@@ -9,7 +9,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use deadpool_sqlite::Pool;
+use super::pool::{Connection, Pool};
 
 use crate::domain::extraction_quality::FingerprintRecord;
 use crate::domain::fingerprint_repository::FingerprintRepository;
@@ -53,7 +53,7 @@ impl SqliteFingerprintRepository {
 
     /// Acquire a pooled connection with the error mapping every entry point
     /// of this repository shares.
-    async fn pooled_connection(&self) -> Result<deadpool_sqlite::Connection, ScraperError> {
+    async fn pooled_connection(&self) -> Result<Connection, ScraperError> {
         self.pool
             .get()
             .await

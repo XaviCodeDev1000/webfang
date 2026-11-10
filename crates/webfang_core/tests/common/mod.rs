@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 #[cfg(feature = "persistence")]
-use deadpool_sqlite::Pool;
+use webfang_core::infrastructure::persistence::pool::Pool;
 
 #[allow(dead_code)]
 pub struct TestHttpServer {

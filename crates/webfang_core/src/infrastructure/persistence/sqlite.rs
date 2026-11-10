@@ -15,7 +15,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
-use deadpool_sqlite::{Config, Hook, HookError, Manager, Pool, Runtime};
+use super::pool::{Config, Hook, HookError, Manager, Pool, Runtime};
 use rusqlite::Connection;
 
 use crate::domain::note_repository::{
@@ -196,7 +196,7 @@ fn migrate_to_current(conn: &Connection) -> Result<(), ScraperError> {
 // Pool construction
 // ============================================================================
 
-/// Build a WAL-mode SQLite connection pool backed by [`deadpool_sqlite`].
+/// Build a WAL-mode SQLite connection pool backed by [`super::pool`].
 ///
 /// `pool_size` is clamped to at least 1 (the caller — `ElasticConfig` — already
 /// applies the frozen `cpu_cores`/floor-4 sizing). The parent directory of

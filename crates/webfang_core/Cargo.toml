@@ -21,7 +21,7 @@ default = []
 # enabled; loom itself is an unconditional dev-dependency.
 # Run with: cargo nextest run -p webfang_core --features loom-model --lib record_transition
 loom-model = []
-persistence = ["dep:rusqlite", "dep:deadpool-sqlite"]
+persistence = ["dep:rusqlite", "dep:deadpool", "dep:deadpool-sync"]
 console = ["dep:console-subscriber"]
 dev-tracing = ["dep:tracing-tree"]
 # Marker features for backward-compatible cfg gates.
@@ -160,7 +160,8 @@ robotstxt = { workspace = true }
 
 # SQLite persistence (feature-gated)
 rusqlite = { workspace = true, optional = true }
-deadpool-sqlite = { workspace = true, optional = true }
+deadpool = { workspace = true, optional = true }
+deadpool-sync = { workspace = true, optional = true }
 
 # Browser automation (CDP)
 chromiumoxide = { workspace = true, optional = true }
