@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.1] - 2026-11-10
+
+
+### 🏗️ Architecture Improvements
+
+- Extract engine stall tests into engine/tests_stalled.rs ([#2653](https://github.com/XaviCodeDev1000/webfang/pull/2653))
+- Extract engine pause tests into engine/tests_pause.rs ([#2657](https://github.com/XaviCodeDev1000/webfang/pull/2657))
+
+### 📦 Dependencies
+
+- Migrate rusqlite to 0.41.1 and replace deadpool-sqlite ([#2652](https://github.com/XaviCodeDev1000/webfang/pull/2652))
+- Update Cargo.lock dependencies
 ## [7.5.0] - 2026-11-09
 
 
