@@ -260,7 +260,14 @@ mod tests {
         assert_eq!(reader.consumed_bytes(), total, "corrupt bytes are consumed");
     }
 
+    // Gate reason: `extract_page_content` → `clean_html` → `lol_html::rewrite_str`
+    // hits the servo_arc Tree-Borrows UB (tracker servo/stylo#210). What these
+    // three tests verify — corrupt-record counting, the watermark, failure
+    // collection — never inspects the rewritten HTML, so the UB buys them
+    // nothing. The reader-only tests above stay ungated: they never convert a
+    // page, so they never reach the cleaner.
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB (stylo#210)")]
     async fn convert_spool_counts_corrupt_records_and_reports_watermark() {
         let (dir, outcome, total) = convert_lines(&[
             valid_line("https://example.test/a", "A"),
@@ -281,6 +288,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB (stylo#210)")]
     async fn convert_spool_from_offset_only_reads_the_tail() {
         let first = valid_line("https://example.test/a", "A");
         let second = valid_line("https://example.test/b", "B");
@@ -300,6 +308,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB (stylo#210)")]
     async fn failed_extraction_is_collected_not_fatal() {
         let (_dir, outcome, total) = convert_lines(&[
             valid_line("https://example.test/a", "A"),

@@ -178,14 +178,18 @@ mod tests {
     /// Sólo aplica a Linux: en macOS la clave es el par de atributos
     /// `service`/`account` y en Windows el `target_name = {account}.{service}`,
     /// idénticos por construcción.
+    ///
+    /// La configuración y la clave REAL se comprueban por separado: construir
+    /// la entrada exige el keyring del kernel (`keyctl`, syscall 250), que Miri
+    /// no ejecuta. Esa mitad vive en
+    /// `the_real_keyring_key_is_byte_identical_to_the_legacy_key` con su propio
+    /// gate; esta mitad sigue corriendo bajo el intérprete.
     #[cfg(target_os = "linux")]
     #[test]
-    fn the_credential_key_is_byte_identical_to_the_legacy_key() {
-        const SERVICE: &str = "webfang-legacy-key-service";
-        const ACCOUNT: &str = "webfang-legacy-key-account";
-        let legacy_key = format!("keyring-rs:{ACCOUNT}@{SERVICE}");
-
-        // RED: el store POR DEFECTO no direcciona la clave legacy.
+    fn the_production_store_addresses_the_legacy_key() {
+        // RED: el store POR DEFECTO NO direcciona la clave legacy: sin la
+        // configuración de este módulo direccionaría otra credencial y la del
+        // usuario quedaría huérfana (contrato "sin fallback").
         let default_store =
             linux_keyutils_keyring_store::Store::new().expect("store por defecto debe construirse");
         assert_ne!(
@@ -211,11 +215,31 @@ mod tests {
             "`keyring` 3 no rechazaba un service con el divisor dentro: \
              rechazarlo ahora dejaría fuera credenciales existentes"
         );
+    }
 
-        // Y la clave que el store REAL produce es byte a byte la legacy.
-        // Esto exige el keyring del kernel; si el entorno no lo tiene, la
-        // comprobación de configuración de arriba es la que sostiene el
-        // contrato (y se avisa, para que el skip no pase por verde).
+    /// La clave que el store REAL produce es byte a byte la legacy.
+    ///
+    /// Exige el keyring del kernel: Miri aborta con «unsupported syscall number
+    /// 250» en `keyctl`. Si el entorno no lo tiene, la comprobación se omite con
+    /// un aviso (para que el skip no pase por verde) y el contrato lo sostiene
+    /// la configuración de `the_production_store_addresses_the_legacy_key`.
+    ///
+    /// Cerrado por el run programado del 2026-11-09: `Miri (domain)` abortaba
+    /// en este `build` después de 443 tests en verde.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[cfg_attr(miri, ignore = "keyctl syscall 250 unsupported by Miri")]
+    fn the_real_keyring_key_is_byte_identical_to_the_legacy_key() {
+        const SERVICE: &str = "webfang-legacy-key-service";
+        const ACCOUNT: &str = "webfang-legacy-key-account";
+        let legacy_key = format!("keyring-rs:{ACCOUNT}@{SERVICE}");
+
+        // Y la clave que el store REAL produce es byte a byte la legacy. Esto
+        // exige el keyring del kernel; si el entorno no lo tiene, la
+        // comprobación se omite con un aviso (para que el skip no pase por
+        // verde) y el contrato lo sostiene la configuración, que comprueba
+        // `the_production_store_addresses_the_legacy_key`.
+        let store = super::store().expect("store de producción debe construerse");
         match store.build(SERVICE, ACCOUNT, None) {
             Ok(entry) => {
                 let description = entry
