@@ -553,6 +553,17 @@ EOF
   else
     skip_step "ci-health close harness" "no ci-health close files changed"
   fi
+  # Bug Discovery reporter semantics harness (#2666): offline proof that a RED
+  # discovery run is reported as red. The reporter used to grep the nextest
+  # log for a line starting with "FAIL" and nextest 0.9.131 prints none, so
+  # the nightly summary said "no findings" on red runs for 33 days. Runs only
+  # when a file in the reporter path changed; cheap enough (<1s) to never skip
+  # otherwise.
+  if grep -Eq '^(scripts/bug-discovery-report\.sh|scripts/test_bug_discovery_report\.sh|\.github/workflows/bug-discovery\.yml)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "bug discovery reporter harness (offline)" bash scripts/test_bug_discovery_report.sh
+  else
+    skip_step "bug discovery reporter harness" "no bug discovery reporter files changed"
+  fi
   # Compatibility-harness semantics (#1635): hermetic, cargo-free proof that
   # the probe failure paths stay fail-closed — the binary's own output reaches
   # the log before a FAIL, the crawl availability branch never degrades into a
