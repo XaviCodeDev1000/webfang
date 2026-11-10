@@ -50,7 +50,7 @@ So a test that exercises the vector export has to provide one.
 IS the test's own `wiremock` server, the credential is anonymous, and nothing
 leaves the machine:
 
-```rust
+```ignore
 let t = BehavioralTest::new().await;
 crate::common::embeddings::mount_embeddings(&t.server).await;
 let provider_config = crate::common::embeddings::provider_config(&t.server);
