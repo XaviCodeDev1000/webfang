@@ -312,9 +312,9 @@ application/crawler/engine.rs	46	use	crate::domain::CorrelationId
 application/crawler/engine.rs	46	use	crate::domain::CrawlerConfig
 application/crawler/engine.rs	46	use	crate::domain::JsStrategy
 application/crawler/engine.rs	46	use	crate::domain::post_load_wait::PostLoadWait
-application/crawler/engine.rs	354	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
-application/crawler/engine.rs	394	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
-application/crawler/engine.rs	396	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
+application/crawler/engine.rs	358	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
+application/crawler/engine.rs	398	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
+application/crawler/engine.rs	400	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::BincodeCheckpoint
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::CheckpointPath
 application/crawler/engine/build.rs	17	use	crate::application::crawler::collector::ResultsCollector
@@ -396,6 +396,15 @@ application/crawler/engine/options.rs	14	use	crate::domain::downloader_factory::
 application/crawler/engine/options.rs	15	use	crate::domain::post_load_wait::PostLoadWait
 application/crawler/engine/options.rs	16	use	crate::domain::JsStrategy
 application/crawler/engine/pause.rs	9	use	crate::domain::CrawlerConfig
+application/crawler/engine/tests_autoscale.rs	14	inline	crate::domain::ram_probe_port::RamProbePort
+application/crawler/engine/tests_autoscale.rs	15	inline	crate::domain::ram_probe_port::RamUsagePercent
+application/crawler/engine/tests_autoscale.rs	16	inline	crate::domain::ram_probe_port::RamUsagePercent::new_clamped
+application/crawler/engine/tests_autoscale.rs	19	inline	crate::domain::ram_probe_port::Sealed
+application/crawler/engine/tests_autoscale.rs	42	inline	crate::application::crawler::concurrency_level::ConcurrencyLevel::Normal
+application/crawler/engine/tests_autoscale.rs	47	inline	crate::application::crawler::concurrency_level::ConcurrencyLevel::Critical
+application/crawler/engine/tests_autoscale.rs	104	inline	crate::domain::ram_probe_port::RamUsagePercent
+application/crawler/engine/tests_autoscale.rs	106	inline	crate::domain::ram_probe_port::RamUsagePercent::new_clamped
+application/crawler/engine/tests_autoscale.rs	110	inline	crate::domain::ram_probe_port::Sealed
 application/crawler/engine/tests_budget.rs	3	use	crate::domain::budget::detector::FixedDetector
 application/crawler/engine/tests_budget.rs	4	use	crate::domain::budget::tiers::BurstPermits
 application/crawler/engine/tests_budget.rs	4	use	crate::domain::budget::tiers::CrawlConcurrency
@@ -420,6 +429,7 @@ application/crawler/engine/tests_pause.rs	41	use	crate::application::crawler::co
 application/crawler/engine/tests_pause.rs	41	use	crate::application::crawler::concurrency_level::SharedConcurrencyLevel
 application/crawler/engine/tests_pool.rs	170	use	crate::application::crawler::content_sink::CrawlContentSink
 application/crawler/engine/tests_pool.rs	170	use	crate::application::crawler::content_sink::InMemoryContentSink
+application/crawler/engine/tests_span.rs	26	inline	crate::infrastructure::observability::FileTraceLayer::new
 application/crawler/engine/tests_stalled.rs	3	use	crate::application::crawler::crawl_task_ctx::CrawlTaskCtx
 application/crawler/engine/tests_stalled.rs	4	use	crate::domain::CrawlError
 application/crawler/engine/tests_stalled.rs	74	use	crate::application::pipeline::PipelineStage
