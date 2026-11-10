@@ -40,7 +40,8 @@ pub trait VectorRepository: Send + Sync {
     ///
     /// If a resource with the same `content_hash` already exists, this
     /// short-circuits (dedup, frozen decision #3) and returns the **existing**
-    /// URL without inserting a duplicate row — saving the heavier chunk inserts.
+    /// URL without inserting a duplicate row. The same URL with a DIFFERENT
+    /// hash is updated in place (#2663): its row holds the most recent content.
     ///
     /// # Errors
     ///

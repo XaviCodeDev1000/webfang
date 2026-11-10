@@ -37,6 +37,20 @@ async fn count_resources_by_hash(repo: &SqliteVectorRepository, hash: &str) -> i
     .expect("count")
 }
 
+/// A file-backed repository over a fresh temp DB, with its temp dir kept
+/// alive by the caller.
+///
+/// The persistence tests need real I/O: `:memory:` is a single connection and
+/// would hide the concurrency the SQLite sink has to survive. The pool is
+/// reachable through [`SqliteVectorRepository::pool`] for the raw assertions.
+async fn file_backed_repo(name: &str) -> (TempDir, SqliteVectorRepository) {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join(name);
+    let pool = create_pool(&db_path, 4).unwrap();
+    setup_schema(&pool).await.unwrap();
+    (tmp, SqliteVectorRepository::new(pool))
+}
+
 /// Schema creation is idempotent — calling setup_schema twice doesn't fail.
 #[tokio::test]
 async fn test_setup_schema_is_idempotent() {
@@ -63,11 +77,7 @@ async fn test_setup_schema_creates_db_file() {
 /// Save a resource and retrieve its URL by content hash (file-backed DB).
 #[tokio::test]
 async fn test_save_and_get_resource() {
-    let tmp = TempDir::new().unwrap();
-    let db_path = tmp.path().join("save-resource.db");
-    let pool = create_pool(&db_path, 4).unwrap();
-    setup_schema(&pool).await.unwrap();
-    let repo = SqliteVectorRepository::new(pool);
+    let (_tmp, repo) = file_backed_repo("save-resource.db").await;
 
     let url = repo
         .save_resource("https://example.com/page1", "Page 1", "hash_abc", 1024)
@@ -100,11 +110,7 @@ async fn test_resource_not_exists() {
 /// Duplicate content hash returns existing URL without inserting a new row.
 #[tokio::test]
 async fn test_dedup_skips_duplicate_hash() {
-    let tmp = TempDir::new().unwrap();
-    let db_path = tmp.path().join("dedup.db");
-    let pool = create_pool(&db_path, 4).unwrap();
-    setup_schema(&pool).await.unwrap();
-    let repo = SqliteVectorRepository::new(pool);
+    let (_tmp, repo) = file_backed_repo("dedup.db").await;
 
     let url1 = repo
         .save_resource("https://a.com/page", "Page", "dedup_hash", 100)
@@ -127,12 +133,10 @@ async fn test_dedup_skips_duplicate_hash() {
 
 // ===== CHUNK CRUD =====
 
-/// Save a chunk with embedding and retrieve the vector.
+/// Save a chunk with embedding and retrieve the vector (file-backed DB).
 #[tokio::test]
 async fn test_save_and_get_chunk_with_embedding() {
-    let pool = create_memory_pool().unwrap();
-    setup_schema(&pool).await.unwrap();
-    let repo = SqliteVectorRepository::new(pool);
+    let (_tmp, repo) = file_backed_repo("chunk-with-embedding.db").await;
 
     // Save a resource first (FK constraint)
     repo.save_resource("https://example.com/doc", "Doc", "h1", 100)
@@ -159,12 +163,10 @@ async fn test_save_and_get_chunk_with_embedding() {
     assert!((vec[3] - (-0.5)).abs() < 1e-6);
 }
 
-/// Save a chunk without embedding — get_vector returns None.
+/// Save a chunk without embedding — get_vector returns None (file-backed DB).
 #[tokio::test]
 async fn test_save_chunk_without_embedding() {
-    let pool = create_memory_pool().unwrap();
-    setup_schema(&pool).await.unwrap();
-    let repo = SqliteVectorRepository::new(pool);
+    let (_tmp, repo) = file_backed_repo("chunk-without-embedding.db").await;
 
     repo.save_resource("https://example.com/doc2", "Doc2", "h2", 100)
         .await
@@ -185,12 +187,10 @@ async fn test_save_chunk_without_embedding() {
     assert_eq!(result, None, "no embedding should return None");
 }
 
-/// get_vector for nonexistent chunk returns None.
+/// get_vector for nonexistent chunk returns None (file-backed DB).
 #[tokio::test]
 async fn test_get_vector_nonexistent() {
-    let pool = create_memory_pool().unwrap();
-    setup_schema(&pool).await.unwrap();
-    let repo = SqliteVectorRepository::new(pool);
+    let (_tmp, repo) = file_backed_repo("chunk-missing.db").await;
 
     let result = repo.get_vector("nonexistent").await.unwrap();
     assert_eq!(result, None);
@@ -427,20 +427,18 @@ async fn save_resource_same_url_same_hash_is_idempotent() {
 /// inverted.
 #[tokio::test]
 async fn save_resource_same_url_different_hash_updates_the_row_in_place() {
-    let tmp = TempDir::new().unwrap();
-    let db_path = tmp.path().join("same-url-different-hash.db");
-    let pool = create_pool(&db_path, 2).unwrap();
-    setup_schema(&pool).await.unwrap();
-    let repo = SqliteVectorRepository::new(pool.clone());
+    let (_tmp, repo) = file_backed_repo("same-url-different-hash.db").await;
     let url = "https://example.com/same";
 
-    repo.save_resource(url, "First", "hash-one", 1).await.unwrap();
+    repo.save_resource(url, "First", "hash-one", 1)
+        .await
+        .unwrap();
 
     // A known old timestamp proves `updated_at` is refreshed and `created_at`
     // is preserved: SQLite's `datetime('now')` has one-second resolution, so
     // "it changed" cannot be observed by comparing two now()s.
     {
-        let conn = pool.get().await.unwrap();
+        let conn = repo.pool().get().await.unwrap();
         let url = url.to_string();
         conn.interact(move |c| {
             c.execute(
@@ -460,7 +458,7 @@ async fn save_resource_same_url_different_hash_updates_the_row_in_place() {
         .expect("the same URL with a different hash must be updated in place");
     assert_eq!(returned, url);
 
-    let conn = pool.get().await.unwrap();
+    let conn = repo.pool().get().await.unwrap();
     let url = url.to_string();
     let row: (String, String, i64, String, String) = conn
         .interact(move |c| {
@@ -502,31 +500,38 @@ async fn save_resource_same_url_different_hash_updates_the_row_in_place() {
 /// fragments of the old content, which fails silently.
 #[tokio::test]
 async fn save_resource_same_url_different_hash_removes_the_old_chunks() {
-    let tmp = TempDir::new().unwrap();
-    let db_path = tmp.path().join("same-url-chunks.db");
-    let pool = create_pool(&db_path, 2).unwrap();
-    setup_schema(&pool).await.unwrap();
-    let repo = SqliteVectorRepository::new(pool.clone());
+    let (_tmp, repo) = file_backed_repo("same-url-chunks.db").await;
     let url = "https://example.com/same";
 
-    repo.save_resource(url, "First", "hash-one", 1).await.unwrap();
+    repo.save_resource(url, "First", "hash-one", 1)
+        .await
+        .unwrap();
     repo.save_chunk("hash-one-0", url, 0, "old content", Some(&[0.1, 0.2]), None)
         .await
         .unwrap();
-    repo.save_chunk("hash-one-1", url, 1, "older content", Some(&[0.3, 0.4]), None)
-        .await
-        .unwrap();
+    repo.save_chunk(
+        "hash-one-1",
+        url,
+        1,
+        "older content",
+        Some(&[0.3, 0.4]),
+        None,
+    )
+    .await
+    .unwrap();
 
     // The content of that URL changed: the row is updated and the chunks of
     // the old content go away with it.
-    repo.save_resource(url, "Second", "hash-two", 2).await.unwrap();
+    repo.save_resource(url, "Second", "hash-two", 2)
+        .await
+        .unwrap();
 
     // The ingestion inserts the new chunks right after the resource row.
     repo.save_chunk("hash-two-0", url, 0, "new content", Some(&[0.5, 0.6]), None)
         .await
         .unwrap();
 
-    let conn = pool.get().await.unwrap();
+    let conn = repo.pool().get().await.unwrap();
     let url = url.to_string();
     let (remaining, old_left): (i64, i64) = conn
         .interact(move |c| {
