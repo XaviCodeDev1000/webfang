@@ -3,9 +3,8 @@
 //! ADR-0004 removed the local ONNX stack, so `--clean-ai` now REQUIRES a
 //! configured REMOTE embedding provider (preflight #796) and `--export-format
 //! vector` requires `--clean-ai`. A test that exercises the vector export
-//! therefore has to PROVIDE one — the two tests that used to be `#[ignore]`d
-//! for "requires cached ONNX model" / "requires a configured remote embedding
-//! provider" were waiting for exactly this seam (#2666).
+//! therefore has to PROVIDE one — the two tests that were skipped for that
+//! reason were waiting for exactly this seam (#2666).
 //!
 //! Hermetic by construction: the endpoint is the test's own wiremock server,
 //! the credential is anonymous (`auth: { source = "none" }`) and nothing

@@ -222,15 +222,15 @@ fn assert_vector_export_identities(t: &BehavioralTest, lines: &[serde_json::Valu
 /// PROVIDER (preflight #796): the provider is the test's own wiremock
 /// endpoint (`common::embeddings`), so the test stays hermetic.
 ///
-/// Still `#[ignore]`d, but NO LONGER for the provider: that seam exists now.
+/// Still skipped, but NO LONGER for the provider: that seam exists now.
 /// It fails on a SECOND, independent rot — the trace's `span_fields`
 /// `correlation_id` carries the durable `CorrelationId` UUID (dashed) where
 /// this pin expects a W3C traceparent (`00-<trace>-<span>-01`), so the
 /// trace<->export join cannot hold until both carry the same identity. That
-/// is a finding of its own, tracked in #2666; the discovery lane runs it and
-/// reports it, the gates must not run a RED test.
+/// is a finding of its own (#2672); the discovery lane runs it and reports
+/// it, the gates must not run a RED test.
 #[tokio::test]
-#[ignore = "the trace correlation identity is the durable UUID, not a traceparent (#2666)"]
+#[ignore = "the trace correlation identity is the durable UUID, not a traceparent (#2672)"]
 async fn scrape_trace_and_vector_export_share_per_page_correlation() {
     let t = BehavioralTest::new().await;
     let base = mount_two_page_site(&t.server).await;
