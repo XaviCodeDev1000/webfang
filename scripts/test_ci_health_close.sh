@@ -414,6 +414,20 @@ check "a log with only the filter line is NOT the known RED" "false" \
   "$(ci_health_classify_bug "$FILTER_LOG")"
 check "a log with the failure line IS the known RED" "true" \
   "$(ci_health_classify_bug "$FAILURE_LOG")"
+# The CI log arrives COLORIZED (CARGO_TERM_COLOR=always): the escape codes sit
+# between "FAIL" and the bracket, so the matcher saw NOTHING and known_only was
+# false in EVERY run -- the W-03 detection was dead in CI while its harness
+# stayed green on an ANSI-free fixture (#2666).
+ESC=$'\033'
+COLORED_FAILURE_LOG="$WORK/log-with-color.log"
+cat >"$COLORED_FAILURE_LOG" <<LOG
+2026-10-14T06:00:41.1234567Z ${ESC}[31;1m  TRY 3 FAIL${ESC}[0m [   0.005s] webfang_core application::crawler::sitemap_session::tests::${KNOWN_RED_TEST}
+2026-10-14T06:00:41.2234567Z ${ESC}[31;1m     Summary${ESC}[0m [   4.210s] 128 tests run: 127 passed, 1 failed
+LOG
+check "a COLORIZED failure line IS the known RED" "true" \
+  "$(ci_health_classify_bug "$COLORED_FAILURE_LOG")"
+check "the classifier strips the ANSI before matching" "yes" \
+  "$(grep -qF 's/\x1b\[[0-9;]*m//g' "$WORK/classify_bug.sh" && echo yes || echo no)"
 check "the classifier keys on the workflow's known RED test" "yes" \
   "$(grep -qF 'KNOWN_RED_TEST' "$WORK/classify_bug.sh" && echo yes || echo no)"
 check "the classifier matches a failure line, not a bare name" "yes" \
