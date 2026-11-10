@@ -327,3 +327,97 @@ async fn test_wal_pragmas_applied_to_every_pooled_connection() {
         assert_eq!(mode, "wal", "every pooled connection must be in WAL mode");
     }
 }
+
+// ===== SAME URL, SAME HASH (#2654) =====
+
+/// #2654: `resources.url` is the primary key, but the dedup check is by
+/// `content_hash`, which is NOT unique. Two concurrent writers can both miss
+/// the SELECT and race the INSERT, and the loser fails with
+/// `UNIQUE constraint failed: resources.url`.
+///
+/// The race is probabilistic, so the round is repeated with a fresh URL per
+/// round: on the current code it fails within a few rounds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn save_resource_same_url_same_hash_is_idempotent() {
+    use std::sync::Arc;
+    use tokio::sync::Barrier;
+
+    const TASKS: usize = 32;
+    const ROUNDS: usize = 64;
+
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("same-url.db");
+    let pool = create_pool(&db_path, TASKS).unwrap();
+    setup_schema(&pool).await.unwrap();
+    let repo = Arc::new(SqliteVectorRepository::new(pool.clone()));
+
+    for round in 0..ROUNDS {
+        let url = format!("https://example.com/race/{round}");
+        let hash = format!("same-content-hash-{round}");
+        let barrier = Arc::new(Barrier::new(TASKS));
+
+        let mut handles = Vec::new();
+        for _ in 0..TASKS {
+            let repo = Arc::clone(&repo);
+            let barrier = Arc::clone(&barrier);
+            let url = url.clone();
+            let hash = hash.clone();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                repo.save_resource(&url, "Race", &hash, 1024).await
+            }));
+        }
+
+        for handle in handles {
+            let result = handle.await.unwrap();
+            assert!(
+                result.is_ok(),
+                "round {round}: concurrent save_resource must succeed, got: {result:?}"
+            );
+        }
+
+        let conn = pool.get().await.unwrap();
+        let count: i64 = conn
+            .interact({
+                let url = url.clone();
+                move |c| {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM resources WHERE url = ?1",
+                        [url],
+                        |row| row.get(0),
+                    )
+                }
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(count, 1, "round {round}: the same URL must have one row");
+    }
+}
+
+/// The different-hash case is OUT of scope for #2654 and must keep today's
+/// behavior: the same URL with a different `content_hash` is still an error,
+/// never a silent overwrite. This pins the pending product decision for
+/// whoever takes it.
+#[tokio::test]
+async fn save_resource_same_url_different_hash_keeps_the_unique_error() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("same-url-different-hash.db");
+    let pool = create_pool(&db_path, 2).unwrap();
+    setup_schema(&pool).await.unwrap();
+    let repo = SqliteVectorRepository::new(pool);
+
+    repo.save_resource("https://example.com/same", "First", "hash-one", 1)
+        .await
+        .unwrap();
+
+    let err = repo
+        .save_resource("https://example.com/same", "Second", "hash-two", 2)
+        .await
+        .expect_err("the same URL with a different hash must keep failing");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("UNIQUE constraint failed: resources.url"),
+        "the different-hash case must keep today's error, got: {msg}"
+    );
+}
