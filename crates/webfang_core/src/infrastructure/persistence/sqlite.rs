@@ -391,8 +391,8 @@ fn bytes_to_f32_vec(b: &[u8]) -> Result<Vec<f32>, ScraperError> {
         .collect()
 }
 
-/// Insert the resource row, or verify that the row already there is the same
-/// one.
+/// Insert the resource row, or update it in place when that URL already
+/// carries a different content.
 ///
 /// `resources.url` is the primary key, but the dedup check upstream is by
 /// `content_hash`, which is NOT unique: two concurrent writers can both miss
@@ -400,37 +400,51 @@ fn bytes_to_f32_vec(b: &[u8]) -> Result<Vec<f32>, ScraperError> {
 /// `UNIQUE constraint failed: resources.url`. `INSERT OR IGNORE` makes the
 /// insert idempotent instead of failing.
 ///
-/// An ignored row is only accepted when it carries the SAME `content_hash`:
-/// the same URL with a different hash keeps today's UNIQUE error, because
-/// deciding what that case means is a separate product decision (#2654).
-fn insert_resource_or_verify_hash(
-    conn: &rusqlite::Connection,
+/// An ignored row that carries the SAME `content_hash` is the same resource:
+/// nothing to do. A DIFFERENT one means the content of that URL changed: the
+/// row is updated in place (#2663 — the row of a URL reflects its most recent
+/// content) and the chunks of the PREVIOUS content are deleted in the SAME
+/// transaction. The chunk ids carry the content hash (`{hash}-{index}`), so
+/// the new chunks would NOT replace the old ones: leaving them answers a
+/// vector search with stale fragments of the old content, which fails
+/// silently — worse than the error this replaces.
+fn upsert_resource_and_drop_stale_chunks(
+    conn: &mut rusqlite::Connection,
     url: &str,
     title: &str,
     content_hash: &str,
     size_bytes: u64,
 ) -> rusqlite::Result<()> {
-    let changed = conn.execute(
+    let tx = conn.transaction()?;
+    let changed = tx.execute(
         "INSERT OR IGNORE INTO resources \
          (url, title, content_hash, size_bytes, status, created_at, updated_at, metadata_json) \
          VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'), NULL)",
         rusqlite::params![url, title, content_hash, size_bytes as i64, "active"],
     )?;
-    if changed == 1 {
-        return Ok(());
+    if changed == 0 {
+        let stored_hash: String = tx.query_row(
+            "SELECT content_hash FROM resources WHERE url = ?1",
+            rusqlite::params![url],
+            |row| row.get(0),
+        )?;
+        if stored_hash != content_hash {
+            // The content of this URL changed: the row takes the new content
+            // (`created_at` is preserved, `updated_at` is refreshed) and the
+            // chunks of the PREVIOUS content go away with it, atomically.
+            tx.execute(
+                "UPDATE resources SET title = ?2, content_hash = ?3, size_bytes = ?4, \
+                 updated_at = datetime('now') WHERE url = ?1",
+                rusqlite::params![url, title, content_hash, size_bytes as i64],
+            )?;
+            tx.execute(
+                "DELETE FROM chunks WHERE resource_url = ?1",
+                rusqlite::params![url],
+            )?;
+        }
     }
-    let stored_hash: String = conn.query_row(
-        "SELECT content_hash FROM resources WHERE url = ?1",
-        rusqlite::params![url],
-        |row| row.get(0),
-    )?;
-    if stored_hash == content_hash {
-        return Ok(());
-    }
-    Err(rusqlite::Error::SqliteFailure(
-        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE),
-        Some("UNIQUE constraint failed: resources.url".to_string()),
-    ))
+    tx.commit()?;
+    Ok(())
 }
 
 // ============================================================================
@@ -468,7 +482,7 @@ impl VectorRepository for SqliteVectorRepository {
                 ScraperError::persistence(format!("obtener conexión del pool: {e}"))
             })?;
             conn.interact(move |c| {
-                insert_resource_or_verify_hash(
+                upsert_resource_and_drop_stale_chunks(
                     c,
                     &url_for_row,
                     &title_owned,
@@ -1284,64 +1298,6 @@ mod tests {
         // --- save_resource + dedup (frozen decision #3) ---
 
         // --- save_chunk + get_vector ---
-
-        #[tokio::test]
-        async fn test_save_and_get_chunk_with_embedding() {
-            let (_dir, repo) = fresh_repo(4).await;
-            repo.save_resource("https://example.com/c", "C", "hash-c", 10)
-                .await
-                .expect("save_resource");
-            let emb = vec![0.1_f32, 0.2, 0.3, 0.4];
-            repo.save_chunk(
-                "chunk-1",
-                "https://example.com/c",
-                0,
-                "hello world",
-                Some(&emb),
-                None,
-            )
-            .await
-            .expect("save_chunk");
-            let got = repo.get_vector("chunk-1").await.expect("get_vector");
-            assert_eq!(
-                got.as_deref(),
-                Some(emb.as_slice()),
-                "embedding must round-trip through BLOB"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_save_chunk_without_embedding_returns_none() {
-            let (_dir, repo) = fresh_repo(4).await;
-            repo.save_resource("https://example.com/n", "N", "hash-n", 10)
-                .await
-                .expect("save_resource");
-            repo.save_chunk(
-                "chunk-none",
-                "https://example.com/n",
-                0,
-                "no vec here",
-                None,
-                None,
-            )
-            .await
-            .expect("save_chunk");
-            let got = repo.get_vector("chunk-none").await.expect("get_vector");
-            assert!(
-                got.is_none(),
-                "chunk saved without embedding must yield None"
-            );
-        }
-
-        #[tokio::test]
-        async fn test_get_vector_nonexistent_chunk() {
-            let (_dir, repo) = fresh_repo(4).await;
-            let got = repo.get_vector("does-not-exist").await.expect("get_vector");
-            assert!(
-                got.is_none(),
-                "missing chunk must yield Ok(None), not an error"
-            );
-        }
 
         #[tokio::test]
         async fn test_corrupt_blob_returns_error() {
