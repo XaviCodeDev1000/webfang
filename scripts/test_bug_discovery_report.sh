@@ -69,9 +69,25 @@ EOF
 # too, and it is NOT a failure: saying "FAIL" about it would be a lie of a
 # different kind.
 cat >"$WORK/fixture-terminated.log" <<EOF
-${ESC}[35m   TRY 1 TMT${RESET} [ 180.046s] (───) ${RED}webfang_mcp::cli_mcp_export_jsonl_parity_test${RESET} ${RED}cli_vs_mcp_export_jsonl_record_parity${RESET}
-${ESC}[35mTRY 1 TRMNTG${RESET} [>180.000s] (───) ${RED}webfang_mcp::cli_mcp_export_jsonl_parity_test${RESET}
-${RED}     Summary${RESET} [ 687.892s] 5241 tests run: 5239 passed (5 slow), 2 failed, 9 skipped
+${ESC}[35;1m   TRY 1 TMT${ESC}[0m [ 180.046s] (───) ${RED}webfang_mcp::cli_mcp_export_jsonl_parity_test${ESC}[0m ${RED}cli_vs_mcp_export_jsonl_record_parity${ESC}[0m
+${ESC}[35mTRY 1 TRMNTG${ESC}[0m [>180.000s] (───) ${RED}webfang_mcp::cli_mcp_export_jsonl_parity_test${ESC}[0m
+${RED}     Summary${ESC}[0m [ 687.892s] 5241 tests run: 5239 passed (5 slow), 2 failed, 9 skipped
+EOF
+
+# A test that CRASHED. nextest prints ABRT / SEGV / KILL -- NOT "ABORT" --
+# and a hand-written token list that says ABORT misses every crash, so the
+# summary said "no findings" on a red run (#2666).
+cat >"$WORK/fixture-crash.log" <<EOF
+${ESC}[35;1m  TRY 1 ABRT${ESC}[0m [   0.094s] (───) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_abort${ESC}[0m
+${ESC}[35;1m  TRY 1 SEGV${ESC}[0m [   0.091s] (───) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_segv${ESC}[0m
+${ESC}[35;1m  TRY 1 KILL${ESC}[0m [   0.005s] (───) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_kill${ESC}[0m
+${RED}     Summary${ESC}[0m [   0.019s] 3 tests run: 0 passed, 3 failed, 0 skipped
+EOF
+
+# A tolerated flaky (flaky-result = "pass"): nextest prints FLAKY, not FLKY.
+cat >"$WORK/fixture-flaky-tolerated.log" <<EOF
+${ESC}[33;1m   FLAKY 2/3${ESC}[0m [   0.004s] (1/1) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_flaky${ESC}[0m
+${RED}     Summary${ESC}[0m [   0.006s] 1 tests run: 1 passed, 0 failed, 0 skipped
 EOF
 
 # A green run.
@@ -109,8 +125,12 @@ extract_run_block() {
 
 extract_run_block "- name: Publish results" "$WORK/publish_poisoned.sh"
 extract_run_block "- name: Publish failure names" "$WORK/publish_ignored.sh"
+extract_run_block "- name: Run tests with poisoned environment" "$WORK/run_poisoned.sh"
 
 # run_step <extracted-step> <fixture> -> the summary the step produced
+# RUN_RC holds the step's exit code: the reporter FAILS CLOSED (exit 1) when
+# the run did not complete, and that has to be observable, not swallowed.
+RUN_RC=0
 run_step() {
   local script="$1" fixture="$2"
   local tmp="$WORK/tmp"
@@ -118,10 +138,11 @@ run_step() {
   mkdir -p "$tmp"
   cp "$fixture" "$tmp/bug-discovery-nextest.log"
   : >"$WORK/summary.md"
+  RUN_RC=0
   GITHUB_WORKSPACE="$REPO_ROOT" \
     RUNNER_TEMP="$tmp" \
     GITHUB_STEP_SUMMARY="$WORK/summary.md" \
-    bash "$script" >/dev/null
+    bash "$script" >/dev/null || RUN_RC=$?
   cat "$WORK/summary.md"
 }
 
@@ -134,6 +155,8 @@ check "both steps call the shared reporter" "2" \
   "$(cat "$WORK/publish_poisoned.sh" "$WORK/publish_ignored.sh" | grep -c 'bug_discovery_report' || true)"
 check "both steps read the log from RUNNER_TEMP" "2" \
   "$(cat "$WORK/publish_poisoned.sh" "$WORK/publish_ignored.sh" | grep -c 'RUNNER_TEMP' || true)"
+check "the poisoned-env job runs with the ci profile" "yes" \
+  "$(grep -q -- '--profile ci' "$WORK/run_poisoned.sh" && echo yes || echo no)"
 
 echo "== 2. a red run is reported as red (#2666) =="
 out="$(run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-retry-fail.log")"
@@ -208,6 +231,33 @@ check "ignored-tests: a filter line is not a finding" "yes" \
   "$(grep -q 'No findings' <<<"$out" && echo yes || echo no)"
 check "ignored-tests: the mentioned test is not listed" "no" \
   "$(grep -q 'sitemap_entry_max_pages_truncates_many_url_fixture' <<<"$out" && echo yes || echo no)"
+
+echo "== 8. a CRASHED test is a finding (nextest prints ABRT/SEGV/KILL, not ABORT) =="
+out="$(run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-crash.log")"
+check "poisoned-env: the three crashed tests are listed" "3" \
+  "$(grep -c '^- ' <<<"$out" || true)"
+check "poisoned-env: the crash status is in the report" "yes" \
+  "$(grep -q 'ABRT' <<<"$out" && echo yes || echo no)"
+check "poisoned-env: it does NOT claim hermeticity" "no" \
+  "$(grep -q 'All tests hermetic' <<<"$out" && echo yes || echo no)"
+out="$(run_step "$WORK/publish_ignored.sh" "$WORK/fixture-crash.log")"
+check "ignored-tests: the three crashed tests are listed" "3" \
+  "$(grep -c '^- ' <<<"$out" || true)"
+check "ignored-tests: it does NOT claim 'no findings'" "no" \
+  "$(grep -q 'No findings' <<<"$out" && echo yes || echo no)"
+out="$(run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-flaky-tolerated.log")"
+check "poisoned-env: a tolerated flaky is a finding too" "yes" \
+  "$(grep -q 'FLAKY' <<<"$out" && echo yes || echo no)"
+
+echo "== 9. the reporter FAILS CLOSED when the run did not complete =="
+run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-no-summary.log" >/dev/null
+check "poisoned-env: it exits 1 when nextest never finished" "1" "$RUN_RC"
+run_step "$WORK/publish_ignored.sh" "$WORK/fixture-no-summary.log" >/dev/null
+check "ignored-tests: it exits 1 when nextest never finished" "1" "$RUN_RC"
+run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-green.log" >/dev/null
+check "a completed green run exits 0" "0" "$RUN_RC"
+run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-retry-fail.log" >/dev/null
+check "a completed run with findings exits 0 (nextest already failed the job)" "0" "$RUN_RC"
 
 echo "test_bug_discovery_report: PASS=$PASS FAIL=$FAIL"
 if ((FAIL > 0)); then

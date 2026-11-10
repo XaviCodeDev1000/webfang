@@ -44,7 +44,15 @@ jobs:
       - name: Run tests with poisoned environment
         run: |
           set -o pipefail
+          # The `ci` profile, NOT `default`: the default's slow-timeout
+          # (60s x 3 = 180s) kills the two CLI-vs-MCP parity tests under the
+          # full suite on the runner, and `flaky-result = "fail"` turns that
+          # timeout into a red lane that is NOT a hermeticity finding. The
+          # `ci` profile is the one the green lane uses (120s x 2 + 30s
+          # grace) and it still prints the failure lines and the summary the
+          # reporter reads (#2666).
           cargo nextest run --workspace --all-features --no-fail-fast \
+            --profile ci \
             2>&1 | tee "$RUNNER_TEMP/bug-discovery-nextest.log"
       - name: Publish results
         if: always()
