@@ -391,6 +391,48 @@ fn bytes_to_f32_vec(b: &[u8]) -> Result<Vec<f32>, ScraperError> {
         .collect()
 }
 
+/// Insert the resource row, or verify that the row already there is the same
+/// one.
+///
+/// `resources.url` is the primary key, but the dedup check upstream is by
+/// `content_hash`, which is NOT unique: two concurrent writers can both miss
+/// the check and race the INSERT, and the loser used to fail with
+/// `UNIQUE constraint failed: resources.url`. `INSERT OR IGNORE` makes the
+/// insert idempotent instead of failing.
+///
+/// An ignored row is only accepted when it carries the SAME `content_hash`:
+/// the same URL with a different hash keeps today's UNIQUE error, because
+/// deciding what that case means is a separate product decision (#2654).
+fn insert_resource_or_verify_hash(
+    conn: &rusqlite::Connection,
+    url: &str,
+    title: &str,
+    content_hash: &str,
+    size_bytes: u64,
+) -> rusqlite::Result<()> {
+    let changed = conn.execute(
+        "INSERT OR IGNORE INTO resources \
+         (url, title, content_hash, size_bytes, status, created_at, updated_at, metadata_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'), NULL)",
+        rusqlite::params![url, title, content_hash, size_bytes as i64, "active"],
+    )?;
+    if changed == 1 {
+        return Ok(());
+    }
+    let stored_hash: String = conn.query_row(
+        "SELECT content_hash FROM resources WHERE url = ?1",
+        rusqlite::params![url],
+        |row| row.get(0),
+    )?;
+    if stored_hash == content_hash {
+        return Ok(());
+    }
+    Err(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE),
+        Some("UNIQUE constraint failed: resources.url".to_string()),
+    ))
+}
+
 // ============================================================================
 // VectorRepository impl (PR4): CRUD + content-hash dedup
 // ============================================================================
@@ -426,11 +468,12 @@ impl VectorRepository for SqliteVectorRepository {
                 ScraperError::persistence(format!("obtener conexión del pool: {e}"))
             })?;
             conn.interact(move |c| {
-                c.execute(
-                    "INSERT INTO resources \
-                     (url, title, content_hash, size_bytes, status, created_at, updated_at, metadata_json) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'), NULL)",
-                    rusqlite::params![url_for_row, title_owned, hash_owned, size_bytes as i64, "active"],
+                insert_resource_or_verify_hash(
+                    c,
+                    &url_for_row,
+                    &title_owned,
+                    &hash_owned,
+                    size_bytes,
                 )
             })
             .await
@@ -1229,22 +1272,6 @@ mod tests {
             (dir, repo)
         }
 
-        /// Count rows in `resources` matching a content_hash (test inspection only).
-        async fn count_resources_by_hash(repo: &SqliteVectorRepository, hash: &str) -> i64 {
-            let hash = hash.to_string();
-            let conn = repo.pool().get().await.expect("get");
-            conn.interact(move |c| {
-                c.query_row(
-                    "SELECT COUNT(*) FROM resources WHERE content_hash = ?1",
-                    rusqlite::params![hash],
-                    |row| row.get::<_, i64>(0),
-                )
-            })
-            .await
-            .expect("interact")
-            .expect("count")
-        }
-
         // --- resource_exists_by_hash ---
 
         #[tokio::test]
@@ -1255,48 +1282,6 @@ mod tests {
         }
 
         // --- save_resource + dedup (frozen decision #3) ---
-
-        #[tokio::test]
-        async fn test_save_and_get_resource() {
-            let (_dir, repo) = fresh_repo(4).await;
-            let url = repo
-                .save_resource("https://example.com/a", "Example", "hash-aaa", 1234)
-                .await
-                .expect("save_resource");
-            assert_eq!(
-                url, "https://example.com/a",
-                "save_resource must return the URL"
-            );
-            let found = repo
-                .resource_exists_by_hash("hash-aaa")
-                .await
-                .expect("query");
-            assert_eq!(found.as_deref(), Some("https://example.com/a"));
-            assert_eq!(count_resources_by_hash(&repo, "hash-aaa").await, 1);
-        }
-
-        #[tokio::test]
-        async fn test_dedup_skips_duplicate_hash() {
-            let (_dir, repo) = fresh_repo(4).await;
-            let first = repo
-                .save_resource("https://example.com/first", "First", "dup-hash", 100)
-                .await
-                .expect("save_resource #1");
-            let second = repo
-                .save_resource("https://example.com/second", "Second", "dup-hash", 200)
-                .await
-                .expect("save_resource #2 (dedup)");
-            assert_eq!(
-                first, "https://example.com/first",
-                "dedup returns existing URL"
-            );
-            assert_eq!(second, first, "dedup must return the SAME (existing) URL");
-            assert_eq!(
-                count_resources_by_hash(&repo, "dup-hash").await,
-                1,
-                "no duplicate row must be inserted on dedup hit"
-            );
-        }
 
         // --- save_chunk + get_vector ---
 
@@ -1407,10 +1392,13 @@ mod tests {
                 assert!(r.is_ok(), "concurrent save must not error: {r:?}");
             }
             for i in 0..4_u8 {
+                let hash = format!("hash-c{i}");
+                let url = format!("https://example.com/c{i}");
+                let found = repo.resource_exists_by_hash(&hash).await.expect("query");
                 assert_eq!(
-                    count_resources_by_hash(&repo, &format!("hash-c{i}")).await,
-                    1,
-                    "row for hash-c{i} must exist after concurrent writes"
+                    found.as_deref(),
+                    Some(url.as_str()),
+                    "row for {hash} must exist after concurrent writes"
                 );
             }
         }

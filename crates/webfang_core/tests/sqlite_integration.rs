@@ -21,6 +21,22 @@ use webfang_core::infrastructure::persistence::sqlite::{
 
 // ===== SCHEMA INITIALIZATION =====
 
+/// Count rows in `resources` matching a content hash (test inspection only).
+async fn count_resources_by_hash(repo: &SqliteVectorRepository, hash: &str) -> i64 {
+    let hash = hash.to_string();
+    let conn = repo.pool().get().await.expect("get");
+    conn.interact(move |c| {
+        c.query_row(
+            "SELECT COUNT(*) FROM resources WHERE content_hash = ?1",
+            [hash],
+            |row| row.get::<_, i64>(0),
+        )
+    })
+    .await
+    .expect("interact")
+    .expect("count")
+}
+
 /// Schema creation is idempotent — calling setup_schema twice doesn't fail.
 #[tokio::test]
 async fn test_setup_schema_is_idempotent() {
@@ -44,10 +60,12 @@ async fn test_setup_schema_creates_db_file() {
 
 // ===== RESOURCE CRUD =====
 
-/// Save a resource and retrieve its URL by content hash.
+/// Save a resource and retrieve its URL by content hash (file-backed DB).
 #[tokio::test]
 async fn test_save_and_get_resource() {
-    let pool = create_memory_pool().unwrap();
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("save-resource.db");
+    let pool = create_pool(&db_path, 4).unwrap();
     setup_schema(&pool).await.unwrap();
     let repo = SqliteVectorRepository::new(pool);
 
@@ -60,6 +78,7 @@ async fn test_save_and_get_resource() {
 
     let existing = repo.resource_exists_by_hash("hash_abc").await.unwrap();
     assert_eq!(existing, Some("https://example.com/page1".to_string()));
+    assert_eq!(count_resources_by_hash(&repo, "hash_abc").await, 1);
 }
 
 /// resource_exists_by_hash returns None for unknown hash.
@@ -81,7 +100,9 @@ async fn test_resource_not_exists() {
 /// Duplicate content hash returns existing URL without inserting a new row.
 #[tokio::test]
 async fn test_dedup_skips_duplicate_hash() {
-    let pool = create_memory_pool().unwrap();
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("dedup.db");
+    let pool = create_pool(&db_path, 4).unwrap();
     setup_schema(&pool).await.unwrap();
     let repo = SqliteVectorRepository::new(pool);
 
@@ -97,6 +118,11 @@ async fn test_dedup_skips_duplicate_hash() {
         .unwrap();
 
     assert_eq!(url1, url2, "dedup should return the original URL");
+    assert_eq!(
+        count_resources_by_hash(&repo, "dedup_hash").await,
+        1,
+        "no duplicate row must be inserted on dedup hit"
+    );
 }
 
 // ===== CHUNK CRUD =====
