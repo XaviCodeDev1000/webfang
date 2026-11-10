@@ -85,7 +85,7 @@
       "crates/webfang_core/src/infrastructure/llm/remote_embedding.rs": 1825,
       "crates/webfang_core/src/infrastructure/network/session_pool.rs": 1156,
       "crates/webfang_core/src/infrastructure/observability/file_trace_layer.rs": 1113,
-      "crates/webfang_core/src/infrastructure/persistence/sqlite.rs": 1488,
+      "crates/webfang_core/src/infrastructure/persistence/sqlite.rs": 1476,
       "crates/webfang_core/src/infrastructure/platform/windows_console.rs": 516,
       "crates/webfang_core/src/infrastructure/semantic_cleaner.rs": 658,
       "crates/webfang_core/src/infrastructure/ssrf.rs": 1298,

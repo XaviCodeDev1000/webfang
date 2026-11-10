@@ -21,6 +21,22 @@ use webfang_core::infrastructure::persistence::sqlite::{
 
 // ===== SCHEMA INITIALIZATION =====
 
+/// Count rows in `resources` matching a content hash (test inspection only).
+async fn count_resources_by_hash(repo: &SqliteVectorRepository, hash: &str) -> i64 {
+    let hash = hash.to_string();
+    let conn = repo.pool().get().await.expect("get");
+    conn.interact(move |c| {
+        c.query_row(
+            "SELECT COUNT(*) FROM resources WHERE content_hash = ?1",
+            [hash],
+            |row| row.get::<_, i64>(0),
+        )
+    })
+    .await
+    .expect("interact")
+    .expect("count")
+}
+
 /// Schema creation is idempotent — calling setup_schema twice doesn't fail.
 #[tokio::test]
 async fn test_setup_schema_is_idempotent() {
@@ -44,10 +60,12 @@ async fn test_setup_schema_creates_db_file() {
 
 // ===== RESOURCE CRUD =====
 
-/// Save a resource and retrieve its URL by content hash.
+/// Save a resource and retrieve its URL by content hash (file-backed DB).
 #[tokio::test]
 async fn test_save_and_get_resource() {
-    let pool = create_memory_pool().unwrap();
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("save-resource.db");
+    let pool = create_pool(&db_path, 4).unwrap();
     setup_schema(&pool).await.unwrap();
     let repo = SqliteVectorRepository::new(pool);
 
@@ -60,6 +78,7 @@ async fn test_save_and_get_resource() {
 
     let existing = repo.resource_exists_by_hash("hash_abc").await.unwrap();
     assert_eq!(existing, Some("https://example.com/page1".to_string()));
+    assert_eq!(count_resources_by_hash(&repo, "hash_abc").await, 1);
 }
 
 /// resource_exists_by_hash returns None for unknown hash.
@@ -81,7 +100,9 @@ async fn test_resource_not_exists() {
 /// Duplicate content hash returns existing URL without inserting a new row.
 #[tokio::test]
 async fn test_dedup_skips_duplicate_hash() {
-    let pool = create_memory_pool().unwrap();
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("dedup.db");
+    let pool = create_pool(&db_path, 4).unwrap();
     setup_schema(&pool).await.unwrap();
     let repo = SqliteVectorRepository::new(pool);
 
@@ -97,6 +118,11 @@ async fn test_dedup_skips_duplicate_hash() {
         .unwrap();
 
     assert_eq!(url1, url2, "dedup should return the original URL");
+    assert_eq!(
+        count_resources_by_hash(&repo, "dedup_hash").await,
+        1,
+        "no duplicate row must be inserted on dedup hit"
+    );
 }
 
 // ===== CHUNK CRUD =====
@@ -326,4 +352,98 @@ async fn test_wal_pragmas_applied_to_every_pooled_connection() {
             .unwrap();
         assert_eq!(mode, "wal", "every pooled connection must be in WAL mode");
     }
+}
+
+// ===== SAME URL, SAME HASH (#2654) =====
+
+/// #2654: `resources.url` is the primary key, but the dedup check is by
+/// `content_hash`, which is NOT unique. Two concurrent writers can both miss
+/// the SELECT and race the INSERT, and the loser fails with
+/// `UNIQUE constraint failed: resources.url`.
+///
+/// The race is probabilistic, so the round is repeated with a fresh URL per
+/// round: on the current code it fails within a few rounds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn save_resource_same_url_same_hash_is_idempotent() {
+    use std::sync::Arc;
+    use tokio::sync::Barrier;
+
+    const TASKS: usize = 32;
+    const ROUNDS: usize = 4;
+
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("same-url.db");
+    let pool = create_pool(&db_path, TASKS).unwrap();
+    setup_schema(&pool).await.unwrap();
+    let repo = Arc::new(SqliteVectorRepository::new(pool.clone()));
+
+    for round in 0..ROUNDS {
+        let url = format!("https://example.com/race/{round}");
+        let hash = format!("same-content-hash-{round}");
+        let barrier = Arc::new(Barrier::new(TASKS));
+
+        let mut handles = Vec::new();
+        for _ in 0..TASKS {
+            let repo = Arc::clone(&repo);
+            let barrier = Arc::clone(&barrier);
+            let url = url.clone();
+            let hash = hash.clone();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                repo.save_resource(&url, "Race", &hash, 1024).await
+            }));
+        }
+
+        for handle in handles {
+            let result = handle.await.unwrap();
+            assert!(
+                result.is_ok(),
+                "round {round}: concurrent save_resource must succeed, got: {result:?}"
+            );
+        }
+
+        let conn = pool.get().await.unwrap();
+        let count: i64 = conn
+            .interact({
+                let url = url.clone();
+                move |c| {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM resources WHERE url = ?1",
+                        [url],
+                        |row| row.get(0),
+                    )
+                }
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(count, 1, "round {round}: the same URL must have one row");
+    }
+}
+
+/// The different-hash case is OUT of scope for #2654 and must keep today's
+/// behavior: the same URL with a different `content_hash` is still an error,
+/// never a silent overwrite. This pins the pending product decision for
+/// whoever takes it.
+#[tokio::test]
+async fn save_resource_same_url_different_hash_keeps_the_unique_error() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("same-url-different-hash.db");
+    let pool = create_pool(&db_path, 2).unwrap();
+    setup_schema(&pool).await.unwrap();
+    let repo = SqliteVectorRepository::new(pool);
+
+    repo.save_resource("https://example.com/same", "First", "hash-one", 1)
+        .await
+        .unwrap();
+
+    let err = repo
+        .save_resource("https://example.com/same", "Second", "hash-two", 2)
+        .await
+        .expect_err("the same URL with a different hash must keep failing");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("UNIQUE constraint failed: resources.url"),
+        "the different-hash case must keep today's error, got: {msg}"
+    );
 }
