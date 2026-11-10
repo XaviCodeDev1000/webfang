@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.1] - 2026-11-10
+
+
+### 📦 Dependencies
+
+- Migrate rusqlite to 0.41.1 and replace deadpool-sqlite ([#2652](https://github.com/XaviCodeDev1000/webfang/pull/2652))
+- Update Cargo.lock dependencies
 ## [7.5.0] - 2026-11-09
 
 
