@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.5.2] - 2026-11-10
+
+
+### 🏗️ Architecture Improvements
+
+- Extract engine budget tests into engine/tests_budget.rs ([#2661](https://github.com/XaviCodeDev1000/webfang/pull/2661))
+
+### 🔧 Fixed
+
+- Make save_resource idempotent for the same URL and hash ([#2660](https://github.com/XaviCodeDev1000/webfang/pull/2660))
 ## [7.5.1] - 2026-11-10
 
 
