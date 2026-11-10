@@ -1,6 +1,6 @@
 # Test Inventory — `#[ignore]` Catalog (Gate 0)
 
-**Source of truth:** `rg -n "#\[ignore" crates/ --glob '!target'` — **13 rows** (9 test attributes + 4 doc/comment mentions).
+**Source of truth:** `rg -n "#\[ignore" crates/ --glob '!target'` — **12 rows** (8 test attributes + 4 doc/comment mentions).
 Generated: `2026-08-21`, updated `2026-09-07`, re-baselined `2026-09-12` (#1328: composition corrected from the stale 27+5 claim to the on-disk 26+6; rows re-keyed from drifting `file:line` to stable `file` + test name). Catalogued #1368 measurement rows `2026-09-13` (#1384 decision: retain + catalogue — the corpus lives outside the repo, so the ignore is legitimate). Catalogued the #1561 timing benchmark `2026-10-03` (quarantined, assertion kept verbatim; needs an idle box with ≥8 cores). Catalogued the #1576 two-spec 97m budgets `2026-10-04` (the new `pool:4` sibling). Catalogued the #2237 tail-read memory probe `2026-10-22` (re-runs the test binary over a 69 MB export fixture; run by hand for the RSS-band evidence). Retired the #1834 console-close e2e probe `2026-10-24` (GenerateConsoleCtrlEvent cannot synthesize CTRL_CLOSE/LOGOFF/SHUTDOWN — documented API restriction — and the handler ignores CTRL_C/CTRL_BREAK by design: no synthesizable event reaches the source, so the probe was unrunnable by construction; handler registration, naming and tokio coexistence stay pinned by the module's unit tests). Linked to `COMPATIBILITY-MATRIX.md`.
 
 **ADR-0004 paso 6 (`2026-10-19`):** the 14 rows under `crates/webfang_ai/**` (9 attributes + 6 doc mentions)
@@ -27,17 +27,19 @@ the "real DNS / real HTTP" class.
 
 **CI enforcement:** this baseline is a frozen budget — `scripts/check_ignored_guard.sh` runs in the CI `repo-guards` job and fails on any drift between this inventory and the live scan, **per category**: each group's declared count, the file+test-name pair set, and the per-file doc/comment counts are all checked, so a composition swap with an equal total fails even when the sum matches (the totals-only blind spot that #1328 killed). Update this file in the same PR when adding/removing an ignored test or a doc/comment mention.
 
+**Unit A5 (`2026-11-10`, #2666):** the provider seam landed — `crates/webfang_core/tests/common/embeddings.rs` mounts an OpenAI-compatible `/embeddings` endpoint on the test's own wiremock and writes the provider config the binary reads (`WEBFANG_CONFIG`, anonymous auth, `allow_loopback`). The ONNX group's `vector_export_total_documents_matches_documents` therefore no longer needs a model: it RUNS and is green, and its row leaves the catalog. `trace_correlation_test.rs` KEEPS its ignore, but its reason is no longer a precondition — with the provider mounted the test runs and fails because the trace's `span_fields.correlation_id` carries the durable `CorrelationId` UUID where the pin expects a W3C traceparent, so the trace<->export join cannot close (#2672). That is a product finding, not test debt: the Bug Discovery lane runs the test and reports it, the gates must not run a RED test. Rows 13 → 12 (8 attributes + 4 doc/comment mentions) — the Comments/docs budget did NOT grow: the two new sentences were reworded so they do not mention the attribute.
+
 ## Summary by group
 
 | Group | Count | Reason pattern | Issue | Next action |
 |-------|-------|----------------|-------|-------------|
-| ONNX | 2 | `requires cached ONNX model` / `requires a configured remote embedding provider` | #433 | Re-baseline the post-paso-6 surface |
+| ONNX | 1 | `the trace correlation identity is the durable UUID, not a traceparent` | #2672 | The provider seam exists (#2666); this row is now a real product finding |
 | Network | 3 | `requires network` / DNS / client | #542 | Keep ignored; wiremock alternative in behavioral |
 | Tracing | 1 | `tracing global subscriber` | #501 | Keep ignored; subscriber race |
 | Reproduction | 3 | race window too narrow to force from a fixture; kept-RED TDD evidence; slow memory-band probe | #1230, #1429, #2237 | Keep ignored; the deterministic pins are the seam test / GREEN bound pin |
 | Comments/docs | 4 | doc comment mentions `#[ignore]` | #386 | Not tests — counted as their own checked category |
 
-Total: 2+3+1+3+4 = **13**. (Post-ADR-0004-paso-6 budget, re-baselined twice: by unit A3 the
+Total: 1+3+1+3+4 = **12**. (Post-ADR-0004-paso-6 budget, re-baselined three times: by unit A3 the
 Quantification and Timing benchmark groups went with the deleted crate — #1368 and #1561's measured
 rows lived in `crates/webfang_ai/**` — and the surviving core/mcp ONNX surface was re-counted with
 the deleted `ai_integration_test.rs` and the un-ignored MCP AI tests removed from it; by unit A4 the
@@ -82,19 +84,18 @@ for doc/comment mentions (compared per file by count). `Line` is not recorded on
 
 | # | Group | File | Identifier | Reason | Issue | Next |
 |---|-------|------|------------|--------|-------|------|
-| 1 | ONNX | `crates/webfang_core/tests/behavioral/cli/export_test.rs` | `vector_export_total_documents_matches_documents` | `requires cached ONNX model` | #433 | Sprint 1 |
-| 2 | ONNX | `crates/webfang_core/tests/behavioral/cli/trace_correlation_test.rs` | `scrape_trace_and_vector_export_share_per_page_correlation` | `requires a configured remote embedding provider` | #433 | Sprint 1 |
-| 3 | Network | `crates/webfang_core/tests/cli_binary_test.rs` | `test_dry_run_with_url` | `requires network access` | #542 | keep ignored |
-| 4 | Network | `crates/webfang_core/src/application/http_client/client.rs` | `test_http_client_get_example_com` | `requires network - run with cargo test --ignored` | #542 | keep ignored |
-| 5 | Network | `crates/webfang_core/src/infrastructure/crawler/sitemap_parser.rs` | `test_parse_from_url_depth_one_attempts_fetch` | `requires network — hits real DNS for invalid-host-xyz-12345.com` | #542 | keep ignored (by design) |
-| 6 | Tracing | `crates/webfang_core/src/infrastructure/observability/logging.rs` | `test_init_json_logging_with_temp_dir` | `tracing global subscriber may already be set in test context` | #501 | keep ignored |
-| 7 | Reproduction | `crates/webfang_core/tests/behavioral/cli/transactional_store_test.rs` | `concurrent_resume_processes_lose_no_records` | asserts the no-loss invariant under real multi-process contention, but measured 8/8 runs against the unfixed code with zero records lost — the clobber window is microseconds wide and a fixture cannot force it. NOT a falsifier of #1230; the deterministic falsifier is tests/record_store_transaction_test.rs | #1230 | Keep ignored; run by hand for stress evidence |
-| 8 | Reproduction | `crates/webfang_core/src/application/crawler/sitemap_session.rs` | `sitemap_entry_max_pages_truncates_many_url_fixture` | kept RED by design: asserts the naive unbounded reading (all 9 pages with max_pages=3), fails against the truncating bound; GREEN pin `sitemap_entry_max_pages_bound_pins_inflight_drain` carries the contract | #1429 | Keep ignored; RED-evidence for the overshoot bound, never run in CI |
-| 9 | Comments/docs | `crates/webfang_mcp/tests/mcp_behavioral_test.rs` | `doc` | `/// (A second test asserted the same thing under the name `mcp_ai_tools_registered_with_ai_off`; it was `#[ignore]`d behind a "requires cached ONNX model" reason it never needed. One test, one assertion.)` | #386 | docs only |
+| 1 | ONNX | `crates/webfang_core/tests/behavioral/cli/trace_correlation_test.rs` | `scrape_trace_and_vector_export_share_per_page_correlation` | `the trace correlation identity is the durable UUID, not a traceparent` | #2672 | Keep ignored; the Bug Discovery lane runs it and reports the finding |
+| 2 | Network | `crates/webfang_core/tests/cli_binary_test.rs` | `test_dry_run_with_url` | `requires network access` | #542 | keep ignored |
+| 3 | Network | `crates/webfang_core/src/application/http_client/client.rs` | `test_http_client_get_example_com` | `requires network - run with cargo test --ignored` | #542 | keep ignored |
+| 4 | Network | `crates/webfang_core/src/infrastructure/crawler/sitemap_parser.rs` | `test_parse_from_url_depth_one_attempts_fetch` | `requires network — hits real DNS for invalid-host-xyz-12345.com` | #542 | keep ignored (by design) |
+| 5 | Tracing | `crates/webfang_core/src/infrastructure/observability/logging.rs` | `test_init_json_logging_with_temp_dir` | `tracing global subscriber may already be set in test context` | #501 | keep ignored |
+| 6 | Reproduction | `crates/webfang_core/tests/behavioral/cli/transactional_store_test.rs` | `concurrent_resume_processes_lose_no_records` | asserts the no-loss invariant under real multi-process contention, but measured 8/8 runs against the unfixed code with zero records lost — the clobber window is microseconds wide and a fixture cannot force it. NOT a falsifier of #1230; the deterministic falsifier is tests/record_store_transaction_test.rs | #1230 | Keep ignored; run by hand for stress evidence |
+| 7 | Reproduction | `crates/webfang_core/src/application/crawler/sitemap_session.rs` | `sitemap_entry_max_pages_truncates_many_url_fixture` | kept RED by design: asserts the naive unbounded reading (all 9 pages with max_pages=3), fails against the truncating bound; GREEN pin `sitemap_entry_max_pages_bound_pins_inflight_drain` carries the contract | #1429 | Keep ignored; RED-evidence for the overshoot bound, never run in CI |
+| 8 | Comments/docs | `crates/webfang_mcp/tests/mcp_behavioral_test.rs` | `doc` | `/// (A second test asserted the same thing under the name `mcp_ai_tools_registered_with_ai_off`; it was `#[ignore]`d behind a "requires cached ONNX model" reason it never needed. One test, one assertion.)` | #386 | docs only |
+| 9 | Comments/docs | `crates/webfang_core/tests/behavioral/cli/error_path_test.rs` | `doc` | `/// No `#[ignore]`: the gate fires before any cleaner could be built.` | #386 | docs only |
 | 10 | Comments/docs | `crates/webfang_core/tests/behavioral/cli/error_path_test.rs` | `doc` | `/// No `#[ignore]`: the gate fires before any cleaner could be built.` | #386 | docs only |
-| 11 | Comments/docs | `crates/webfang_core/tests/behavioral/cli/error_path_test.rs` | `doc` | `/// No `#[ignore]`: the gate fires before any cleaner could be built.` | #386 | docs only |
-| 12 | Comments/docs | `crates/webfang_core/tests/behavioral/cli/waf_gauntlet_test.rs` | `doc` | `/// ... the historical wiremock-FIFO flakiness that motivated `#[ignore]` no longer applies.` | #386 | docs only |
-| 13 | Reproduction | `crates/webfang_core/src/infrastructure/export/tail_window.rs` | `tail_read_memory_probe` | measures the RSS band of the tail recovery: it re-runs the test binary as a child process over a 69 MB export fixture, so it is slow and needs a real filesystem | #2237 | Keep ignored; run by hand for the memory-band evidence |
+| 11 | Comments/docs | `crates/webfang_core/tests/behavioral/cli/waf_gauntlet_test.rs` | `doc` | `/// ... the historical wiremock-FIFO flakiness that motivated `#[ignore]` no longer applies.` | #386 | docs only |
+| 12 | Reproduction | `crates/webfang_core/src/infrastructure/export/tail_window.rs` | `tail_read_memory_probe` | measures the RSS band of the tail recovery: it re-runs the test binary as a child process over a 69 MB export fixture, so it is slow and needs a real filesystem | #2237 | Keep ignored; run by hand for the memory-band evidence |
 
 > **Guard contract (since #1328, 2026-09-12):** `check_ignored_guard.sh` compares this catalog to
 > the live scan per category — group counts, the file+test-name pair set, and per-file doc/comment

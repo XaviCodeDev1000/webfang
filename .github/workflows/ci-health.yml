@@ -368,7 +368,12 @@ jobs:
           #   FAIL [   0.010s] <binary> <test_path>::<test_name>
           # so the known RED counts as known ONLY when that line is there.
           FAILURE_LINE_RE="(^|[^[:alnum:]_])FAIL[[:space:]]+\[[^]]*\][[:space:]]+.*${KNOWN_RED_TEST}"
-          LOG_SNIPPET="$(gh run view "$RUN_ID" --log 2>/dev/null | grep -E "$FAILURE_LINE_RE" || true)"
+          # The log arrives COLORIZED (CARGO_TERM_COLOR=always): the escape
+          # codes sit BETWEEN "FAIL" and the bracket, so the matcher above
+          # saw NOTHING and known_only was false in every run -- the W-03
+          # detection was dead in CI while its harness stayed green on an
+          # ANSI-free fixture (#2666). Strip the ANSI before matching.
+          LOG_SNIPPET="$(gh run view "$RUN_ID" --log 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g' | grep -E "$FAILURE_LINE_RE" || true)"
           if [ -n "$LOG_SNIPPET" ]; then
             echo "known_only=true" >> "$GITHUB_OUTPUT"
             echo "W-03 known RED failure line seen; known-false-positive."

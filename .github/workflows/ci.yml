@@ -497,6 +497,14 @@ jobs:
       # close implementation. Offline, no real issues touched.
       - name: CI health close semantics harness
         run: bash scripts/test_ci_health_close.sh
+      # Semantics harness for the Production Bug Discovery reporter (#2666):
+      # proves that a RED discovery run is reported as red. The reporter used
+      # to grep the nextest log for a line starting with "FAIL", and nextest
+      # 0.9.131 prints none ("TRY 3 FAIL [...]", "FLKY-FL 2/3 [...]", both
+      # colorized in CI), so the nightly summary said "no findings" on red
+      # runs for 33 days. Offline, mktemp fixtures, no real run.
+      - name: Bug Discovery reporter semantics harness
+        run: bash scripts/test_bug_discovery_report.sh
       # Semantics harness for the nightly bench scope (#1913): proves on
       # dependency-free mktemp fixtures that the derived scope INCLUDES a crate
       # whose bench targets are autodiscovered (`benches/*.rs`, no `[[bench]]`

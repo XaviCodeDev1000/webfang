@@ -30,6 +30,16 @@
 use assert_cmd::Command;
 use insta::assert_snapshot;
 use std::path::Path;
+
+/// A fake REMOTE embeddings provider for the CLI's `--clean-ai` path.
+///
+/// ADR-0004 retired the local ONNX stack, so `--clean-ai` requires a
+/// CONFIGURED REMOTE embedding provider (preflight #796) and `--export-format
+/// vector` requires `--clean-ai`. The helper mounts that provider on the
+/// test's own wiremock server and writes the config the binary reads, so a
+/// test can exercise the vector export hermetically (#2666).
+#[path = "embeddings.rs"]
+pub mod embeddings;
 use std::process::{Child, ExitStatus};
 use std::time::{Duration, Instant};
 use wiremock::matchers::{method, path as wm_path};

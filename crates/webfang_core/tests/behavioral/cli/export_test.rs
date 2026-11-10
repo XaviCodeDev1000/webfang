@@ -45,10 +45,12 @@ const PAGE_HTML: &str = r#"
 /// Semantic JSON assertions instead of snapshots on purpose: the header embeds
 /// a `created_at` timestamp that is non-deterministic by design.
 ///
-/// Requires a cached ONNX model: `--export-format vector` needs `--clean-ai`
-/// (preflight #796).
+/// `--export-format vector` needs `--clean-ai` (preflight #796) and, since
+/// ADR-0004 retired the local ONNX stack, `--clean-ai` needs a CONFIGURED
+/// REMOTE embedding provider. The provider is the test's own wiremock
+/// endpoint (`common::embeddings`), so the test is hermetic: no endpoint, no
+/// credential and no network beyond the loopback interface.
 #[tokio::test]
-#[ignore = "requires cached ONNX model"]
 async fn vector_export_total_documents_matches_documents() {
     let t = BehavioralTest::new().await;
 
@@ -59,7 +61,13 @@ async fn vector_export_total_documents_matches_documents() {
         .mount(&t.server)
         .await;
 
+    crate::common::embeddings::mount_embeddings(&t.server).await;
+    let provider_config = crate::common::embeddings::provider_config(&t.server);
+
     t.scraper_cmd()
+        .env("WEBFANG_CONFIG", &provider_config)
+        .arg("--embedding-provider")
+        .arg(crate::common::embeddings::PROVIDER_ID)
         .arg("--single-page")
         .arg("--export-format")
         .arg("vector")

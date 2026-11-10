@@ -312,7 +312,7 @@
       "crate": "webfang_core",
       "area": "cli",
       "test_count": 3,
-      "ignored_count": 1,
+      "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
     },
@@ -483,6 +483,15 @@
       "crate": "webfang_core",
       "area": "cli",
       "test_count": 8,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "ai_model_semantic"
+    },
+    {
+      "path": "crates/webfang_core/tests/common/embeddings.rs",
+      "crate": "webfang_core",
+      "area": "ai",
+      "test_count": 0,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"

@@ -40,6 +40,38 @@ cargo test --test behavioral selector_h3_extracts_only_h3
 Ignored tests (e.g. optional live-site checks) are excluded by default; run them with
 `cargo nextest run --test behavioral --run-ignored ignored-only`.
 
+## Mocking a remote embeddings provider
+
+`--clean-ai` needs a **configured remote** embedding provider: ADR-0004 retired the
+local ONNX stack, and `--export-format vector` needs `--clean-ai` (preflight #796).
+So a test that exercises the vector export has to provide one.
+
+`crates/webfang_core/tests/common/embeddings.rs` does it hermetically — the provider
+IS the test's own `wiremock` server, the credential is anonymous, and nothing
+leaves the machine:
+
+```ignore
+let t = BehavioralTest::new().await;
+crate::common::embeddings::mount_embeddings(&t.server).await;
+let provider_config = crate::common::embeddings::provider_config(&t.server);
+
+t.scraper_cmd()
+    .env("WEBFANG_CONFIG", &provider_config) // absolute path: the CLI refuses a relative one
+    .arg("--embedding-provider")
+    .arg(crate::common::embeddings::PROVIDER_ID)
+    .arg("--export-format")
+    .arg("vector")
+    .arg("--clean-ai")
+    .assert()
+    .success();
+```
+
+Two details the fake has to honor: the endpoint answers **one vector per input**
+(the adapter rejects a body whose vector count does not match the text count), and
+the provider is declared in the config file with `auth = { source = "none" }` and
+`allow_loopback = true` — the loopback opt-in is config-file-only by design
+(#1462); there is deliberately no CLI flag for it.
+
 ## Snapshot testing with `insta`
 
 Content assertions use [`insta`](https://insta.rs) snapshots instead of brittle

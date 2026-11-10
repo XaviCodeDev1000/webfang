@@ -44,24 +44,27 @@ jobs:
       - name: Run tests with poisoned environment
         run: |
           set -o pipefail
+          # The `ci` profile, NOT `default`: the default's slow-timeout
+          # (60s x 3 = 180s) kills the two CLI-vs-MCP parity tests under the
+          # full suite on the runner, and `flaky-result = "fail"` turns that
+          # timeout into a red lane that is NOT a hermeticity finding. The
+          # `ci` profile is the one the green lane uses (120s x 2 + 30s
+          # grace) and it still prints the failure lines and the summary the
+          # reporter reads (#2666).
           cargo nextest run --workspace --all-features --no-fail-fast \
-            2>&1 | tee /tmp/poisoned-env-nextest.log
+            --profile ci \
+            2>&1 | tee "$RUNNER_TEMP/bug-discovery-nextest.log"
       - name: Publish results
         if: always()
+        # One reporter for both discovery jobs (scripts/bug-discovery-report.sh):
+        # a copy per job is how they drifted apart in the first place. The copy
+        # grepped for a line STARTING with "FAIL", and nextest 0.9.131 prints
+        # none: a failed test is "TRY 3 FAIL [...]" and an enforced flaky is
+        # "FLKY-FL 2/3 [...]", both colorized in CI, so the summary said "All
+        # tests hermetic" on red runs for 33 days (#2666).
         run: |
-          LOG=/tmp/poisoned-env-nextest.log
-          {
-            echo "## Poisoned Env Results"
-            if grep -qE '^[[:space:]]*FAIL[[:space:]]' "$LOG"; then
-              echo ""
-              echo "Tests that FAIL with poisoned env are NOT hermetic:"
-              echo ""
-              sed -En 's/^[[:space:]]*FAIL[[:space:]]+\[[^]]*\][[:space:]]+(.*)$/- \1/p' "$LOG"
-            else
-              echo ""
-              echo "All tests hermetic under poisoned environment."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          . "$GITHUB_WORKSPACE/scripts/bug-discovery-report.sh"
+          bug_discovery_report hermetic "$RUNNER_TEMP/bug-discovery-nextest.log" >> "$GITHUB_STEP_SUMMARY"
 
   ignored-tests:
     runs-on: ubuntu-latest
@@ -106,23 +109,14 @@ jobs:
           cargo nextest run --workspace --all-features --run-ignored only --no-fail-fast \
             --profile discovery \
             -E '!(test(/session_pool/) | test(/vault_detector/) | test(/cli_binary_test/) | test(/sitemap_entry_max_pages_truncates_many_url_fixture/))' \
-            2>&1 | tee /tmp/ignored-tests-nextest.log
+            2>&1 | tee "$RUNNER_TEMP/bug-discovery-nextest.log"
       - name: Publish failure names
         if: always()
+        # The same reporter as the poisoned-env job: one implementation, one
+        # shape to match (#2666).
         run: |
-          LOG=/tmp/ignored-tests-nextest.log
-          {
-            echo "## Production Bug Discovery"
-            if grep -qE '^[[:space:]]*FAIL[[:space:]]' "$LOG"; then
-              echo ""
-              echo "Failures here = potential production bugs. Findings:"
-              echo ""
-              sed -En 's/^[[:space:]]*FAIL[[:space:]]+\[[^]]*\][[:space:]]+(.*)$/- \1/p' "$LOG"
-            else
-              echo ""
-              echo "No findings: all ignored tests passed."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          . "$GITHUB_WORKSPACE/scripts/bug-discovery-report.sh"
+          bug_discovery_report findings "$RUNNER_TEMP/bug-discovery-nextest.log" >> "$GITHUB_STEP_SUMMARY"
 
   # Final honest-conclusion gate. Green = no findings; red = findings to triage.
   # Runs even when upstream jobs fail (if: always()) and turns any real failure
