@@ -312,9 +312,9 @@ application/crawler/engine.rs	46	use	crate::domain::CorrelationId
 application/crawler/engine.rs	46	use	crate::domain::CrawlerConfig
 application/crawler/engine.rs	46	use	crate::domain::JsStrategy
 application/crawler/engine.rs	46	use	crate::domain::post_load_wait::PostLoadWait
-application/crawler/engine.rs	352	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
-application/crawler/engine.rs	392	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
-application/crawler/engine.rs	394	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
+application/crawler/engine.rs	354	inline	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
+application/crawler/engine.rs	394	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
+application/crawler/engine.rs	396	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::BincodeCheckpoint
 application/crawler/engine/build.rs	16	use	crate::application::crawler::checkpoint::CheckpointPath
 application/crawler/engine/build.rs	17	use	crate::application::crawler::collector::ResultsCollector
@@ -396,6 +396,14 @@ application/crawler/engine/options.rs	14	use	crate::domain::downloader_factory::
 application/crawler/engine/options.rs	15	use	crate::domain::post_load_wait::PostLoadWait
 application/crawler/engine/options.rs	16	use	crate::domain::JsStrategy
 application/crawler/engine/pause.rs	9	use	crate::domain::CrawlerConfig
+application/crawler/engine/tests_budget.rs	3	use	crate::domain::budget::detector::FixedDetector
+application/crawler/engine/tests_budget.rs	4	use	crate::domain::budget::tiers::BurstPermits
+application/crawler/engine/tests_budget.rs	4	use	crate::domain::budget::tiers::CrawlConcurrency
+application/crawler/engine/tests_budget.rs	5	use	crate::domain::budget::BudgetModel
+application/crawler/engine/tests_budget.rs	5	use	crate::domain::budget::BudgetOverrides
+application/crawler/engine/tests_budget.rs	117	inline	crate::domain::budget::detector::SystemDetector
+application/crawler/engine/tests_budget.rs	183	use	crate::application::crawler::collector::CrawlMessage
+application/crawler/engine/tests_budget.rs	184	use	crate::domain::DiscoveredUrl
 application/crawler/engine/tests_checkpoint.rs	3	use	crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY
 application/crawler/engine/tests_checkpoint.rs	4	use	crate::domain::persistence::CheckpointCfg
 application/crawler/engine/tests_checkpoint.rs	4	use	crate::domain::persistence::PersistenceMode
