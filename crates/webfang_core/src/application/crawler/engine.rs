@@ -64,6 +64,8 @@ pub use entry::{crawl_site, crawl_site_capturing};
 
 mod build;
 #[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+mod tests_autoscale;
+#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_budget;
 #[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_checkpoint;
@@ -71,6 +73,8 @@ mod tests_checkpoint;
 mod tests_pause;
 #[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_pool;
+#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+mod tests_span;
 #[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_stalled;
 
@@ -507,10 +511,7 @@ mod tests {
     use crate::domain::persistence::PersistenceMode;
     use crate::domain::session_port::SessionPort;
     use crate::domain::CrawlError;
-    use tracing_subscriber::layer::SubscriberExt;
     use url::Url;
-    use wiremock::matchers::path;
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     // ——— ADR-0012-B sub-slice 3.F: session pool is the domain port (#1075) ———
 
@@ -596,113 +597,6 @@ mod tests {
             .expect("test session must build")
     }
 
-    /// ADR-0012 sub-slice 3.B-1c — the autoscale loop MUST read RAM via the
-    /// injected [`RamProbePort`], not via a hardcoded `ResourceGovernor` static
-    /// call. This test injects a high-pressure reading, runs the autoscale
-    /// background task, and asserts the shared concurrency level reaches
-    /// `Critical` without ever touching real sysinfo.
-    #[tokio::test]
-    async fn with_autoscale_uses_injected_ram_probe() {
-        #[derive(Debug)]
-        struct HighPressureProbe;
-        impl crate::domain::ram_probe_port::RamProbePort for HighPressureProbe {
-            fn ram_usage_percent(&self) -> crate::domain::ram_probe_port::RamUsagePercent {
-                crate::domain::ram_probe_port::RamUsagePercent::new_clamped(95.0)
-            }
-        }
-        impl crate::domain::ram_probe_port::Sealed for HighPressureProbe {}
-
-        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
-        let config = CrawlerConfig::builder(seed).build();
-        let engine = session_engine(config)
-            .with_ram_probe(Arc::new(HighPressureProbe))
-            .with_autoscale();
-
-        // The probe returns 95% on every poll. The autoscale background loop
-        // ticks at 5s; we wait long enough for at least one post-skip tick
-        // to land, then verify the shared level moved to Critical. The
-        // probe is `Arc<dyn RamProbePort>` so it MUST be the one polled —
-        // not the production `SystemRamProbe`.
-        let level = engine
-            .scheduler
-            .autoscale_level()
-            .expect("with_autoscale must install a level")
-            .clone();
-        // Sleep slightly longer than one 5s tick so the spawn'd loop runs
-        // at least once past the initial skip-tick.
-        tokio::time::sleep(Duration::from_millis(5_100)).await;
-        assert_ne!(
-            level.get(),
-            crate::application::crawler::concurrency_level::ConcurrencyLevel::Normal,
-            "autoscale loop must have moved off Normal under 95% injected RAM pressure",
-        );
-        assert_eq!(
-            level.get(),
-            crate::application::crawler::concurrency_level::ConcurrencyLevel::Critical,
-            "autoscale loop must reach Critical at 95% (>= 90% threshold)",
-        );
-
-        // End the 5s poll loop this test started (#1941) instead of leaking it
-        // into the rest of the suite.
-        engine.shutdown().await;
-    }
-
-    /// #1941: the RAM autoscale loop is an unbounded poll task (it loops on a
-    /// 5s tick forever). `with_autoscale` used to `tokio::spawn` it and drop
-    /// the `JoinHandle`, so nothing owned it — not the engine, not shutdown —
-    /// and the task outlived the crawl that created it, keeping the runtime
-    /// alive and polling a probe no one reads. The engine must hold the handle
-    /// and end it in `shutdown`, exactly like `signal_handle`.
-    #[tokio::test]
-    async fn autoscale_probe_handle_is_owned_and_aborted_by_shutdown() {
-        let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
-        let config = CrawlerConfig::builder(seed).build();
-        let engine = session_engine(config)
-            .with_ram_probe(Arc::new(CountingProbe(Arc::new(
-                std::sync::atomic::AtomicUsize::new(0),
-            ))))
-            .with_autoscale();
-
-        let abort = engine
-            .autoscale_handle
-            .as_ref()
-            .map(tokio::task::JoinHandle::abort_handle)
-            .expect("with_autoscale must record the spawned probe handle");
-        assert!(
-            !abort.is_finished(),
-            "the probe task must be live before shutdown, else this proves nothing"
-        );
-
-        engine.shutdown().await;
-
-        // `abort()` marks the task; the runtime observes it on the next poll
-        // pass, so yield a bounded number of times before reading the verdict.
-        for _ in 0..32 {
-            if abort.is_finished() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-        assert!(
-            abort.is_finished(),
-            "shutdown must abort the autoscale probe task instead of leaking it"
-        );
-    }
-
-    /// Counter used by the test above; the value is never read — only the
-    /// fact that the task exists and stops is under test.
-    #[derive(Debug)]
-    struct CountingProbe(Arc<std::sync::atomic::AtomicUsize>);
-
-    impl RamProbePort for CountingProbe {
-        fn ram_usage_percent(&self) -> crate::domain::ram_probe_port::RamUsagePercent {
-            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            crate::domain::ram_probe_port::RamUsagePercent::new_clamped(10.0)
-        }
-    }
-
-    impl crate::domain::ram_probe_port::Sealed for CountingProbe {}
-
     /// Test helper: the task context plus an empty in-flight set that
     /// `crawl_loop` needs, assembled exactly like `Engine::run` does.
     ///
@@ -764,119 +658,6 @@ mod tests {
         );
         assert_eq!(partial.total_pages, 1, "the collected page must survive");
         assert_eq!(partial.urls.len(), 1);
-    }
-
-    // ——— #1610 crawl run outcome + duration contract (OBS-H7) ———
-
-    /// #1610 (OBS-H7): the crawl entry span must say how the run ENDED, and
-    /// the `crawl completed` event must carry a millisecond duration.
-    ///
-    /// Before the outcome contract the span closed with configuration only,
-    /// and `duration_secs` rounded every sub-second run to 0 — the crawl cost
-    /// was recoverable only from the `span_close` record, which no summary
-    /// query can aggregate. The crawl runs against a wiremock seed (the
-    /// proven shape of the sibling entry tests) under a real FileTraceLayer,
-    /// so both records are read back from the parsed JSONL.
-    #[test]
-    fn crawl_site_with_options_span_records_outcome_and_summary_duration_ms() {
-        // #1615 (F11 / G-3 / G-4 / G-5): this path applies the literal-IP
-        // entry guard, which refuses wiremock's 127.0.0.1.
-        let _entry_off = webfang_test_utils::EnvGuard::entry_guard_off();
-
-        let dir = tempfile::tempdir().expect("temp dir");
-        let trace_path = dir.path().join("trace.jsonl");
-        let layer = crate::infrastructure::observability::FileTraceLayer::new(trace_path.clone())
-            .expect("trace layer");
-        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(layer));
-        // Multi-threaded, like the sibling entry tests: the crawl spawns
-        // workers. Only the entry span and the summary event are asserted —
-        // both are produced on THIS thread, where the layer is installed.
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("runtime");
-
-        tracing::dispatcher::with_default(&dispatch, || {
-            runtime.block_on(async {
-                let server = MockServer::start().await;
-                let port = server.address().port();
-                Mock::given(path("/"))
-                    .respond_with(
-                        ResponseTemplate::new(200)
-                            .set_body_string("<html><body>seed</body></html>"),
-                    )
-                    .mount(&server)
-                    .await;
-
-                let seed =
-                    Url::parse(&format!("http://127.0.0.1:{port}/")).expect("valid seed URL");
-                let config = CrawlerConfig::builder(seed)
-                    .max_depth(0)
-                    .max_pages(10)
-                    .ignore_robots(true)
-                    .build();
-                let result = crawl_site_with_options(
-                    config,
-                    EngineOptions {
-                        ignore_robots: true,
-                        ..Default::default()
-                    },
-                    &CorrelationId::new(),
-                )
-                .await
-                .expect("crawl must succeed");
-                assert_eq!(result.total_pages, 1, "the seed page is crawled");
-            });
-        });
-        drop(runtime);
-        // Flush before reading: the layer buffers and only drains on drop.
-        drop(dispatch);
-
-        let records: Vec<serde_json::Value> = std::fs::read_to_string(&trace_path)
-            .expect("trace file")
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("jsonl line"))
-            .collect();
-
-        let closes: Vec<_> = records
-            .iter()
-            .filter(|r| r["record"] == "span_close" && r["span"] == "crawl_site_with_options")
-            .collect();
-        assert_eq!(closes.len(), 1, "exactly one crawl entry span closes");
-        let span_fields = closes[0]["span_fields"].as_object().expect("span_fields");
-        assert_eq!(
-            span_fields.get("outcome").and_then(|v| v.as_str()),
-            Some("ok"),
-            "a completed crawl must close its span with a verdict"
-        );
-        assert!(
-            span_fields.contains_key("correlation_id"),
-            "the run-root identity must survive the late outcome record"
-        );
-
-        let summaries: Vec<_> = records
-            .iter()
-            .filter(|r| r["message"] == "crawl completed")
-            .collect();
-        assert_eq!(summaries.len(), 1, "exactly one crawl summary");
-        let summary_fields = summaries[0]["fields"].as_object().expect("summary fields");
-        let duration_ms = summary_fields
-            .get("duration_ms")
-            .and_then(serde_json::Value::as_u64)
-            .expect("the summary must report milliseconds, not whole seconds only");
-        assert!(
-            summary_fields.contains_key("duration_secs"),
-            "the historical field must survive — other tooling reads it"
-        );
-        let span_ms = closes[0]["span_duration_ms"]
-            .as_u64()
-            .expect("the span reports its own lifetime");
-        assert!(
-            duration_ms <= span_ms,
-            "the summary is emitted inside the span, so its elapsed time ({duration_ms}ms) cannot exceed the span lifetime ({span_ms}ms)"
-        );
     }
 
     /// Source that resolves immediately with a fixed event name.
