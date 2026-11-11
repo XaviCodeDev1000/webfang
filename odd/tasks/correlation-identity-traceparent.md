@@ -105,23 +105,28 @@ habla traceparent. El productor real del UUID crudo es OTRO subsistema.
 
 ## Tasks
 
-- [ ] T1 · S1, S2 — **PRODUCTOR LOCALIZADO** (ver «Hechos verificados (T1, 2026-11-11)»): el
-  infractor es `infrastructure/llm/remote_embedding.rs` (spans `embed` / `embed_batch`), que publica
-  un UUID v4 por request bajo la clave `correlation_id` y pisa el traceparent heredado del scope. El
-  span de página YA habla traceparent, así que el fix no está donde decía la previa. Falta cerrar el
-  SHAPE: el nombre del campo donde vive ese UUID por request y si se agrega `correlation_uuid` en
-  algún lado (decisión del owner, L5). Un solo campo nuevo, aditivo; ningún campo público cambia de
-  nombre.
-- [ ] T2 · S3, S4 — Sacar el `#[ignore]` del test y dejar el pin como está: el traceparent del span
-  tiene que ser el del export. RED contra el productor viejo, GREEN con el nuevo.
-- [ ] T3 · S2, S6 — Actualizar el pin de `correlation_id_fidelity.rs` y los `jq` de
-  `docs/samples/debugging/` si el shape del campo cambia; el `jq` tiene que seguir encontrando la
-  correlación.
-- [ ] T4 · S5 — `docs/test-inventory.md`: filas 12 → 11 (7 atributos + 4 menciones), con la fila que
-  sale y el motivo real que queda. `docs/test-inventory.json` regenerado.
-- [ ] T5 · S7 — Verificación completa: `cargo nextest run` del módulo afectado, clippy
-  `--all-targets --all-features -D warnings`, `cargo fmt --all -- --check`, `cargo doc` con
-  `RUSTDOCFLAGS=-D warnings`, y el gate `scripts/check_ignored_guard.sh` en verde.
+- [x] T1 · S1, S2 — **PRODUCTOR LOCALIZADO Y CORREGIDO** (ver «Hechos verificados (T1, 2026-11-11)»): el
+  infractor era `infrastructure/llm/remote_embedding.rs` (spans `embed` / `embed_batch`), que publicaba
+  un UUID v4 por request bajo la clave `correlation_id` y pisaba el traceparent heredado del scope. El
+  span de página YA hablaba traceparent, así que el fix no estaba donde decía la previa. Shape
+  decidido por el owner (L5, opción A): el UUID por request pasa a `request_id` — el nombre honesto,
+  es un id de request y no una correlación — y NO se agrega `correlation_uuid`: el UUID durable del
+  `CorrelationId` ya está expuesto como `span_fields.trace_id`, donde ya estaba y ya está
+  documentado. Commit propio `9e95f974`.
+- [x] T2 · S3, S4 — Destrabado: `scrape_trace_and_vector_export_share_per_page_correlation` sale de
+  `#[ignore]` y corre VERDE. RED observado contra el productor viejo (v4 crudo por corrida),
+  GREEN con el productor nuevo. Commit `1bed39d2`.
+- [x] T3 · S2, S6 — **Sin cambios necesarios, verificado**: los `jq` de `docs/samples/debugging/`
+  (`12-page-pacing-by-correlation.sh`, `17-correlate-wait-with-page.sh`) ya filtran por
+  `.fields.correlation_id` con un valor TRACEPARENT (`CID=00-01949e0e…-01`) — el shape del evento no
+  lo toca este cambio. El pin `correlation_id_json_contains_traceparent` de
+  `correlation_id_fidelity.rs` asserta las keys del `CorrelationId` serializado (`trace_id`,
+  `span_id`), no el shape del span: tampoco depende de este cambio. Verificado en vivo: el evento
+  `rate limit wait` sigue llevando `fields.correlation_id = "00-01a1c8a1…-3ee3331358f5655b-01"`.
+- [x] T4 · S5 — `docs/test-inventory.md`: filas 12 → 11 (7 atributos + 4 menciones), con la fila que
+  sale y el motivo real que queda (Unit A6). `docs/test-inventory.json` regenerado (181 archivos;
+  el `ignored_count` del área afectados pasa 1 → 0). `scripts/check_ignored_guard.sh` en verde.
+- [x] T5 · S7 — Verificación completa (ver L6).
 - [ ] T6 · S7 — La lane valida: confirmar en la corrida programada que `ignored-tests` reporta el
   test destrabado si algo falla, y que no reporta nada cuando pasa.
 
@@ -181,21 +186,59 @@ identidad de la corrida. El UUID durable del `CorrelationId` ya está expuesto c
 `span_fields.trace_id` (v7 del run-root) y está documentado en `docs/src/debugging.md`; por eso
 S2, tal como está redactada, no tiene un hueco real que tapar.
 
-L5 — PENDIENTE DE DECISIÓN DEL OWNER (2026-11-11): con los hechos corregidos, la decisión de shape
-que queda es UNA — dónde vive el UUID por request del adaptador de embeddings y si el campo
-`correlation_uuid` aprobado llega a existir:
+L5 — DECISIÓN DEL OWNER (2026-11-11), opción **(A)**: el UUID por request del adaptador de embeddings
+pasa a `request_id` (el nombre honesto: es un id de request, no una correlación) y NO se agrega
+`correlation_uuid` — el UUID durable del `CorrelationId` sigue en `span_fields.trace_id`, donde ya
+estaba y ya está documentado (`docs/src/debugging.md`). Se descartaron (B) y (C) porque
+`correlation_uuid` habría pasado a significar dos cosas distintas (id del request de embeddings vs.
+UUID durable) o habría duplicado byte a byte `span_fields.trace_id`. Con (A) el shape del trace
+JSONL queda: `span_fields.correlation_id` = traceparent W3C (uniforme en todo el trace),
+`span_fields.trace_id` = UUID durable del run-root, `span_fields.request_id` = el id por request
+del adaptador de embeddings (único en su columna).
 
-- **(A)** el UUID por request pasa a `request_id` (el nombre honesto: es un id de request, no una
-  correlación) y NO se agrega `correlation_uuid` — el UUID durable sigue en `span_fields.trace_id`,
-  donde ya estaba y ya está documentado. Diff mínimo: un archivo de producción + el pin.
-- **(B)** el UUID por request pasa a `correlation_uuid` (el nombre aprobado) y NO se agrega en
-  ningún otro lado. Cumple la letra de L3, pero `correlation_uuid` significaría «id del request de
-  embeddings» y no «UUID durable del CorrelationId».
-- **(C)** el UUID por request pasa a `request_id` Y se agrega `correlation_uuid` = UUID durable del
-  `CorrelationId` a los spans de identidad (página / corrida). Lectura más literal de L3, pero el
-  campo sería byte-idéntico a `span_fields.trace_id` en esos spans: duplicación pura del shape del
-  trace JSONL.
+L6 — Cierre de T1-T5 (2026-11-11):
 
-Con cualquiera de las tres, `span_fields.correlation_id` queda uniforme (traceparent) y el join
-trace↔export cierra.
+- **Commits**: `9e95f974` (el productor: el rename del campo + el doc del porqué, commit propio como
+  pidió el owner) · `1bed39d2` (el destrabe del pin + el catálogo a 11 filas).
+- **RED → GREEN**: el pin destrabado falló con un UUID v4 DISTINTO en cada corrida
+  (`a4ecf457-…`, `369495bd-…`, `6797516b-…`) — la prueba de que era un id por request y no la
+  identidad de la corrida; con el productor corregido corre VERDE.
+- **Verificación**: `cargo nextest run --workspace` → 5135/5135 verde (7 skipped); el target
+  `behavioral` completo → 176/176 verde (1 skipped: la fila `#[ignore]` que sigue viva por diseño);
+  `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W
+  clippy::too_many_lines` verde; `cargo fmt --all -- --check` verde; `cargo doc --workspace
+  --all-features --no-deps` con `RUSTDOCFLAGS=-D warnings` exit 0; `scripts/check_ignored_guard.sh`
+  verde (11 menciones: 7 atributos + 4 doc/comment); `scripts/check_test_inventory.sh` verde.
+- **Evidencia en vivo (post-fix)**: en un `--trace-file` real, TODO `span_fields.correlation_id` del
+  trace es un traceparent (el filtro `grep -vE '^00-[0-9a-f]{32}-[0-9a-f]{16}-01$'` sobre el campo no
+  devuelve nada), el span `embed_batch` hereda el traceparent de la corrida
+  (`00-01a1c8a1…-19ab785b87823681-01`) y el id por request aparece como `request_id`
+  (`95b6215d-…`, `f23bf1f8-…`).
+- **Ratchets del repo (los dos que el cambio tocaba)**: `scripts/check_file_size.sh` — el archivo
+  `remote_embedding.rs` está en el TECHO de su baseline (1825/1825) y no puede crecer ni una línea:
+  por eso el cambio es un rename neto-cero y el doc del porqué se compensó recortando el doc
+  verboso de `as_any`, en vez de growing el archivo. `scripts/check_duplication.sh` — 8306 líneas
+  duplicadas, 19 POR DEBAJO del baseline de 8325.
+
+L7 — Lo que este ciclo deja anotado (2026-11-11):
+
+- **El pin unitario que se escribió primero se Sacó, y el E2E quedó como pin**: el pin unitario
+  (el `embed_batch` span no debe declarar `correlation_id`) iba a vivir en `remote_embedding.rs`, un
+  archivo grandfathered SIN HEADROOM: el ratchet de tamaño falla si crece una sola línea, y el
+  ratchet de duplicación sube +2 por el bloque `FileTraceLayer` copiado del pin de `orchestrator.rs`.
+  Sacarlo dejó el archivo en su techo exacto (1825) y la duplicación 19 líneas por debajo del
+  baseline. Y el pin unitario era REDUNDANTE: el test conductual destrabado asserta la regla
+  COMPLETA (todo `span_fields.correlation_id` es un traceparent que embebe el trace del run-root, y
+  los `correlation_id` del export están en ese conjunto) y corre en cada lane. La extracción del
+  harness de captura (`FileTraceLayer` → JSONL) que las dos cosas exigirían es un trabajo de otro
+  PR: toca `rate_limiter.rs` y `orchestrator.rs`, que no tienen nada que ver con #2672.
+- **`Display for CorrelationId` ES el traceparent**: el `%` de `tracing` usa `Display`, y
+  `Display for CorrelationId` imprime `to_traceparent()`. Cualquier productor que declare
+  `correlation_id = %<CorrelationId>` escribe el traceparent sin tocar nada. El infractor era el
+  único que NO usaba un `CorrelationId` — usaba un `Uuid::new_v4()` — y por eso su campo era la
+  ÚNICA columna del trace con dos identidades mezcladas.
+- **El merge del scope es la causa raíz**: `FileTraceLayer` fusiona los campos del scope
+  padre → hijo y el hijo gana. Un span anidado que declare su propio `correlation_id` pisa el
+  traceparent heredado. La lección para cualquier span anidado futuro: la clave `correlation_id`
+  es de la RUN, no del span.
 
