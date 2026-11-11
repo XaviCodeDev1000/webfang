@@ -86,6 +86,52 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 filter = 'test(=brotli_bomb_via_sitemap)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# Los shims RETIRADOS como env vars (`the_retired_shim_env_vars_are_ignored`):
+# el test SPAWLEA el binario `webfang` CUATRO VECES DENTRO DEL MISMO test, una
+# por cada env var retirada (`WEBFANG_MAX_TOKENS`, `WEBFANG_AI_MODEL_ID`,
+# `AI_MODEL_ID`, `WEBFANG_AI_ENGINE`), y cada spawn corre bajo el presupuesto
+# COMPARTIDO de latencia de 60s (`SPAWN_LATENCY_BUDGET`), que mata+reapea al
+# hijo que se pasa y REINTENTA UNA vez cuando el presupuesto dispara.
+#
+# Aritmética: un spawn vale 2 x 60s = 120s en el peor caso (intento + un
+# reintento); cuatro spawns SECUENCIALES valen 4 x 120s = 480s. El
+# `slow-timeout` del perfil `ci` (120s x 2 = 240s) es un techo de PARED CLOCK:
+# mataría el test a mitad de camino y lo reportaría como TERMINADO, no como el
+# timeout que es.
+#
+# Override POR TEST, no global: el techo común sigue cazando cuelgues reales
+# en el resto de la suite (mismo criterio que el override del trybuild y el del
+# bomb brotli). 600s con terminate-after 1 (tests largos, no flaky → un solo
+# intento; los reintentos sólo multiplican el global-timeout) cubre los 480s
+# del peor caso con holgura y queda por debajo del `global-timeout = "1h"` del
+# perfil `ci`. El perfil `ci` hereda estos overrides (`inherits = "default"`),
+# que es por donde este techo llega a CI.
+#
+# `test(=...)` es el selector de coincidencia EXACTA (ver el override del
+# trybuild más arriba): a secas `test(...)` hace substring match y aplicaría
+# este techo a cualquier test futuro cuyo nombre contenga el texto. El gemelo
+# unitario `cli::args::ai::spec_parity_tests::the_retired_shim_env_vars_are_ignored`
+# NO matchea — es otro nombre, y no lo necesita.
+[[profile.default.overrides]]
+filter = 'test(=the_retired_shim_env_vars_are_ignored)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
+# Los shims RETIRADOS como flags (`the_retired_shims_are_unknown_arguments`):
+# mismo patrón, DOS spawns secuenciales dentro del MISMO test (`--max-tokens`
+# y `--ai-model`), cada uno bajo el presupuesto de 60s con un reintento ⇒
+# 2 x 2 x 60s = 240s en el peor caso, EXACTAMENTE el techo del perfil `ci`
+# (120s x 2 = 240s). Sentarse justo SOBRE el techo es la misma falla esperando
+# un runner más lento: basta un poco de ruido de scheduling para que nextest
+# mate el test a mitad de camino.
+#
+# Override POR TEST, no global: mismo criterio que los overrides del trybuild
+# y del bomb brotli — el techo común sigue cazando cuelgues reales en el resto
+# de la suite. 600s con terminate-after 1 da holgura sobre los 240s del peor
+# caso y queda por debajo del `global-timeout = "1h"` del perfil `ci`.
+[[profile.default.overrides]]
+filter = 'test(=the_retired_shims_are_unknown_arguments)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
