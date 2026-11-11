@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.1] - 2026-11-11
+
+
+### 🏗️ Architecture Improvements
+
+- Extract engine termination tests into engine/tests_termination.rs and the shared base into engine/tests_common.rs ([#2688](https://github.com/XaviCodeDev1000/webfang/pull/2688))
 ## [7.6.0] - 2026-11-11
 
 
