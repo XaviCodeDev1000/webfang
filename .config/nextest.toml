@@ -70,8 +70,11 @@ default-filter = "not test(ai_integration)"
 filter = 'test(=compile_fail_cases_fail_to_compile)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
-# El mismo criterio para `brotli_bomb_via_sitemap` (#2680): el bomb brotli es
-# CPU-heavy, y el `slow-timeout` del perfil `ci` (120s x 2 = 240s) es de PARED
+# El mismo criterio para `brotli_bomb_via_sitemap_fails_typed_not_crash`
+# (#2680; #2709: el test se renombro y el filtro quedo huérfano matcheando 0
+# tests — el nombre del filtro debe ser SIEMPRE el nombre exacto vigente):
+# el bomb brotli es CPU-heavy, y el `slow-timeout` del perfil `ci`
+# (120s x 2 = 240s) es de PARED
 # CLOCK: bajo la carga de la suite completa en el runner, el primer intento lo
 # mata a los 240s aunque solo necesite ~68s de CPU (el reintento pasa en 68.6s).
 #
@@ -83,7 +86,7 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 # Override POR TEST, no global: el techo comun sigue cazando cuelgues reales
 # en el resto de la suite (mismo criterio que el override del trybuild).
 [[profile.default.overrides]]
-filter = 'test(=brotli_bomb_via_sitemap)'
+filter = 'test(=brotli_bomb_via_sitemap_fails_typed_not_crash)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
 # Los shims RETIRADOS como env vars (`the_retired_shim_env_vars_are_ignored`):
