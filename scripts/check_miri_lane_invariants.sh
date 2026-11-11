@@ -87,19 +87,41 @@ UB_SURFACE_EXEMPT=(
 # <marker> is an awk ERE matched against the body of every test of the file.
 # Adding a surface here is MANDATORY when a new scheduled run goes red on one:
 # the 2026-11-09 run aborted three of four Miri jobs on three entry points that
-# were NOT in the table, which is why the lane had never gone green.
+# were NOT in the table, and the 2026-11-10 manual run (42921114313) — after
+# those were gated and merged — aborted `Miri (core)` on a FOURTH, at 330 tests
+# instead of 119. Each one had been invisible because the abort always happened
+# earlier in the same filter. Declaring the surface is what turns that into a
+# PR-time failure instead of a red week.
 #   - `clean_html` → `lol_html::rewrite_str`: the servo_arc `HeaderSlice`
 #     Tree-Borrows UB (tracker servo/stylo#210, still open). It lives in the
 #     dependency and not in our cleaning logic, so the test that only exercises
 #     the contract AROUND it is gated — the aliasing model is never disabled.
+#   - `serialize_matches` (`application/extraction.rs`) → `absolutize_urls`
+#     (`application/fragment_urls.rs`) → `lol_html::rewrite_str`: the SAME UB
+#     through a SECOND, independent call site. Every file that reaches it is
+#     declared here with a marker that matches what ITS OWN tests call:
+#     `serialize_case` for the table tests, `flush_spool_tail` for the CLI
+#     flush tests.
 #   - `keyctl` (syscall 250): Miri cannot execute the syscall at all. That is a
 #     property of the interpreter, so the test that needs a real kernel keyring
 #     is gated and the configuration contract it also verifies stays ungated.
+#
+# Why `application/extraction.rs` itself is NOT an entry: a marker matches the
+# TEXT of a test body, and there the tests that reach the rewrite
+# (`test_matching_selector_returns_the_fragment_unwrapped`, …) and the ones that
+# return before it (`test_body_selector_is_passthrough`, `test_invalid_selector_
+# falls_back`, `test_empty_html_falls_back`) call the same
+# `extract_with_selector`. A marker cannot tell them apart, and declaring the
+# file would fail the guard on the three deliberately un-gated early-return
+# tests. Those are left to the lane, which reports them, and to the module-level
+# gate (the `htmd_converter` shape) when a whole module is UB-routed.
 UB_SURFACE_ENTRIES=(
   "crates/webfang_core/src/domain/html_cleaner.rs~clean_html~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/scraper_service.rs~scrape_with_config~1~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/infrastructure/converter/htmd_converter.rs~HtmdConverter.convert|converter.convert~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/batch/spool_export.rs~convert_lines|convert_spool~0~extract_page_content → clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/application/selector_serialization_tests.rs~serialize_case~0~serialize_matches → absolutize_urls (application/fragment_urls.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/cli/batch_flush_tests.rs~flush_spool_tail|convert_spool~0~flush_spool_tail → convert_spool → extract_content → extract_with_selector → serialize_matches → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/domain/keyring_store.rs~store.build|default_store.build~0~keyctl (syscall 250) building a real kernel-keyring credential"
 )
 

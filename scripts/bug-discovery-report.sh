@@ -94,7 +94,21 @@ bug_discovery_report() {
   fi
   if [ -n "$findings" ]; then
     printf '%s\n\n' "$fail_header"
-    printf '%s\n' "$findings" | sed -nE "$BUG_DISCOVERY_PATH_SED" | sed -E 's/^/- /' || true
+    # One line per TEST, not per attempt: nextest prints a status line per
+    # attempt AND repeats the last one in its summary block, so a test that
+    # failed three times was listed FOUR times ("4 findings" for one test --
+    # the same kind of lie this reporter exists to stop). The LAST status of a
+    # path is its verdict: the enforced-flaky one ("FLKY-FL") when a retry
+    # saved it, the failure when it did not.
+    printf '%s\n' "$findings" \
+      | sed -nE "$BUG_DISCOVERY_PATH_SED" \
+      | awk '{
+          key = $0
+          sub(/^[^ ]+ /, "", key)
+          last[key] = $0
+          if (!(key in seen)) { seen[key] = 1; order[++n] = key }
+        }
+        END { for (i = 1; i <= n; i++) print "- " last[order[i]] }' || true
   elif [ "$complete" -eq 1 ]; then
     printf '%s\n' "$ok"
   fi

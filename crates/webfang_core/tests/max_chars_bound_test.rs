@@ -40,8 +40,10 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::{assert_snapshot_redacted, mount_single_page_site, BehavioralTest};
-use std::time::Duration;
+use common::cli_harness::{
+    assert_snapshot_redacted, assert_spawn_within_output_blocking, mount_single_page_site,
+    std_scraper_cmd, BehavioralTest, SPAWN_LATENCY_BUDGET,
+};
 
 /// Exit code of a rejected flag VALUE: `CliExit::UsageError` (EX_USAGE).
 ///
@@ -70,21 +72,45 @@ const RETIRED_MAX_TOKENS_NOTICE_MARKER: &str = "--max-tokens está obsoleto";
 /// its own absence.
 const RETIRED_AI_MODEL_NOTICE_MARKER: &str = "el modelo local ya no existe";
 
-const RUN_TIMEOUT_SECS: u64 = 60;
-
 /// Mount a single catch-all page so a run that PASSES validation has a
 /// hermetic, instant success target instead of the real network — and so a run
 /// that should have been rejected still resolves its mock if the rejection
 /// Run one scrape of the mock with an explicit flag value.
-async fn scrape_with_flag(t: &BehavioralTest, flag: &str, value: &str) -> std::process::Output {
-    t.scraper_cmd()
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg(flag)
-        .arg(value)
-        .timeout(Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang")
+///
+/// The spawn runs under the shared [`SPAWN_LATENCY_BUDGET`]: a hung child is
+/// killed, reaped and retried ONCE (invisible to nextest, so the flake never
+/// reaches the lane) instead of burning the `ci` profile's whole wall clock
+/// (issue #2658). `test_name` is the CALLING test's name — one helper serves
+/// several tests, so the budget's own diagnosis has to name the test that
+/// actually failed.
+///
+/// The assertions live in the CALLER, not in the budgeted closure: the
+/// closure only hands back the spawned binary's own [`std::process::Output`],
+/// because an assert inside it would judge the output of a child the budget
+/// already killed, and a snapshot taken from it would write a `.snap.new` no
+/// run ever produced.
+async fn scrape_with_flag(
+    t: &BehavioralTest,
+    test_name: &'static str,
+    flag: &str,
+    value: &str,
+) -> std::process::Output {
+    // The closure moves onto the blocking pool, so it must be `'static`: it
+    // carries the URL and the output path BY VALUE instead of borrowing the
+    // harness.
+    let url = t.server.uri();
+    let out = t.out.path().to_path_buf();
+    let flag = flag.to_owned();
+    let value = value.to_owned();
+    assert_spawn_within_output_blocking(SPAWN_LATENCY_BUDGET, test_name, move |child| {
+        let mut cmd = std_scraper_cmd(&url, &out);
+        cmd.arg("--single-page")
+            .arg("--ignore-robots")
+            .arg(flag.as_str())
+            .arg(value.as_str());
+        child.output(cmd)
+    })
+    .await
 }
 
 /// The lower bound. `--max-chars 0` makes the guard reject EVERY chunk (any
@@ -96,7 +122,7 @@ async fn max_chars_zero_fails_closed() {
     let t = BehavioralTest::new().await;
     mount_single_page_site(&t).await;
 
-    let output = scrape_with_flag(&t, "--max-chars", "0").await;
+    let output = scrape_with_flag(&t, "max_chars_zero_fails_closed", "--max-chars", "0").await;
 
     assert_eq!(
         output.status.code(),
@@ -120,7 +146,13 @@ async fn max_chars_non_numeric_fails_closed() {
     let t = BehavioralTest::new().await;
     mount_single_page_site(&t).await;
 
-    let output = scrape_with_flag(&t, "--max-chars", "banana").await;
+    let output = scrape_with_flag(
+        &t,
+        "max_chars_non_numeric_fails_closed",
+        "--max-chars",
+        "banana",
+    )
+    .await;
 
     assert_eq!(
         output.status.code(),
@@ -142,7 +174,13 @@ async fn max_chars_lower_boundary_is_accepted() {
     let t = BehavioralTest::new().await;
     mount_single_page_site(&t).await;
 
-    let output = scrape_with_flag(&t, "--max-chars", "1").await;
+    let output = scrape_with_flag(
+        &t,
+        "max_chars_lower_boundary_is_accepted",
+        "--max-chars",
+        "1",
+    )
+    .await;
 
     assert!(
         output.status.success(),
@@ -162,7 +200,13 @@ async fn max_chars_above_the_retired_token_ceiling_is_accepted() {
     let t = BehavioralTest::new().await;
     mount_single_page_site(&t).await;
 
-    let output = scrape_with_flag(&t, "--max-chars", "999999").await;
+    let output = scrape_with_flag(
+        &t,
+        "max_chars_above_the_retired_token_ceiling_is_accepted",
+        "--max-chars",
+        "999999",
+    )
+    .await;
 
     assert!(
         output.status.success(),
@@ -180,14 +224,20 @@ async fn env_max_chars_zero_fails_closed() {
     let t = BehavioralTest::new().await;
     mount_single_page_site(&t).await;
 
-    let output = t
-        .scraper_cmd()
-        .env("WEBFANG_MAX_CHARS", "0")
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .timeout(Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang");
+    let url = t.server.uri();
+    let out = t.out.path().to_path_buf();
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "env_max_chars_zero_fails_closed",
+        move |child| {
+            let mut cmd = std_scraper_cmd(&url, &out);
+            cmd.env("WEBFANG_MAX_CHARS", "0")
+                .arg("--single-page")
+                .arg("--ignore-robots");
+            child.output(cmd)
+        },
+    )
+    .await;
 
     assert_eq!(
         output.status.code(),
@@ -211,7 +261,8 @@ async fn the_retired_shims_are_unknown_arguments() {
         let t = BehavioralTest::new().await;
         mount_single_page_site(&t).await;
 
-        let output = scrape_with_flag(&t, flag, "4096").await;
+        let output =
+            scrape_with_flag(&t, "the_retired_shims_are_unknown_arguments", flag, "4096").await;
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         assert_eq!(
@@ -255,14 +306,20 @@ async fn the_retired_shim_env_vars_are_ignored() {
         let t = BehavioralTest::new().await;
         mount_single_page_site(&t).await;
 
-        let output = t
-            .scraper_cmd()
-            .env(var, "4096")
-            .arg("--single-page")
-            .arg("--ignore-robots")
-            .timeout(Duration::from_secs(RUN_TIMEOUT_SECS))
-            .output()
-            .expect("spawn webfang");
+        let url = t.server.uri();
+        let out = t.out.path().to_path_buf();
+        let output = assert_spawn_within_output_blocking(
+            SPAWN_LATENCY_BUDGET,
+            "the_retired_shim_env_vars_are_ignored",
+            move |child| {
+                let mut cmd = std_scraper_cmd(&url, &out);
+                cmd.env(var, "4096")
+                    .arg("--single-page")
+                    .arg("--ignore-robots");
+                child.output(cmd)
+            },
+        )
+        .await;
         let stderr = String::from_utf8_lossy(&output.stderr);
 
         assert!(

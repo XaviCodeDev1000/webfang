@@ -1,5 +1,5 @@
 use super::*;
-use crate::application::crawler::engine::tests::{entry_off, nz, session_engine};
+use crate::application::crawler::engine::tests_common::{entry_off, nz, session_engine};
 use crate::domain::budget::{BudgetModel, BudgetOverrides};
 use crate::domain::CrawlerConfig;
 use url::Url;

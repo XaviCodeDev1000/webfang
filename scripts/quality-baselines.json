@@ -19,7 +19,6 @@
       "crates/webfang_core/src/application/crawler/crawl_scheduler.rs": 645,
       "crates/webfang_core/src/application/crawler/crawl_task.rs": 1461,
       "crates/webfang_core/src/application/crawler/discovery.rs": 1026,
-      "crates/webfang_core/src/application/crawler/engine.rs": 781,
       "crates/webfang_core/src/application/crawler/ports.rs": 748,
       "crates/webfang_core/src/application/crawler/session.rs": 1006,
       "crates/webfang_core/src/application/crawler/sitemap_discovery.rs": 1400,
@@ -107,7 +106,7 @@
       "crates/webfang_mcp/src/mcp_server/state.rs": 1131,
       "crates/webfang_mcp/src/mcp_server/validation.rs": 1163,
       "crates/webfang_test_utils/src/lib.rs": 1458,
-      "crates/webfang_core/src/cli/batch_flush.rs": 671
+      "crates/webfang_core/src/cli/batch_flush.rs": 527
     },
     "exceptions": {
       "crates/webfang_mcp/src/mcp_server/provenance.rs": "Security envelope: the module identity is the ONLY sanctioned Content::text constructors, bound to the neutralization contract docs. The only seam (the private hygiene machinery, ~86 lines) fragments a cohesive security unit for a 16-line overshoot - the forced-arithmetic shape the program forbids. Verdict: Ola 0 batch 3 exploration (odd/tasks/file-size-ola0-batch3.md).",
