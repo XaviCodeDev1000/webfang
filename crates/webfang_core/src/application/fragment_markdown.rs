@@ -250,7 +250,20 @@ fn selector(css: &str) -> scraper::Selector {
     parsed
 }
 
-#[cfg(test)]
+// Every test of this module drives `with_header`, whose contract is the table
+// rewrite: `lol_html::rewrite_str` with the handlers below, where servo_arc
+// 0.4.3 raises the Tree-Borrows UB (tracker servo/stylo#210, open upstream).
+// Gate the whole module, following the precedent written in
+// `domain::html_cleaner::tests`: only a minority of cases return before the
+// rewrite (no `<table>`, or an existing `<th>`/`<thead>`), and a textual marker
+// cannot tell those from the ones that rewrite — so the module is the unit
+// that carries the gate.
+//
+// With the three production `lol_html` call sites of this crate now declared
+// (`domain::html_cleaner`, `application::fragment_urls`,
+// `application::fragment_markdown`), the surface this lane sweeps is COMPLETE
+// for this crate: no further entry point is hiding behind an earlier abort.
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::with_header;
 
