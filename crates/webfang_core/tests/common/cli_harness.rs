@@ -227,8 +227,33 @@ pub(crate) fn assert_spawn_within<F>(budget: Duration, what: &str, attempt: F)
 where
     F: Fn(&BudgetChild) -> Result<(), String> + Send + Sync + 'static,
 {
+    assert_spawn_within_output(budget, what, attempt);
+}
+
+/// [`assert_spawn_within`], handing the attempt's own value back to the
+/// caller.
+///
+/// The value is what makes the attempt OBSERVABLE: an attempt that spawns the
+/// binary returns its [`std::process::Output`], and the caller asserts on the
+/// exit code and the captured stderr — outside the budgeted closure.
+///
+/// It has to be outside. A closure that asserts on the output of a child the
+/// budget already KILLED asserts on the output of a dead process, and a
+/// snapshot taken from it writes a `.snap.new` no run ever produced. That is
+/// the exact shape of the windows-latest flake this machinery exists to
+/// remove (#2658): `assert_cmd`'s raw `.timeout()` killed the child, the
+/// capture came back EMPTY, and the assert blamed the env var for it.
+///
+/// A budget that fires NEVER hands a value back: the attempt is abandoned
+/// and the caller gets the budget's own diagnosis — the measured latencies,
+/// not an empty stderr.
+pub(crate) fn assert_spawn_within_output<T, F>(budget: Duration, what: &str, attempt: F) -> T
+where
+    F: Fn(&BudgetChild) -> Result<T, String> + Send + Sync + 'static,
+    T: Send + 'static,
+{
     match run_under_budget(budget, attempt) {
-        SpawnOutcome::Passed => {},
+        SpawnOutcome::Passed(value) => value,
         SpawnOutcome::Reported(failure) => panic!("{what}: {failure}"),
         SpawnOutcome::Disconnected(attempt_no) => {
             panic!("{what}: the attempt ended without a verdict (attempt {attempt_no})")
@@ -280,6 +305,38 @@ pub(crate) async fn assert_spawn_within_blocking<F>(
         });
 }
 
+/// [`assert_spawn_within_output`] for async tests: the budgeted attempt runs
+/// on the blocking pool, and the attempt's own value is handed back.
+///
+/// Same two properties as its synchronous twin, and the blocking-pool
+/// placement is load-bearing for the same reason it is in
+/// [`assert_spawn_within_blocking`]: the attempt's wait must not sit on the
+/// test's runtime thread, where it would starve the mock server the spawned
+/// binary is about to call.
+///
+/// The closure is `'static`, so it carries the values it needs BY VALUE: it
+/// cannot borrow the test's harness. [`std_scraper_cmd`] is the seam for
+/// that — it takes the URL and the output path as arguments instead of
+/// reading them off a borrowed harness.
+pub(crate) async fn assert_spawn_within_output_blocking<T, F>(
+    budget: Duration,
+    what: &'static str,
+    attempt: F,
+) -> T
+where
+    F: Fn(&BudgetChild) -> Result<T, String> + Send + Sync + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || assert_spawn_within_output(budget, what, attempt))
+        .await
+        .unwrap_or_else(|join_error| match join_error.try_into_panic() {
+            Ok(payload) => std::panic::resume_unwind(payload),
+            Err(join_error) => {
+                panic!("budget worker did not report a verdict: {join_error}")
+            },
+        })
+}
+
 /// Sealed verdict of [`run_under_budget`], which [`assert_spawn_within`] turns
 /// into a panic.
 ///
@@ -290,9 +347,9 @@ pub(crate) async fn assert_spawn_within_blocking<F>(
 /// 398 ms against 211 ms of real waits, so a bound derived from the waits alone
 /// failed while every wait was inside its budget (#2063).
 #[derive(Debug)]
-enum SpawnOutcome {
-    /// The attempt reported success inside its budget.
-    Passed,
+enum SpawnOutcome<T> {
+    /// The attempt reported success inside its budget, carrying its value.
+    Passed(T),
     /// The attempt produced its own failure verdict.
     Reported(String),
     /// The attempt ended without a verdict (its sender was dropped).
@@ -305,9 +362,14 @@ enum SpawnOutcome {
 
 /// Run `attempt` up to twice under a wall-clock budget, killing each
 /// overrunning attempt's child and recording how long the attempt ran.
-fn run_under_budget<F>(budget: Duration, attempt: F) -> SpawnOutcome
+///
+/// The attempt's value travels back through the same channel as its verdict,
+/// so the caller can assert on it OUTSIDE the budgeted closure (see
+/// [`assert_spawn_within_output`]).
+fn run_under_budget<T, F>(budget: Duration, attempt: F) -> SpawnOutcome<T>
 where
-    F: Fn(&BudgetChild) -> Result<(), String> + Send + Sync + 'static,
+    F: Fn(&BudgetChild) -> Result<T, String> + Send + Sync + 'static,
+    T: Send + 'static,
 {
     let attempt = std::sync::Arc::new(attempt);
     // #1697: the budget covers the SPAWN, never a compiler invocation.
@@ -320,7 +382,7 @@ where
     let mut killed_pid: Option<u32> = None;
     for attempt_no in 1..=2u8 {
         let started = Instant::now();
-        let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<T, String>>();
         let worker = std::sync::Arc::clone(&attempt);
         let worker_child = BudgetChild::new();
         let child = worker_child.clone();
@@ -328,7 +390,7 @@ where
             let _ = tx.send(worker(&worker_child));
         });
         match rx.recv_timeout(budget) {
-            Ok(Ok(())) => return SpawnOutcome::Passed,
+            Ok(Ok(value)) => return SpawnOutcome::Passed(value),
             Ok(Err(failure)) => return SpawnOutcome::Reported(failure),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 overruns.push(started.elapsed());
@@ -577,6 +639,21 @@ fn sanitize_std_env() -> std::process::Command {
 /// no handle to it.
 pub(crate) fn std_cmd() -> std::process::Command {
     sanitize_std_env()
+}
+
+/// The std twin of [`BehavioralTest::scraper_cmd`]: the same binary, the same
+/// hermetic environment and the same `--url`/`--output` pair, built for
+/// attempts that run under the spawn budget.
+///
+/// The URL and the output path are ARGUMENTS instead of harness fields
+/// because the budgeted closure must be `'static` — it moves onto the
+/// blocking pool, so it cannot borrow the [`BehavioralTest`]. One seam for
+/// both shapes keeps the two from drifting: [`BehavioralTest::scraper_cmd`]
+/// builds its own command through this very function.
+pub(crate) fn std_scraper_cmd(url: &str, out: &Path) -> std::process::Command {
+    let mut cmd = std_cmd();
+    cmd.arg("--url").arg(url).arg("--output").arg(out);
+    cmd
 }
 
 /// Unique cache base directory for one spawned-binary invocation.
@@ -875,12 +952,7 @@ impl BehavioralTest {
     /// Build a `Command` for the `webfang` binary with `--url` and
     /// `--output` pre-filled to this harness's server and temp dir.
     pub fn scraper_cmd(&self) -> assert_cmd::Command {
-        let mut cmd = Command::from_std(std_cmd());
-        cmd.arg("--url")
-            .arg(self.server.uri())
-            .arg("--output")
-            .arg(self.out.path());
-        cmd
+        Command::from_std(std_scraper_cmd(&self.server.uri(), self.out.path()))
     }
 
     /// Recursively find all files matching the given extension inside the
@@ -1069,8 +1141,8 @@ pub(crate) fn assert_snapshot_plain(name: &str, value: impl Into<String>) {
 #[cfg(test)]
 mod spawn_latency_budget {
     use super::{
-        assert_spawn_within, assert_spawn_within_blocking, run_under_budget, SpawnOutcome,
-        SPAWN_LATENCY_BUDGET,
+        assert_spawn_within, assert_spawn_within_blocking, assert_spawn_within_output,
+        assert_spawn_within_output_blocking, run_under_budget, SpawnOutcome, SPAWN_LATENCY_BUDGET,
     };
     use std::time::{Duration, Instant};
 
@@ -1225,7 +1297,7 @@ mod spawn_latency_budget {
     fn a_healthy_attempt_returns_without_paying_the_budget() {
         let _ = super::webfang_path();
         match run_under_budget(SPAWN_LATENCY_BUDGET, |_child| Ok(())) {
-            SpawnOutcome::Passed => {},
+            SpawnOutcome::Passed(_) => {},
             other => {
                 panic!("a healthy attempt must return without paying the budget, got {other:?}")
             },
@@ -1254,6 +1326,75 @@ mod spawn_latency_budget {
         assert_spawn_within(SPAWN_LATENCY_BUDGET, "gone_spawn", |_child| {
             panic!("worker died")
         });
+    }
+
+    /// The output variant hands the attempt's own value back to the caller, so
+    /// the assertions can live OUTSIDE the budgeted closure.
+    ///
+    /// This is the property #2658 needs: the caller gets the spawned binary's
+    /// exit code and stderr, and asserts on them itself, instead of the
+    /// assert living inside a closure whose child the budget may kill.
+    #[test]
+    fn an_output_attempt_hands_its_value_back() {
+        let value =
+            assert_spawn_within_output(SPAWN_LATENCY_BUDGET, "value_attempt", |_child| Ok(42usize));
+        assert_eq!(
+            value, 42,
+            "the attempt's own value must reach the caller, or the caller \
+             cannot assert on it outside the closure"
+        );
+    }
+
+    /// A budget that fires MUST NOT hand a value back: the child was killed,
+    /// so what it "produced" is the output of a dead process.
+    ///
+    /// Handing it back would let the caller assert on it — and a snapshot
+    /// taken from a killed child's output is a `.snap.new` no run ever
+    /// produced. The caller must get the budget's own diagnosis instead.
+    #[test]
+    #[should_panic(expected = "stuck_output_attempt: exceeded its 100ms budget")]
+    fn an_overrunning_output_attempt_never_hands_a_value_back() {
+        let _ = assert_spawn_within_output(
+            Duration::from_millis(100),
+            "stuck_output_attempt",
+            |_child| {
+                std::thread::sleep(Duration::from_millis(10 * 100));
+                Ok(0usize)
+            },
+        );
+    }
+
+    /// The async output variant hands the value back too — the blocking-pool
+    /// placement must not swallow it.
+    #[tokio::test]
+    async fn an_async_output_attempt_hands_its_value_back() {
+        let value = assert_spawn_within_output_blocking(
+            SPAWN_LATENCY_BUDGET,
+            "async_value_attempt",
+            |_child| Ok(7usize),
+        )
+        .await;
+        assert_eq!(
+            value, 7,
+            "the async variant must hand the attempt's value back as well"
+        );
+    }
+
+    /// And it resumes the budget's own diagnosis when the budget fires, the
+    /// same way its no-value twin does: a flattened `JoinError` would hide
+    /// the latencies that say WHY the attempt overran.
+    #[tokio::test]
+    #[should_panic(expected = "async_stuck_output_attempt: exceeded its 100ms budget")]
+    async fn an_async_overrunning_output_attempt_resumes_the_budget_diagnosis() {
+        let _ = assert_spawn_within_output_blocking(
+            Duration::from_millis(100),
+            "async_stuck_output_attempt",
+            |_child| {
+                std::thread::sleep(Duration::from_millis(10 * 100));
+                Ok(0usize)
+            },
+        )
+        .await;
     }
 }
 
