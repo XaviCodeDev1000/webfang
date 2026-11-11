@@ -1,4 +1,4 @@
-use super::tests::{loop_harness, nz, session_engine, TEST_WATCHDOG};
+use super::tests_common::{loop_harness, nz, session_engine, TEST_WATCHDOG};
 use super::*;
 use crate::domain::budget::detector::FixedDetector;
 use crate::domain::budget::tiers::{BurstPermits, CrawlConcurrency};

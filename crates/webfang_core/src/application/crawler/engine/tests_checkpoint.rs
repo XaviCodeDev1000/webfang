@@ -1,4 +1,4 @@
-use super::tests::{entry_off, session_engine};
+use super::tests_common::{entry_off, session_engine};
 use super::*;
 use crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY;
 use crate::domain::persistence::{CheckpointCfg, PersistenceMode};
