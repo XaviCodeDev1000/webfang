@@ -426,12 +426,12 @@ where
 /// it when the attempt overruns (#2387).
 ///
 /// [`Self::output`] is the `assert_cmd::Command::output()` twin for the
-/// budget machinery: stdio is piped (stdin `null` — an immediately-readable
-/// EOF, which is all both budget callers feed), the live child stays in a
+/// budget machinery: stdout/stderr are piped, the live child stays in a
 /// shared slot for the duration of the wait, and the wait itself is a
 /// `try_wait` poll whose locks are held for one poll only, never across the
 /// sleep. When the budget owner kills the child, the poll observes the exit
-/// and the worker finishes instead of being abandoned.
+/// and the worker finishes instead of being abandoned. stdin is `null`
+/// unless the caller feeds it through [`Self::output_with_stdin`].
 #[derive(Clone)]
 pub(crate) struct BudgetChild {
     slot: std::sync::Arc<std::sync::Mutex<Option<Child>>>,
@@ -453,17 +453,47 @@ impl BudgetChild {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Spawn `cmd` and wait for it to exit, capturing its output.
+    /// Spawn `cmd` and wait for it to exit, capturing its output. The
+    /// child's stdin is `null` — an immediately-readable EOF.
     pub(crate) fn output(
         &self,
+        cmd: std::process::Command,
+    ) -> Result<std::process::Output, String> {
+        self.run(cmd, None)
+    }
+
+    /// [`Self::output`] twin for attempts that feed the child's stdin (the
+    /// `--batch` URL list): `input` is written to the child's pipe on its own
+    /// thread and the pipe is then dropped, so the child sees the bytes
+    /// followed by EOF. A child that exits without reading gets EPIPE — the
+    /// write error is ignored and the exit status stays the verdict.
+    pub(crate) fn output_with_stdin(
+        &self,
+        cmd: std::process::Command,
+        input: &[u8],
+    ) -> Result<std::process::Output, String> {
+        // The budgeted closure is `Fn` — it runs once per attempt, so it can
+        // only BORROW the captured input. The writer thread needs an owned
+        // copy, made here on each attempt.
+        self.run(cmd, Some(input.to_vec()))
+    }
+
+    /// Shared spawn-and-wait behind [`Self::output`] and
+    /// [`Self::output_with_stdin`].
+    fn run(
+        &self,
         mut cmd: std::process::Command,
+        stdin_input: Option<Vec<u8>>,
     ) -> Result<std::process::Output, String> {
         use std::io::Read;
         use std::process::Stdio;
 
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        if stdin_input.is_some() {
+            cmd.stdin(Stdio::piped());
+        } else {
+            cmd.stdin(Stdio::null());
+        }
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let child = cmd
             .spawn()
             .map_err(|e| format!("could not spawn the binary: {e}"))?;
@@ -472,13 +502,28 @@ impl BudgetChild {
         // the registration is inside one lock. The residual window — spawn to
         // register — is a few statements against a seconds-long budget.
         *self.lock_slot() = Some(child);
-        let (stdout, stderr) = {
+        let (stdout, stderr, stdin_pipe) = {
             let mut guard = self.lock_slot();
             let registered = guard
                 .as_mut()
                 .expect("child was just registered into the slot");
-            (registered.stdout.take(), registered.stderr.take())
+            (
+                registered.stdout.take(),
+                registered.stderr.take(),
+                registered.stdin.take(),
+            )
         };
+
+        // Feed stdin on its own thread: the write can block when the child
+        // stops reading and the input exceeds the OS pipe buffer, and this
+        // thread must stay free for the poll loop below (#2387).
+        let stdin_writer = std::thread::spawn(move || {
+            use std::io::Write;
+            if let (Some(mut pipe), Some(input)) = (stdin_pipe, stdin_input) {
+                let _ = pipe.write_all(&input);
+            }
+            // Dropping `pipe` here closes the write end: the child sees EOF.
+        });
 
         // The pipes are drained on their own threads so a chatty child can
         // never fill the OS pipe buffer and block a process that would
@@ -528,6 +573,7 @@ impl BudgetChild {
         let stderr = stderr_reader
             .join()
             .expect("stderr pipe reader thread cannot panic");
+        let _ = stdin_writer.join();
         self.lock_slot().take();
         Ok(std::process::Output {
             status,
@@ -1342,6 +1388,31 @@ mod spawn_latency_budget {
             value, 42,
             "the attempt's own value must reach the caller, or the caller \
              cannot assert on it outside the closure"
+        );
+    }
+
+    /// The stdin twin feeds the child's pipe and then closes it, so an empty
+    /// `--batch` stdin behaves exactly like a null stdin: exit 64 with the
+    /// Spanish empty-batch message, and the writer thread never hangs the
+    /// attempt. The batch behavioral tests pin that REAL bytes arrive (they
+    /// pipe URLs and assert success — a null stdin would exit 64 instead).
+    #[test]
+    fn output_with_stdin_feeds_the_pipe_and_closes_it() {
+        let output = assert_spawn_within_output(SPAWN_LATENCY_BUDGET, "stdin_attempt", |child| {
+            let mut cmd = super::std_cmd();
+            cmd.arg("--batch");
+            child.output_with_stdin(cmd, &[])
+        });
+        assert_eq!(
+            output.status.code(),
+            Some(64),
+            "empty --batch stdin must exit 64; stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("No URLs provided"),
+            "stderr must name the empty batch, got: {stderr}"
         );
     }
 

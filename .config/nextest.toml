@@ -164,6 +164,27 @@ filter = 'test(=cli_vs_mcp_sitemap_run_record_shape_parity)'
 
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# `batch_single_page_matches_per_url_single_page` (backlog #2658): spawnea el
+# binario TRES VECES dentro del MISMO test (un --batch + dos corridas de
+# referencia --single-page en el loop), cada spawn bajo el presupuesto
+# compartido de 60s (`SPAWN_LATENCY_BUDGET`) con un reintento ⇒
+# 3 x 2 x 60s = 360s en el peor caso, por encima del `slow-timeout` de pared
+# del perfil `ci` (120s x 2 = 240s).
+#
+# Override POR TEST, no global: mismo criterio que los de arriba — el techo
+# común sigue cazando cuelgues reales en el resto de la suite. 600s con
+# terminate-after 1 cubre los 360s del peor caso con holgura y queda por
+# debajo del `global-timeout = "1h"` del perfil `ci` (que hereda este override
+# vía `inherits = "default"`).
+#
+# `test(=...)` es el selector de coincidencia EXACTA sobre el nombre del test
+# dentro del binario (ver el override del trybuild más arriba): a secas,
+# `test(...)` hace substring match y aplicaría este techo a cualquier test
+# futuro cuyo nombre contenga el texto.
+[[profile.default.overrides]]
+filter = 'test(=cli::batch_test::batch_single_page_matches_per_url_single_page)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
