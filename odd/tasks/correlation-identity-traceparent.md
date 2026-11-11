@@ -4,8 +4,7 @@ Objetivo: el `span_fields.correlation_id` de un span de página debe llevar el *
 (`00-<32hex>-<16hex>-01`), igual que el `correlation_id` del documento exportado, para que el join
 trace↔export cierre sobre el estándar de observabilidad. El UUID durable de `CorrelationId` queda en
 un campo explícito de los `span_fields` para quien necesite la identidad cross-run.
-Rama: `fix/correlation-traceparent`. Worktree:
-`/home/xavi/Projects/Rust/webfang-worktrees/fix-correlation-traceparent`.
+Entregado: PR #2699 → `32c786a2` (2026-11-11). El worktree y la rama se retiraron tras el merge.
 Cierra: #2672 (el bug de producto que la lane de Bug Discovery destapó al destrabar el test de
 `trace_correlation_test.rs`).
 
@@ -127,8 +126,11 @@ habla traceparent. El productor real del UUID crudo es OTRO subsistema.
   sale y el motivo real que queda (Unit A6). `docs/test-inventory.json` regenerado (181 archivos;
   el `ignored_count` del área afectados pasa 1 → 0). `scripts/check_ignored_guard.sh` en verde.
 - [x] T5 · S7 — Verificación completa (ver L6).
-- [ ] T6 · S7 — La lane valida: confirmar en la corrida programada que `ignored-tests` reporta el
-  test destrabado si algo falla, y que no reporta nada cuando pasa.
+- [x] T6 · S7 — Verificado en la lane real de ignored-tests: `bug-discovery.yml` (cron diario 6AM)
+  corre `nextest --run-ignored only`. Antes del fix fallaba exactamente por el test destrabado
+  (corrida 2026-11-11T13:50Z, 3/3 intentos); con el fix en main la lane quedó verde: 6/6, el test
+  ya no pertenece a su set. El reporter nombra el fallo — no dice "no findings" sobre una corrida
+  roja.
 
 ### Riesgo
 
@@ -242,3 +244,17 @@ L7 — Lo que este ciclo deja anotado (2026-11-11):
   traceparent heredado. La lección para cualquier span anidado futuro: la clave `correlation_id`
   es de la RUN, no del span.
 
+L8 — Entrega (2026-11-11):
+
+- **Dos PRs, en orden**: #2701 (`chore(deps): bump rustix a 1.1.6 por RUSTSEC-2026-0486` →
+  `ccbc27a8`) destrabó el `Security Audit` repo-wide que rojeaba TODOS los PRs; después #2699
+  (`fix(infra): el trace publica la correlación como traceparent W3C` → `32c786a2`) entregó este
+  ciclo. El orden no fue cosmético: #2699 no podía mergear con el advisory en rojo.
+- **Verificación post-merge en `main`**: lane cross-platform `windows-latest` + `macos-latest`
+  verdes y lane de `ignored-tests` verde (ver T6). La lane cross-platform se lanzó a mano
+  (`gh workflow run ci.yml --ref main`) porque NO corre en el path de PR (decisión #2342). El rojo
+  de Windows que apareció en un dispatch previo era un flake de latencia de spawn
+  (`max_chars_bound_test::the_retired_shim_env_vars_are_ignored`, clase #2387/#2694), no el bump:
+  el crate compiló y pasaron 5043/5044.
+- **Limpieza**: worktrees, ramas locales y target dirs de ambas misiones eliminados; `main`
+  sincronizado y `git status` limpio.
