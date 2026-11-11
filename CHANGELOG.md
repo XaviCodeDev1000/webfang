@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.2] - 2026-11-11
+
+
+### 🏗️ Architecture Improvements
+
+- Split the error.rs test module into five topic files ([#2702](https://github.com/XaviCodeDev1000/webfang/pull/2702))
+
+### 📦 Dependencies
+
+- Update Cargo.lock dependencies
+
+### 🔧 Fixed
+
+- Los spawns de los tests de CLI pasan por el presupuesto de latencia ([#2694](https://github.com/XaviCodeDev1000/webfang/pull/2694))
+- El trace publica la correlación como traceparent W3C y el join con el export cierra ([#2699](https://github.com/XaviCodeDev1000/webfang/pull/2699))
+- Gate the third lol_html entry point, and close the surface ([#2697](https://github.com/XaviCodeDev1000/webfang/pull/2697))
 ## [7.6.1] - 2026-11-11
 
 
