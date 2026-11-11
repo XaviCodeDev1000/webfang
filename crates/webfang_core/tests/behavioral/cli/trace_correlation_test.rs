@@ -222,15 +222,16 @@ fn assert_vector_export_identities(t: &BehavioralTest, lines: &[serde_json::Valu
 /// PROVIDER (preflight #796): the provider is the test's own wiremock
 /// endpoint (`common::embeddings`), so the test stays hermetic.
 ///
-/// Still skipped, but NO LONGER for the provider: that seam exists now.
-/// It fails on a SECOND, independent rot — the trace's `span_fields`
-/// `correlation_id` carries the durable `CorrelationId` UUID (dashed) where
-/// this pin expects a W3C traceparent (`00-<trace>-<span>-01`), so the
-/// trace<->export join cannot hold until both carry the same identity. That
-/// is a finding of its own (#2672); the discovery lane runs it and reports
-/// it, the gates must not run a RED test.
+/// It was skipped for the provider; that seam exists now (#2666). Then it
+/// failed on a SECOND, independent rot (#2672): the trace's `span_fields`
+/// `correlation_id` carried a raw UUID where this pin expects a W3C
+/// traceparent (`00-<trace>-<span>-01`), so the trace<->export join could not
+/// hold. The offender was the embeddings adapter: it published its per-request
+/// UUID under the same key, and — the layer merges the scope parent → child
+/// with the child winning — that field OVERWROTE the inherited traceparent.
+/// It now publishes the id as `request_id`, so `span_fields.correlation_id`
+/// is the traceparent everywhere and the join closes.
 #[tokio::test]
-#[ignore = "the trace correlation identity is the durable UUID, not a traceparent (#2672)"]
 async fn scrape_trace_and_vector_export_share_per_page_correlation() {
     let t = BehavioralTest::new().await;
     let base = mount_two_page_site(&t.server).await;
