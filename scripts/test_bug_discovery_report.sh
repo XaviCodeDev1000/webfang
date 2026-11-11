@@ -69,8 +69,8 @@ EOF
 # too, and it is NOT a failure: saying "FAIL" about it would be a lie of a
 # different kind.
 cat >"$WORK/fixture-terminated.log" <<EOF
+${ESC}[35mTRY 1 TRMNTG${ESC}[0m [>180.000s] (───) ${RED}webfang_mcp::cli_mcp_export_jsonl_parity_test${ESC}[0m ${RED}cli_vs_mcp_export_jsonl_record_parity${ESC}[0m
 ${ESC}[35;1m   TRY 1 TMT${ESC}[0m [ 180.046s] (───) ${RED}webfang_mcp::cli_mcp_export_jsonl_parity_test${ESC}[0m ${RED}cli_vs_mcp_export_jsonl_record_parity${ESC}[0m
-${ESC}[35mTRY 1 TRMNTG${ESC}[0m [>180.000s] (───) ${RED}webfang_mcp::cli_mcp_export_jsonl_parity_test${ESC}[0m
 ${RED}     Summary${ESC}[0m [ 687.892s] 5241 tests run: 5239 passed (5 slow), 2 failed, 9 skipped
 EOF
 
@@ -88,6 +88,17 @@ EOF
 cat >"$WORK/fixture-flaky-tolerated.log" <<EOF
 ${ESC}[33;1m   FLAKY 2/3${ESC}[0m [   0.004s] (1/1) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_flaky${ESC}[0m
 ${RED}     Summary${ESC}[0m [   0.006s] 1 tests run: 1 passed, 0 failed, 0 skipped
+EOF
+
+# The real shape of a failing test: nextest prints one status line per attempt
+# and repeats the LAST one in its summary block. Four lines, ONE test: the
+# reporter must list it once.
+cat >"$WORK/fixture-retry-fail-full.log" <<EOF
+${ESC}[31;1m  TRY 1 FAIL${ESC}[0m [  50.573s] (───) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_slow${ESC}[0m
+${ESC}[31;1m  TRY 2 FAIL${ESC}[0m [   0.494s] (───) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_slow${ESC}[0m
+${ESC}[31;1m  TRY 3 FAIL${ESC}[0m [   0.482s] (1/2) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_slow${ESC}[0m
+${RED}     Summary${ESC}[0m [  54.615s] 2 tests run: 0 passed, 2 failed, 5248 skipped
+${ESC}[31;1m  TRY 3 FAIL${ESC}[0m [   0.482s] (1/2) ${RED}webfang_core::behavioral${ESC}[0m ${RED}cli::export_test${ESC}[0m${RED}::${ESC}[0m${RED}t_slow${ESC}[0m
 EOF
 
 # A green run.
@@ -258,6 +269,18 @@ run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-green.log" >/dev/null
 check "a completed green run exits 0" "0" "$RUN_RC"
 run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-retry-fail.log" >/dev/null
 check "a completed run with findings exits 0 (nextest already failed the job)" "0" "$RUN_RC"
+
+echo "== 10. one finding per TEST, not per attempt =="
+out="$(run_step "$WORK/publish_ignored.sh" "$WORK/fixture-retry-fail-full.log")"
+check "ignored-tests: a test that failed 3 times is listed ONCE" "1" \
+  "$(grep -c '^- ' <<<"$out" || true)"
+check "ignored-tests: the listed status is the final verdict" "yes" \
+  "$(grep -qE '^- FAIL ' <<<"$out" && echo yes || echo no)"
+out="$(run_step "$WORK/publish_poisoned.sh" "$WORK/fixture-terminated.log")"
+check "poisoned-env: a terminated-then-passed test is listed once" "1" \
+  "$(grep -c '^- ' <<<"$out" || true)"
+check "poisoned-env: the listed status is the enforced-flaky verdict" "yes" \
+  "$(grep -qE '^- (FLKY-FL|TMT) ' <<<"$out" && echo yes || echo no)"
 
 echo "test_bug_discovery_report: PASS=$PASS FAIL=$FAIL"
 if ((FAIL > 0)); then
