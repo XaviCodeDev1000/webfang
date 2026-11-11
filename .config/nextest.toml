@@ -70,6 +70,22 @@ default-filter = "not test(ai_integration)"
 filter = 'test(=compile_fail_cases_fail_to_compile)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# El mismo criterio para `brotli_bomb_via_sitemap` (#2680): el bomb brotli es
+# CPU-heavy, y el `slow-timeout` del perfil `ci` (120s x 2 = 240s) es de PARED
+# CLOCK: bajo la carga de la suite completa en el runner, el primer intento lo
+# mata a los 240s aunque solo necesite ~68s de CPU (el reintento pasa en 68.6s).
+#
+# Medido en la corrida manual del 2026-11-10 (run 42923785359, `main@81381840`):
+# el intento 1 murio TERMINADO a los 240.0s y el intento 2 paso en 68.593s.
+# El env venenoso NO lo rompe: con el mismo env del job, aislado, el test pasa
+# en 34.4s (sin poison, tampoco) ⇒ no es hermeticidad, es tiempo de pared.
+#
+# Override POR TEST, no global: el techo comun sigue cazando cuelgues reales
+# en el resto de la suite (mismo criterio que el override del trybuild).
+[[profile.default.overrides]]
+filter = 'test(=brotli_bomb_via_sitemap)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
