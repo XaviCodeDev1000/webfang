@@ -102,6 +102,11 @@ UB_SURFACE_EXEMPT=(
 #     declared here with a marker that matches what ITS OWN tests call:
 #     `serialize_case` for the table tests, `flush_spool_tail` for the CLI
 #     flush tests.
+#   - `with_header` (`application/fragment_markdown.rs`) → `lol_html::rewrite_str`:
+#     a THIRD independent call site, module-gated like `html_cleaner`. These
+#     three are the ONLY production `rewrite_str` call sites in the crate
+#     (verified by grep), so this table now covers the lol_html surface whole:
+#     no entry point is left hiding behind an earlier abort in the same filter.
 #   - `keyctl` (syscall 250): Miri cannot execute the syscall at all. That is a
 #     property of the interpreter, so the test that needs a real kernel keyring
 #     is gated and the configuration contract it also verifies stays ungated.
@@ -122,6 +127,7 @@ UB_SURFACE_ENTRIES=(
   "crates/webfang_core/src/application/batch/spool_export.rs~convert_lines|convert_spool~0~extract_page_content → clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/selector_serialization_tests.rs~serialize_case~0~serialize_matches → absolutize_urls (application/fragment_urls.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/cli/batch_flush_tests.rs~flush_spool_tail|convert_spool~0~flush_spool_tail → convert_spool → extract_content → extract_with_selector → serialize_matches → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/application/fragment_markdown.rs~with_header~0~with_header (fragment_markdown.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/domain/keyring_store.rs~store.build|default_store.build~0~keyctl (syscall 250) building a real kernel-keyring credential"
 )
 

@@ -434,6 +434,20 @@ mod tests {
     async fn flush_keeps_the_watermark() { let _ = flush_spool_tail("p", 0, "o", &opts()).await; }
 }'
 
+# fragment_markdown: `with_header` is the third production `rewrite_str` call
+# site. The whole module is gated (the htmd_converter shape), so the RED control
+# is the removal of that module gate.
+red_surface "fragment-markdown" "crates/webfang_core/src/application/fragment_markdown.rs" \
+'rejects a fragment_markdown module whose Miri gate was removed' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn issue_2540_column_count_drives_the_header_width() {
+        let out = with_header("<table><tr><td>a</td></tr></table>");
+        assert!(out.contains("Column 1"), "got: {out}");
+    }
+}'
+
 if [ "$FAILURES" -ne 0 ]; then
   printf 'FAIL: the harness cannot detect the pre-fix shape\n'
   exit 1
