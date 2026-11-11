@@ -32,11 +32,11 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::{assert_snapshot_redacted, mount_single_page_site, BehavioralTest};
-use std::time::Duration;
+use common::cli_harness::{
+    assert_snapshot_redacted, assert_spawn_within_output_blocking, mount_single_page_site,
+    std_scraper_cmd, BehavioralTest, SPAWN_LATENCY_BUDGET,
+};
 use webfang_core::cli::args::ai::ORPHAN_THRESHOLD_NOTICE_MARKER;
-
-const RUN_TIMEOUT_SECS: u64 = 60;
 
 /// An explicit `--threshold` that is NOT the default, so the orphan warning's
 /// own precondition ("the user did not pass one") is genuinely exercised
@@ -45,10 +45,14 @@ const EXPLICIT_THRESHOLD: &str = "0.55";
 
 /// Mount a single catch-all page so a run that reaches the scrape path has a
 /// hermetic target instead of the real network.
-async fn ai_surface_stderr(extra: &[&str]) -> (BehavioralTest, String) {
+///
+/// `test_name` is the CALLING test's name — one helper serves several tests,
+/// so the spawn budget's own diagnosis has to name the test that actually
+/// failed.
+async fn ai_surface_stderr(test_name: &'static str, extra: &[&str]) -> (BehavioralTest, String) {
     let t = BehavioralTest::new().await;
     mount_single_page_site(&t).await;
-    let output = scrape_ai_surface(&t, extra).await;
+    let output = scrape_ai_surface(&t, test_name, extra).await;
     (t, String::from_utf8_lossy(&output.stderr).into_owned())
 }
 
@@ -81,18 +85,42 @@ fn notice_events(stderr: &str, marker: &str) -> usize {
 /// No `HF_HOME` juggling any more: the hf_hub cache is gone with the ONNX
 /// stack, and the hermetic `WEBFANG_CONFIG` the harness installs (an empty
 /// file) is what guarantees no provider is resolved.
-async fn scrape_ai_surface(t: &BehavioralTest, extra: &[&str]) -> std::process::Output {
-    let mut cmd = t.scraper_cmd();
-    cmd.arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--clean-ai")
-        .arg("--offline");
-    for arg in extra {
-        cmd.arg(arg);
-    }
-    cmd.timeout(Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang")
+///
+/// The spawn runs under the shared [`SPAWN_LATENCY_BUDGET`]: a hung child is
+/// killed, reaped and retried ONCE (invisible to nextest, so the flake never
+/// reaches the lane) instead of burning the `ci` profile's whole wall clock
+/// (issue #2658). `test_name` is the CALLING test's name — one helper serves
+/// several tests, so the budget's own diagnosis has to name the test that
+/// actually failed.
+///
+/// The assertions live in the CALLER, not in the budgeted closure: the
+/// closure only hands back the spawned binary's own [`std::process::Output`],
+/// because an assert inside it would judge the output of a child the budget
+/// already killed, and a snapshot taken from it would write a `.snap.new` no
+/// run ever produced.
+async fn scrape_ai_surface(
+    t: &BehavioralTest,
+    test_name: &'static str,
+    extra: &[&str],
+) -> std::process::Output {
+    // The closure moves onto the blocking pool, so it must be `'static`: it
+    // carries the URL, the output path and the extra flags BY VALUE instead of
+    // borrowing the harness.
+    let url = t.server.uri();
+    let out = t.out.path().to_path_buf();
+    let extra: Vec<String> = extra.iter().map(|arg| (*arg).to_owned()).collect();
+    assert_spawn_within_output_blocking(SPAWN_LATENCY_BUDGET, test_name, move |child| {
+        let mut cmd = std_scraper_cmd(&url, &out);
+        cmd.arg("--single-page")
+            .arg("--ignore-robots")
+            .arg("--clean-ai")
+            .arg("--offline");
+        for arg in &extra {
+            cmd.arg(arg.as_str());
+        }
+        child.output(cmd)
+    })
+    .await
 }
 
 /// The orphaned-default mitigation, exactly once, while the threshold is still
@@ -103,7 +131,11 @@ async fn scrape_ai_surface(t: &BehavioralTest, extra: &[&str]) -> std::process::
 /// is calibrated, the number means something different than it says.
 #[tokio::test]
 async fn orphan_threshold_warning_fires_once_with_the_default_threshold() {
-    let (t, stderr) = ai_surface_stderr(&[]).await;
+    let (t, stderr) = ai_surface_stderr(
+        "orphan_threshold_warning_fires_once_with_the_default_threshold",
+        &[],
+    )
+    .await;
 
     assert_eq!(
         notice_events(&stderr, ORPHAN_THRESHOLD_NOTICE_MARKER),
@@ -127,7 +159,11 @@ async fn orphan_threshold_warning_fires_once_with_the_default_threshold() {
 /// hands; the orphan warning would be noise about a decision they already made.
 #[tokio::test]
 async fn orphan_threshold_warning_does_not_fire_with_an_explicit_threshold() {
-    let (_t, stderr) = ai_surface_stderr(&["--threshold", EXPLICIT_THRESHOLD]).await;
+    let (_t, stderr) = ai_surface_stderr(
+        "orphan_threshold_warning_does_not_fire_with_an_explicit_threshold",
+        &["--threshold", EXPLICIT_THRESHOLD],
+    )
+    .await;
 
     assert_eq!(
         notice_events(&stderr, ORPHAN_THRESHOLD_NOTICE_MARKER),
@@ -145,13 +181,18 @@ async fn orphan_threshold_warning_does_not_fire_without_the_ai_surface() {
     let t = BehavioralTest::new().await;
     mount_single_page_site(&t).await;
 
-    let output = t
-        .scraper_cmd()
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .timeout(Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang");
+    let url = t.server.uri();
+    let out = t.out.path().to_path_buf();
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "orphan_threshold_warning_does_not_fire_without_the_ai_surface",
+        move |child| {
+            let mut cmd = std_scraper_cmd(&url, &out);
+            cmd.arg("--single-page").arg("--ignore-robots");
+            child.output(cmd)
+        },
+    )
+    .await;
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
