@@ -23,7 +23,15 @@ fn serialize_case(html: &str, selector: &str) -> Option<String> {
     serialize_matches(&document, &css, &base)
 }
 
+// Both tables reach `serialize_matches` → `absolutize_urls`
+// (`application/fragment_urls.rs`), whose `lol_html::rewrite_str` raises the servo_arc
+// 0.4.3 Tree-Borrows UB (tracker servo/stylo#210, open upstream). What these tables
+// verify is the SERIALIZED FRAGMENT — the selector match, the unwrapping, the
+// attribute set — never the absolute URLs the rewrite produces, so the UB buys
+// them nothing. The pure-srcset tests at the bottom of this file stay un-gated:
+// they only exercise `parse_srcset`/`rewrite_srcset`.
 #[test]
+#[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB (stylo#210)")]
 fn selector_fragment_html_table() {
     let cases = [
         HtmlCase {
@@ -92,6 +100,7 @@ struct MdCase {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB (stylo#210)")]
 fn selector_fragment_markdown_table() {
     let cases = [
         MdCase {
