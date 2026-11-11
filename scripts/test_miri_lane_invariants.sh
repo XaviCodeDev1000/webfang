@@ -396,6 +396,44 @@ mod tests {
     async fn convert_spool_counts_corrupt_records_and_reports_watermark() { let _ = convert_lines(&[]).await; }
 }'
 
+# selector_serialization_tests: `serialize_case` is the shared arrange helper into
+# `serialize_matches` → `absolutize_urls` (fragment_urls.rs) → rewrite_str.
+red_surface "serialize-tables" "crates/webfang_core/src/application/selector_serialization_tests.rs" \
+'rejects an unguarded selector-serialization table' \
+'use super::*;
+
+fn serialize_case(html: &str, selector: &str) -> Option<String> {
+    Some(String::new())
+}
+
+#[test]
+fn selector_fragment_html_table() {
+    let _ = serialize_case("<h3>x</h3>", "h3");
+}'
+
+# batch_flush: `flush_spool_tail` is the funnel into convert_spool → extract_content
+# → extract_with_selector → serialize_matches → rewrite_str. The tests live in the
+# `#[path]` child file, so that is where the surface is declared.
+red_surface "batch-flush" "crates/webfang_core/src/cli/batch_flush_tests.rs" \
+'rejects an unguarded tail-flush test' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn flush_converts_and_writes_the_full_tail() {
+        let _ = flush_spool_tail("p", 0, "o", &opts()).await;
+    }
+}'
+
+# One-line body, on the second entry point: `fn x() { … }` keeps its code on the
+# fn line, and a one-line un-gated test must not slip through.
+red_surface "batch-flush-oneline" "crates/webfang_core/src/cli/batch_flush_tests.rs" \
+'rejects an unguarded one-line tail-flush test' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn flush_keeps_the_watermark() { let _ = flush_spool_tail("p", 0, "o", &opts()).await; }
+}'
+
 if [ "$FAILURES" -ne 0 ]; then
   printf 'FAIL: the harness cannot detect the pre-fix shape\n'
   exit 1
