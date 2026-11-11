@@ -776,18 +776,18 @@ fn last_status_error(provider_id: &str, status: u16) -> SemanticError {
 
 impl EmbeddingPort for RemoteEmbeddingAdapter {
     fn embed<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<Vec<f32>, SemanticError>> {
-        let correlation_id = uuid::Uuid::new_v4();
+        let request_id = uuid::Uuid::new_v4();
         let span = tracing::debug_span!(
             "embed",
             provider_id = %self.provider_id,
             model = %self.model,
             dim = self.embedding_dim(),
-            correlation_id = %correlation_id
+            request_id = %request_id
         );
         Box::pin(
             async move {
                 let batch = self
-                    .embed_batch_impl(std::slice::from_ref(&text.to_owned()), correlation_id)
+                    .embed_batch_impl(std::slice::from_ref(&text.to_owned()), request_id)
                     .await?;
                 batch.into_iter().next().ok_or_else(|| {
                     SemanticError::Inference(
@@ -803,8 +803,8 @@ impl EmbeddingPort for RemoteEmbeddingAdapter {
         &'a self,
         texts: &'a [String],
     ) -> BoxFuture<'a, Result<Vec<Vec<f32>>, SemanticError>> {
-        let correlation_id = uuid::Uuid::new_v4();
-        Box::pin(self.embed_batch_impl(texts, correlation_id))
+        let request_id = uuid::Uuid::new_v4();
+        Box::pin(self.embed_batch_impl(texts, request_id))
     }
 
     fn embedding_dim(&self) -> usize {
@@ -819,24 +819,24 @@ impl EmbeddingPort for RemoteEmbeddingAdapter {
 
     /// Returns the concrete adapter for downcasting.
     ///
-    /// Required, not optional: the trait default **panics**, and the CLI's
-    /// embedding summary reaches these usage counters through
-    /// `Arc<dyn EmbeddingPort>::as_any` — a call that dispatches on the
-    /// vtable. A private inherent method of the same name does NOT satisfy
-    /// this contract: it never enters the vtable, so the call still lands
-    /// on the panicking default and aborts the run.
+    /// Required, not optional: the trait default **panics** and the CLI reaches
+    /// these counters through a vtable dispatch (`Arc<dyn EmbeddingPort>::as_any`).
+    /// A private inherent method of the same name never enters the vtable: the
+    /// call lands on the panicking default and aborts the run.
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }
 
-/// Private implementation with explicit correlation_id for span propagation.
+/// Private implementation with an explicit per-request id for span propagation.
 /// Not part of the trait — called directly on the concrete type.
+///
+/// The id is published as `request_id`, never as `correlation_id` (#2672).
 impl RemoteEmbeddingAdapter {
     async fn embed_batch_impl(
         &self,
         texts: &[String],
-        correlation_id: uuid::Uuid,
+        request_id: uuid::Uuid,
     ) -> Result<Vec<Vec<f32>>, SemanticError> {
         let span = tracing::debug_span!(
             "embed_batch",
@@ -844,7 +844,7 @@ impl RemoteEmbeddingAdapter {
             model = %self.model,
             count = texts.len(),
             dim = self.embedding_dim(),
-            correlation_id = %correlation_id
+            request_id = %request_id
         );
         async move {
             if texts.is_empty() {
