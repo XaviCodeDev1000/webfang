@@ -966,6 +966,9 @@ cli/batch_flush.rs	368	inline	crate::infrastructure::export::RecordStore
 cli/batch_flush.rs	394	inline	crate::cli::batch_flow::BATCH_SPOOL_FILE
 cli/batch_flush.rs	468	inline	crate::error::ScraperError::Io
 cli/batch_flush.rs	493	inline	crate::infrastructure::export::RecordStore
+cli/batch_flush_tests.rs	2	use	crate::application::batch::progress::SpoolIdentity
+cli/batch_flush_tests.rs	15	inline	crate::application::crawler::content_sink::CapturedPage
+cli/batch_flush_tests.rs	83	inline	crate::application::crawler::content_sink::CapturedPage
 cli/commands/blocks.rs	21	use	crate::domain::model_profile::ModelProfileRegistry
 cli/commands/blocks.rs	21	use	crate::domain::model_profile::ProfileProvenance
 cli/commands/blocks.rs	22	use	crate::domain::network_policy::NetworkPolicyMode
