@@ -86,6 +86,38 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 filter = 'test(=brotli_bomb_via_sitemap)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# Los dos tests de PARIDAD CLI-vs-MCP (#2685): cada uno levanta un servidor
+# MCP, corre un crawl y exporta, y compara registro a registro. Son tests de
+# PARED CLOCK, y el `slow-timeout` del perfil `ci` (120s x 2 = 240s) tambien.
+#
+# Medido en la corrida manual del 2026-11-10 (run 42923785359, `main@81381840`),
+# con la suite completa saturando el runner (2 vCPU, 8 hilos):
+# `cli_vs_mcp_export_jsonl_record_parity` tardo 221.4s y
+# `cli_vs_mcp_sitemap_run_record_shape_parity` 203.6s — contra el techo de
+# 240s, o sea al 88%. Antes del fix de perfil (#2670) estos dos morian
+# TERMINADOS a los 180s con el perfil `default` (60s x 3).
+#
+# A 19s del techo, la varianza de carga los deja a metros de la pared: un
+# runner mas lento los termina y los convierte en `FLKY-FL` => rojo de la lane,
+# por un motivo nuevo y dificil de reconocer (parece el problema de D2 otra
+# vez, y no lo es).
+#
+# Override POR TEST, no global: mismo criterio que el del trybuild y el del
+# bomb brotli — el techo comun sigue cazando cuelgues reales en el resto de
+# la suite. 600s con terminate-after 1 da margen sobre los 221.4s medidos y
+# queda por debajo del `global-timeout = "1h"` del perfil `ci`.
+#
+# `test(=...)` es el selector de coincidencia EXACTA (ver el override del
+# trybuild mas arriba): a secas `test(...)` hace substring match y aplicaria
+# este techo a cualquier test futuro cuyo nombre contenga el texto.
+[[profile.default.overrides]]
+filter = 'test(=cli_vs_mcp_export_jsonl_record_parity)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
+[[profile.default.overrides]]
+filter = 'test(=cli_vs_mcp_sitemap_run_record_shape_parity)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
