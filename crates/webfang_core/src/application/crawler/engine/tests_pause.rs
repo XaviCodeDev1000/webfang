@@ -1,4 +1,4 @@
-use super::tests::{loop_harness, nz, session_engine};
+use super::tests_common::{loop_harness, nz, session_engine};
 use super::*;
 use url::Url;
 
