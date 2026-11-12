@@ -12,7 +12,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::{assert_spawn_within_output_blocking, std_cmd, SPAWN_LATENCY_BUDGET};
+use common::cli_harness::{spawn_budgeted, std_cmd};
 use std::path::PathBuf;
 use std::time::Duration;
 use wiremock::matchers::{method, path};
@@ -24,8 +24,27 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 // `AI_MODEL_ID` scrubbing, same SSRF entry-guard allowance, same empty
 // `WEBFANG_CONFIG` — plus a hermetic `XDG_CACHE_HOME`. `webfang_path()`
 // behind it resolves the binary the same way (the `webfang_cli`
-// sibling-crate fallback included), and `assert_spawn_within_output_blocking`
-// bounds every spawn here under `SPAWN_LATENCY_BUDGET` (#2658 backlog).
+// sibling-crate fallback included), and `spawn_budgeted` bounds every spawn
+// here under `SPAWN_LATENCY_BUDGET` (#2658 backlog).
+
+/// Assert the spawned run exited with `code` and its stderr contains every
+/// fragment, printing the captured stderr on failure. The assertions live
+/// OUTSIDE the budget, on the real captured output.
+fn assert_exit(output: &std::process::Output, code: i32, fragments: &[&str]) {
+    assert_eq!(
+        output.status.code(),
+        Some(code),
+        "expected exit {code}; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for fragment in fragments {
+        assert!(
+            stderr.contains(fragment),
+            "stderr must contain {fragment:?}, got: {stderr}"
+        );
+    }
+}
 
 /// A config file with the given contents for one spawned-binary invocation.
 ///
@@ -68,32 +87,15 @@ async fn test_empty_sitemap_returns_exit_2() {
     let base_url = format!("{}/", mock_server.uri());
     let sitemap_url = format!("{}/sitemap.xml", mock_server.uri());
 
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
-        "test_empty_sitemap_returns_exit_2",
-        move |child| {
-            let mut command = std_cmd();
-            command
-                .arg("--url")
-                .arg(&base_url)
-                .arg("--sitemap-url")
-                .arg(&sitemap_url)
-                .arg("--use-sitemap");
-            child.output(command)
-        },
-    )
-    .await;
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "empty sitemap must exit 2; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("No URLs discovered"),
-        "stderr must name the empty discovery, got: {stderr}"
-    );
+    let mut command = std_cmd();
+    command
+        .arg("--url")
+        .arg(&base_url)
+        .arg("--sitemap-url")
+        .arg(&sitemap_url)
+        .arg("--use-sitemap");
+    let output = spawn_budgeted("test_empty_sitemap_returns_exit_2", command, None).await;
+    assert_exit(&output, 2, &["No URLs discovered"]);
 }
 
 /// Site without any sitemap (auto-discovery finds nothing) returns exit 2,
@@ -106,27 +108,10 @@ async fn test_missing_sitemap_returns_exit_2() {
     // No mocks mounted: robots.txt and every sitemap candidate 404.
     let base_url = format!("{}/", mock_server.uri());
 
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
-        "test_missing_sitemap_returns_exit_2",
-        move |child| {
-            let mut command = std_cmd();
-            command.arg("--url").arg(&base_url).arg("--use-sitemap");
-            child.output(command)
-        },
-    )
-    .await;
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "missing sitemap must exit 2; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("No URLs discovered"),
-        "stderr must name the empty discovery, got: {stderr}"
-    );
+    let mut command = std_cmd();
+    command.arg("--url").arg(&base_url).arg("--use-sitemap");
+    let output = spawn_budgeted("test_missing_sitemap_returns_exit_2", command, None).await;
+    assert_exit(&output, 2, &["No URLs discovered"]);
 }
 
 // ============================================================================
@@ -156,27 +141,14 @@ async fn test_dom_external_only_links_scrapes_seed() {
     let base_url = format!("{}/", mock_server.uri());
     let out_dir = tempfile::TempDir::new().expect("create temp output dir");
 
-    let out_path = out_dir.path().to_path_buf();
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
-        "test_dom_external_only_links_scrapes_seed",
-        move |child| {
-            let mut command = std_cmd();
-            command
-                .arg("--url")
-                .arg(&base_url)
-                .arg("--output")
-                .arg(&out_path);
-            child.output(command)
-        },
-    )
-    .await;
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "DOM discovery with only external links must still scrape the seed (exit 0); stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let mut command = std_cmd();
+    command
+        .arg("--url")
+        .arg(&base_url)
+        .arg("--output")
+        .arg(out_dir.path());
+    let output = spawn_budgeted("test_dom_external_only_links_scrapes_seed", command, None).await;
+    assert_exit(&output, 0, &[]);
 
     // The seed page itself must have been fetched: DOM discovery reads it once
     // for link extraction and the scraper reads it again for content.
@@ -237,34 +209,17 @@ async fn test_timeout_returns_exit_69() {
     let base_url = format!("{}/", mock_server.uri());
     let sitemap_url = format!("{}/slow-sitemap.xml", mock_server.uri());
 
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
-        "test_timeout_returns_exit_69",
-        move |child| {
-            let mut command = std_cmd();
-            command
-                .arg("--url")
-                .arg(&base_url)
-                .arg("--sitemap-url")
-                .arg(&sitemap_url)
-                .arg("--use-sitemap")
-                .arg("--timeout-secs")
-                .arg("1");
-            child.output(command)
-        },
-    )
-    .await;
-    assert_eq!(
-        output.status.code(),
-        Some(69),
-        "sitemap fetch timeout must exit 69; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("URL discovery failed"),
-        "stderr must name the failed discovery, got: {stderr}"
-    );
+    let mut command = std_cmd();
+    command
+        .arg("--url")
+        .arg(&base_url)
+        .arg("--sitemap-url")
+        .arg(&sitemap_url)
+        .arg("--use-sitemap")
+        .arg("--timeout-secs")
+        .arg("1");
+    let output = spawn_budgeted("test_timeout_returns_exit_69", command, None).await;
+    assert_exit(&output, 69, &["URL discovery failed"]);
 }
 
 // ============================================================================
@@ -302,27 +257,15 @@ async fn test_valid_sitemap_returns_exit_0() {
     let base_url = format!("{server_uri}/");
     let sitemap_url = format!("{server_uri}/sitemap.xml");
 
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
-        "test_valid_sitemap_returns_exit_0",
-        move |child| {
-            let mut command = std_cmd();
-            command
-                .arg("--url")
-                .arg(&base_url)
-                .arg("--sitemap-url")
-                .arg(&sitemap_url)
-                .arg("--use-sitemap");
-            child.output(command)
-        },
-    )
-    .await;
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "valid sitemap must exit 0; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let mut command = std_cmd();
+    command
+        .arg("--url")
+        .arg(&base_url)
+        .arg("--sitemap-url")
+        .arg(&sitemap_url)
+        .arg("--use-sitemap");
+    let output = spawn_budgeted("test_valid_sitemap_returns_exit_0", command, None).await;
+    assert_exit(&output, 0, &[]);
 }
 
 // ============================================================================
@@ -360,31 +303,15 @@ async fn test_clean_ai_without_embedding_provider_fails_before_fetch() {
 
     let base_url = format!("{}/", mock_server.uri());
 
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
+    let mut command = std_cmd();
+    command.arg("--url").arg(&base_url).arg("--clean-ai");
+    let output = spawn_budgeted(
         "test_clean_ai_without_embedding_provider_fails_before_fetch",
-        move |child| {
-            let mut command = std_cmd();
-            command.arg("--url").arg(&base_url).arg("--clean-ai");
-            child.output(command)
-        },
+        command,
+        None,
     )
     .await;
-    assert_eq!(
-        output.status.code(),
-        Some(78),
-        "--clean-ai without a provider must exit 78; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("--clean-ai"),
-        "stderr must name --clean-ai, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("--embedding-provider"),
-        "stderr must name --embedding-provider, got: {stderr}"
-    );
+    assert_exit(&output, 78, &["--clean-ai", "--embedding-provider"]);
 
     let requests = mock_server.received_requests().await.unwrap();
     assert!(
@@ -472,36 +399,25 @@ async fn test_clean_ai_offline_with_remote_embedding_provider_exits_78() {
     let base_url = format!("{}/", mock_server.uri());
 
     let config_path = hermetic_config_file(&remote_provider_config());
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
+    let mut command = std_cmd();
+    command
+        .env("WEBFANG_CONFIG", &config_path)
+        .arg("--url")
+        .arg(&base_url)
+        .arg("--clean-ai")
+        .arg("--offline");
+    let output = spawn_budgeted(
         "test_clean_ai_offline_with_remote_embedding_provider_exits_78",
-        move |child| {
-            let mut command = std_cmd();
-            command
-                .env("WEBFANG_CONFIG", &config_path)
-                .arg("--url")
-                .arg(&base_url)
-                .arg("--clean-ai")
-                .arg("--offline");
-            child.output(command)
-        },
+        command,
+        None,
     )
     .await;
-    assert_eq!(
-        output.status.code(),
-        Some(78),
-        "--clean-ai --offline with a remote provider must exit 78; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(OFFLINE_REMOTE_FRAGMENT),
-        "stderr must carry the offline message, got: {stderr}"
-    );
+    assert_exit(&output, 78, &[OFFLINE_REMOTE_FRAGMENT]);
 
     // The guard runs BEFORE the adapter is built, so the configured endpoint
     // is never contacted: a dial names the endpoint in the error, the guard
     // does not.
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !stderr.contains(REMOTE_PROVIDER_HOST),
         "the offline guard must fire before the endpoint is contacted, got: {stderr}"
@@ -569,32 +485,20 @@ allow_loopback = true
     );
 
     let config_path = hermetic_config_file(&provider_config);
-    let output = assert_spawn_within_output_blocking(
-        SPAWN_LATENCY_BUDGET,
+    let mut command = std_cmd();
+    command
+        .env("WEBFANG_CONFIG", &config_path)
+        .arg("--url")
+        .arg(&base_url)
+        .arg("--clean-ai")
+        .arg("--offline");
+    let output = spawn_budgeted(
         "test_clean_ai_offline_with_loopback_embedding_provider_is_rejected",
-        move |child| {
-            let mut command = std_cmd();
-            command
-                .env("WEBFANG_CONFIG", &config_path)
-                .arg("--url")
-                .arg(&base_url)
-                .arg("--clean-ai")
-                .arg("--offline");
-            child.output(command)
-        },
+        command,
+        None,
     )
     .await;
-    assert_eq!(
-        output.status.code(),
-        Some(78),
-        "--clean-ai --offline with a loopback provider must exit 78; stderr:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(OFFLINE_REMOTE_FRAGMENT),
-        "stderr must carry the offline message, got: {stderr}"
-    );
+    assert_exit(&output, 78, &[OFFLINE_REMOTE_FRAGMENT]);
 
     let requests = mock_server.received_requests().await.unwrap();
     assert!(
@@ -656,28 +560,24 @@ async fn test_ssrf_literal_seeds_rejected_before_fetch() {
     // in .config/nextest.toml (#2658 backlog).
     for url in literal_urls {
         let out_dir = tempfile::TempDir::new().expect("create temp output dir");
-        let out_path = out_dir.path().to_path_buf();
-        let url_arg = url.clone();
         // Opt out of the harness entry-guard allowance: production never sets
         // it, so the spawned binary must enforce like production.
-        let output = assert_spawn_within_output_blocking(
-            SPAWN_LATENCY_BUDGET,
+        let mut command = std_cmd();
+        command
+            .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
+            .arg("--url")
+            .arg(&url)
+            .arg("--single-page")
+            .arg("--output")
+            .arg(out_dir.path())
+            .arg("--timeout-secs")
+            .arg("3")
+            .arg("--max-retries")
+            .arg("0");
+        let output = spawn_budgeted(
             "test_ssrf_literal_seeds_rejected_before_fetch",
-            move |child| {
-                let mut command = std_cmd();
-                command
-                    .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
-                    .arg("--url")
-                    .arg(&url_arg)
-                    .arg("--single-page")
-                    .arg("--output")
-                    .arg(&out_path)
-                    .arg("--timeout-secs")
-                    .arg("3")
-                    .arg("--max-retries")
-                    .arg("0");
-                child.output(command)
-            },
+            command,
+            None,
         )
         .await;
         assert!(
