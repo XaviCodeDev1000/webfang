@@ -37,11 +37,8 @@
 mod common;
 
 use std::process::Output;
-use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Normalize captured stderr: drop ESC bytes and collapse whitespace runs.
 /// Tracing writes ANSI colour/attribute sequences (`ESC[..m`) to TTY output;
@@ -69,7 +66,14 @@ async fn run_production(url: &str) -> (Output, MockServer) {
         .await;
 
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
-    let output = common::cmd()
+    // Budgeted spawn (#2658 backlog): `std_cmd()` is the std twin of `cmd()`
+    // feeding `spawn_budgeted`, which applies SPAWN_LATENCY_BUDGET, kills and
+    // reaps an overrunning child and retries once. Envs and args are set
+    // BEFORE the call — the harness snapshots them and rebuilds the command
+    // per attempt — and every assertion stays outside, on the returned
+    // `Output`.
+    let mut command = common::std_cmd();
+    command
         .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
         .arg("--url")
         .arg(url)
@@ -80,10 +84,8 @@ async fn run_production(url: &str) -> (Output, MockServer) {
         .arg("--timeout-secs")
         .arg("5")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = common::spawn_budgeted("run_production", command, None).await;
     (output, mock_server)
 }
 
@@ -236,7 +238,10 @@ async fn row7_hostname_answering_private_range_is_blocked_at_connect() {
     let port = port_provider::bind_any()
         .await
         .expect("ephemeral port for the bogus hostname target");
-    let output = common::cmd()
+    // Budgeted spawn (#2658 backlog): args/envs set before the call are
+    // snapshotted by `spawn_budgeted` and rebuilt per attempt.
+    let mut command = common::std_cmd();
+    command
         .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
         .arg("--url")
         .arg(format!("http://localhost:{port}/"))
@@ -247,10 +252,13 @@ async fn row7_hostname_answering_private_range_is_blocked_at_connect() {
         .arg("--timeout-secs")
         .arg("5")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = common::spawn_budgeted(
+        "row7_hostname_answering_private_range_is_blocked_at_connect",
+        command,
+        None,
+    )
+    .await;
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
     assert_eq!(
         output.status.code(),
@@ -292,7 +300,10 @@ async fn row8_redirect_to_forbidden_literal_is_never_followed() {
     // literal redirect target is 127.0.0.2:9 — a different host:port this
     // mock never owns. The discriminator is the terminal-302 classification.)
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
-    let output = common::cmd()
+    // Budgeted spawn (#2658 backlog): harness posture kept — `std_cmd()`
+    // already disarms only the entry layer, exactly like `cmd()` did here.
+    let mut command = common::std_cmd();
+    command
         .arg("--url")
         .arg(format!("{}/redir", mock_server.uri()))
         .arg("--single-page")
@@ -302,10 +313,13 @@ async fn row8_redirect_to_forbidden_literal_is_never_followed() {
         .arg("--timeout-secs")
         .arg("5")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = common::spawn_budgeted(
+        "row8_redirect_to_forbidden_literal_is_never_followed",
+        command,
+        None,
+    )
+    .await;
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(
@@ -368,7 +382,10 @@ the ephemeral local listener.</p>
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
     // Harness `cmd()` already sets DISABLE_ENTRY_GUARD_ENV=1 — this is the
     // one-layer disarmed posture, production resolver/redirect layers live.
-    let output = common::cmd()
+    // Budgeted spawn (#2658 backlog): harness posture kept — `std_cmd()`
+    // already sets the entry-guard disarmer, as the comment above states.
+    let mut command = common::std_cmd();
+    command
         .arg("--url")
         .arg(mock_server.uri())
         .arg("--single-page")
@@ -378,10 +395,13 @@ the ephemeral local listener.</p>
         .arg("--timeout-secs")
         .arg("10")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = common::spawn_budgeted(
+        "row9_positive_control_loopback_is_reachable_when_entry_guard_disarmed",
+        command,
+        None,
+    )
+    .await;
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
     assert!(
         output.status.success(),
