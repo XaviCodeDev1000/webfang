@@ -20,11 +20,11 @@
 
 #[path = "common/cli_harness.rs"]
 mod common;
-use common::cmd;
+use assert_cmd::assert::Assert;
+use common::{spawn_budgeted, std_cmd};
 
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader};
-use std::time::Duration;
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -47,25 +47,27 @@ async fn serve_pages(count: usize) -> MockServer {
     server
 }
 
-/// Run a stdin batch crawl of `urls` with `--trace-file` into `trace_path`,
-/// returning the number of events in the trace JSONL.
-fn run_batch_with_trace(
+/// Run a stdin batch crawl of `urls` with `--trace-file` into `trace_path`
+/// under the shared spawn budget, returning the number of events in the
+/// trace JSONL.
+async fn run_batch_with_trace(
     urls: &[String],
     output_dir: &std::path::Path,
     trace_path: &std::path::Path,
 ) -> usize {
     let stdin = urls.join("\n") + "\n";
-    let assert = cmd()
+    let mut command = std_cmd();
+    command
         .arg("--batch")
         .arg("--output")
         .arg(output_dir)
         .arg("--trace-file")
         .arg(trace_path)
-        .arg("--quiet")
-        .write_stdin(stdin)
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+        .arg("--quiet");
+    let output = spawn_budgeted("run_batch_with_trace", command, Some(stdin.as_bytes())).await;
+    // assert_cmd 2.2.2 `Assert::new` takes the captured Output alone, so the
+    // `.success()` verdict and its message stay on the real captured run.
+    let assert = Assert::new(output).success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let file = std::fs::File::open(trace_path).unwrap_or_else(|e| {
@@ -108,7 +110,7 @@ async fn batch_crawl_emits_a_single_trace_id() {
         format!("{}/page-1", server.uri()),
     ];
 
-    let line_count = run_batch_with_trace(&urls, out.path(), &trace_path);
+    let line_count = run_batch_with_trace(&urls, out.path(), &trace_path).await;
     assert!(
         line_count > 0,
         "the batch run must produce at least one trace event"
