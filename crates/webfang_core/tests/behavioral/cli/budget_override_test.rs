@@ -19,11 +19,10 @@
 //! effective crawl bound of 2 can only come from an explicit override that
 //! reached the model.
 
-use crate::cmd;
+use crate::{spawn_budgeted, std_cmd};
 use assert_cmd::assert::Assert;
 use regex::Regex;
 use std::path::PathBuf;
-use std::time::Duration;
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -120,15 +119,22 @@ fn assert_structured_field(stderr: &str, field: &str, value: usize) {
 /// applied to the child process and `extra_args` appended after the fixed
 /// `--url … --output …` prefix, returning the finished command assert.
 ///
+/// The spawn runs under the shared `SPAWN_LATENCY_BUDGET` (#2658 backlog):
+/// `what` names the caller for the budget's own panic diagnosis, and the
+/// captured output is wrapped with `Assert::new` — never asserted inside the
+/// budgeted closure, which would judge the output of a child the budget may
+/// have killed.
+///
 /// No verbosity flag is added: tests that need `-v` pass it in `extra_args`,
 /// because the fail-closed family below asserts at DEFAULT verbosity.
-fn scrape(
+async fn scrape(
+    what: &'static str,
     server: &MockServer,
     envs: &[(&str, &str)],
     output: &TempDir,
     extra_args: &[&str],
 ) -> Assert {
-    let mut command = cmd();
+    let mut command = std_cmd();
     for (key, value) in envs {
         command.env(key, value);
     }
@@ -139,9 +145,8 @@ fn scrape(
             "--output",
             output.path().to_string_lossy().as_ref(),
         ])
-        .args(extra_args)
-        .timeout(Duration::from_secs(60))
-        .assert()
+        .args(extra_args);
+    Assert::new(spawn_budgeted(what, command, None).await)
 }
 
 /// Mount a single catch-all page so a run that PASSES validation has a
@@ -163,14 +168,19 @@ async fn mount_single_page_site(server: &MockServer) {
 }
 
 /// Arrange the fail-closed family's fixture (fresh single-page mock site +
-/// temp output dir) and run a scrape against it with `envs` applied to the
-/// child and `extra_args` appended, returning the output dir (the caller
-/// keeps it alive for snapshot redaction) plus the finished assert.
-async fn run_single_page_scrape(envs: &[(&str, &str)], extra_args: &[&str]) -> (TempDir, Assert) {
+/// temp output dir) and run one budgeted scrape against it with `envs`
+/// applied to the child and `extra_args` appended, returning the output dir
+/// (the caller keeps it alive for snapshot redaction) plus the finished
+/// assert. `what` names the caller for the spawn budget's own diagnosis.
+async fn run_single_page_scrape(
+    what: &'static str,
+    envs: &[(&str, &str)],
+    extra_args: &[&str],
+) -> (TempDir, Assert) {
     let server = MockServer::start().await;
     mount_single_page_site(&server).await;
     let output = TempDir::new().expect("temp output dir");
-    let assert = scrape(&server, envs, &output, extra_args);
+    let assert = scrape(what, &server, envs, &output, extra_args).await;
     (output, assert)
 }
 
@@ -197,11 +207,13 @@ async fn toml_concurrency_reaches_scrape_enforcement() {
     let sitemap_url = format!("{}/sitemap.xml", server.uri());
 
     let assert = scrape(
+        "toml_concurrency_reaches_scrape_enforcement",
         &server,
         &[("WEBFANG_CONFIG", conf_path.to_string_lossy().as_ref())],
         &output,
         &["--use-sitemap", "--sitemap-url", &sitemap_url, "-v"],
     )
+    .await
     .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
@@ -224,6 +236,7 @@ async fn cli_concurrency_flag_outranks_toml_config() {
     let sitemap_url = format!("{}/sitemap.xml", server.uri());
 
     let assert = scrape(
+        "cli_concurrency_flag_outranks_toml_config",
         &server,
         &[("WEBFANG_CONFIG", conf_path.to_string_lossy().as_ref())],
         &output,
@@ -236,6 +249,7 @@ async fn cli_concurrency_flag_outranks_toml_config() {
             "-v",
         ],
     )
+    .await
     .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
@@ -262,19 +276,20 @@ async fn batch_concurrency_flag_reaches_model_tier() {
     let urls = output.path().join("urls.txt");
     std::fs::write(&urls, format!("{}\n", server.uri())).expect("write batch file");
 
-    let assert = cmd()
-        .args([
-            "--batch-file",
-            urls.to_string_lossy().as_ref(),
-            "--output",
-            output.path().to_string_lossy().as_ref(),
-            "--batch-concurrency",
-            "4",
-            "-v",
-        ])
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+    let mut command = std_cmd();
+    command.args([
+        "--batch-file",
+        urls.to_string_lossy().as_ref(),
+        "--output",
+        output.path().to_string_lossy().as_ref(),
+        "--batch-concurrency",
+        "4",
+        "-v",
+    ]);
+    let assert = Assert::new(
+        spawn_budgeted("batch_concurrency_flag_reaches_model_tier", command, None).await,
+    )
+    .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     assert!(
@@ -295,11 +310,13 @@ async fn download_concurrency_flag_reaches_asset_tier() {
     let output = TempDir::new().expect("temp output dir");
 
     let assert = scrape(
+        "download_concurrency_flag_reaches_asset_tier",
         &server,
         &[],
         &output,
         &["--download-concurrency", "7", "-v"],
     )
+    .await
     .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
@@ -319,11 +336,13 @@ async fn toml_crawl_and_cli_download_survive_same_merge() {
     let (_conf, conf_path) = write_toml_config("concurrency = \"2\"\n");
 
     let assert = scrape(
+        "toml_crawl_and_cli_download_survive_same_merge",
         &server,
         &[("WEBFANG_CONFIG", conf_path.to_string_lossy().as_ref())],
         &output,
         &["--download-concurrency", "6", "-v"],
     )
+    .await
     .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
@@ -339,22 +358,22 @@ async fn toml_crawl_and_cli_download_survive_same_merge() {
 /// the CLI flag path must hard-error with the Spanish boundary message and
 /// exit 78 (ConfigError), never silently degrade to the derived default.
 /// Fails before any network I/O, so no mock server is needed.
-#[test]
-fn cli_rate_limit_burst_zero_hard_errors() {
+#[tokio::test]
+async fn cli_rate_limit_burst_zero_hard_errors() {
     let output = TempDir::new().expect("temp output dir");
 
-    let assert = cmd()
-        .args([
-            "--url",
-            "https://example.com",
-            "--output",
-            output.path().to_string_lossy().as_ref(),
-            "--rate-limit-burst",
-            "0",
-        ])
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .failure();
+    let mut command = std_cmd();
+    command.args([
+        "--url",
+        "https://example.com",
+        "--output",
+        output.path().to_string_lossy().as_ref(),
+        "--rate-limit-burst",
+        "0",
+    ]);
+    let assert =
+        Assert::new(spawn_budgeted("cli_rate_limit_burst_zero_hard_errors", command, None).await)
+            .failure();
 
     assert_eq!(
         assert.get_output().status.code(),
@@ -373,7 +392,12 @@ fn cli_rate_limit_burst_zero_hard_errors() {
 /// give the pre-fix run a fast hermetic success.
 #[tokio::test]
 async fn cli_rate_limit_burst_non_numeric_fails_closed() {
-    let (output, assert) = run_single_page_scrape(&[], &["--rate-limit-burst", "banana"]).await;
+    let (output, assert) = run_single_page_scrape(
+        "cli_rate_limit_burst_non_numeric_fails_closed",
+        &[],
+        &["--rate-limit-burst", "banana"],
+    )
+    .await;
 
     let assert = assert_exit_78(
         assert,
@@ -392,7 +416,12 @@ async fn cli_rate_limit_burst_non_numeric_fails_closed() {
 /// `u32::MAX + 1`, i.e. an explicit request that cannot be honoured.
 #[tokio::test]
 async fn cli_rate_limit_burst_out_of_range_fails_closed() {
-    let (output, assert) = run_single_page_scrape(&[], &["--rate-limit-burst", "4294967296"]).await;
+    let (output, assert) = run_single_page_scrape(
+        "cli_rate_limit_burst_out_of_range_fails_closed",
+        &[],
+        &["--rate-limit-burst", "4294967296"],
+    )
+    .await;
 
     let assert = assert_exit_78(
         assert,
@@ -411,7 +440,12 @@ async fn cli_rate_limit_burst_out_of_range_fails_closed() {
 /// pass both tests above.
 #[tokio::test]
 async fn cli_rate_limit_burst_valid_value_is_accepted() {
-    let (_output, assert) = run_single_page_scrape(&[], &["--rate-limit-burst", "7"]).await;
+    let (_output, assert) = run_single_page_scrape(
+        "cli_rate_limit_burst_valid_value_is_accepted",
+        &[],
+        &["--rate-limit-burst", "7"],
+    )
+    .await;
     assert.success();
 }
 
@@ -420,8 +454,12 @@ async fn cli_rate_limit_burst_valid_value_is_accepted() {
 /// than than being a second, softer front door.
 #[tokio::test]
 async fn env_rate_limit_burst_non_numeric_fails_closed() {
-    let (_output, assert) =
-        run_single_page_scrape(&[("WEBFANG_RATE_LIMIT_BURST", "banana")], &[]).await;
+    let (_output, assert) = run_single_page_scrape(
+        "env_rate_limit_burst_non_numeric_fails_closed",
+        &[("WEBFANG_RATE_LIMIT_BURST", "banana")],
+        &[],
+    )
+    .await;
 
     assert_exit_78(
         assert,
@@ -440,7 +478,12 @@ async fn env_rate_limit_burst_non_numeric_fails_closed() {
 /// the derived default, never exit 78.
 #[tokio::test]
 async fn cli_rate_limit_burst_auto_keyword_is_accepted_as_unset() {
-    let (_output, assert) = run_single_page_scrape(&[], &["--rate-limit-burst", "auto"]).await;
+    let (_output, assert) = run_single_page_scrape(
+        "cli_rate_limit_burst_auto_keyword_is_accepted_as_unset",
+        &[],
+        &["--rate-limit-burst", "auto"],
+    )
+    .await;
     assert.success();
 }
 
@@ -449,8 +492,12 @@ async fn cli_rate_limit_burst_auto_keyword_is_accepted_as_unset() {
 /// validator as argv, so it must reach the derived default too.
 #[tokio::test]
 async fn env_rate_limit_burst_auto_keyword_is_accepted_as_unset() {
-    let (_output, assert) =
-        run_single_page_scrape(&[("WEBFANG_RATE_LIMIT_BURST", "auto")], &[]).await;
+    let (_output, assert) = run_single_page_scrape(
+        "env_rate_limit_burst_auto_keyword_is_accepted_as_unset",
+        &[("WEBFANG_RATE_LIMIT_BURST", "auto")],
+        &[],
+    )
+    .await;
     assert.success();
 }
 
@@ -461,7 +508,12 @@ async fn env_rate_limit_burst_auto_keyword_is_accepted_as_unset() {
 /// failing closed — the same regression in a narrower spelling.
 #[tokio::test]
 async fn cli_rate_limit_burst_auto_keyword_is_case_insensitive() {
-    let (_output, assert) = run_single_page_scrape(&[], &["--rate-limit-burst", "AUTO"]).await;
+    let (_output, assert) = run_single_page_scrape(
+        "cli_rate_limit_burst_auto_keyword_is_case_insensitive",
+        &[],
+        &["--rate-limit-burst", "AUTO"],
+    )
+    .await;
     assert.success();
 }
 
@@ -469,22 +521,21 @@ async fn cli_rate_limit_burst_auto_keyword_is_case_insensitive() {
 /// `rate_limit_burst = 0` must also hard-error with exit 78 (ConfigError),
 /// never silently degrade to the derived default. Fails before any network
 /// I/O, so no mock server is needed. (Preserved from the #925 landing.)
-#[test]
-fn toml_rate_limit_burst_zero_hard_errors() {
+#[tokio::test]
+async fn toml_rate_limit_burst_zero_hard_errors() {
     let output = TempDir::new().expect("temp output dir");
     let (_conf, conf_path) = write_toml_config("rate_limit_burst = 0\n");
 
-    let assert = cmd()
-        .env("WEBFANG_CONFIG", &conf_path)
-        .args([
-            "--url",
-            "https://example.com",
-            "--output",
-            output.path().to_string_lossy().as_ref(),
-        ])
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .failure();
+    let mut command = std_cmd();
+    command.env("WEBFANG_CONFIG", &conf_path).args([
+        "--url",
+        "https://example.com",
+        "--output",
+        output.path().to_string_lossy().as_ref(),
+    ]);
+    let assert =
+        Assert::new(spawn_budgeted("toml_rate_limit_burst_zero_hard_errors", command, None).await)
+            .failure();
 
     assert_eq!(
         assert.get_output().status.code(),
