@@ -1575,7 +1575,16 @@ jobs:
         run: |
           rustup target add x86_64-pc-windows-gnu
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64
+          # BOTH compilers, not just gcc. `gcc-mingw-w64-x86-64` ships the C
+          # driver only; the C++ one is `g++-mingw-w64-x86-64` (Debian/Ubuntu
+          # split), and btls-sys needs it to cross-compile BoringSSL.
+          # Without it the job dies in the build script before the Rust code
+          # carrying the `cfg` is ever reached:
+          #   ToolNotFound: failed to find tool "x86_64-w64-mingw32-g++"
+          #   error: failed to run custom build command for `btls-sys`
+          # (g++ alone would be enough for btls-sys, but zstd-sys's C also
+          # needs the gcc driver, so both are installed.)
+          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
       - name: Type-check the test surface under cfg(windows)
         env:
           CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
