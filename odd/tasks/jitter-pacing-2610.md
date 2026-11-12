@@ -78,6 +78,74 @@ mechanical plumbing (spec → argv → preflight → options).
 ordering to the shared rate limiter). Not item 3: a new flag and an optional config key are
 explicitly excluded from the high-risk list.
 
+### PR body (draft)
+
+```
+Closes #2610
+
+## What
+
+`--jitter-ms <MS>` randomizes the delay between requests so the cadence stops being a
+signature. The value is an ADDITION to `--delay-ms`: the effective interval is uniform over
+`[delay_ms, delay_ms + jitter_ms]`, so the mean interval becomes `delay + jitter/2` — the
+request rate drops, and a run that wants its old rate must lower `--delay-ms`.
+
+Default 0: today's behavior byte for byte (no gate is built at all).
+
+```
+--jitter-ms 500            # CLI
+WEBFANG_JITTER_MS=500      # env
+jitter_ms = 500            # TOML
+```
+
+## The four design decisions
+
+1. **Cumulative gate, not a sleep.** The shape is load-bearing: a sleep drawn AFTER the
+   permit yields `delay + j_k - j_(k-1)`, whose difference of independent draws dips BELOW
+   the configured delay; a sleep drawn BEFORE the permit is absorbed by the token bucket and
+   barely moves the cadence. Only a cumulative schedule — `slot = max(next_slot, now)`,
+   `next_slot = slot + delay + jitter` — keeps the floor AND decorrelates.
+2. **The burst is covered.** The burst is the other half of the metronome: N requests
+   leaving at once is as loud as N requests leaving on a fixed tick. With the jitter on, the
+   token bucket's `concurrency` permits are paced too — the first leaves at once, the rest
+   wait their slot. With the jitter off, the burst is untouched. (`budget.burst()` is 8 on a
+   16-core box, so today the first 8 requests of a run leave simultaneously.)
+3. **A cancelled wait returns its slot — but only if it is still the latest reservation.** A
+   later reservation already built its own slot on top of that one; stealing it would
+   reorder the schedule.
+4. **The `http_client` RPM limiter is off the target path** (so it stays a non-goal):
+   `HttpClientConfig::rate_limit_rpm` defaults to `None` and no production builder sets it,
+   so `HttpClient::new` builds no limiter at all; and `HttpClientPort::get` never consults
+   one even when it exists. The only pacing on the target path is `SharedRateLimiter`.
+
+## AC2 — `Retry-After` is respected verbatim
+
+Structural isolation: the jitter lives in the limiter (fetch guard chain stage 2) and the
+server-dictated wait lives in `WreqDownloader::fetch_inner` (stage 4). The retry never
+re-enters pacing, so the jitter can only add time to a normal request — never shorten or
+replace the wait the server asked for. Pinned by a wiremock regression
+(`retry_after_is_respected_while_the_jitter_is_active`): a `429` with `Retry-After: 1`
+arrives again at least a second later while the jitter is active.
+
+## What a reviewer should read closely
+
+Commit 1 (`7f2ca5de`, the limiter core) is the fine-grained one — the gate, the slot
+arithmetic, the cancellation rollback, the unit tests. Commit 2 (`965fcac1`) is mechanical
+plumbing: spec → argv → preflight → options → the three limiter builders. Commit 3
+(`f7da4b8e`) only spells the semantics out in `--help` and the docs. Commit 4
+(`84667b71`) is the mission record (`odd/tasks/jitter-pacing-2610.md`) — no product code.
+
+## Verification
+
+- `cargo nextest run --workspace --all-features` → 5504 passed, 7 skipped.
+- `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` → clean.
+- `cargo fmt --all -- --check` → clean.
+- RED proof: removing the jitter from `build_batch_rate_limiter` makes
+  `jitter_paces_every_request_not_only_the_refills` fail — the E2E is not vacuous.
+- `gentle-ai review assess --base-ref 92d9f241 --committed-only` → risk `high`, review due
+  (the jitter gate adds shared scheduling state to the shared rate limiter).
+```
+
 ### Verification evidence
 
 - `cargo nextest run --workspace --all-features` → **5504 tests run, 5504 passed, 7 skipped** (exit 0).
