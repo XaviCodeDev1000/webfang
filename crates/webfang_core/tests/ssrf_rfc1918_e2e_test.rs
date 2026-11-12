@@ -37,8 +37,24 @@
 mod common;
 
 use std::process::Output;
+use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// Per-attempt budget for these rows: the shared
+/// [`common::spawn_budgeted`] budget (60 s) is sized for sites whose healthy
+/// latency is milliseconds, and on `windows-latest` these rows legitimately
+/// exceed it — inside the trybuild window that compiles the whole crate plus
+/// BoringSSL for ~10 minutes, a row measured 83-86 s against 0.6-0.8 s on an
+/// idle Linux box (issue #2658). That is load, not a hang: the shared budget
+/// killed a healthy child there, the first attempt failed and the retry
+/// passed, which is the exact `fail-if-flaky` shape this file must not
+/// produce.
+///
+/// 180 s is ~2x the worst latency ever observed on that runner. A real
+/// regression hangs with no ceiling at all, so it still fails — naming the
+/// latencies the harness MEASURED, not an empty capture.
+const ROW_BUDGET: Duration = Duration::from_secs(180);
 
 /// Normalize captured stderr: drop ESC bytes and collapse whitespace runs.
 /// Tracing writes ANSI colour/attribute sequences (`ESC[..m`) to TTY output;
@@ -85,7 +101,7 @@ async fn run_production(url: &str) -> (Output, MockServer) {
         .arg("5")
         .arg("--max-retries")
         .arg("0");
-    let output = common::spawn_budgeted("run_production", command, None).await;
+    let output = common::spawn_budgeted_with(ROW_BUDGET, "run_production", command, None).await;
     (output, mock_server)
 }
 
@@ -253,7 +269,8 @@ async fn row7_hostname_answering_private_range_is_blocked_at_connect() {
         .arg("5")
         .arg("--max-retries")
         .arg("0");
-    let output = common::spawn_budgeted(
+    let output = common::spawn_budgeted_with(
+        ROW_BUDGET,
         "row7_hostname_answering_private_range_is_blocked_at_connect",
         command,
         None,
@@ -314,7 +331,8 @@ async fn row8_redirect_to_forbidden_literal_is_never_followed() {
         .arg("5")
         .arg("--max-retries")
         .arg("0");
-    let output = common::spawn_budgeted(
+    let output = common::spawn_budgeted_with(
+        ROW_BUDGET,
         "row8_redirect_to_forbidden_literal_is_never_followed",
         command,
         None,
@@ -396,7 +414,8 @@ the ephemeral local listener.</p>
         .arg("10")
         .arg("--max-retries")
         .arg("0");
-    let output = common::spawn_budgeted(
+    let output = common::spawn_budgeted_with(
+        ROW_BUDGET,
         "row9_positive_control_loopback_is_reachable_when_entry_guard_disarmed",
         command,
         None,

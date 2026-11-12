@@ -354,6 +354,33 @@ pub(crate) async fn spawn_budgeted(
     cmd: std::process::Command,
     stdin: Option<&[u8]>,
 ) -> std::process::Output {
+    spawn_budgeted_with(SPAWN_LATENCY_BUDGET, what, cmd, stdin).await
+}
+
+/// [`spawn_budgeted`] with an explicit per-site budget, for the sites whose
+/// REAL latency legitimately exceeds [`SPAWN_LATENCY_BUDGET`] on a loaded
+/// runner.
+///
+/// The SSRF e2e rows are the case: on `windows-latest` the trybuild
+/// `compile_fail_cases_fail_to_compile` build compiles the whole crate plus
+/// BoringSSL for ~10 minutes, and a row spawning the binary inside that
+/// window measured 83-86 s against 0.6-0.8 s on an idle Linux box (issue
+/// #2658). That is load, not a hang, so the shared 60 s budget — sized for
+/// sites whose healthy latency is milliseconds — reported a false failure
+/// there: the first attempt was killed at its budget and the retry passed,
+/// which is exactly the `fail-if-flaky` shape the lane must never produce.
+///
+/// A budget this file still owns the semantics of: an attempt that overruns
+/// it is killed, reaped and retried ONCE, and a second overrun fails the
+/// test naming the latencies it MEASURED. Enlarging the number for a site
+/// whose ceiling is real widens hang tolerance for that site alone; it does
+/// not stop bounding hangs, because a genuine hang has no ceiling of its own.
+pub(crate) async fn spawn_budgeted_with(
+    budget: Duration,
+    what: &'static str,
+    cmd: std::process::Command,
+    stdin: Option<&[u8]>,
+) -> std::process::Output {
     use std::ffi::{OsStr, OsString};
     let stdin = stdin.map(<[u8]>::to_vec);
     let program = cmd.get_program().to_os_string();
@@ -362,7 +389,7 @@ pub(crate) async fn spawn_budgeted(
         .get_envs()
         .map(|(key, value)| (key.to_os_string(), value.map(OsStr::to_os_string)))
         .collect();
-    assert_spawn_within_output_blocking(SPAWN_LATENCY_BUDGET, what, move |child| {
+    assert_spawn_within_output_blocking(budget, what, move |child| {
         let mut command = std::process::Command::new(&program);
         command.args(&args);
         for (key, value) in &envs {

@@ -17,6 +17,10 @@
 #[path = "common/mod.rs"]
 mod common;
 
+// `Duration` is used only inside the `#[cfg(unix)]` kill test's sleep, so the
+// import is gated with it: on Windows it would be an unused import, and that
+// warning is invisible to every Linux gate.
+#[cfg(unix)]
 use std::time::Duration;
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
@@ -80,6 +84,11 @@ fn count_md(root: &std::path::Path) -> usize {
 /// `SPAWN_LATENCY_BUDGET`, kills and reaps an overrunning child and retries
 /// once; the caller asserts OUTSIDE the budget, on the returned `Output` and
 /// the files on disk.
+///
+/// `#[cfg(unix)]` because its only caller is the `#[cfg(unix)]` kill test
+/// below: on Windows this helper would be dead code, and that warning is
+/// invisible to every Linux gate.
+#[cfg(unix)]
 async fn recover_spool(
     spool: &std::path::Path,
     recovered: &std::path::Path,
