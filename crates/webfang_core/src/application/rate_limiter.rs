@@ -116,6 +116,10 @@ impl RateLimiterConfig {
     /// effective interval is uniform over `[delay_ms, delay_ms + jitter_ms]`.
     /// A mean interval of `delay_ms + jitter_ms / 2` — so a run that wants
     /// the rate it had before must lower `delay_ms` accordingly.
+    ///
+    /// The FIRST request of a run leaves immediately; the schedule governs
+    /// every interval after it. A run of N requests therefore takes about
+    /// `(N-1) * (delay_ms + jitter_ms / 2)`.
     #[must_use]
     pub fn with_jitter(mut self, jitter_ms: u64) -> Self {
         self.jitter_ms = jitter_ms;
@@ -498,9 +502,10 @@ impl SharedRateLimiter {
 
     /// Wait for the jitter slot, if this run asked for one (#2610).
     ///
-    /// The first request of a run is dispatched immediately (its slot is
+    /// The FIRST request of a run is dispatched immediately (its slot is
     /// `now`); every later one waits for the cumulative slot, so the burst
-    /// of the token bucket is NOT a burst on the wire.
+    /// of the token bucket is NOT a burst on the wire. A run of N requests
+    /// therefore takes about `(N-1) * (delay + jitter/2)`.
     async fn await_jitter_turn(&self) {
         let Some(schedule) = self.jitter.as_ref() else {
             return;

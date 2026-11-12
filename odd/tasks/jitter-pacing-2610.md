@@ -3,7 +3,10 @@
 **Objective**: break the metronomic request cadence produced by `--delay-ms` so a
 rate limiter (Cloudflare) cannot align its counting window with our request pattern.
 **Branch**: `feat/jitter-ms-pacing` (worktree `~/Projects/Rust/webfang-worktrees/feat-jitter-ms-pacing`).
-**Delivery strategy**: single PR, two work-unit commits (core → plumbing).
+**Delivery strategy**: ONE PR, two work-unit commits (core → plumbing) — the maintainer's
+call (L7). The authored delta is 777 lines (the rest is generated: insta snapshots + the
+test inventory); the review's fine-grained target is the `rate_limiter.rs` gate, the rest is
+mechanical plumbing (spec → argv → preflight → options).
 **Test runner**: `cargo nextest run` (focused per task) + `scripts/ci_fast_gate.sh` at the end.
 
 ## Specs
@@ -16,6 +19,10 @@ rate limiter (Cloudflare) cannot align its counting window with our request patt
   rate must lower `--delay-ms` accordingly.
   Acceptance: the flag parses from CLI, `WEBFANG_JITTER_MS`, and TOML `jitter_ms`;
   default 0 keeps today's behavior byte-for-byte.
+  What the operator sees (stated in `--help` and in the flag's rustdoc): the FIRST request
+  leaves immediately and the gate governs every interval after it, so a run of N requests
+  takes about `(N-1) * (delay_ms + jitter_ms / 2)` — and with `0` a run that fits inside the
+  burst is not paced at all.
 
 - **S2** — "**Precedencia intacta**: el backoff con `Retry-After` del fetch guard chain (stage 4) manda sobre cualquier jitter — el jitter solo aplica al pacing normal, nunca a una espera dictada por el servidor."
   Acceptance: with jitter active, a `429` carrying `Retry-After: N` still waits ≥ N
@@ -26,9 +33,11 @@ rate limiter (Cloudflare) cannot align its counting window with our request patt
   so two processes never replay the same sequence.
 
 - **S4** — "Con `--jitter-ms` activo, los intervalos observados caen dentro del rango configurado (test con `MockClock`/inyección de azar, determinista vía seed)."
-  Acceptance: every observed inter-dispatch gap is in `[delay_ms, delay_ms + jitter_ms]`
-  (real-time tolerance), and the scheduling core is unit-tested deterministically with a
-  seeded RNG.
+  Acceptance: the SCHEDULED gap between two dispatches is in
+  `[delay_ms, delay_ms + jitter_ms]` — the schedule's slots are absolute, so a
+  late wake-up can only make a measured gap SHORTER, never faster than the
+  floor the schedule guarantees. The scheduling core is unit-tested
+  deterministically with a seeded RNG (no clock, no sleeping).
 
 - **S5** — "Default 0: los tests existentes de pacing no cambian."
   Acceptance: `jitter_ms == 0` builds NO jitter gate — the governor token bucket stays
@@ -55,14 +64,36 @@ rate limiter (Cloudflare) cannot align its counting window with our request patt
 
 - **T1** — limiter core: `jitter_ms` on `RateLimiterConfig` (+ `with_jitter`), the cumulative
   schedule gate in every `SharedRateLimiter` wait method, slot rollback on cancellation,
-  unit tests. → S1, S3, S4, S5, S6, S7. Route: inline. Commit: pending.
+  unit tests. → S1, S3, S4, S5, S6, S7. Route: inline. Commit: `7f2ca5de`.
 - **T2** — CLI plumbing: `OptionSpec` entry + GROUP, `spec_command` binding + slot,
   `CrawlerArgs`, `NetworkOptions`, preflight stages, `ConfigDefaults`, `CrawlerConfig`,
-  the three limiter builders. → S1, S5. Route: inline. Commit: pending.
-- **T3** — `Retry-After` regression with jitter active (wiremock). → S2. Route: inline.
+  the three limiter builders. → S1, S5. Route: inline. Commit: `965fcac1`.
+- **T3** — `Retry-After` regression with jitter active (wiremock) + the E2E pacing proof.
+  → S2, S6. Route: inline. Commit: `965fcac1`.
 - **T4** — verification: `cargo check` / `clippy --all-targets --all-features` / `fmt --check` /
   `cargo doc`, focused `nextest` suites, independent verifier (Risk: item 4), RDD assess.
-  Route: inline.
+  Route: inline. Evidence below.
+
+**Risk: item 4** (concurrency — the jitter gate adds shared scheduling state and async
+ordering to the shared rate limiter). Not item 3: a new flag and an optional config key are
+explicitly excluded from the high-risk list.
+
+### Verification evidence
+
+- `cargo nextest run --workspace --all-features` → **5504 tests run, 5504 passed, 7 skipped** (exit 0).
+- `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` → clean.
+- `cargo fmt --all -- --check` → clean (after one `cargo fmt --all` fixer pass).
+- `cargo doc --workspace --all-features --no-deps` with `RUSTDOCFLAGS=-D warnings` → exit 0, HTML generated.
+  NOTE: rustdoc 1.91.1 ICEs once per crate while rendering the search index
+  (`scoped-tls`: "cannot access a scoped thread local variable without calling `set` first").
+  It fires for crates this change never touched (`webfang_test_utils`, `webfang_mcp`,
+  `webfang_cli`, `webfang_benchmark`) and the command still exits 0 — a pre-existing
+  toolchain bug, not a change-caused one.
+- RED proof for the E2E pacing test: with the jitter removed from `build_batch_rate_limiter`,
+  `jitter_paces_every_request_not_only_the_refills` FAILS (3 retries) — the test is not vacuous.
+- `gentle-ai review assess --base-ref 92d9f241 --committed-only --escalate-item 4` → risk `high`,
+  `review_due: true` (`high_risk`), 31 paths / 911 changed lines.
+
 
 ## Log
 
@@ -102,3 +133,26 @@ rate limiter (Cloudflare) cannot align its counting window with our request patt
   off the target path (S8); AC2 gets a real wiremock test, not a structural argument.
 - **L4** (2026-11-12) — Environment: worktree `feat-jitter-ms-pacing`; seeds are rustc-1.88
   artifacts and this tree needs 1.91, so the target dir is a cold build.
+- **L5** (2026-11-12) — Implementation landed: `7f2ca5de` (limiter core + unit tests) and
+  `965fcac1` (CLI plumbing, E2E tests, snapshots, regenerated `docs/test-inventory.json`).
+  The 911 changed lines are mostly generated (insta snapshots + the inventory); the authored
+  delta is ~300. The repo forbids stacked PRs, so this ships as ONE PR on `main`.
+- **L6** (2026-11-12) — Deliberately NOT exposed on the MCP surface: `scrape_batch` keeps
+  `delay_ms` and its jitter stays 0. The MCP↔spec parity is one-directional (MCP-derived
+  properties → spec ids), so a CLI-only spec does not break it.
+- **L7** (2026-11-12) — Delivery budget: 777 authored lines (468 of them in
+  `application/rate_limiter.rs`, half of that documentation and tests) — over the ~400
+  heuristic. The maintainer votes **ONE PR with the two commits as they are**: a PR carrying
+  only the engine would be inert (nobody can turn `jitter_ms` on without the flag, so a
+  reviewer could not check AC1/AC2/AC3 against it), the RED proof crosses both commits, and
+  this repo has no stacked-PR path — PR2 would have to wait for PR1 to merge, delaying the
+  fix the issue asks for. The change is ONE behavior end to end, and the doc/comment budget
+  was NOT cut to fit a number. If the verifier or the native review demands a separate
+  iteration of the engine, the split is: PR1 = the engine + its unit tests, PR2 = the flag.
+- **L8** (2026-11-12) — Pre-PR checks from the maintainer, both done: (1) the FIRST request
+  leaves immediately — the gate governs every interval AFTER it, so a run of N requests
+  takes about `(N-1) * (delay + jitter/2)`; pinned by `jitter_never_delays_the_first_request`
+  and `jitter_gate_covers_the_first_request`, now also stated in the code docs, in the
+  `--jitter-ms` rustdoc and in `--help`. (2) `--help` now says the mean interval becomes
+  `delay + jitter/2` (the request rate drops) and that with `0` a run that fits in the
+  burst is not paced at all; the help snapshots were regenerated.
