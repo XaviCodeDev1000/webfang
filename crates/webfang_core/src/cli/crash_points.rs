@@ -170,6 +170,13 @@ fn kill_self() -> ! {
 /// so a single test covers both. A path that only one branch used would
 /// leave the other one uncovered, which is how the discarded case stayed
 /// invisible until #2066.
+///
+/// `#[cfg(unix)]` because its only callers are the two branches of the
+/// `#[cfg(unix)]` `kill_self` below: the `#[cfg(not(unix))]` replacement that
+/// Windows and macOS compile does not use it, so without the gate the helper
+/// is dead code there — invisible to every Linux gate, and exactly what the
+/// cfg(windows) cross-lint caught in this file.
+#[cfg(unix)]
 fn die_diagnostically(reason: &str) -> ! {
     tracing::error!(
         error = reason,
