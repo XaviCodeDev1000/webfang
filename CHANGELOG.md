@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.3] - 2026-11-12
+
+
+### 🧪 Testing
+
+- Crawl_js timeout test distinguishes a mock transport failure from the timeout contract ([#2698](https://github.com/XaviCodeDev1000/webfang/pull/2698)) ([#2716](https://github.com/XaviCodeDev1000/webfang/pull/2716))
 ## [7.6.2] - 2026-11-11
 
 
