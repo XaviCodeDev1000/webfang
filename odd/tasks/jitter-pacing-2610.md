@@ -1,4 +1,4 @@
-# feat(cli): --jitter-ms — aleatorización asimétrica del delay (issue #2610)
+# feat(cli): --jitter-ms — jitter ascendente del delay para romper la cadencia metronómica (issue #2610)
 
 **Objective**: break the metronomic request cadence produced by `--delay-ms` so a
 rate limiter (Cloudflare) cannot align its counting window with our request pattern.
@@ -98,6 +98,16 @@ WEBFANG_JITTER_MS=500      # env
 jitter_ms = 500            # TOML
 ```
 
+What the operator sees:
+
+- The **mean interval becomes `delay + jitter/2`** — the request rate DROPS against the
+  configured `--delay-ms`, so a run that wants its old rate must lower `--delay-ms`.
+- With the jitter on, **the burst is no longer a burst on the wire**: `budget.burst()` is 8
+  on a 16-core box, so today the first 8 requests of a run leave simultaneously — with the
+  jitter the first leaves at once and the other seven wait their slots.
+- The **first request leaves immediately**; the gate governs every interval AFTER it, so a run
+  of N requests takes about `(N-1) * (delay + jitter/2)`.
+
 ## The four design decisions
 
 1. **Cumulative gate, not a sleep.** The shape is load-bearing: a sleep drawn AFTER the
@@ -120,12 +130,32 @@ jitter_ms = 500            # TOML
 
 ## AC2 — `Retry-After` is respected verbatim
 
-Structural isolation: the jitter lives in the limiter (fetch guard chain stage 2) and the
-server-dictated wait lives in `WreqDownloader::fetch_inner` (stage 4). The retry never
-re-enters pacing, so the jitter can only add time to a normal request — never shorten or
-replace the wait the server asked for. Pinned by a wiremock regression
-(`retry_after_is_respected_while_the_jitter_is_active`): a `429` with `Retry-After: 1`
-arrives again at least a second later while the jitter is active.
+How it is proven (not only structurally):
+
+- **A regression test against the fixture server** —
+  `retry_after_is_respected_while_the_jitter_is_active` in
+  `crates/webfang_core/tests/jitter_pacing.rs`: the fixture answers `429` with
+  `Retry-After: 1` on the first hit and `200` on the second, the client runs with the jitter
+  ACTIVE, and the assertion reads the SERVER-SIDE arrival log: the retry must arrive at least
+  a second later. A client that shortened, replaced or raced that wait would fail the test.
+- **Structural isolation** (why the wait cannot be touched in the first place): the jitter
+  lives in the limiter (fetch guard chain stage 2) and the server-dictated wait lives in
+  `WreqDownloader::fetch_inner` (stage 4). The retry never re-enters pacing, so the jitter
+  can only add time to a normal request — never shorten or replace the wait the server asked
+  for.
+
+## Known limitations (from the native review)
+
+The review approved this candidate with zero BLOCKER and zero CRITICAL. Two findings are
+known limitations of the shipped behavior, each tracked as its own issue:
+
+- **#2749 — an OS-RNG failure at construction degrades to NO pacing at all**, not to
+  token-bucket-only pacing: the failure removes the protection the operator asked for instead
+  of removing only the randomization. Rare (it needs the OS entropy source to be unavailable)
+  and the fix is small — fall back to the token bucket and WARN about the lost randomization.
+- **#2750 — a cancelled reservation that is no longer the latest leaves its slot stranded**,
+  so the next request waits one extra slot. Cancellation/shutdown paths only; the request is
+  late, never early, so the pacing floor still holds.
 
 ## What a reviewer should read closely
 
@@ -138,6 +168,11 @@ Commit 5 (`286c6e11`) moves the gate into its own module (`rate_limiter/jitter.r
 raises the file-size ratchet. Commit 6 (`4bb4ec82`) is the independent verifier's fix
 batch — the binary's final merge now copies `jitter_ms`, the per-URL rebuild carries it,
 and the zero-delay rule answers "no pacing" only when there is no jitter either.
+
+Docs-only commits (no product code): commit 4 (`f42d955b`, the mission record) and commit 7
+(`ab1a5827`, the mission-record update with the verifier round and the review receipt). The
+generated part of the diff is the insta snapshots plus `docs/test-inventory.json`; the
+authored part is the gate, its plumbing and the tests.
 
 ## Verification
 
