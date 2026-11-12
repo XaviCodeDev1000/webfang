@@ -186,6 +186,34 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
+      # MAIN MUST NOT BE AHEAD OF ITS TAG (webfang#2768)
+      #
+      # `release-plz release-pr` derives the next version from the commits between
+      # the newest v* tag and main, so the one state it cannot read is "the
+      # version bump is already merged and the tag is seconds away".
+      #
+      # Measured on 2026-11-12: the PR job of the run triggered by #2753 started
+      # at 17:46:04; #2767 (`chore: release v7.7.0`) merged at 17:46:23; that
+      # job's release-plz still read its PRE-merge checkout at ~17:46:30 and
+      # opened #2768 at 17:46:33 - a Release PR for 7.7.0, already on main, with
+      # no content (its only conflict was three timestamps in .github/support.json);
+      # the sibling run pushed the v7.7.0 tag at 17:46:58.
+      #
+      # The intra-run ordering of webfang#1546/#1550 (`needs: [release-plz-release]`)
+      # does NOT cover this: inside that run the jobs were already ordered. The
+      # race is CROSS-RUN - the PR job of an older run overlapping the release job
+      # of a newer one, each with its own checkout.
+      #
+      # The step syncs the checkout to origin/main (the pre-merge checkout is what
+      # made the phantom possible) and waits, bounded, for the tag of that version.
+      # The decision lives in scripts/await_release_tag.sh: it is testable offline,
+      # and a bash block embedded in YAML is not (same reason as
+      # scripts/verify-release-tag.sh).
+      - name: Sync main and await the release tag
+        env:
+          RELEASE_TAG_WAIT_SECONDS: "120"
+        run: bash scripts/await_release_tag.sh
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
       # App token (full migration, slice 2 closed #1205): PRs opened with

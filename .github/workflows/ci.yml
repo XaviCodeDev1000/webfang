@@ -753,6 +753,16 @@ jobs:
       # identity. Without a CI entry point the harness would be inert.
       - name: Pending publication declaration semantics harness
         run: bash scripts/test_declare_pending_publication.sh
+      # The phantom Release PR of webfang#2768: `release-plz release-pr` derives
+      # the next version from `last v* tag..main`, so a main that is ahead of its
+      # own tag (a release in flight, or a broken one) makes it propose a version
+      # that is already on main. The guard refuses that state; this harness pins
+      # the refusal offline (local bare repos as the remote, a sibling release
+      # that pushes the tag mid-wait, a clone that is the pre-merge main). It
+      # belongs here, next to the other release-flow harnesses: the failure is a
+      # workflow step, and only a harness notices its removal.
+      - name: Release tag await guard semantics harness
+        run: bash scripts/test_await_release_tag.sh
       # Edges of the MCP version-marker gate below (#2038): the guard runs with
       # the event's base, `repo-guards` stays unfiltered, and `gate` waits on it
       # in both scopes. Offline, pure text plus one local `git` call: no cargo,
