@@ -2074,7 +2074,10 @@ jobs:
   # timeout cancels the whole run — see the `miri` job rationale; compilation
   # under Miri is 5-10x slower).
   # NOTE: Positive module filters — new infrastructure:: modules must be
-  # explicitly assigned to one of the two infra jobs to run under Miri.
+  # explicitly assigned to one of the Miri groups to run under Miri. `miri`
+  # carries core/domain, `miri-infra-fast` the tree-wide infrastructure:: filter,
+  # and `miri-infra-slow` three disjoint groups (crawler, transport, content)
+  # whose filters, in the `include:` block, are the authoritative list.
   # ============================================================================
   miri-infra-fast:
     name: Miri (infra-fast)
@@ -2129,9 +2132,9 @@ jobs:
             -- infrastructure::cpu_pool:: -- infrastructure::stream:: -- infrastructure::error:: -- infrastructure::user_agent:: -- infrastructure::bridge:: -- infrastructure::output:: -- infrastructure::config:: -- infrastructure::autotuning:: -- infrastructure::content_processing:: -- infrastructure::scraper::
 
   # ============================================================================
-  # MIRI INFRA-SLOW: crawler/obsidian/export/http/network/converter + the
-  # downloader submodules. 120 min timeout (#1512) — see the `miri` job
-  # rationale.
+  # MIRI INFRA-SLOW: a 3-group matrix over crawler/obsidian/export/http/
+  # network/converter + the downloader submodules. 120 min timeout (#1512) —
+  # see the `miri` job rationale.
   # syntax_highlight is excluded at source via #[cfg(all(test, not(miri)))];
   # wikilinks (pure pulldown_cmark, no FFI) runs and passes under Miri — it
   # is already covered by the `infrastructure::converter::` filter, so it
@@ -2149,9 +2152,34 @@ jobs:
   # as of #1512 the job outgrew that budget — measured 60m20s, killed at the
   # cap in run 35621757387, whose cancellation took the whole run down —
   # so the budget is now 120 min.
+  #
+  # WHY IT IS A MATRIX OF THREE GROUPS AND NOT ONE BIG JOB (2026-11-12):
+  # The 120-min budget above was chosen by measuring ONE job with a WARM
+  # sysroot cache — 50 min in #1633, 36 min in the manual run 43111425786,
+  # which completed all 474 of its tests with zero failures. That measurement
+  # assumed a runner of stable speed. It is not stable: the same suite, on the
+  # same four-jobs-in-parallel layout, ran >104 min in run 43147459659 on a
+  # ~4x slower runner and was CANCELLED at 398/474 with not one test failing.
+  # continue-on-error absorbs a `failure` conclusion, NOT a cancellation, so a
+  # slow runner alone turned the scheduled run red — and that red described
+  # the machine, not the tree, which is exactly the unactionable class this
+  # lane has been clearing since #2235.
+  # The cache was the first suspect and was ELIMINATED by measurement before
+  # anything was changed: a cold sysroot rebuild cost 3 min in that run
+  # against ~80 min of missing margin, so caching was never the fix. Raising
+  # the budget instead would only move the knife-edge to a worse number and
+  # slower report, so it is deliberately NOT done (#1633 stands).
+  # Three DISJOINT groups of ~200 tests replace the one 474-test job. Each
+  # pays the same ~12 min of setup+compile and runs ~1/3 of the suite, so
+  # each needs ~20 min against the 120-min cap — ~6x margin instead of ~3.3x
+  # — and the three execute concurrently, so the lane's WALL TIME falls from
+  # ~36 min to ~20 min. The union of the three filters is exactly the
+  # previous one, so no test leaves the lane; the per-group count is the
+  # assertion. The remedy for the next growth spurt is a fourth group, not a
+  # bigger budget.
   # ============================================================================
   miri-infra-slow:
-    name: Miri (infra-slow)
+    name: "Miri (infra-slow: ${{ matrix.group }})"
     runs-on: ubuntu-latest
     # #1512: see the `miri` job rationale — a job timeout cancels the run.
     # Kept at 120 min by #1633 (NOT raised to the matrix job's 240): run
@@ -2174,6 +2202,23 @@ jobs:
       # Must name the SAME pinned toolchain installed below — RUSTUP_TOOLCHAIN
       # has the highest rustup precedence (see the `miri` job rationale).
       RUSTUP_TOOLCHAIN: nightly-2026-08-27
+    strategy:
+      # A slow runner on one group must not cancel the other two.
+      fail-fast: false
+      matrix:
+        group: [crawler, transport, content]
+        include:
+          # ~202 tests: the crawl engine plus its network layer.
+          - group: crawler
+            filter: "-- infrastructure::crawler:: -- infrastructure::network::"
+          # ~192 tests: HTTP transport and the exporters.
+          - group: transport
+            filter: "-- infrastructure::http:: -- infrastructure::export::"
+          # ~193 tests: content conversion (obsidian/wikilinks) and the FFI
+          # downloader submodules, whose FFI/asm tests carry their own
+          # per-test gate with a written reason and the rest run under Miri.
+          - group: content
+            filter: "-- infrastructure::obsidian:: -- infrastructure::converter:: -- infrastructure::downloader::cookie_bridge:: -- infrastructure::downloader::spa_detector:: -- infrastructure::downloader::wreq_downloader:: -- infrastructure::downloader::obscura_downloader:: -- infrastructure::downloader::chromiumoxide_downloader::"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -2190,17 +2235,17 @@ jobs:
           key: miri-sysroot-${{ runner.os }}-2026-08-27
           restore-keys: |
             miri-sysroot-${{ runner.os }}-
-      - name: Setup & Run Miri (infra-slow)
+      - name: "Setup & Run Miri (infra-slow: ${{ matrix.group }})"
         env:
           MIRIFLAGS: -Zmiri-tree-borrows -Zmiri-disable-isolation -Zmiri-ignore-leaks -Zmiri-seed=42 -Zmiri-permissive-provenance
         run: |
           cargo miri setup
           # #2235: NO skip-net — see the design block above the `miri` job.
-          # The three FFI downloader submodules are back in the filter: their
-          # FFI/asm tests carry a per-test gate with a written reason, and
-          # the rest run under Miri.
+          # The three FFI downloader submodules are back in the filter of the
+          # `content` group: their FFI/asm tests carry a per-test gate with a
+          # written reason, and the rest run under Miri.
           cargo miri test --lib -- \
-            -- infrastructure::crawler:: -- infrastructure::obsidian:: -- infrastructure::export:: -- infrastructure::http:: -- infrastructure::network:: -- infrastructure::converter:: -- infrastructure::downloader::cookie_bridge:: -- infrastructure::downloader::spa_detector:: -- infrastructure::downloader::wreq_downloader:: -- infrastructure::downloader::obscura_downloader:: -- infrastructure::downloader::chromiumoxide_downloader::
+            ${{ matrix.filter }}
 
   # ============================================================================
   # COVERAGE: PR gate + push-to-main + manual trigger
