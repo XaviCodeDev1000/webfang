@@ -229,6 +229,44 @@ slow-timeout = { period = "900s", terminate-after = 1, grace-period = "30s" }
 filter = 'test(=checkpoint_then_resume_skips_flushed_pages)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# Las 9 filas de `ssrf_rfc1918_e2e_test` (issue #2658).
+#
+# Cada fila spawnea el binario UNA vez con el presupuesto por sitio
+# `ROW_BUDGET = 180s` del archivo y un reintento ⇒ peor caso 360s de spawn.
+# El techo de PARED del perfil `ci` es 240s (120s x 2 = terminate-after 2), así
+# que una fila que se acerca a su presupuesto sería matada por nextest antes de
+# que el presupuesto pudiera siquiera diagnosticarla. 600s con terminate-after 1
+# queda por encima de esos 360s con holgura y por debajo del
+# `global-timeout = "1h"` del perfil `ci` (que hereda este override vía
+# `inherits = "default"`).
+#
+# El presupuesto por sitio NO es un parche: las medidas del propio tracker dan
+# 83-86s por fila dentro de la ventana en que el trybuild
+# `compile_fail_cases_fail_to_compile` compila el crate completo + BoringSSL
+# (~10 min en Windows), contra 0.6-0.8s en una Linux idle. Eso es CARGA, no un
+# cuelgue: un cuelgue real no tiene techo y sigue fallando, con las latencias
+# que el harness MIDIÓ en el mensaje. Lo que se corrige es la clase opuesta — un
+# techo demasiado angosto que mata a un hijo sano y produce el `FLKY-FL` que
+# `fail-if-flaky` rechaza.
+#
+# UN solo bloque, no nueve: el filtro acepta `or` (DSL de nextest), y los nueve
+# nombres exactos se verificaron con `cargo nextest list -E` (9 tests, cero
+# colateral en todo el workspace). Un regex amplio como `/^row[0-9]/` capturaría
+# también 10 filas de `sitemap_ssrf_e2e_test` y `ssrf_policy_e2e_test`, que no
+# necesitan este techo.
+#
+# `platform` acota el override al host Windows, que es donde existe la ventana
+# de carga documentada (docs de nextest: `platform` acepta una triple, un string
+# o un mapa con sintaxis `cfg()` de Rust). En Linux y macOS el techo común
+# sigue cazando cuelgues reales sin cambios — el override no los afloja.
+#
+# `test(=...)` es el selector de coincidencia EXACTA: a secas `test(...)` hace
+# match por substring.
+[[profile.default.overrides]]
+filter = 'test(=row1_rfc1918_192_168_is_rejected_at_entry) or test(=row2_rfc1918_10_8_is_rejected_at_entry) or test(=row3_rfc1918_172_16_is_rejected_at_entry) or test(=row4_cgnat_100_64_is_rejected_at_entry) or test(=row5_ipv4_mapped_rfc1918_is_rejected_at_entry) or test(=row6_nat64_embedded_rfc1918_is_rejected_at_entry) or test(=row7_hostname_answering_private_range_is_blocked_at_connect) or test(=row8_redirect_to_forbidden_literal_is_never_followed) or test(=row9_positive_control_loopback_is_reachable_when_entry_guard_disarmed)'
+platform = { host = 'cfg(target_os = "windows")' }
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
