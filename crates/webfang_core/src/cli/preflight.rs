@@ -1741,7 +1741,7 @@ pub fn icon(emoji: &str, ascii: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))] // Command::spawn unsupported by Miri (#775)
 mod tests {
     use super::*;
 
@@ -2202,9 +2202,9 @@ mod tests {
     /// check. Hermetic: a fake `google-chrome` executable in a controlled
     /// PATH dir (same pattern as the obscura fakes), so the test never
     /// depends on the real process environment.
-    // Miri cannot emulate posix_spawn (Command::status), so both tests that
-    // actually probe a candidate binary are skipped there (#775). The
-    // short-circuit tests (static/hybrid/feature-gate) above stay active.
+    // Miri cannot emulate posix_spawn (Command::status), so the whole test tree
+    // here is excluded (#775): no text marker can tell a test that spawns a
+    // resolved binary from one that only names a missing one.
     #[cfg_attr(miri, ignore)] // Command::spawn → posix_spawnattr_init unsupported by Miri (#775)
     #[cfg(unix)]
     #[test]
