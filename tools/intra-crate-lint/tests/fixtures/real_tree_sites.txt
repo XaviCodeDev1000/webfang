@@ -1446,6 +1446,11 @@ domain/ssrf_guard.rs	62	use	crate::domain::network_policy::NetworkPolicy
 domain/ssrf_guard.rs	923	choke	redirect
 domain/ssrf_guard.rs	971	choke	redirect
 domain/ssrf_guard.rs	1004	choke	redirect
+domain/ssrf_guard/tests_parity.rs	18	inline	crate::domain::network_policy::NEVER_ALLOWABLE
+domain/ssrf_guard/tests_resolved_dial.rs	231	inline	crate::domain::network_policy::NEVER_ALLOWABLE
+domain/ssrf_guard/tests_runtime.rs	105	inline	crate::domain::network_policy::NetworkPolicy
+domain/ssrf_guard/tests_support.rs	20	inline	crate::domain::network_policy::CidrBlock::parse
+domain/ssrf_guard/tests_support.rs	25	inline	crate::domain::network_policy::NetworkPolicyMode::Allowlist
 domain/text_chunker.rs	11	use	crate::error::SemanticError
 domain/url_validation.rs	3	use	crate::error::ScraperError
 domain/url_validation.rs	4	use	crate::Result
