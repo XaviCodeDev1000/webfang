@@ -917,6 +917,22 @@ lane_fmt_and_guards() {
   run_guard "dependency direction gate (#513)" scripts/check_dependency_direction.sh \
     bash scripts/check_dependency_direction.sh
   run_step "build the intra-crate lint extractor" ensure_intra_crate_lint
+  # The extractor's OWN test suite — the CI step "Intra-crate lint tool tests"
+  # of the `repo-guards` job. The golden set over the real tree is pinned
+  # there, so a new module under crates/webfang_core/src turns that CI job
+  # RED until the golden is refreshed (scripts/refresh_real_tree_golden.sh).
+  # The gate below CONSUMES the extractor, but nothing ran its tests: the
+  # drift reached CI first on #2752, the PR that shipped `--jitter-ms`.
+  # The build above already compiled the crate; this runs its tests.
+  run_step "intra-crate lint tool tests" \
+    cargo test --manifest-path tools/intra-crate-lint/Cargo.toml --locked
+  # CLI reference drift — the CI step "CLI reference drift check (chapter must
+  # match binary help)" of the `docs.yml` workflow: the generated chapter in
+  # docs/src/cli-reference.md must match the binary's --help, and a new flag
+  # that forgets the chapter turns that job RED. The script is the sanctioned
+  # writer; --check only compares, it never rewrites. Measured cost: the CLI
+  # is already built by this lane, so it is the compare that costs.
+  run_step "CLI reference drift check" bash scripts/gen-cli-reference.sh --check
   run_guard "intra-crate direction gate, strict (ADR-0010)" scripts/check_intra_crate_direction.sh \
     env INTRA_CRATE_MODE=strict INTRA_CRATE_LINT_BIN="$INTRA_CRATE_LINT_BIN_PATH" bash scripts/check_intra_crate_direction.sh
   run_guard "ignored-test inventory guard" scripts/check_ignored_guard.sh \
