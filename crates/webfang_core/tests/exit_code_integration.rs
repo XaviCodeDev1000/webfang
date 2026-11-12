@@ -9,104 +9,23 @@
 //!
 //! Run with: cargo nextest run --test-threads 2 exit_code_integration
 
-use assert_cmd::Command;
-use predicates::prelude::*;
+#[path = "common/mod.rs"]
+mod common;
+
+use common::cli_harness::{assert_spawn_within_output_blocking, std_cmd, SPAWN_LATENCY_BUDGET};
 use std::path::PathBuf;
 use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Resolve the path to the `webfang` binary.
-///
-/// `webfang` is built by `webfang_cli` (a workspace sibling), so
-/// `assert_cmd::cargo_bin` cannot resolve it — `CARGO_BIN_EXE_webfang`
-/// is only set for the owning crate.  This fallback searches
-/// `target/{debug,release}` and builds the binary on demand.
-fn webfang_path() -> PathBuf {
-    if let Ok(p) = std::env::var("CARGO_BIN_EXE_webfang") {
-        return PathBuf::from(p);
-    }
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("resolve workspace root");
-    let target_root = std::env::var("CARGO_TARGET_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| workspace_root.join("target"));
-    for profile in ["debug", "release"] {
-        let mut candidate = target_root.join(profile).join("webfang");
-        if cfg!(windows) {
-            candidate.set_extension("exe");
-        }
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-    let cargo = option_env!("CARGO").unwrap_or("cargo");
-    let status = std::process::Command::new(cargo)
-        .args(["build", "-p", "webfang_cli", "--bin", "webfang", "--quiet"])
-        .status()
-        .expect("spawn cargo to build webfang");
-    assert!(status.success(), "cargo build --bin webfang failed");
-    let mut built = target_root.join("debug").join("webfang");
-    if cfg!(windows) {
-        built.set_extension("exe");
-    }
-    built
-}
-
-fn cmd() -> Command {
-    let mut c = Command::new(webfang_path());
-    // Hermeticity: remove all WEBFANG_* / AI_MODEL_ID env vars so poisoned CI
-    // environments (bug-discovery workflow) don't affect arg parsing. The AI
-    // model env names are ignored by the CLI since the migration shims were
-    // retired (issue #2119), but stripping them keeps the run independent of
-    // whatever the CI environment happens to export.
-    let poisoned: Vec<String> = std::env::vars()
-        .filter(|(k, _)| k.starts_with("WEBFANG_") || k == "AI_MODEL_ID")
-        .map(|(k, _)| k)
-        .collect();
-    for key in poisoned {
-        c.env_remove(&key);
-    }
-    // SSRF entry-guard allowance (F-06 + F-32, #1217): mocks bind 127.0.0.1 —
-    // a forbidden literal the production request path now rejects — so this
-    // funnel disarms ONLY the entry layer for spawned binaries. Production
-    // never sets this; `test_ssrf_literal_seeds_rejected_before_fetch` opts
-    // back out with `.env_remove(...)`.
-    c.env(
-        webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
-        "1",
-    );
-    // Config gets the same treatment, for a stronger reason than the cache:
-    // the CLI resolves its config file through `WEBFANG_CONFIG`
-    // (`cli::config::load_config_defaults`), so pointing that at an EMPTY
-    // file means a spawned binary can never read the developer's real
-    // `~/.config/webfang/config.toml`. It MATTERS for the `--clean-ai` case
-    // below: a config that declares an embedding provider would make the run
-    // resolve — and PROBE — that endpoint instead of failing with the
-    // "no provider" configuration error the test is about. An explicit
-    // override must be absolute and present (#1659), so the file is created
-    // for real; `ConfigDefaults` is `#[serde(default)]`, so empty TOML parses
-    // to the same all-`None` defaults an absent file used to produce.
-    c.env("WEBFANG_CONFIG", hermetic_empty_config_file());
-    c
-}
-
-/// An EMPTY config file for one spawned-binary invocation.
-///
-/// Created eagerly (the explicit-override contract rejects a missing file,
-/// #1659) and left for the OS temp cleanup to reclaim: the `Command` cannot
-/// own the file's lifetime.
-///
-/// Thin wrapper over [`hermetic_config_file`] with an empty body: the
-/// "no provider resolvable" run needs a file that DECLARES nothing, while
-/// the `--offline` run needs one that DECLARES a provider — same contract
-/// (absolute, present, parseable), different body.
-fn hermetic_empty_config_file() -> std::path::PathBuf {
-    hermetic_config_file("")
-}
+// The spawned binary and its sanitized environment now come from the shared
+// harness (`common::cli_harness`): `std_cmd()` is the budget-compatible twin
+// of the local `cmd()` this file used to carry — same `WEBFANG_*` /
+// `AI_MODEL_ID` scrubbing, same SSRF entry-guard allowance, same empty
+// `WEBFANG_CONFIG` — plus a hermetic `XDG_CACHE_HOME`. `webfang_path()`
+// behind it resolves the binary the same way (the `webfang_cli`
+// sibling-crate fallback included), and `assert_spawn_within_output_blocking`
+// bounds every spawn here under `SPAWN_LATENCY_BUDGET` (#2658 backlog).
 
 /// A config file with the given contents for one spawned-binary invocation.
 ///
@@ -149,16 +68,32 @@ async fn test_empty_sitemap_returns_exit_2() {
     let base_url = format!("{}/", mock_server.uri());
     let sitemap_url = format!("{}/sitemap.xml", mock_server.uri());
 
-    cmd()
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--sitemap-url")
-        .arg(&sitemap_url)
-        .arg("--use-sitemap")
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .code(2)
-        .stderr(predicate::str::contains("No URLs discovered"));
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_empty_sitemap_returns_exit_2",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--url")
+                .arg(&base_url)
+                .arg("--sitemap-url")
+                .arg(&sitemap_url)
+                .arg("--use-sitemap");
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "empty sitemap must exit 2; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No URLs discovered"),
+        "stderr must name the empty discovery, got: {stderr}"
+    );
 }
 
 /// Site without any sitemap (auto-discovery finds nothing) returns exit 2,
@@ -171,14 +106,27 @@ async fn test_missing_sitemap_returns_exit_2() {
     // No mocks mounted: robots.txt and every sitemap candidate 404.
     let base_url = format!("{}/", mock_server.uri());
 
-    cmd()
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--use-sitemap")
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .code(2)
-        .stderr(predicate::str::contains("No URLs discovered"));
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_missing_sitemap_returns_exit_2",
+        move |child| {
+            let mut command = std_cmd();
+            command.arg("--url").arg(&base_url).arg("--use-sitemap");
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "missing sitemap must exit 2; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No URLs discovered"),
+        "stderr must name the empty discovery, got: {stderr}"
+    );
 }
 
 // ============================================================================
@@ -208,14 +156,27 @@ async fn test_dom_external_only_links_scrapes_seed() {
     let base_url = format!("{}/", mock_server.uri());
     let out_dir = tempfile::TempDir::new().expect("create temp output dir");
 
-    cmd()
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--output")
-        .arg(out_dir.path())
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .code(0);
+    let out_path = out_dir.path().to_path_buf();
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_dom_external_only_links_scrapes_seed",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--url")
+                .arg(&base_url)
+                .arg("--output")
+                .arg(&out_path);
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "DOM discovery with only external links must still scrape the seed (exit 0); stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // The seed page itself must have been fetched: DOM discovery reads it once
     // for link extraction and the scraper reads it again for content.
@@ -276,18 +237,34 @@ async fn test_timeout_returns_exit_69() {
     let base_url = format!("{}/", mock_server.uri());
     let sitemap_url = format!("{}/slow-sitemap.xml", mock_server.uri());
 
-    cmd()
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--sitemap-url")
-        .arg(&sitemap_url)
-        .arg("--use-sitemap")
-        .arg("--timeout-secs")
-        .arg("1")
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .code(69)
-        .stderr(predicate::str::contains("URL discovery failed"));
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_timeout_returns_exit_69",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--url")
+                .arg(&base_url)
+                .arg("--sitemap-url")
+                .arg(&sitemap_url)
+                .arg("--use-sitemap")
+                .arg("--timeout-secs")
+                .arg("1");
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(69),
+        "sitemap fetch timeout must exit 69; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("URL discovery failed"),
+        "stderr must name the failed discovery, got: {stderr}"
+    );
 }
 
 // ============================================================================
@@ -325,15 +302,27 @@ async fn test_valid_sitemap_returns_exit_0() {
     let base_url = format!("{server_uri}/");
     let sitemap_url = format!("{server_uri}/sitemap.xml");
 
-    cmd()
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--sitemap-url")
-        .arg(&sitemap_url)
-        .arg("--use-sitemap")
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .code(0);
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_valid_sitemap_returns_exit_0",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--url")
+                .arg(&base_url)
+                .arg("--sitemap-url")
+                .arg(&sitemap_url)
+                .arg("--use-sitemap");
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "valid sitemap must exit 0; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 // ============================================================================
@@ -371,15 +360,31 @@ async fn test_clean_ai_without_embedding_provider_fails_before_fetch() {
 
     let base_url = format!("{}/", mock_server.uri());
 
-    cmd()
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--clean-ai")
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .code(78)
-        .stderr(predicate::str::contains("--clean-ai"))
-        .stderr(predicate::str::contains("--embedding-provider"));
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_clean_ai_without_embedding_provider_fails_before_fetch",
+        move |child| {
+            let mut command = std_cmd();
+            command.arg("--url").arg(&base_url).arg("--clean-ai");
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(78),
+        "--clean-ai without a provider must exit 78; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--clean-ai"),
+        "stderr must name --clean-ai, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("--embedding-provider"),
+        "stderr must name --embedding-provider, got: {stderr}"
+    );
 
     let requests = mock_server.received_requests().await.unwrap();
     assert!(
@@ -466,24 +471,37 @@ async fn test_clean_ai_offline_with_remote_embedding_provider_exits_78() {
 
     let base_url = format!("{}/", mock_server.uri());
 
-    let outcome = cmd()
-        .env(
-            "WEBFANG_CONFIG",
-            hermetic_config_file(&remote_provider_config()),
-        )
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--clean-ai")
-        .arg("--offline")
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .code(78)
-        .stderr(predicate::str::contains(OFFLINE_REMOTE_FRAGMENT));
+    let config_path = hermetic_config_file(&remote_provider_config());
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_clean_ai_offline_with_remote_embedding_provider_exits_78",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .env("WEBFANG_CONFIG", &config_path)
+                .arg("--url")
+                .arg(&base_url)
+                .arg("--clean-ai")
+                .arg("--offline");
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(78),
+        "--clean-ai --offline with a remote provider must exit 78; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(OFFLINE_REMOTE_FRAGMENT),
+        "stderr must carry the offline message, got: {stderr}"
+    );
 
     // The guard runs BEFORE the adapter is built, so the configured endpoint
     // is never contacted: a dial names the endpoint in the error, the guard
     // does not.
-    let stderr = String::from_utf8_lossy(&outcome.get_output().stderr).into_owned();
     assert!(
         !stderr.contains(REMOTE_PROVIDER_HOST),
         "the offline guard must fire before the endpoint is contacted, got: {stderr}"
@@ -550,16 +568,33 @@ allow_loopback = true
         mock_server.uri()
     );
 
-    cmd()
-        .env("WEBFANG_CONFIG", hermetic_config_file(&provider_config))
-        .arg("--url")
-        .arg(&base_url)
-        .arg("--clean-ai")
-        .arg("--offline")
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .code(78)
-        .stderr(predicate::str::contains(OFFLINE_REMOTE_FRAGMENT));
+    let config_path = hermetic_config_file(&provider_config);
+    let output = assert_spawn_within_output_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "test_clean_ai_offline_with_loopback_embedding_provider_is_rejected",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .env("WEBFANG_CONFIG", &config_path)
+                .arg("--url")
+                .arg(&base_url)
+                .arg("--clean-ai")
+                .arg("--offline");
+            child.output(command)
+        },
+    )
+    .await;
+    assert_eq!(
+        output.status.code(),
+        Some(78),
+        "--clean-ai --offline with a loopback provider must exit 78; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(OFFLINE_REMOTE_FRAGMENT),
+        "stderr must carry the offline message, got: {stderr}"
+    );
 
     let requests = mock_server.received_requests().await.unwrap();
     assert!(
@@ -615,25 +650,46 @@ async fn test_ssrf_literal_seeds_rejected_before_fetch() {
         format!("http://127.1:{port}/"),
     ];
 
+    // Five spawns in this loop (one per literal encoding), each under the
+    // shared budget with one retry ⇒ worst case 5x2x60s = 600s, above the ci
+    // profile's 240s wall clock — so this test carries its own 900s ceiling
+    // in .config/nextest.toml (#2658 backlog).
     for url in literal_urls {
         let out_dir = tempfile::TempDir::new().expect("create temp output dir");
+        let out_path = out_dir.path().to_path_buf();
+        let url_arg = url.clone();
         // Opt out of the harness entry-guard allowance: production never sets
         // it, so the spawned binary must enforce like production.
-        cmd()
-            .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
-            .arg("--url")
-            .arg(&url)
-            .arg("--single-page")
-            .arg("--output")
-            .arg(out_dir.path())
-            .arg("--timeout-secs")
-            .arg("3")
-            .arg("--max-retries")
-            .arg("0")
-            .timeout(Duration::from_secs(60))
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("SSRF"));
+        let output = assert_spawn_within_output_blocking(
+            SPAWN_LATENCY_BUDGET,
+            "test_ssrf_literal_seeds_rejected_before_fetch",
+            move |child| {
+                let mut command = std_cmd();
+                command
+                    .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
+                    .arg("--url")
+                    .arg(&url_arg)
+                    .arg("--single-page")
+                    .arg("--output")
+                    .arg(&out_path)
+                    .arg("--timeout-secs")
+                    .arg("3")
+                    .arg("--max-retries")
+                    .arg("0");
+                child.output(command)
+            },
+        )
+        .await;
+        assert!(
+            !output.status.success(),
+            "literal seed {url} must be rejected (non-zero exit); stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("SSRF"),
+            "stderr must name the SSRF guard for {url}, got: {stderr}"
+        );
     }
 
     let requests = mock_server.received_requests().await.unwrap();
