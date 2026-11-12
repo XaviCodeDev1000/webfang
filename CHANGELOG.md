@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.5] - 2026-11-12
+
+
+### 🏗️ Architecture Improvements
+
+- Split ScraperError layer conversions into error/conversions.rs ([#2727](https://github.com/XaviCodeDev1000/webfang/pull/2727))
 ## [7.6.4] - 2026-11-12
 
 
