@@ -431,6 +431,45 @@ async fn include_pattern_only_scrapes_matching_urls() {
     );
 }
 
+/// #2698 classification of one spawned run of
+/// [`crawl_js_strategy_respects_timeout_secs`]: which observable contract the
+/// run's exit status and stderr actually exercised.
+enum TimeoutSpawnVerdict {
+    /// The command succeeded — the primary contract violation (#280).
+    Succeeded,
+    /// Non-success exit whose stderr pins the product's own timeout wording
+    /// (#2512 R3-002) — the pass condition.
+    TimedOut,
+    /// Non-success exit whose stderr shows a transport-level failure against
+    /// the test's own in-process mock: wreq's connect-error `Display`
+    /// (`error sending request for uri (…): client error (Connect)`) carries
+    /// no "timed out" word, so what failed is the mock not serving in time
+    /// under runner saturation, not the `--timeout-secs` contract.
+    MockTransportFailure,
+    /// Any other non-success exit — a product regression, never infra.
+    OtherFailure,
+}
+
+/// Classify one spawn of the #2698 crawl command by its exit status and stderr.
+///
+/// `mock_base` is the lowercased wiremock base URL. The spawned run is
+/// hermetic (the harness sanitizes its env), so a transport error whose URI
+/// sits under `mock_base` is a failure against the test's own mock — never
+/// against anything the product chose to dial.
+fn classify_timeout_spawn(output: &std::process::Output, mock_base: &str) -> TimeoutSpawnVerdict {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let lowered = stderr.to_lowercase();
+    if output.status.success() {
+        TimeoutSpawnVerdict::Succeeded
+    } else if lowered.contains("timeout") || lowered.contains("timed out") {
+        TimeoutSpawnVerdict::TimedOut
+    } else if lowered.contains("error sending request") && lowered.contains(mock_base) {
+        TimeoutSpawnVerdict::MockTransportFailure
+    } else {
+        TimeoutSpawnVerdict::OtherFailure
+    }
+}
+
 /// Crawl mode with `--js-strategy static` must respect `--timeout-secs`.
 ///
 /// End-to-end guard for the user-visible contract behind issue #280: a crawl
@@ -451,6 +490,21 @@ async fn include_pattern_only_scrapes_matching_urls() {
 /// flaked. The attempt runs under [`assert_spawn_within_blocking`]: the shared budget
 /// is the only clock in the test, and an overrunning child is killed and
 /// reaped instead of being orphaned by a bare tokio timeout (#2387).
+///
+/// #2698 (FLKY-FL in `Tests (windows-latest)`): on a saturated runner the
+/// in-process wiremock listener's backlog fills and the CONNECT to the mock
+/// itself expires at wreq's connect cap, so the run fails at the transport
+/// layer — and wreq's connect-error `Display` carries no "timed out" word
+/// (reproduced locally: exit 69 with `error sending request for uri (…):
+/// client error (Connect)` and no timeout keyword anywhere on stderr). That
+/// is test infrastructure, not the product contract, so the closure
+/// discriminates through [`classify_timeout_spawn`]: a transport-level
+/// failure whose URI sits under the mock's own base is inconclusive, and the
+/// SAME command is spawned once more inside the same budgeted attempt. The
+/// test passes iff ANY spawn pinned the timeout wording — a real regression
+/// (the page fetch failing with a non-timeout error) still fails both spawns
+/// — and the worst case (2 spawns x ~8 s) stays far inside
+/// [`SPAWN_LATENCY_BUDGET`].
 #[tokio::test]
 async fn crawl_js_strategy_respects_timeout_secs() {
     let t = BehavioralTest::new().await;
@@ -468,6 +522,8 @@ async fn crawl_js_strategy_respects_timeout_secs() {
     let base = t.server.uri();
     let slow_url = format!("{base}/slow");
     let sitemap_url = mount_urlset_sitemap(&t.server, &base, &["/slow"]).await;
+    // Lowercased mock base for the #2698 transport-failure classification.
+    let mock_base = base.to_lowercase();
 
     let out_path = t.out.path().to_path_buf();
 
@@ -475,45 +531,70 @@ async fn crawl_js_strategy_respects_timeout_secs() {
         SPAWN_LATENCY_BUDGET,
         "crawl_js_strategy_respects_timeout_secs",
         move |child| {
-            let mut command = std_cmd();
-            command
-                .arg("--url")
-                .arg(&slow_url)
-                .arg("--sitemap-url")
-                .arg(&sitemap_url)
-                .arg("--use-sitemap")
-                .arg("--js-strategy")
-                .arg("static")
-                .arg("--timeout-secs")
-                .arg("2")
-                // F-08 (#1231): timeouts retry, so pin the budget to keep
-                // the run short — 2 attempts x 2s + backoff, far inside
-                // the spawn budget the attempt runs under.
-                .arg("--max-retries")
-                .arg("1")
-                .arg("--max-depth")
-                .arg("0")
-                .arg("--output")
-                .arg(&out_path)
-                .arg("--quiet");
-            let output = child.output(command)?;
+            // Built per spawn: the #2698 respawn below runs the SAME command a
+            // second time inside this one budgeted attempt.
+            let build_command = || {
+                let mut command = std_cmd();
+                command
+                    .arg("--url")
+                    .arg(&slow_url)
+                    .arg("--sitemap-url")
+                    .arg(&sitemap_url)
+                    .arg("--use-sitemap")
+                    .arg("--js-strategy")
+                    .arg("static")
+                    .arg("--timeout-secs")
+                    .arg("2")
+                    // F-08 (#1231): timeouts retry, so pin the budget to keep
+                    // the run short — 2 attempts x 2s + backoff, far inside
+                    // the spawn budget the attempt runs under.
+                    .arg("--max-retries")
+                    .arg("1")
+                    .arg("--max-depth")
+                    .arg("0")
+                    .arg("--output")
+                    .arg(&out_path)
+                    .arg("--quiet");
+                command
+            };
 
-            if output.status.success() {
-                return Err(format!(
-                    "request should have timed out, but command succeeded; stderr: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ));
+            // Up to two spawns of the SAME command inside this one budgeted
+            // attempt (#2698): the first spawn passes at once when stderr pins
+            // the timeout wording; a transport-level failure against the
+            // test's own in-process mock is inconclusive test infrastructure,
+            // so the command runs once more and the test passes iff any spawn
+            // pinned the wording. A product regression that fails the page
+            // fetch with a non-timeout error fails both spawns.
+            let mut last_stderr = String::new();
+            for spawn_no in 1..=2 {
+                let output = child.output(build_command())?;
+                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                match classify_timeout_spawn(&output, &mock_base) {
+                    TimeoutSpawnVerdict::Succeeded => {
+                        return Err(format!(
+                            "request should have timed out, but command succeeded; stderr: {}",
+                            stderr.trim()
+                        ));
+                    },
+                    // #2512 (R3-002): any non-success exit would satisfy a bare
+                    // code check, so the timeout-specific detection also pins
+                    // the product's own wording on stderr — the same contract
+                    // the batch timeout siblings assert — without reintroducing
+                    // any wall clock.
+                    TimeoutSpawnVerdict::TimedOut => return Ok(()),
+                    TimeoutSpawnVerdict::MockTransportFailure if spawn_no == 1 => {
+                        last_stderr = stderr;
+                    },
+                    _ => {
+                        return Err(format!(
+                            "stderr should mention timeout (spawn {spawn_no} of 2), got: {stderr}"
+                        ));
+                    },
+                }
             }
-            // #2512 (R3-002): any non-success exit would satisfy the check
-            // above, so the timeout-specific detection also pins the product's
-            // own wording on stderr — the same contract the batch timeout
-            // siblings assert — without reintroducing any wall clock.
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let lowered = stderr.to_lowercase();
-            if !(lowered.contains("timeout") || lowered.contains("timed out")) {
-                return Err(format!("stderr should mention timeout, got: {stderr}"));
-            }
-            Ok(())
+            Err(format!(
+                "neither spawn pinned the timeout wording; last stderr: {last_stderr}"
+            ))
         },
     )
     .await;
