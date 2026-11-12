@@ -68,6 +68,7 @@ expect_rc() {
 write_ub_surfaces() {
   local root="$1"
   mkdir -p "$root/crates/webfang_core/src/application/batch" \
+    "$root/crates/webfang_core/src/cli" \
     "$root/crates/webfang_core/src/infrastructure/converter" \
     "$root/crates/webfang_core/src/domain"
 
@@ -128,6 +129,89 @@ mod tests {
     fn the_real_keyring_key_is_byte_identical_to_the_legacy_key() {
         let store = super::store().expect("store");
         let _ = store.build(SERVICE, ACCOUNT, None);
+    }
+}
+EOF
+
+  # fragment_markdown: the whole module is the gate unit — same shape as the
+  # real file, where a marker cannot tell the early-return cases from the
+  # ones that reach lol_html::rewrite_str.
+  cat >"$root/crates/webfang_core/src/application/fragment_markdown.rs" <<'EOF'
+#[cfg(all(test, not(miri)))]
+mod tests {
+    #[test]
+    fn with_header_adds_the_synthetic_header_row() {
+        let out = with_header("<table><tr><td>a</td></tr></table>");
+        assert!(out.contains("<th>"));
+    }
+}
+EOF
+
+  # scraper_service: one 2xx scrape WITH a gate, and the non-2xx sibling that
+  # matches the marker without reaching the surface — the one the nominal
+  # exemption names. Both entries of that pair must exist, or the check
+  # cannot distinguish "gated" from "not examined".
+  cat >"$root/crates/webfang_core/src/application/scraper_service.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB through clean_html")]
+    fn scrape_of_a_clean_page_records_the_success_outcome() {
+        let _ = scrape_with_config(wiremock_response(200));
+    }
+
+    #[test]
+    fn scrape_span_records_error_outcome_with_error_class() {
+        let _ = scrape_with_config(wiremock_response(404));
+    }
+}
+EOF
+
+  # selector_serialization_tests: two gated cases through serialize_case.
+  cat >"$root/crates/webfang_core/src/application/selector_serialization_tests.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB through absolutize_urls")]
+    fn selector_serialization_absolutizes_the_fragment_urls() {
+        let _ = serialize_case("<a href=\"/rel\">x</a>", "selector");
+    }
+}
+EOF
+
+  # batch_flush_tests: the tail-flush tests are gated, the reader-only one is not.
+  cat >"$root/crates/webfang_core/src/cli/batch_flush_tests.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn flush_records_are_read_back_in_order() {
+        let _ = read_back(&spool);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "servo_arc Tree-Borrows UB through convert_spool")]
+    fn flush_spool_tail_writes_the_final_line() {
+        let _ = flush_spool_tail(&spool);
+    }
+}
+EOF
+
+  # preflight: the WHOLE module is the gate unit (#775) — `Command::spawn`
+  # reaches `posix_spawnattr_init`, which Miri cannot call on linux, and no
+  # text marker separates the tests that spawn from the ones that only name a
+  # missing binary. Both declared markers are still matched by the fixture so
+  # the surface stays documented; the module gate is what covers it.
+  cat >"$root/crates/webfang_core/src/cli/preflight.rs" <<'EOF'
+#[cfg(all(test, not(miri)))] // Command::spawn unsupported by Miri (#775)
+mod tests {
+    #[test]
+    fn hybrid_strategy_probes_the_resolved_obscura_binary() {
+        let _ = check_js_dependencies_with(&["true"], false, "", &opts);
+    }
+
+    #[test]
+    fn version_probe_reads_the_child_output_and_the_exit_status() {
+        let _ = run_version_probe_with_timeout(&bin_path, DEADLINE);
     }
 }
 EOF
@@ -209,6 +293,12 @@ EOF
 # The pre-fix shape of the module of the attributed UB: the test that
 # REACHES the UB surface (a 2xx response) has no gate, and the arm that does
 # not reach it is the nominally exempt one.
+#
+# Every OTHER declared UB surface stays GREEN in this tree, and it is written
+# FIRST: the RED file below must override the green fixture of the very same
+# path, or the control would inspect the green shape and prove nothing.
+write_ub_surfaces "$FIX"
+
 cat >"$FIX/crates/webfang_core/src/application/scraper_service.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
@@ -240,10 +330,6 @@ cp "$FIX/crates/webfang_core/src/application/scraper_service.rs" \
 cp "$FIX/crates/webfang_core/src/application/scraper_service.rs" \
   "$FIX/crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs"
 
-# Every OTHER declared UB surface stays GREEN in this tree: the red below can
-# only come from the un-gated 2xx test of scraper_service.rs.
-write_ub_surfaces "$FIX"
-
 # NEGATION: a Miri job that skips a whole submodule with no written reason of
 # its own must be REJECTED. Before the fix (#2235) the skip-net of #1423 was
 # accepted, and it deleted a whole test tree per entry — with it, the UB
@@ -271,6 +357,12 @@ mkdir -p "$VACUITY/.github/workflows" \
   "$VACUITY/crates/webfang_core/src/application" \
   "$VACUITY/crates/webfang_core/src/infrastructure/downloader"
 cp "$FIX/.github/workflows/ci.yml" "$VACUITY/.github/workflows/ci.yml"
+for owned in wreq_downloader obscura_downloader chromiumoxide_downloader resource_governor; do
+  printf '// fixture\n' >"$VACUITY/crates/webfang_core/src/infrastructure/downloader/$owned.rs"
+done
+# The green fixtures are written FIRST, so the renamed-marker file below is
+# the one the guard inspects.
+write_ub_surfaces "$VACUITY"
 cat >"$VACUITY/crates/webfang_core/src/application/scraper_service.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
@@ -285,10 +377,6 @@ mod tests {
     }
 }
 EOF
-for owned in wreq_downloader obscura_downloader chromiumoxide_downloader resource_governor; do
-  printf '// fixture\n' >"$VACUITY/crates/webfang_core/src/infrastructure/downloader/$owned.rs"
-done
-write_ub_surfaces "$VACUITY"
 run_guard "$VACUITY" check_ub_attribution
 expect_rc "RED control: check_ub_attribution rejects a fixture whose marker disappeared" 1 "$?"
 
@@ -445,6 +533,29 @@ mod tests {
     fn issue_2540_column_count_drives_the_header_width() {
         let out = with_header("<table><tr><td>a</td></tr></table>");
         assert!(out.contains("Column 1"), "got: {out}");
+    }
+}'
+
+# preflight: the seventh entry point, found by the manual run 43111425786
+# after 798 tests. TWO markers are declared for this one file —
+# `check_js_dependencies_with` (the hybrid strategy that probes a resolved
+# obscura binary) and `run_version_probe_with_timeout` (the direct probe) —
+# because they are the two doors into the same `Command::spawn`. The gate is
+# a MODULE-level one, so the RED control is its removal, and the removed gate
+# leaves both markers matched and un-gated: a symmetric counterpart of the
+# per-test RED controls above.
+red_surface "preflight" "crates/webfang_core/src/cli/preflight.rs" \
+'rejects a preflight module whose Miri gate was removed' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn hybrid_strategy_ok_without_chromium_feature() {
+        let _ = check_js_dependencies_with(&["definitely-not-installed-9x4k"], false, "", &opts);
+    }
+
+    #[test]
+    fn version_probe_reports_normal_exit_and_output() {
+        let _ = run_version_probe_with_timeout(&bin_path, std::time::Duration::from_secs(5));
     }
 }'
 
