@@ -1,13 +1,49 @@
 //! Batch mode: stdin and file-based URL processing.
 
-use crate::cmd;
 use crate::BehavioralTest;
-use crate::{assert_spawn_within, assert_spawn_within_blocking, std_cmd, SPAWN_LATENCY_BUDGET};
+use crate::{
+    assert_spawn_within, assert_spawn_within_blocking, spawn_budgeted, std_cmd,
+    SPAWN_LATENCY_BUDGET,
+};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// Run the binary under the shared spawn budget and assert success, with the
+/// captured stderr in the failure message. Every spawn in this file asserts
+/// success, so one wrapper keeps the call sites free of per-site closure
+/// boilerplate (the jscpd duplication ratchet counts that boilerplate).
+async fn spawn_ok(
+    what: &'static str,
+    cmd: std::process::Command,
+    stdin: Option<&[u8]>,
+) -> std::process::Output {
+    let output = spawn_budgeted(what, cmd, stdin).await;
+    assert!(
+        output.status.success(),
+        "{what} must succeed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
+}
+
+/// Spawn `--batch` over the two cross-linked `mount_article_graph` seeds
+/// under the shared budget, with extra CLI args, asserting success. One
+/// builder for the tests that run the same batch command — otherwise their
+/// arg chains clone (jscpd ratchet, #2658 backlog).
+async fn spawn_batch_fixture(what: &'static str, t: &BehavioralTest, extra_args: &[&str]) {
+    let uri = t.server.uri();
+    let stdin_urls = format!("{uri}/article\n{uri}/article/2\n");
+    let mut command = std_cmd();
+    command.arg("--batch").arg("--output").arg(t.out.path());
+    for arg in extra_args {
+        command.arg(arg);
+    }
+    command.arg("--no-checkpoint").arg("--delay-ms").arg("0");
+    spawn_ok(what, command, Some(stdin_urls.as_bytes())).await;
+}
 
 // ---------------------------------------------------------------------------
 // #1215 (F-38 + F-02) fixtures: two articles that cross-link each other and a
@@ -117,12 +153,15 @@ async fn batch_stdin_processes_urls() {
         .mount(&server)
         .await;
 
-    cmd()
-        .arg("--batch")
-        .write_stdin(format!("{}\n", server.uri()))
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .success();
+    let stdin_url = format!("{}\n", server.uri());
+    let mut command = std_cmd();
+    command.arg("--batch");
+    spawn_ok(
+        "batch_stdin_processes_urls",
+        command,
+        Some(stdin_url.as_bytes()),
+    )
+    .await;
 
     let requests = server.received_requests().await.unwrap();
     assert_eq!(
@@ -203,15 +242,15 @@ async fn batch_stdin_record_cardinality_matches_url_count() {
             .await;
     }
     let base = t.server.uri();
-
-    cmd()
-        .arg("--batch")
-        .arg("--output")
-        .arg(t.out.path())
-        .write_stdin(format!("{base}/a\n{base}/b\n"))
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+    let stdin_urls = format!("{base}/a\n{base}/b\n");
+    let mut command = std_cmd();
+    command.arg("--batch").arg("--output").arg(t.out.path());
+    spawn_ok(
+        "batch_stdin_record_cardinality_matches_url_count",
+        command,
+        Some(stdin_urls.as_bytes()),
+    )
+    .await;
 
     assert_eq!(
         t.record_count("export.jsonl"),
@@ -241,14 +280,15 @@ async fn batch_stdin_writes_markdown_and_jsonl() {
         .mount(&server)
         .await;
 
-    cmd()
-        .arg("--batch")
-        .arg("--output")
-        .arg(out.path())
-        .write_stdin(format!("{}\n", server.uri()))
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+    let stdin_url = format!("{}\n", server.uri());
+    let mut command = std_cmd();
+    command.arg("--batch").arg("--output").arg(out.path());
+    spawn_ok(
+        "batch_stdin_writes_markdown_and_jsonl",
+        command,
+        Some(stdin_url.as_bytes()),
+    )
+    .await;
 
     // `save_results` nests files under a per-host directory (e.g.
     // `<output>/127.0.0.1/index.md`), so walk the tree rather than the top
@@ -305,16 +345,20 @@ async fn batch_stdin_resume_creates_state_file() {
         .mount(&server)
         .await;
 
-    cmd()
+    let stdin_url = format!("{}\n", server.uri());
+    let mut command = std_cmd();
+    command
         .arg("--batch")
         .arg("--resume")
         .arg("--output")
         .arg(out.path())
-        .env("XDG_CACHE_HOME", cache.path())
-        .write_stdin(format!("{}\n", server.uri()))
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+        .env("XDG_CACHE_HOME", cache.path());
+    spawn_ok(
+        "batch_stdin_resume_creates_state_file",
+        command,
+        Some(stdin_url.as_bytes()),
+    )
+    .await;
 
     let state_files: Vec<_> = walk_dir(&cache.path().join("webfang/state"))
         .into_iter()
@@ -351,12 +395,9 @@ async fn batch_file_processes_urls() {
     let batch_file = temp.path().join("urls.txt");
     std::fs::write(&batch_file, format!("{}\n", server.uri())).unwrap();
 
-    cmd()
-        .arg("--batch-file")
-        .arg(&batch_file)
-        .timeout(Duration::from_secs(30))
-        .assert()
-        .success();
+    let mut command = std_cmd();
+    command.arg("--batch-file").arg(&batch_file);
+    spawn_ok("batch_file_processes_urls", command, None).await;
 
     let requests = server.received_requests().await.unwrap();
     assert_eq!(
@@ -587,20 +628,7 @@ async fn batch_file_timeout_reports_failures() {
 async fn batch_scrapes_each_url_once_no_jsonl_duplicates() {
     let t = BehavioralTest::new().await;
     mount_article_graph(&t.server).await;
-    let uri = t.server.uri();
-    let stdin_urls = format!("{uri}/article\n{uri}/article/2\n");
-
-    cmd()
-        .arg("--batch")
-        .arg("--output")
-        .arg(t.out.path())
-        .arg("--no-checkpoint")
-        .arg("--delay-ms")
-        .arg("0")
-        .write_stdin(stdin_urls)
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+    spawn_batch_fixture("batch_scrapes_each_url_once_no_jsonl_duplicates", &t, &[]).await;
 
     let lines = read_jsonl_lines(t.out.path());
     let unique_urls: HashSet<String> = lines
@@ -646,19 +674,16 @@ async fn batch_single_page_matches_per_url_single_page() {
     let uri = t.server.uri();
     let urls = [format!("{uri}/article"), format!("{uri}/article/2")];
 
-    // Batch run over both seeds with --single-page.
-    cmd()
-        .arg("--batch")
-        .arg("--single-page")
-        .arg("--output")
-        .arg(t.out.path())
-        .arg("--no-checkpoint")
-        .arg("--delay-ms")
-        .arg("0")
-        .write_stdin(format!("{}\n{}\n", urls[0], urls[1]))
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+    // Batch run over both seeds with --single-page. This test spawns the
+    // binary THREE times (this run plus the two reference runs below), each
+    // under the shared budget with one retry, so it carries its own 600s
+    // ceiling in .config/nextest.toml (#2658 backlog).
+    spawn_batch_fixture(
+        "batch_single_page_matches_per_url_single_page",
+        &t,
+        &["--single-page"],
+    )
+    .await;
     let batch_md = md_files_by_relative_path(t.out.path());
     let batch_jsonl = read_jsonl_lines(t.out.path());
 
@@ -666,7 +691,8 @@ async fn batch_single_page_matches_per_url_single_page() {
     let ref1 = TempDir::new().unwrap();
     let ref2 = TempDir::new().unwrap();
     for (url, dir) in [(&urls[0], &ref1), (&urls[1], &ref2)] {
-        cmd()
+        let mut command = std_cmd();
+        command
             .arg("--url")
             .arg(url)
             .arg("--single-page")
@@ -674,10 +700,13 @@ async fn batch_single_page_matches_per_url_single_page() {
             .arg(dir.path())
             .arg("--no-checkpoint")
             .arg("--delay-ms")
-            .arg("0")
-            .timeout(Duration::from_secs(60))
-            .assert()
-            .success();
+            .arg("0");
+        spawn_ok(
+            "batch_single_page_matches_per_url_single_page",
+            command,
+            None,
+        )
+        .await;
     }
     let mut reference_md = md_files_by_relative_path(ref1.path());
     reference_md.extend(md_files_by_relative_path(ref2.path()));
@@ -709,21 +738,12 @@ async fn batch_single_page_matches_per_url_single_page() {
 async fn batch_max_pages_one_still_scrapes_every_seed() {
     let t = BehavioralTest::new().await;
     mount_article_graph(&t.server).await;
-    let uri = t.server.uri();
-
-    cmd()
-        .arg("--batch")
-        .arg("--max-pages")
-        .arg("1")
-        .arg("--output")
-        .arg(t.out.path())
-        .arg("--no-checkpoint")
-        .arg("--delay-ms")
-        .arg("0")
-        .write_stdin(format!("{uri}/article\n{uri}/article/2\n"))
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+    spawn_batch_fixture(
+        "batch_max_pages_one_still_scrapes_every_seed",
+        &t,
+        &["--max-pages", "1"],
+    )
+    .await;
 
     let lines = read_jsonl_lines(t.out.path());
     let unique_urls: HashSet<String> = lines
