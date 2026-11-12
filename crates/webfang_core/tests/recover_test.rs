@@ -20,9 +20,8 @@ mod common;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use common::cli_harness::{cmd, redact_nondeterministic};
+use common::cli_harness::{redact_nondeterministic, spawn_budgeted, std_cmd};
 use tempfile::TempDir;
 use wiremock::matchers::{method, path as wm_path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -86,18 +85,18 @@ fn seed_stranded_spool(dir: &TempDir, lines: &[String]) -> PathBuf {
     spool
 }
 
-/// Run `webfang recover --spool <p> -o <dir> [extra args]` and return the raw output.
-fn run_recover(spool: &Path, output: &Path, extra: &[&str]) -> std::process::Output {
-    cmd()
+/// Run `webfang recover --spool <p> -o <dir> [extra args]` under the shared
+/// spawn budget and return the raw output.
+async fn run_recover(spool: &Path, output: &Path, extra: &[&str]) -> std::process::Output {
+    let mut command = std_cmd();
+    command
         .arg("recover")
         .arg("--spool")
         .arg(spool)
         .arg("-o")
         .arg(output)
-        .args(extra)
-        .timeout(Duration::from_secs(60))
-        .output()
-        .expect("run webfang recover")
+        .args(extra);
+    spawn_budgeted("run_recover", command, None).await
 }
 
 fn exit_code(output: &std::process::Output) -> i32 {
@@ -106,13 +105,16 @@ fn exit_code(output: &std::process::Output) -> i32 {
 
 /// The shared partial-corruption fixture: one valid page plus raw `extra`
 /// lines in the stranded spool, recovered into `<scratch>/out`.
-fn recover_with_lines(extra: &[&str], flags: &[&str]) -> (TempDir, std::process::Output, PathBuf) {
+async fn recover_with_lines(
+    extra: &[&str],
+    flags: &[&str],
+) -> (TempDir, std::process::Output, PathBuf) {
     let scratch = TempDir::new().expect("temp dir");
     let mut lines = vec![spool_line("https://example.test/a")];
     lines.extend(extra.iter().map(|line| (*line).to_string()));
     let spool = seed_stranded_spool(&scratch, &lines);
     let out = scratch.path().join("out");
-    let output = run_recover(&spool, &out, flags);
+    let output = run_recover(&spool, &out, flags).await;
     (scratch, output, out)
 }
 
@@ -144,14 +146,13 @@ async fn recover_tree_matches_a_real_batch_export() {
     let batch_out = scratch.path().join("batch-out");
     let batch_file = scratch.path().join("urls.txt");
     std::fs::write(&batch_file, format!("{}\n", server.uri())).expect("write batch file");
-    let batch = cmd()
+    let mut batch_cmd = std_cmd();
+    batch_cmd
         .arg("--batch-file")
         .arg(&batch_file)
         .arg("-o")
-        .arg(&batch_out)
-        .timeout(Duration::from_secs(60))
-        .output()
-        .expect("run webfang batch");
+        .arg(&batch_out);
+    let batch = spawn_budgeted("recover_tree_matches_a_real_batch_export", batch_cmd, None).await;
     assert!(
         batch.status.success(),
         "reference batch must succeed, stderr: {}",
@@ -166,7 +167,7 @@ async fn recover_tree_matches_a_real_batch_export() {
     // Stranded: the SAME captured page, hand-written into a spool, no close.
     let recover_out = scratch.path().join("recover-out");
     let spool = seed_stranded_spool(&scratch, &[spool_line(&server.uri())]);
-    let output = run_recover(&spool, &recover_out, &[]);
+    let output = run_recover(&spool, &recover_out, &[]).await;
     assert!(
         output.status.success(),
         "recover must succeed, stderr: {}",
@@ -181,9 +182,9 @@ async fn recover_tree_matches_a_real_batch_export() {
 }
 
 /// A corrupt record is a PAGE failure: counted, reported, never fatal (#2611).
-#[test]
-fn recover_skips_corrupt_lines_and_exits_zero_without_strict() {
-    let (_scratch, output, out) = recover_with_lines(&["{broken json"], &[]);
+#[tokio::test]
+async fn recover_skips_corrupt_lines_and_exits_zero_without_strict() {
+    let (_scratch, output, out) = recover_with_lines(&["{broken json"], &[]).await;
 
     assert_eq!(exit_code(&output), 0, "corrupt lines must not fail recover");
     let stdout = stdout_of(&output);
@@ -200,13 +201,13 @@ fn recover_skips_corrupt_lines_and_exits_zero_without_strict() {
 }
 
 /// A spool that cannot be opened exits `74` with the Spanish message.
-#[test]
-fn recover_missing_spool_exits_74() {
+#[tokio::test]
+async fn recover_missing_spool_exits_74() {
     let scratch = TempDir::new().expect("temp dir");
     let missing = scratch.path().join("no-such-spool.jsonl");
     let out = scratch.path().join("out");
 
-    let output = run_recover(&missing, &out, &[]);
+    let output = run_recover(&missing, &out, &[]).await;
 
     assert_eq!(exit_code(&output), 74, "missing spool is an I/O error");
     assert!(
@@ -216,9 +217,9 @@ fn recover_missing_spool_exits_74() {
 }
 
 /// `--strict` turns a partial recovery into exit `69`.
-#[test]
-fn recover_strict_exits_69_on_partial_success() {
-    let (_scratch, output, out) = recover_with_lines(&["{broken json"], &["--strict"]);
+#[tokio::test]
+async fn recover_strict_exits_69_on_partial_success() {
+    let (_scratch, output, out) = recover_with_lines(&["{broken json"], &["--strict"]).await;
 
     assert_eq!(
         exit_code(&output),
@@ -230,8 +231,8 @@ fn recover_strict_exits_69_on_partial_success() {
 }
 
 /// A spool where NOTHING is recoverable exits `3` (all scrapers failed).
-#[test]
-fn recover_all_corrupt_exits_3() {
+#[tokio::test]
+async fn recover_all_corrupt_exits_3() {
     let scratch = TempDir::new().expect("temp dir");
     let spool = seed_stranded_spool(
         &scratch,
@@ -239,7 +240,7 @@ fn recover_all_corrupt_exits_3() {
     );
     let out = scratch.path().join("out");
 
-    let output = run_recover(&spool, &out, &[]);
+    let output = run_recover(&spool, &out, &[]).await;
 
     assert_eq!(
         exit_code(&output),
@@ -249,9 +250,9 @@ fn recover_all_corrupt_exits_3() {
 }
 
 /// The operator-facing summary is stable (paths redacted).
-#[test]
-fn recover_summary_is_a_stable_snapshot() {
-    let (scratch, output, _out) = recover_with_lines(&["{broken json"], &[]);
+#[tokio::test]
+async fn recover_summary_is_a_stable_snapshot() {
+    let (scratch, output, _out) = recover_with_lines(&["{broken json"], &[]).await;
     let stdout = stdout_of(&output);
 
     assert_snapshot_redacted("recover_summary", scratch.path(), stdout);

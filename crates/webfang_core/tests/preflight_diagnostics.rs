@@ -24,18 +24,17 @@
 //!    constant in `webfang_core::cli::error`. Asserted programmatically
 //!    against the constants, not via a full `--help` snapshot.
 //!
-//! Posture: the shared `cmd()` harness (entry layer disarmed for the
-//! loopback fixture, child env only — no global mutation). Determinism:
+//! Posture: the shared `std_cmd()` harness (entry layer disarmed for the
+//! loopback fixture, child env only — no global mutation), every spawn under
+//! the shared budget via `spawn_budgeted` (#2658 backlog). Determinism:
 //! content assertions only, no timing, no sleeps.
 
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::cmd;
+use common::cli_harness::{spawn_budgeted, std_cmd};
 use common::fixture_server::start_fixture;
 use webfang_core::cli::error as cli_error;
-
-const RUN_TIMEOUT_SECS: u64 = 120;
 
 /// Distinctive fragment of the burst-rejection message.
 ///
@@ -60,10 +59,15 @@ const ALL_EXIT_CODES: &[u8] = &[
     cli_error::EXIT_CONFIG,
 ];
 
-/// Run a single-page scrape of `url` with an explicit burst flag, returning
-/// the completed output.
-fn scrape_with_burst(url: &str, out: &tempfile::TempDir, burst: &str) -> std::process::Output {
-    cmd()
+/// Run a single-page scrape of `url` with an explicit burst flag under the
+/// shared spawn budget, returning the completed output.
+async fn scrape_with_burst(
+    url: &str,
+    out: &tempfile::TempDir,
+    burst: &str,
+) -> std::process::Output {
+    let mut command = std_cmd();
+    command
         .arg("--url")
         .arg(url)
         .arg("--single-page")
@@ -73,10 +77,8 @@ fn scrape_with_burst(url: &str, out: &tempfile::TempDir, burst: &str) -> std::pr
         .arg("--rate-limit-burst")
         .arg(burst)
         .arg("--timeout-secs")
-        .arg("10")
-        .timeout(std::time::Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang")
+        .arg("10");
+    spawn_budgeted("scrape_with_burst", command, None).await
 }
 
 /// #1813: a garbage burst FAILS CLOSED with the Spanish validation error at
@@ -88,7 +90,7 @@ async fn garbage_burst_fails_closed_with_spanish_error() {
     let (base, _log) = start_fixture().await;
     let out = tempfile::TempDir::new().expect("temp output dir");
 
-    let output = scrape_with_burst(&format!("{base}/ok"), &out, "abc");
+    let output = scrape_with_burst(&format!("{base}/ok"), &out, "abc").await;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(
@@ -115,7 +117,7 @@ async fn numeric_burst_is_honoured_without_validation_error() {
     let (base, _log) = start_fixture().await;
     let out = tempfile::TempDir::new().expect("temp output dir");
 
-    let output = scrape_with_burst(&format!("{base}/ok"), &out, "4");
+    let output = scrape_with_burst(&format!("{base}/ok"), &out, "4").await;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -133,9 +135,9 @@ async fn numeric_burst_is_honoured_without_validation_error() {
 /// `EXIT CODES` table. Asserted against the constants themselves: adding a
 /// new exit constant without documenting it (or dropping a documented code)
 /// fails this test without snapshotting unrelated help text.
-#[test]
-fn help_exit_table_lists_every_exit_constant() {
-    let table = help_exit_codes_table();
+#[tokio::test]
+async fn help_exit_table_lists_every_exit_constant() {
+    let table = help_exit_codes_table().await;
     for code in ALL_EXIT_CODES {
         assert!(
             table_contains_code(&table, *code),
@@ -160,14 +162,13 @@ fn docs_exit_table_mirrors_every_exit_constant() {
     }
 }
 
-/// Run `webfang --help` and return the `EXIT CODES:` section only, so the
-/// assertions cannot pass vacuously on a number mentioned elsewhere.
-fn help_exit_codes_table() -> String {
-    let output = cmd()
-        .arg("--help")
-        .timeout(std::time::Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang --help");
+/// Run `webfang --help` under the shared spawn budget and return the
+/// `EXIT CODES:` section only, so the assertions cannot pass vacuously on a
+/// number mentioned elsewhere.
+async fn help_exit_codes_table() -> String {
+    let mut command = std_cmd();
+    command.arg("--help");
+    let output = spawn_budgeted("help_exit_codes_table", command, None).await;
     assert!(output.status.success(), "`webfang --help` must exit 0");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let start = stdout

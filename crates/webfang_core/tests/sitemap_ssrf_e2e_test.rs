@@ -28,11 +28,8 @@
 mod common;
 
 use std::process::Output;
-use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Normalize captured stderr: drop ESC bytes and collapse whitespace runs.
 fn normalize_captured(s: &str) -> String {
@@ -65,8 +62,12 @@ async fn run_production_sitemap(seed: &str, sitemap_url: Option<&str>) -> (Outpu
         .await;
 
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
-    let mut cmd = common::cmd();
-    cmd.env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
+    // Env changes land BEFORE the budgeted call: `spawn_budgeted` snapshots
+    // the command and rebuilds it per attempt, so the re-armed entry guard
+    // holds on every attempt.
+    let mut command = common::std_cmd();
+    command
+        .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
         .arg("--url")
         .arg(seed)
         .arg("--use-sitemap")
@@ -77,9 +78,9 @@ async fn run_production_sitemap(seed: &str, sitemap_url: Option<&str>) -> (Outpu
         .arg("--max-retries")
         .arg("0");
     if let Some(s) = sitemap_url {
-        cmd.arg("--sitemap-url").arg(s);
+        command.arg("--sitemap-url").arg(s);
     }
-    let output = cmd.timeout(RUN_TIMEOUT).output().expect("spawn webfang");
+    let output = common::spawn_budgeted("run_production_sitemap", command, None).await;
     (output, mock_server)
 }
 
@@ -218,9 +219,10 @@ async fn row3_positive_control_sitemap_reachable_when_entry_guard_disarmed() {
         .await;
 
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
-    // Harness `cmd()` already sets DISABLE_ENTRY_GUARD_ENV=1 — one-layer
+    // Harness `std_cmd()` already sets DISABLE_ENTRY_GUARD_ENV=1 — one-layer
     // disarmed posture, production resolver/redirect layers live.
-    let output = common::cmd()
+    let mut command = common::std_cmd();
+    command
         .arg("--url")
         .arg(mock_server.uri())
         .arg("--use-sitemap")
@@ -229,10 +231,13 @@ async fn row3_positive_control_sitemap_reachable_when_entry_guard_disarmed() {
         .arg("--timeout-secs")
         .arg("10")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = common::spawn_budgeted(
+        "row3_positive_control_sitemap_reachable_when_entry_guard_disarmed",
+        command,
+        None,
+    )
+    .await;
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
     assert!(
         output.status.success() || output.status.code() == Some(2),
