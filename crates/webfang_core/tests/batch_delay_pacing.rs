@@ -37,7 +37,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::cmd;
+use common::cli_harness::{spawn_budgeted, std_cmd};
 use common::fixture_server::{start_fixture, RequestLog, SPACING_TOLERANCE};
 use webfang_core::domain::budget::detector::SystemDetector;
 use webfang_core::domain::budget::{BudgetModel, BudgetOverrides};
@@ -47,14 +47,16 @@ use webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV;
 /// [`SPACING_TOLERANCE`] — arrival jitter exists; early refills do not.
 const DELAY_MS: u64 = 400;
 
-/// Run `--batch` with `urls` on stdin to completion (blocking — no sleeps).
+/// Run `--batch` with `urls` on stdin to completion under the shared spawn
+/// budget (#2658 backlog; blocking — no sleeps).
 ///
-/// Child env only: the shared [`cmd`] sanitizer strips ambient `WEBFANG_*`
+/// Child env only: the shared [`std_cmd`] sanitizer strips ambient `WEBFANG_*`
 /// poison and disarms the entry layer for the loopback fixture; the batch
 /// path additionally needs the documented resolver hatch (same posture as
-/// the pre-#1433 local helper — what the test proves is unchanged).
-fn run_batch(urls: &[String], delay_ms: u64, out: &tempfile::TempDir) {
-    let mut batch_cmd = cmd();
+/// the pre-#1433 local helper — what the test proves is unchanged). The env
+/// is set before the budgeted call, so it is honored on every attempt.
+async fn run_batch(urls: &[String], delay_ms: u64, out: &tempfile::TempDir) {
+    let mut batch_cmd = std_cmd();
     batch_cmd
         .env(DISABLE_VALIDATING_RESOLVER_ENV, "1")
         .arg("--batch")
@@ -62,11 +64,14 @@ fn run_batch(urls: &[String], delay_ms: u64, out: &tempfile::TempDir) {
         .arg(delay_ms.to_string())
         .arg("--ignore-robots")
         .arg("--output")
-        .arg(out.path())
-        .write_stdin(urls.join("\n"))
-        .timeout(std::time::Duration::from_secs(120))
-        .assert()
-        .success();
+        .arg(out.path());
+    let stdin_urls = urls.join("\n");
+    let output = spawn_budgeted("run_batch", batch_cmd, Some(stdin_urls.as_bytes())).await;
+    assert!(
+        output.status.success(),
+        "run_batch must succeed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// The detector-derived default burst on THIS machine — the same value the
@@ -107,7 +112,7 @@ async fn batch_delay_ms_paces_across_urls_at_default_burst() {
     let (base, log) = start_fixture().await;
     let urls = paced_urls(&base);
     let out = tempfile::TempDir::new().expect("temp output dir");
-    run_batch(&urls, DELAY_MS, &out);
+    run_batch(&urls, DELAY_MS, &out).await;
 
     let (count, span_ms) = page_arrivals(&log).expect("the paced run must reach the server");
     assert_eq!(
@@ -130,7 +135,7 @@ async fn batch_delay_ms_zero_stays_fast() {
     let (base, log) = start_fixture().await;
     let urls = paced_urls(&base);
     let out = tempfile::TempDir::new().expect("temp output dir");
-    run_batch(&urls, 0, &out);
+    run_batch(&urls, 0, &out).await;
 
     let (count, span_ms) = page_arrivals(&log).expect("the unthrottled run must reach the server");
     assert_eq!(
