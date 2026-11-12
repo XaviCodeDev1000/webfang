@@ -188,6 +188,26 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 filter = 'test(=cli::batch_test::batch_single_page_matches_per_url_single_page)'
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
+# `test_ssrf_literal_seeds_rejected_before_fetch` (backlog #2658): spawnea el
+# binario CINCO VECES dentro del MISMO test (un loop sobre las 5 codificaciones
+# de IP literal), cada spawn bajo el presupuesto compartido de 60s
+# (`SPAWN_LATENCY_BUDGET`) con un reintento ⇒ 5 x 2 x 60s = 600s en el peor
+# caso, por encima del `slow-timeout` de pared del perfil `ci`
+# (120s x 2 = 240s).
+#
+# Override POR TEST, no global: mismo criterio que los de arriba — el techo
+# común sigue cazando cuelgues reales en el resto de la suite. 900s con
+# terminate-after 1 da holgura sobre los 600s del peor caso (no sentarse justo
+# sobre el techo) y queda por debajo del `global-timeout = "1h"` del perfil
+# `ci` (que hereda este override vía `inherits = "default"`).
+#
+# `test(=...)` es el selector de coincidencia EXACTA sobre el nombre del test
+# dentro del binario (ver el override del trybuild más arriba): a secas,
+# `test(...)` hace substring match.
+[[profile.default.overrides]]
+filter = 'test(=test_ssrf_literal_seeds_rejected_before_fetch)'
+slow-timeout = { period = "900s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
