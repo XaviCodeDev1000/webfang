@@ -55,6 +55,12 @@ Discovery:
           [env: WEBFANG_DELAY_MS=]
           [default: 1000]
 
+      --jitter-ms <JITTER_MS>
+          Random addition to the delay between requests, in milliseconds (0 = fixed delay)
+          
+          [env: WEBFANG_JITTER_MS=]
+          [default: 0]
+
       --max-pages <MAX_PAGES>
           Maximum pages to scrape
           

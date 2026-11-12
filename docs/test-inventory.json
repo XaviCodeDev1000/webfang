@@ -839,6 +839,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/jitter_pacing.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 2,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/jsonl_byline_artifact_test.rs",
       "crate": "webfang_core",
       "area": "core",

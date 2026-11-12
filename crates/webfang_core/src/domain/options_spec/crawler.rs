@@ -75,6 +75,35 @@ pub const DELAY_MS: OptionSpec = OptionSpec {
     value_delimiter: None,
 };
 
+/// `--jitter-ms <JITTER_MS>` — random addition to each paced interval
+/// (#2610). Metadata-only entry, same shape as [`DELAY_MS`]: the parsing
+/// stays with clap's built-in `u64` parser and no bound exists today.
+///
+/// The value is an ADDITION to `--delay-ms`, not a replacement: the
+/// effective interval is uniform over `[delay_ms, delay_ms + jitter_ms]`, so
+/// the mean interval is `delay_ms + jitter_ms / 2` — a run that needs the
+/// rate it had before must lower `--delay-ms` accordingly.
+///
+/// Zero — the default — keeps today's behavior exactly: no jitter gate is
+/// built at all.
+pub const JITTER_MS: OptionSpec = OptionSpec {
+    id: "jitter_ms",
+    value_name: "JITTER_MS",
+    long: "jitter-ms",
+    short: None,
+    aliases: &[],
+    env: Some("WEBFANG_JITTER_MS"),
+    default: Some(DefaultValue::Uint(0)),
+    nullable: false,
+    description_override: None,
+    help: "Random addition to the delay between requests, in milliseconds (0 = fixed delay)",
+    heading: Some("Discovery"),
+    kind: ValueKind::uint_unbounded(),
+    visible_aliases: &[],
+    feature_gate: None,
+    value_delimiter: None,
+};
+
 /// `--max-pages <MAX_PAGES>` — FULLY migrated: bound enforced through
 /// [`OptionSpec::parse_uint`] with verbatim legacy messages (#780).
 ///
@@ -892,6 +921,7 @@ pub const GROUP: &[OptionSpec] = &[
     URL,
     SELECTOR,
     DELAY_MS,
+    JITTER_MS,
     MAX_PAGES,
     USE_SITEMAP,
     SITEMAP_URL,

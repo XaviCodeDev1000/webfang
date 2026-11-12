@@ -252,6 +252,7 @@ fn numeric_binding(id: &str) -> Option<ValueParser> {
         "max_chars" => Some(str_fn(super::args::ai::parse_max_chars)),
         "download_timeout" => Some(str_fn(super::args::crawler::parse_download_timeout)),
         "delay_ms"
+        | "jitter_ms"
         | "backoff_base_ms"
         | "backoff_max_ms"
         | "max_file_size"
@@ -403,6 +404,7 @@ const CRAWLER_LAYOUT: &[CrawlerSlot] = &[
     CrawlerSlot::Spec(&options_spec::crawler::URL),
     CrawlerSlot::Spec(&options_spec::crawler::SELECTOR),
     CrawlerSlot::Spec(&options_spec::crawler::DELAY_MS),
+    CrawlerSlot::Spec(&options_spec::crawler::JITTER_MS),
     CrawlerSlot::Spec(&options_spec::crawler::MAX_PAGES),
     CrawlerSlot::Manual(manual_concurrency),
     CrawlerSlot::Manual(manual_rate_limit_burst),

@@ -290,7 +290,9 @@ impl JitterSchedule {
     /// predictable sequence is worse than no jitter at all.
     fn new(base: Duration, jitter_ms: u64) -> Result<Self, ScraperError> {
         let rng = StdRng::try_from_os_rng().map_err(|e| {
-            ScraperError::Config(format!("no se pudo inicializar el generador de jitter: {e}"))
+            ScraperError::Config(format!(
+                "no se pudo inicializar el generador de jitter: {e}"
+            ))
         })?;
         Ok(Self {
             base,
@@ -1277,9 +1279,10 @@ mod tests {
     #[tokio::test]
     async fn jitter_never_delays_the_first_request() {
         let delay = Duration::from_millis(500);
-        let limiter =
-            SharedRateLimiter::new(&RateLimiterConfig::new(delay.as_millis() as u64, 1).with_jitter(5_000))
-                .unwrap();
+        let limiter = SharedRateLimiter::new(
+            &RateLimiterConfig::new(delay.as_millis() as u64, 1).with_jitter(5_000),
+        )
+        .unwrap();
 
         let started = std::time::Instant::now();
         limiter.until_ready().await;

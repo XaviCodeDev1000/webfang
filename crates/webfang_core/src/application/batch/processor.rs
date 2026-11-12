@@ -382,11 +382,15 @@ fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<SharedRateLim
     let burst = BudgetModel::build(base_config.budget_overrides, &SystemDetector)
         .burst()
         .get();
-    match SharedRateLimiter::new(&RateLimiterConfig::new(base_config.delay_ms, burst)) {
+    match SharedRateLimiter::new(
+        &RateLimiterConfig::new(base_config.delay_ms, burst).with_jitter(base_config.jitter_ms),
+    ) {
         Ok(limiter) => {
             info!(
                 delay_ms = base_config.delay_ms,
-                burst, "batch rate limiter wired (run scope)"
+                jitter_ms = base_config.jitter_ms,
+                burst,
+                "batch rate limiter wired (run scope)"
             );
             Some(limiter)
         },

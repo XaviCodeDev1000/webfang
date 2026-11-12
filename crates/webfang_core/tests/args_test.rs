@@ -818,6 +818,7 @@ fn prop_crawler_args() -> CrawlerArgs {
         url: Some(ValidUrl::parse("https://example.com/prop").unwrap()),
         selector: "body".into(),
         delay_ms: 0,
+        jitter_ms: 0,
         max_pages: 1,
         concurrency: webfang_core::ConcurrencyConfig::default(),
         use_sitemap: false,

@@ -426,11 +426,15 @@ fn build_scrape_rate_limiter(opts: &CrawlOptions) -> Option<SharedRateLimiter> {
         &crate::domain::budget::detector::SystemDetector,
     );
     let burst = budget.burst().get();
-    match SharedRateLimiter::new(&RateLimiterConfig::new(opts.network.delay_ms, burst)) {
+    match SharedRateLimiter::new(
+        &RateLimiterConfig::new(opts.network.delay_ms, burst).with_jitter(opts.network.jitter_ms),
+    ) {
         Ok(limiter) => {
             info!(
                 delay_ms = opts.network.delay_ms,
-                burst, "scrape rate limiter wired"
+                jitter_ms = opts.network.jitter_ms,
+                burst,
+                "scrape rate limiter wired"
             );
             Some(limiter)
         },
