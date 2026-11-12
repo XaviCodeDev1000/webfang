@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.6] - 2026-11-12
+
+
+### 🧪 Testing
+
+- Bound ssrf_rfc1918_e2e spawns with the shared spawn latency budget ([#2732](https://github.com/XaviCodeDev1000/webfang/pull/2732))
+- Bound the first backlog batch's spawns with the shared spawn latency budget ([#2734](https://github.com/XaviCodeDev1000/webfang/pull/2734))
 ## [7.6.5] - 2026-11-12
 
 
