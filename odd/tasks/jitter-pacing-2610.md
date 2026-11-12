@@ -184,7 +184,9 @@ the gate, its plumbing and the tests.
 - RED proof: removing the jitter from `build_batch_rate_limiter` makes
   `jitter_paces_every_request_not_only_the_refills` fail — the E2E is not vacuous.
 - `gentle-ai review assess --base-ref 92d9f241 --committed-only` → risk `high`, review due
-  (the jitter gate adds shared scheduling state to the shared rate limiter).
+  (the jitter gate adds shared scheduling state to the shared rate limiter). The review ran
+  against the pre-rebase fork point; the branch was then rebased onto `main` (`0e99822c`) with
+  a byte-identical candidate patch, and re-verified on the rebased tree.
 - Native review: APPROVED (risk / resilience / reliability; zero BLOCKER, zero CRITICAL) —
   receipt `gentle-ai.review-acknowledged/v1`, lineage `review-3lens-a41f9c`, authority burned.
 ```
