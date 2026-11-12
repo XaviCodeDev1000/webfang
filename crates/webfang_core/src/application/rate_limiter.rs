@@ -34,12 +34,20 @@ use governor::{
     state::{InMemoryState, NotKeyed},
     Quota, RateLimiter as GovernorLimiter,
 };
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::error::ScraperError;
 
 mod jitter;
 use jitter::JitterSchedule;
+
+#[cfg(all(test, not(miri)))]
+mod test_support;
+#[cfg(all(test, not(miri)))]
+mod tests_rng_fallback;
 
 /// Clock used by the governor rate limiters.
 ///
@@ -245,6 +253,21 @@ pub struct SharedRateLimiter {
 impl SharedRateLimiter {
     /// Create a new shared rate limiter from config
     pub fn new(config: &RateLimiterConfig) -> Result<Self, ScraperError> {
+        Self::new_with_rng(config, StdRng::try_from_os_rng)
+    }
+
+    /// Create the limiter with an explicit RNG seed source (#2749).
+    ///
+    /// The OS entropy source cannot be made to fail from a test, so the
+    /// degradation path — the randomization lost, the pacing kept — is
+    /// reachable only through this seam. The seed source is consulted ONLY
+    /// when a jitter was asked for: with `jitter_ms == 0` the run is byte for
+    /// byte today's.
+    fn new_with_rng<E, F>(config: &RateLimiterConfig, seed: F) -> Result<Self, ScraperError>
+    where
+        F: FnOnce() -> Result<StdRng, E>,
+        E: std::fmt::Display,
+    {
         // A zero delay means "no delay between requests": governor rejects a
         // zero period (`Quota::with_period(Duration::ZERO)` is `None`), which
         // would otherwise surface as a config error and abort discovery.
@@ -265,10 +288,27 @@ impl SharedRateLimiter {
         // `jitter_ms == 0` the bucket alone paces the run — burst included,
         // today's behavior byte for byte.
         let jitter = if config.jitter_ms > 0 {
-            Some(Arc::new(JitterSchedule::new(
+            match JitterSchedule::from_rng(
                 Duration::from_millis(period_ms),
                 config.jitter_ms,
-            )?))
+                seed(),
+            ) {
+                Ok(schedule) => Some(Arc::new(schedule)),
+                // #2749: a seed failure costs the RANDOMIZATION, not the
+                // pacing. The bucket alone keeps the run at the configured
+                // delay — today's behavior — and the loss is WARNed, because
+                // a requested jitter that silently became a fixed cadence is
+                // exactly the degradation this path exists to remove.
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        delay_ms = config.delay_ms,
+                        jitter_ms = config.jitter_ms,
+                        "jitter RNG unavailable — keeping the fixed-delay bucket (the randomization is lost)"
+                    );
+                    None
+                },
+            }
         } else {
             None
         };
@@ -378,64 +418,8 @@ impl From<GovernorLimiter<NotKeyed, InMemoryState, GovernorClock, GovernorMiddle
 
 #[cfg(all(test, not(miri)))]
 mod tests {
+    use super::test_support::{capture_trace, wait_events};
     use super::*;
-    use tracing_subscriber::layer::SubscriberExt;
-
-    /// `tracing` caches the per-callsite `Interest` process-wide: the first
-    /// thread to reach the `rate limit wait` callsite WITHOUT a subscriber
-    /// caches `Interest::never()` forever, which would silently turn these
-    /// assertions into a test of nothing. Installing a global sink subscriber
-    /// once makes every callsite register as always-interested; the per-test
-    /// `FileTraceLayer` below still collects what it needs.
-    static GLOBAL_SUBSCRIBER: std::sync::Once = std::sync::Once::new();
-
-    fn ensure_global_subscriber() {
-        GLOBAL_SUBSCRIBER.call_once(|| {
-            let _ = tracing::subscriber::set_global_default(
-                tracing_subscriber::fmt()
-                    .with_writer(std::io::sink)
-                    .finish(),
-            );
-        });
-    }
-
-    /// Run `body` under a real `FileTraceLayer` and return the JSONL records.
-    ///
-    /// The production layer — not a mock — is the assertion surface: what this
-    /// proves is that the event survives the same path `--trace-file` uses.
-    /// The body drives its own runtime (governor needs a Tokio timer), so the
-    /// whole future stays inside the `with_default` scope and every event it
-    /// emits is captured.
-    fn capture_trace<F, Fut>(body: F) -> Vec<serde_json::Value>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ()>,
-    {
-        ensure_global_subscriber();
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("trace.jsonl");
-        let layer = crate::infrastructure::observability::FileTraceLayer::new(path.clone())
-            .expect("trace layer");
-        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(layer));
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime");
-        tracing::dispatcher::with_default(&dispatch, || runtime.block_on(body()));
-        std::fs::read_to_string(&path)
-            .expect("trace file")
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("jsonl line"))
-            .collect()
-    }
-
-    fn wait_events(records: &[serde_json::Value]) -> Vec<&serde_json::Value> {
-        records
-            .iter()
-            .filter(|r| r["message"] == "rate limit wait")
-            .collect()
-    }
 
     /// #1610 (OBS-P1-2 / OBS-M1): a paced wait emits ONE structured event
     /// carrying the identifying fields and its measured cost.

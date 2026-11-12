@@ -11,7 +11,11 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
+// The seeded constructor is test-only, and `SeedableRng` is in scope only
+// there: the production build never seeds by hand.
+#[cfg(test)]
+use rand::SeedableRng;
 use tokio_util::sync::CancellationToken;
 
 use super::RateLimitCancelled;
@@ -72,14 +76,23 @@ struct JitterState {
 }
 
 impl JitterSchedule {
-    /// Build a schedule whose RNG is seeded from the OS.
+    /// Build a schedule from an explicit RNG seed source (#2749).
+    ///
+    /// The OS entropy source cannot be made to fail from a test, so the seed
+    /// failure is reached through this seam instead of through the real one.
+    /// The CALLER decides what a seed failure means: the limiter keeps the
+    /// pacing and drops the randomization.
     ///
     /// # Errors
     ///
-    /// Returns [`ScraperError::Config`] when the OS RNG is unavailable: a
+    /// Returns [`ScraperError::Config`] when the seed source fails: a
     /// predictable sequence is worse than no jitter at all.
-    pub(super) fn new(base: Duration, jitter_ms: u64) -> Result<Self, ScraperError> {
-        let rng = StdRng::try_from_os_rng().map_err(|e| {
+    pub(super) fn from_rng<E: std::fmt::Display>(
+        base: Duration,
+        jitter_ms: u64,
+        rng: Result<StdRng, E>,
+    ) -> Result<Self, ScraperError> {
+        let rng = rng.map_err(|e| {
             ScraperError::Config(format!(
                 "no se pudo inicializar el generador de jitter: {e}"
             ))
