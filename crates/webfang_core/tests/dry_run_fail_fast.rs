@@ -22,20 +22,31 @@
 #[path = "common/cli_harness.rs"]
 mod common;
 
-use std::time::Duration;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::{redact_nondeterministic, BehavioralTest};
 
-const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 /// Env var carrying the frozen pre-fix binary for the A/B gate.
 const FROZEN_BIN_ENV: &str = "WEBFANG_FROZEN_BIN";
 
 // NOTE: poisoned-env stripping (`WEBFANG_*` / `AI_MODEL_ID`) lives in the
-// shared harness (`common::strip_poisoned_env`, same floor as `sanitize_env`)
-// so the A/B runs stay hermetic even when CI bug-discovery workflows poison
-// the environment.
+// shared harness (`common::poisoned_env_names`, the list behind
+// `strip_poisoned_env`) so the A/B runs stay hermetic even when CI
+// bug-discovery workflows poison the environment.
+
+/// Build the budgeted scraper command for `test` (mock server URL + temp
+/// output dir — the same pair `BehavioralTest::scraper_cmd` pre-fills) with
+/// extra CLI args, and run it under the shared spawn budget (#2658 backlog).
+async fn run_scraper_budgeted(
+    test: &BehavioralTest,
+    what: &'static str,
+    extra_args: &[&str],
+) -> std::process::Output {
+    let mut command = common::std_scraper_cmd(&test.server.uri(), test.out.path());
+    command.args(extra_args);
+    common::spawn_budgeted(what, command, None).await
+}
 
 /// Normalize captured output: strip ANSI escape sequences (`ESC[` … final
 /// byte, plus any stray `ESC`), then collapse whitespace runs (same floor
@@ -104,15 +115,19 @@ async fn dry_run_refused_seed_exits_69_with_spanish_error() {
     let out = tempfile::TempDir::new().expect("temp output dir");
 
     // Act.
-    let output = common::cmd()
+    let mut command = common::std_cmd();
+    command
         .arg("--url")
         .arg(format!("http://127.0.0.1:{port}/"))
         .arg("--dry-run")
         .arg("--output")
-        .arg(out.path())
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg(out.path());
+    let output = common::spawn_budgeted(
+        "dry_run_refused_seed_exits_69_with_spanish_error",
+        command,
+        None,
+    )
+    .await;
 
     // Assert.
     let stderr = normalize(&String::from_utf8_lossy(&output.stderr));
@@ -153,13 +168,16 @@ async fn dry_run_ssrf_forbidden_seed_exits_2_before_any_fetch() {
         .await;
 
     // Act.
-    let output = test
-        .scraper_cmd()
+    let mut command = common::std_scraper_cmd(&test.server.uri(), test.out.path());
+    command
         .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
-        .arg("--dry-run")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg("--dry-run");
+    let output = common::spawn_budgeted(
+        "dry_run_ssrf_forbidden_seed_exits_2_before_any_fetch",
+        command,
+        None,
+    )
+    .await;
 
     // Assert.
     let stderr = normalize(&String::from_utf8_lossy(&output.stderr));
@@ -197,16 +215,18 @@ async fn dry_run_failing_seed_issues_a_single_attempt() {
     mount_failing_seed(&test.server).await;
 
     // Act.
-    let output = test
-        .scraper_cmd()
-        .arg("--dry-run")
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--timeout-secs")
-        .arg("5")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+    let output = run_scraper_budgeted(
+        &test,
+        "dry_run_failing_seed_issues_a_single_attempt",
+        &[
+            "--dry-run",
+            "--single-page",
+            "--ignore-robots",
+            "--timeout-secs",
+            "5",
+        ],
+    )
+    .await;
 
     // Assert.
     let stderr = normalize(&String::from_utf8_lossy(&output.stderr));
@@ -253,24 +273,28 @@ async fn real_crawl_at_defaults_matches_frozen_binary_attempt_counts() {
 
         // Act: identical flags and identical env treatment for both binaries
         // (entry guard disarmed for the loopback mock, poison stripped).
-        let mut cmd = assert_cmd::Command::new(&bin);
-        common::strip_poisoned_env(&mut cmd);
-        let output = cmd
-            .env(
-                webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
-                "1",
-            )
-            .arg("--url")
-            .arg(server.uri())
-            .arg("--single-page")
-            .arg("--ignore-robots")
-            .arg("--timeout-secs")
-            .arg("5")
-            .arg("--output")
-            .arg(out.path())
-            .timeout(RUN_TIMEOUT)
-            .output()
-            .expect("spawn webfang");
+        let mut cmd = std::process::Command::new(&bin);
+        for key in common::poisoned_env_names() {
+            cmd.env_remove(&key);
+        }
+        cmd.env(
+            webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
+            "1",
+        )
+        .arg("--url")
+        .arg(server.uri())
+        .arg("--single-page")
+        .arg("--ignore-robots")
+        .arg("--timeout-secs")
+        .arg("5")
+        .arg("--output")
+        .arg(out.path());
+        let output = common::spawn_budgeted(
+            "real_crawl_at_defaults_matches_frozen_binary_attempt_counts",
+            cmd,
+            None,
+        )
+        .await;
 
         // Assert per run, then compare across runs.
         let stderr = normalize(&String::from_utf8_lossy(&output.stderr));
@@ -309,17 +333,19 @@ async fn real_crawl_explicit_max_retries_is_honored() {
     mount_failing_seed(&test.server).await;
 
     // Act.
-    let output = test
-        .scraper_cmd()
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("1")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+    let output = run_scraper_budgeted(
+        &test,
+        "real_crawl_explicit_max_retries_is_honored",
+        &[
+            "--single-page",
+            "--ignore-robots",
+            "--timeout-secs",
+            "5",
+            "--max-retries",
+            "1",
+        ],
+    )
+    .await;
 
     // Assert.
     let stderr = normalize(&String::from_utf8_lossy(&output.stderr));
