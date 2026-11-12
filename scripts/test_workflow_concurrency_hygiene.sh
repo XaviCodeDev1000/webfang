@@ -73,6 +73,9 @@ trap 'rm -rf "$T"' EXIT
 # 2 — THE INCIDENT SHAPE: dispatchable, constant group, cancellation ON for the
 #     event. This is a verbatim ci.yml before #2776, and the shape that killed
 #     a 240-minute run at minute 128 on 2026-11-12.
+# NEGATION: this control MUST fail. It is the one that proves the gate has teeth:
+# if it ever reports 0 here, the gate has stopped detecting the defect it exists
+# for and its green on the real tree means nothing.
 write_workflow "$T" "incident.yml" "on:
   workflow_dispatch:
 concurrency:
@@ -93,6 +96,10 @@ expect_rc "control 2: constant group WITH cancellation is rejected (the 17:46 sh
 #     mid-write"). Such a run QUEUES behind its predecessor instead of
 #     destroying it, so the rule must NOT fire — this control is what proves
 #     the gate did not overreach and override an informed decision.
+# NEGATION: this control must NOT fail. It is the boundary assertion: the first
+# version of the gate demanded uniqueness from every dispatchable workflow and
+# failed on 16 of 17, which was an overreaching rule and not a broken repo.
+# Without this control the gate could overreach again with nothing to catch it.
 write_workflow "$T" "incident.yml" "on:
   workflow_dispatch:
 concurrency:
