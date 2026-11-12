@@ -24,6 +24,8 @@ pub struct ConfigDefaults {
     pub max_pages: Option<usize>,
     /// Default delay between requests (ms)
     pub delay_ms: Option<u64>,
+    /// Default random addition to the delay between requests (ms, #2610)
+    pub jitter_ms: Option<u64>,
     /// Default log level
     pub log_level: Option<String>,
     /// Whether to use sitemap by default

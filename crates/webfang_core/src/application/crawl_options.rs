@@ -195,6 +195,12 @@ pub struct NetworkOptions {
     pub concurrency: ConcurrencyConfig,
     /// Delay between requests in milliseconds.
     pub delay_ms: u64,
+    /// Random addition to each paced interval, in milliseconds (#2610).
+    ///
+    /// The effective interval is uniform over
+    /// `[delay_ms, delay_ms + jitter_ms]`; `0` — the default — keeps the
+    /// fixed cadence exactly as it is today.
+    pub jitter_ms: u64,
     /// Request timeout in seconds.
     pub timeout_secs: u64,
     /// Whether `timeout_secs` was operator-configured (`--timeout-secs` /
@@ -378,6 +384,7 @@ impl Default for NetworkOptions {
             accept_language: "en-US,en;q=0.9".to_owned(),
             concurrency: ConcurrencyConfig::default(),
             delay_ms: 1000,
+            jitter_ms: 0,
             timeout_secs: 30,
             timeout_secs_explicit: false,
             max_retries: 3,

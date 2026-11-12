@@ -8,6 +8,7 @@ expression: redacted
   "export_format": "Jsonl",
   "format": "Markdown",
   "ignore_waf": "false",
+  "jitter_ms": "0",
   "max_depth": "2",
   "max_pages": "10",
   "obsidian_relative_assets": "false",

@@ -120,8 +120,15 @@ const FAMILIES: &[FamilyCase] = &[
     // -- crawler + network --
     FamilyCase {
         name: "crawler_network_delay_concurrency",
-        cli_flags: &["--delay-ms", "500", "--concurrency", "4"],
-        cli_ids: &["delay_ms", "concurrency"],
+        cli_flags: &[
+            "--delay-ms",
+            "500",
+            "--jitter-ms",
+            "250",
+            "--concurrency",
+            "4",
+        ],
+        cli_ids: &["delay_ms", "jitter_ms", "concurrency"],
         env: &[
             EnvSetting {
                 id: "delay_ms",
@@ -129,12 +136,17 @@ const FAMILIES: &[FamilyCase] = &[
                 apply: |a, v| a.crawler.delay_ms = v.parse().expect("u64"),
             },
             EnvSetting {
+                id: "jitter_ms",
+                value: "250",
+                apply: |a, v| a.crawler.jitter_ms = v.parse().expect("u64"),
+            },
+            EnvSetting {
                 id: "concurrency",
                 value: "4",
                 apply: |a, v| a.crawler.concurrency = webfang_core::ConcurrencyConfig::from(v),
             },
         ],
-        toml_lines: &["delay_ms = 500", "concurrency = \"4\""],
+        toml_lines: &["delay_ms = 500", "jitter_ms = 250", "concurrency = \"4\""],
     },
     FamilyCase {
         name: "crawler_network_timeout_secs",
@@ -328,6 +340,7 @@ fn effective(n: &NormalizedConfig) -> BTreeMap<String, String> {
     m.insert("use_sitemap".into(), n.use_sitemap.value.to_string());
     m.insert("selector".into(), n.selector.value.clone());
     m.insert("delay_ms".into(), n.delay_ms.value.to_string());
+    m.insert("jitter_ms".into(), n.jitter_ms.value.to_string());
     m.insert("timeout_secs".into(), n.timeout_secs.value.to_string());
     m.insert("concurrency".into(), format!("{:?}", n.concurrency.value));
     m.insert("output".into(), n.output.value.display().to_string());

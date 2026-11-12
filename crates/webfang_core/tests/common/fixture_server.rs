@@ -195,6 +195,7 @@ pub async fn start_fixture() -> (String, RequestLog) {
 struct FixtureState {
     log: RequestLog,
     limited_hits: AtomicUsize,
+    slow_limited_hits: AtomicUsize,
     flaky_hits: AtomicUsize,
     default_ua_first: std::sync::Mutex<Option<String>>,
 }
@@ -204,6 +205,7 @@ impl FixtureState {
         Self {
             log: RequestLog::default(),
             limited_hits: AtomicUsize::new(0),
+            slow_limited_hits: AtomicUsize::new(0),
             flaky_hits: AtomicUsize::new(0),
             default_ua_first: std::sync::Mutex::new(None),
         }
@@ -369,6 +371,21 @@ fn stateful_route(
                 status: 429,
                 reason: "Too Many Requests",
                 headers: vec![("retry-after".to_string(), "0".to_string())],
+                body: "rate limited".as_bytes().to_vec(),
+            });
+        }
+        return Some(FixtureResponse::html(article_body()));
+    }
+    if path == "/limited-slow" {
+        // A 429 whose `Retry-After` is a WHOLE SECOND: the wait it dictates
+        // is observable in the arrival log, so a client that shortened it
+        // (or replaced it with its own pacing) is caught (#2610).
+        let hit = state.slow_limited_hits.fetch_add(1, Ordering::SeqCst);
+        if hit == 0 {
+            return Some(FixtureResponse {
+                status: 429,
+                reason: "Too Many Requests",
+                headers: vec![("retry-after".to_string(), "1".to_string())],
                 body: "rate limited".as_bytes().to_vec(),
             });
         }

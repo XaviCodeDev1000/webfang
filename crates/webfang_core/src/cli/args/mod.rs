@@ -526,6 +526,7 @@ impl From<Args> for crate::application::crawl_options::CrawlOptions {
                 accept_language: args.crawler.accept_language,
                 concurrency: args.crawler.concurrency,
                 delay_ms: args.crawler.delay_ms,
+                jitter_ms: args.crawler.jitter_ms,
                 timeout_secs: args.crawler.timeout_secs,
                 timeout_secs_explicit: args.crawler.timeout_secs_explicit,
                 max_retries: args.crawler.max_retries,

@@ -235,6 +235,13 @@ pub struct CrawlerArgs {
     /// Delay between requests in milliseconds
     pub delay_ms: u64,
 
+    /// Random addition to each paced interval, in milliseconds (#2610).
+    ///
+    /// The effective interval is uniform over
+    /// `[delay_ms, delay_ms + jitter_ms]`. `0` — the default — keeps the
+    /// fixed cadence exactly as it is today.
+    pub jitter_ms: u64,
+
     /// Maximum pages to scrape
     pub max_pages: usize,
 
@@ -430,6 +437,7 @@ impl clap::FromArgMatches for CrawlerArgs {
             url: extract::opt(m, "url"),
             selector: extract::value(m, "selector")?,
             delay_ms: extract::value(m, "delay_ms")?,
+            jitter_ms: extract::value(m, "jitter_ms")?,
             concurrency: extract::value(m, "concurrency")?,
             max_pages: extract::value(m, "max_pages")?,
             rate_limit_burst: extract::opt(m, "rate_limit_burst"),
@@ -780,7 +788,7 @@ mod spec_parity_tests {
 
     #[test]
     fn deferred_list_is_honest_about_its_reasons() {
-        assert_eq!(spec::crawler::GROUP.len() + DEFERRED_FROM_SPEC.len(), 48);
+        assert_eq!(spec::crawler::GROUP.len() + DEFERRED_FROM_SPEC.len(), 49);
         let args = command_args();
         for (id, _) in DEFERRED_FROM_SPEC {
             assert!(
@@ -818,6 +826,7 @@ mod spec_parity_tests {
         let defaults = parse_args_hermetic(&[]).expect("bare invocation must parse");
         assert_eq!(defaults.crawler.selector, "body");
         assert_eq!(defaults.crawler.delay_ms, 1000);
+        assert_eq!(defaults.crawler.jitter_ms, 0);
         assert_eq!(defaults.crawler.max_pages, 10);
         assert_eq!(defaults.crawler.max_depth, 2);
         assert!(!defaults.crawler.use_sitemap);

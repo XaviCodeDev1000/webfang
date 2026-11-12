@@ -269,7 +269,7 @@ pub struct Engine {
 /// `CrawlerConfig.concurrency`, so raising the crawler concurrency leaves
 /// the token-bucket burst unchanged.
 fn rate_limiter_config(config: &CrawlerConfig, budget: &BudgetModel) -> RateLimiterConfig {
-    RateLimiterConfig::new(config.delay_ms, budget.burst().get())
+    RateLimiterConfig::new(config.delay_ms, budget.burst().get()).with_jitter(config.jitter_ms)
 }
 
 impl Engine {
