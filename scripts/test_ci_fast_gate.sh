@@ -370,6 +370,11 @@ make_fixture() {
   # fixture provides a no-op instead of letting the step fail for a reason
   # that has nothing to do with the case under test.
   printf '#!/usr/bin/env bash\nexit 0\n' >"$dir/scripts/test_release_provenance.sh"
+  # The code and full lanes run the CLI reference drift check through `bash`
+  # (not through run_guard), so the fixture provides a no-op instead of
+  # letting the step fail for a reason that has nothing to do with the case
+  # under test — the same shape as the release-provenance no-op above.
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$dir/scripts/gen-cli-reference.sh"
   # The FULL lane runs the CI-ONLY lane's semantics harnesses too (B52), so
   # the fixture provides a no-op for each of them: the case under test is the
   # LANE SHAPE, not the harnesses' own semantics, and a missing script would
@@ -793,6 +798,13 @@ has "$GATE_OUT" "PASS: duplication ratchet (jscpd v5, #2559)" \
   "#2559: the code lane runs the duplication ratchet"
 has "$GATE_OUT" "PASS: test inventory drift (#2559)" \
   "#2559: the code lane runs the test-inventory drift check"
+# #2762: the two generated-artifact checks that reached CI first as reds
+# (#2752). A step that is WIRED but never runs is the same hole as a step
+# that does not exist, so the harness pins that the code lane runs both.
+has "$GATE_OUT" "PASS: intra-crate lint tool tests" \
+  "#2762: the code lane runs the intra-crate lint tool's own tests"
+has "$GATE_OUT" "PASS: CLI reference drift check" \
+  "#2762: the code lane runs the CLI reference drift check"
 
 # And a red one really reds the gate: the wiring must not be a step that
 # cannot fail.
