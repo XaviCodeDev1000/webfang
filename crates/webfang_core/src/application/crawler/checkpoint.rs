@@ -724,13 +724,15 @@ mod tests {
 
         // Make the parent dir read-only so rename into it fails
         // This test verifies cleanup of .tmp file on rename failure
-        let store = BincodeCheckpoint::new();
-        let state = CrawlCheckpoint::new();
-
-        // Try saving to a path where rename will fail (read-only parent)
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            // `store`/`state` live inside the unix block because that is the
+            // only path that exercises the rename failure: on Windows the
+            // block is compiled out and the bindings would be unused (the
+            // cfg(windows) cross-lint caught exactly this).
+            let store = BincodeCheckpoint::new();
+            let state = CrawlCheckpoint::new();
             fs::set_permissions(&readonly_dir, fs::Permissions::from_mode(0o444)).unwrap();
 
             let bad_path = readonly_dir.join("checkpoint.bin");

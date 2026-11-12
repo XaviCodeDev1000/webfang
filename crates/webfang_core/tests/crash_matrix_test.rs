@@ -25,19 +25,31 @@ use std::path::Path;
 use std::process::ExitStatus;
 use std::time::Duration;
 
+// The signal family (`send_signal`, `wait_exit`, `spawn_webfang_with`,
+// `wait_for_page_fetches`, `PAGE_DELAY`) is unix-only — every consumer is a
+// `#[cfg(unix)]` row that kills a child with SIGINT/SIGKILL — so the import is
+// gated with it. Without the gate it is unused on Windows, which no Linux gate
+// reports (the cfg(windows) cross-lint caught exactly this).
+#[cfg(unix)]
 use common::cli_harness::{
     mock_sitemap, send_signal, spawn_webfang_with, std_cmd, wait_exit, wait_for_page_fetches,
     BehavioralTest, PAGE_DELAY,
 };
+#[cfg(not(unix))]
+use common::cli_harness::{mock_sitemap, std_cmd, BehavioralTest};
 use tempfile::TempDir;
 use wiremock::matchers::{any, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use webfang_core::cli::crash_points::{
-    DURING_CANCEL_DRAIN, MID_EXTRACTION, MID_FETCH, MID_JSONL_LINE, MID_STATE_FILE_WRITE,
-    POST_EXTRACTION_PRE_PIPELINE, POST_FETCH_PRE_EXTRACT, POST_FLUSH_PRE_COMMIT, PRE_FIRST_PERSIST,
-    TMP_WRITTEN_PRE_RENAME, WHILE_HOLDING_LOCK,
+    MID_EXTRACTION, MID_FETCH, MID_JSONL_LINE, MID_STATE_FILE_WRITE, POST_EXTRACTION_PRE_PIPELINE,
+    POST_FETCH_PRE_EXTRACT, POST_FLUSH_PRE_COMMIT, PRE_FIRST_PERSIST, TMP_WRITTEN_PRE_RENAME,
+    WHILE_HOLDING_LOCK,
 };
+// `DURING_CANCEL_DRAIN` arms the one row that cancels a draining run and then
+// kills it — a `#[cfg(unix)]` test, so on Windows the constant is unused.
+#[cfg(unix)]
+use webfang_core::cli::crash_points::DURING_CANCEL_DRAIN;
 use webfang_core::domain::page_state::PageStatus;
 use webfang_core::infrastructure::export::RecordStore;
 
@@ -95,7 +107,7 @@ async fn mount_crash_fixture_delayed(t: &BehavioralTest, delay: Duration) -> Str
 fn assert_killed_by_sigkill(status: &ExitStatus, child_stderr: &str) {
     assert!(
         !status.success(),
-        "armed crash point must terminate the child by signal, got clean exit"
+        "armed crash point must terminate the child by signal, got clean exit; child stderr: {child_stderr}"
     );
     #[cfg(unix)]
     {
@@ -591,6 +603,10 @@ async fn crash_during_cancel_drain_sigint_drain_kills_then_recovers() {
 /// with one 2-dim vector per input: that is the dimension `probe_dim` pins and
 /// the shape the cleaner reads back. The returned `TempDir` must outlive the
 /// child run — it owns the config file the child loads.
+///
+/// `#[cfg(unix)]` because its only caller is the `#[cfg(unix)]` cancel-drain
+/// clean-ai row: on Windows the helper would be dead code.
+#[cfg(unix)]
 async fn mount_loopback_embeddings(t: &BehavioralTest) -> (TempDir, std::path::PathBuf) {
     Mock::given(method("POST"))
         .and(path("/v1/embeddings"))

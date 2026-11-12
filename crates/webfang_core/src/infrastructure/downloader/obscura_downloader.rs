@@ -210,6 +210,10 @@ mod tests {
     use super::*;
 
     /// Base URL for the selector path exercised below.
+    ///
+    /// `#[cfg(unix)]` because its only caller spawns the fake obscura
+    /// binary, which is unix-only: on Windows the helper would be dead code.
+    #[cfg(unix)]
     fn base() -> url::Url {
         url::Url::parse("https://example.com/").expect("static base URL is valid")
     }
@@ -356,6 +360,11 @@ mod tests {
 
     // ---- #793 — fake obscura executable --------------------------------
 
+    /// HTML body every fake-obscura fixture writes to disk.
+    ///
+    /// `#[cfg(unix)]`: all three consumers are the tests that spawn the fake
+    /// binary, and those are unix-only.
+    #[cfg(unix)]
     const FAKE_HTML: &str = "<!DOCTYPE html><html><body><article>\
          <h1>Obscura Article</h1>\
          <p>Rendered body text long enough for Readability to keep the article.</p>\
