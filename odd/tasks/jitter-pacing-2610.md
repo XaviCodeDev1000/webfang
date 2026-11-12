@@ -64,12 +64,12 @@ mechanical plumbing (spec → argv → preflight → options).
 
 - **T1** — limiter core: `jitter_ms` on `RateLimiterConfig` (+ `with_jitter`), the cumulative
   schedule gate in every `SharedRateLimiter` wait method, slot rollback on cancellation,
-  unit tests. → S1, S3, S4, S5, S6, S7. Route: inline. Commit: `7f2ca5de`.
+  unit tests. → S1, S3, S4, S5, S6, S7. Route: inline. Commit: `ded51438`.
 - **T2** — CLI plumbing: `OptionSpec` entry + GROUP, `spec_command` binding + slot,
   `CrawlerArgs`, `NetworkOptions`, preflight stages, `ConfigDefaults`, `CrawlerConfig`,
-  the three limiter builders. → S1, S5. Route: inline. Commit: `965fcac1`.
+  the three limiter builders. → S1, S5. Route: inline. Commit: `e757e22a`.
 - **T3** — `Retry-After` regression with jitter active (wiremock) + the E2E pacing proof.
-  → S2, S6. Route: inline. Commit: `965fcac1`.
+  → S2, S6. Route: inline. Commit: `e757e22a`.
 - **T4** — verification: `cargo check` / `clippy --all-targets --all-features` / `fmt --check` /
   `cargo doc`, focused `nextest` suites, independent verifier (Risk: item 4), RDD assess.
   Route: inline. Evidence below.
@@ -159,20 +159,22 @@ known limitations of the shipped behavior, each tracked as its own issue:
 
 ## What a reviewer should read closely
 
-Commit 1 (`7f2ca5de`, the limiter core) is the fine-grained one — the gate, the slot
-arithmetic, the cancellation rollback, the unit tests. Commit 2 (`965fcac1`) is mechanical
+Commit 1 (`ded51438`, the limiter core) is the fine-grained one — the gate, the slot
+arithmetic, the cancellation rollback, the unit tests. Commit 2 (`e757e22a`) is mechanical
 plumbing: spec → argv → preflight → options → the three limiter builders. Commit 3
-(`f7da4b8e`) only spells the semantics out in `--help` and the docs. Commit 4
-(`f42d955b`) is the mission record (`odd/tasks/jitter-pacing-2610.md`) — no product code.
-Commit 5 (`286c6e11`) moves the gate into its own module (`rate_limiter/jitter.rs`) and
-raises the file-size ratchet. Commit 6 (`4bb4ec82`) is the independent verifier's fix
+(`8ad48189`) only spells the semantics out in `--help` and the docs. Commit 4
+(`7de372ef`) is the mission record (`odd/tasks/jitter-pacing-2610.md`) — no product code.
+Commit 5 (`74846cb7`) moves the gate into its own module (`rate_limiter/jitter.rs`) and
+raises the file-size ratchet. Commit 6 (`90dcde59`) is the independent verifier's fix
 batch — the binary's final merge now copies `jitter_ms`, the per-URL rebuild carries it,
 and the zero-delay rule answers "no pacing" only when there is no jitter either.
 
-Docs-only commits (no product code): commit 4 (`f42d955b`, the mission record) and commit 7
-(`ab1a5827`, the mission-record update with the verifier round and the review receipt). The
-generated part of the diff is the insta snapshots plus `docs/test-inventory.json`; the
-authored part is the gate, its plumbing and the tests.
+Docs-only commits (no product code): commit 4 (`7de372ef`, the mission record), commit 7
+(`f835df40`, the mission-record update with the verifier round and the review receipt),
+commit 8 (`1b148275`, the PR-body alignment with the known limitations) and commit 9
+(`45cc6e49`, the file-size baseline kept at main's value after the rebase). The generated
+part of the diff is the insta snapshots plus `docs/test-inventory.json`; the authored part is
+the gate, its plumbing and the tests.
 
 ## Verification
 
@@ -242,8 +244,8 @@ authored part is the gate, its plumbing and the tests.
   off the target path (S8); AC2 gets a real wiremock test, not a structural argument.
 - **L4** (2026-11-12) — Environment: worktree `feat-jitter-ms-pacing`; seeds are rustc-1.88
   artifacts and this tree needs 1.91, so the target dir is a cold build.
-- **L5** (2026-11-12) — Implementation landed: `7f2ca5de` (limiter core + unit tests) and
-  `965fcac1` (CLI plumbing, E2E tests, snapshots, regenerated `docs/test-inventory.json`).
+- **L5** (2026-11-12) — Implementation landed: `ded51438` (limiter core + unit tests) and
+  `e757e22a` (CLI plumbing, E2E tests, snapshots, regenerated `docs/test-inventory.json`).
   The 911 changed lines are mostly generated (insta snapshots + the inventory); the authored
   delta is ~300. The repo forbids stacked PRs, so this ships as ONE PR on `main`.
 - **L6** (2026-11-12) — Deliberately NOT exposed on the MCP surface: `scrape_batch` keeps
@@ -270,7 +272,7 @@ authored part is the gate, its plumbing and the tests.
   `crates/webfang_cli/src/main.rs` never copied `jitter_ms`, so a TOML-configured jitter was
   silently dropped) plus two advisories (the per-URL rebuild lost the jitter; the zero-delay
   rule said "no pacing" while the crawl path clamped to 1 ms). All three are fixed in
-  `4bb4ec82`, each with a regression test, and the RED proof was observed by reverting the
+  `90dcde59`, each with a regression test, and the RED proof was observed by reverting the
   fixes (the TOML test then saw `jitter_ms: 0` instead of 250, and the jitter-alone test
   found no wiring log at all).
 - **L10** (2026-11-12) — Native review (RDD) of the corrected candidate: assess → risk
@@ -283,3 +285,13 @@ authored part is the gate, its plumbing and the tests.
   pacing — WARNING) and `R4-002` (a cancelled reservation that is no longer the latest
   leaves its slot stranded — WARNING); plus suggestions on the `SLOT_HORIZON` fallback log,
   the mutex contention, and the documentation of `jitter_ms`.
+- **L11** (2026-11-12) — `main` moved 9 commits past the branch fork point (`92d9f241` →
+  `0e99822c`, the `ssrf_guard` test-module split), so the branch was REBASED onto the
+  current `main` before opening the PR. The candidate patch is byte-identical — the reviewed
+  diff still describes exactly what the PR proposes — and the only conflict was
+  `scripts/quality-baselines.json` (both sides raised baselines), resolved as the union: our
+  raises plus main's `ssrf_guard.rs` value, which stays at 1147. The branch was NOT pushed
+  before the rebase, so no published history was rewritten. Re-verified on the rebased tree:
+  `cargo nextest run --workspace --all-features` → 5508 passed / 7 skipped, clippy
+  `--all-targets --all-features` clean, `cargo fmt --all -- --check` clean, file-size ratchet
+  OK.
