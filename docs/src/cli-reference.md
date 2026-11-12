@@ -183,6 +183,12 @@ Discovery:
           [env: WEBFANG_DELAY_MS=]
           [default: 1000]
 
+      --jitter-ms <JITTER_MS>
+          Random addition to each delay between requests, in milliseconds (0 = fixed delay; the mean interval becomes delay + jitter/2, so the request rate drops; with 0, a run that fits in the burst is not paced at all)
+          
+          [env: WEBFANG_JITTER_MS=]
+          [default: 0]
+
       --max-pages <MAX_PAGES>
           Maximum pages to scrape
           
