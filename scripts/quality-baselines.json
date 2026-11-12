@@ -6,11 +6,11 @@
   "file_size_rust": {
     "hard_limit": 500,
     "grandfathered": {
-      "crates/webfang_cli/src/main.rs": 1169,
+      "crates/webfang_cli/src/main.rs": 1174,
       "crates/webfang_core/src/adapters/downloader/mod.rs": 2008,
       "crates/webfang_core/src/adapters/url_path.rs": 895,
       "crates/webfang_core/src/application/adaptive_engine/real.rs": 755,
-      "crates/webfang_core/src/application/batch/processor.rs": 1211,
+      "crates/webfang_core/src/application/batch/processor.rs": 1253,
       "crates/webfang_core/src/application/container.rs": 1554,
       "crates/webfang_core/src/application/crawl_options.rs": 627,
       "crates/webfang_core/src/application/crawl_result_repository.rs": 1097,
@@ -42,7 +42,7 @@
       "crates/webfang_core/src/cli/llm_wire.rs": 975,
       "crates/webfang_core/src/cli/orchestrator.rs": 1230,
       "crates/webfang_core/src/cli/preflight.rs": 3300,
-      "crates/webfang_core/src/cli/scrape_flow.rs": 1425,
+      "crates/webfang_core/src/cli/scrape_flow.rs": 1444,
       "crates/webfang_core/src/cli/spec_command.rs": 895,
       "crates/webfang_core/src/cli/url_discovery.rs": 599,
       "crates/webfang_core/src/domain/auth_source.rs": 575,

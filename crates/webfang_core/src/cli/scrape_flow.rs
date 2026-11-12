@@ -409,16 +409,25 @@ fn scrape_concurrency(
 /// budget model's independent burst tier (`rate_limiter_config`,
 /// engine.rs:152) — so discovery and scrape share one cadence policy.
 ///
-/// `delay_ms == 0` returns `None`: no bucket is allocated and the per-URL
-/// path performs no await, which keeps an unthrottled run identical to the
-/// pre-fix behavior (zero overhead, zero drift in the existing suites).
+/// `delay_ms == 0` AND `jitter_ms == 0` returns `None`: no bucket is
+/// allocated and the per-URL path performs no await, which keeps an
+/// unthrottled run identical to the pre-fix behavior (zero overhead, zero
+/// drift in the existing suites). A jitter on its own IS a pacing request,
+/// so it wires the bucket even with a zero delay (#2610).
 ///
 /// A construction failure degrades to `None` with a WARN, mirroring the
 /// `Container` precedent (`container.rs:608`). It is unreachable in
 /// practice: `SharedRateLimiter::new` rejects only a zero period (clamped
 /// to 1 ms) or zero burst (`BurstPermits` is `NonZeroU32`).
 fn build_scrape_rate_limiter(opts: &CrawlOptions) -> Option<SharedRateLimiter> {
-    if opts.network.delay_ms == 0 {
+    // A zero delay means "no pacing" — but only when the operator asked for
+    // no pacing. A jitter on its own IS a pacing request, so the limiter is
+    // built even with a zero base delay (#2610): the gate then spaces the
+    // requests by `U[0, jitter_ms]` over the clamped 1 ms floor, exactly
+    // like the crawl path's `delay_ms.max(1)`. Without this, the same
+    // `--delay-ms 0 --jitter-ms N` would mean "no pacing" here and "paced"
+    // on the crawl path.
+    if opts.network.delay_ms == 0 && opts.network.jitter_ms == 0 {
         return None;
     }
     let budget = crate::domain::budget::BudgetModel::build(
@@ -1133,14 +1142,15 @@ mod tests {
         );
     }
 
-    /// `delay_ms == 0` must build NO bucket at all — not a bucket with a 1 ms
-    /// floor. That is what keeps an unthrottled run free of any added await.
+    /// No pacing at all — no delay AND no jitter — must build NO bucket:
+    /// not a bucket with a 1 ms floor. That is what keeps an unthrottled run
+    /// free of any added await.
     #[cfg_attr(
         miri,
         ignore = "quanta CPUID detection (raw-cpuid inline asm) unsupported by Miri"
     )]
     #[test]
-    fn scrape_rate_limiter_is_built_only_for_a_positive_delay() {
+    fn scrape_rate_limiter_is_built_only_when_pacing_was_asked_for() {
         let opts = CrawlOptions::default();
         assert!(
             build_scrape_rate_limiter(&opts).is_some(),
@@ -1151,7 +1161,16 @@ mod tests {
         opts.network.delay_ms = 0;
         assert!(
             build_scrape_rate_limiter(&opts).is_none(),
-            "--delay-ms 0 must build no bucket and add no await"
+            "--delay-ms 0 with no jitter must build no bucket and add no await"
+        );
+
+        // A jitter alone IS a pacing request (#2610) — and the crawl path
+        // already answers that way (it clamps the base delay to 1 ms), so
+        // the scrape path must not answer "no pacing" for the same input.
+        opts.network.jitter_ms = 500;
+        assert!(
+            build_scrape_rate_limiter(&opts).is_some(),
+            "a jitter without a delay must still build the pacing bucket"
         );
     }
 

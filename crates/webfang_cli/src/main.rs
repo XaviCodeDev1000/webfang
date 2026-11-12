@@ -163,6 +163,11 @@ async fn __main() -> CliExit {
     opts.crawl.use_sitemap = projected.crawl.use_sitemap;
     opts.crawl.selector = projected.crawl.selector;
     opts.network.delay_ms = projected.network.delay_ms;
+    // #2610: the jitter rides with the delay. Without this copy the TOML
+    // channel dies HERE — the preflight stages and the Gate 3 matrix both
+    // see the projected value, so only the binary's final merge could drop
+    // it, and a TOML-configured jitter would silently keep a fixed cadence.
+    opts.network.jitter_ms = projected.network.jitter_ms;
     opts.network.timeout_secs = projected.network.timeout_secs;
     opts.network.concurrency = projected.network.concurrency;
     opts.export.output_dir = projected.export.output_dir;

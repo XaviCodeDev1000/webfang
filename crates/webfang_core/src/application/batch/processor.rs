@@ -342,6 +342,7 @@ fn build_per_url_config(
         .max_pages(1)
         .concurrency(base_config.concurrency)
         .delay_ms(base_config.delay_ms)
+        .jitter_ms(base_config.jitter_ms)
         .timeout_secs(base_config.timeout_secs)
         .ignore_robots(base_config.ignore_robots)
         .tls_emulation(base_config.tls_emulation)
@@ -366,17 +367,24 @@ fn build_per_url_config(
 /// cadence policy (AGENTS.md fetch guard-chain stage 2: pacing happens
 /// BEFORE any network is touched).
 ///
-/// `delay_ms == 0` returns `None`: no bucket is allocated and each engine
-/// keeps its historical per-engine limiter, which keeps an unthrottled run
-/// identical to the pre-fix behavior (zero overhead, zero drift) — the same
-/// contract as `build_scrape_rate_limiter` (`scrape_flow.rs`).
+/// `delay_ms == 0` AND `jitter_ms == 0` returns `None`: no bucket is
+/// allocated and each engine keeps its historical per-engine limiter, which
+/// keeps an unthrottled run identical to the pre-fix behavior (zero
+/// overhead, zero drift) — the same contract as
+/// `build_scrape_rate_limiter` (`scrape_flow.rs`). A jitter on its own IS a
+/// pacing request, so it wires the bucket even with a zero delay (#2610).
 ///
 /// A construction failure degrades to `None` with a WARN, mirroring the
 /// scrape-path precedent. It is unreachable in practice:
 /// `SharedRateLimiter::new` rejects only a zero period (clamped to 1 ms)
 /// or a zero burst (the budget tier is non-zero by construction).
 fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<SharedRateLimiter> {
-    if base_config.delay_ms == 0 {
+    // A zero delay means "no pacing" — but only when the operator asked for
+    // no pacing. A jitter on its own IS a pacing request, so the run-scoped
+    // limiter is built even with a zero base delay (#2610): the gate then
+    // spaces the requests over the clamped 1 ms floor, exactly like the
+    // crawl path's `delay_ms.max(1)`.
+    if base_config.delay_ms == 0 && base_config.jitter_ms == 0 {
         return None;
     }
     let burst = BudgetModel::build(base_config.budget_overrides, &SystemDetector)
@@ -915,6 +923,24 @@ mod tests {
     }
 
     #[test]
+    fn per_url_config_carries_jitter_ms() {
+        // Same class as the budget overrides above: a knob staged on the
+        // base config must survive the per-URL rebuild, or the per-URL
+        // engine builds a limiter WITHOUT the jitter (#2610).
+        let base = CrawlerConfig::builder(Url::parse("https://example.com").unwrap())
+            .jitter_ms(250)
+            .build();
+
+        let per_url =
+            build_per_url_config("https://example.org/seed", &base).expect("valid per-URL seed");
+
+        assert_eq!(
+            per_url.jitter_ms, 250,
+            "the configured jitter must survive the per-URL rebuild"
+        );
+    }
+
+    #[test]
     fn per_url_config_forces_seed_only_scrape() {
         // #1215 (F-38): the batch path rebuilds a fresh CrawlerConfig for
         // every URL, and the rebuild MUST pin seed-only scope no matter what
@@ -957,10 +983,10 @@ mod tests {
 
     #[test]
     fn batch_rate_limiter_none_at_zero_delay() {
-        // `delay_ms == 0` means "no pacing": no bucket is allocated and
-        // each engine keeps its historical per-engine limiter (zero
-        // overhead, zero drift — the `build_scrape_rate_limiter` contract
-        // in `scrape_flow.rs`).
+        // No pacing at all — no delay AND no jitter — means "no pacing": no
+        // bucket is allocated and each engine keeps its historical
+        // per-engine limiter (zero overhead, zero drift — the
+        // `build_scrape_rate_limiter` contract in `scrape_flow.rs`).
         let base = CrawlerConfig::builder(Url::parse("https://example.com").unwrap())
             .delay_ms(0)
             .build();
@@ -968,6 +994,22 @@ mod tests {
         assert!(
             build_batch_rate_limiter(&base).is_none(),
             "zero delay must build no bucket"
+        );
+    }
+
+    #[test]
+    fn batch_rate_limiter_some_for_a_jitter_without_a_delay() {
+        // A jitter alone IS a pacing request (#2610) — the crawl path
+        // already answers that way, so the batch path must not answer
+        // "no pacing" for the same input.
+        let base = CrawlerConfig::builder(Url::parse("https://example.com").unwrap())
+            .delay_ms(0)
+            .jitter_ms(500)
+            .build();
+
+        assert!(
+            build_batch_rate_limiter(&base).is_some(),
+            "a jitter without a delay must still build the run-scoped bucket"
         );
     }
 
