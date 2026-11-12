@@ -1512,6 +1512,17 @@ jobs:
   # `dead_code` are rustc lints, so plain `-D warnings` catches them; clippy
   # would add parity with the Linux gate but is not what detects this class.
   #
+  # WHY clippy AND NOT check — corrected on the pilot's first run, which died
+  # in 28 s on `error: unexpected argument '-D' found`. `cargo check` rejects
+  # rustc flags after `--` (that form works for clippy/build/rustc, not check),
+  # and the RUSTFLAGS env that does reach `check` applies to EVERY crate
+  # including dependencies — one pre-existing dependency warning would redden
+  # the job for a reason unrelated to this repository. `cargo clippy` accepts
+  # the flags after `--` AND scopes them to the primary packages only, which is
+  # exactly the semantics wanted, and it carries the same lint set as the Linux
+  # gate so the two cannot drift. Neither variant links or runs a binary, so
+  # both carry no flake surface.
+  #
   # HONEST ABOUT THE COST. `cargo check` still RUNS the `-sys` build scripts
   # (they are host programs), so btls-sys still invokes cmake and compiles
   # BoringSSL for this target — the saving against `cargo test` is the LINK,
@@ -1571,7 +1582,7 @@ jobs:
           CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
           CC: x86_64-w64-mingw32-gcc
           CXX: x86_64-w64-mingw32-g++
-        run: cargo check --target x86_64-pc-windows-gnu -p webfang_core --tests --locked -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-gnu -p webfang_core --tests --locked -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines
 
   # ============================================================================
   # TEST RELEASE PROVENANCE (L1) — Behavioral acceptance matrix for
