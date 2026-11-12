@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.4] - 2026-11-12
+
+
+### 🔧 Fixed
+
+- Declare the seventh UB surface, the preflight process spawn ([#2725](https://github.com/XaviCodeDev1000/webfang/pull/2725))
 ## [7.6.3] - 2026-11-12
 
 
