@@ -60,7 +60,7 @@
       "crates/webfang_core/src/domain/providers.rs": 593,
       "crates/webfang_core/src/domain/record_transition.rs": 577,
       "crates/webfang_core/src/domain/site/crawler_config.rs": 808,
-      "crates/webfang_core/src/domain/ssrf_guard.rs": 2288,
+      "crates/webfang_core/src/domain/ssrf_guard.rs": 1147,
       "crates/webfang_core/src/domain/url_validation.rs": 746,
       "crates/webfang_core/src/domain/value_objects.rs": 765,
       "crates/webfang_core/src/infrastructure/autotuning.rs": 575,
