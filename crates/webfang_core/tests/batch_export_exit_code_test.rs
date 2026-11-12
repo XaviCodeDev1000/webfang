@@ -30,9 +30,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use std::time::Duration;
-
-use common::cli_harness::{cmd, redact_nondeterministic, BehavioralTest};
+use common::cli_harness::{redact_nondeterministic, spawn_budgeted, std_cmd, BehavioralTest};
 use insta::assert_snapshot;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
@@ -82,17 +80,16 @@ async fn batch_export_failure_exits_io_error() {
     let blocked = t.out.path().join("blocked");
     std::fs::write(&blocked, b"not a directory").expect("create blocked file");
 
-    let output = cmd()
+    let mut command = std_cmd();
+    command
         .arg("--batch-file")
         .arg(&batch_file)
         .arg("--quick-save")
         .arg("--vault")
         .arg(&vault)
         .arg("--output")
-        .arg(&blocked)
-        .timeout(Duration::from_secs(60))
-        .output()
-        .expect("spawn webfang binary");
+        .arg(&blocked);
+    let output = spawn_budgeted("batch_export_failure_exits_io_error", command, None).await;
 
     let code = output
         .status
@@ -199,17 +196,21 @@ async fn batch_transient_ingestion_failure_exits_unavailable() {
 
     let db_path = t.out.path().join("elastic.db");
 
-    let output = cmd()
+    let mut command = std_cmd();
+    command
         .arg("--batch-file")
         .arg(&batch_file)
         .arg("--elastic")
         .arg("--db-path")
         .arg(&db_path)
         .arg("--output")
-        .arg(t.out.path())
-        .timeout(Duration::from_secs(60))
-        .output()
-        .expect("spawn webfang binary");
+        .arg(t.out.path());
+    let output = spawn_budgeted(
+        "batch_transient_ingestion_failure_exits_unavailable",
+        command,
+        None,
+    )
+    .await;
 
     let code = output
         .status

@@ -10,7 +10,7 @@
 //! | 1   | `/redir-loopback` (302 → 127.0.0.2:9)   | exit 69, exactly 1 arrival  |
 //! | 2   | forbidden-literal seed, guard armed     | exit 69, 0 arrivals           |
 //!
-//! Row 1 runs under the shared `cmd()` posture (entry layer disarmed so the
+//! Row 1 runs under the shared `std_cmd()` posture (entry layer disarmed so the
 //! seed reaches the fixture; redirect + resolver layers fully armed): the
 //! seed arrival proves the network is live, and the absence of any later
 //! arrival proves the redirect guard stopped the hop pre-socket. Row 2 runs
@@ -23,10 +23,8 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::cmd;
+use common::cli_harness::{spawn_budgeted, std_cmd};
 use common::fixture_server::start_fixture;
-
-const RUN_TIMEOUT_SECS: u64 = 120;
 
 /// Collapse whitespace runs so multi-line stderr matches robustly.
 fn normalize_captured(text: &str) -> String {
@@ -43,7 +41,8 @@ async fn redirect_to_loopback_costs_seed_arrival_only() {
     let (base, log) = start_fixture().await;
     let out = tempfile::TempDir::new().expect("temp output dir");
 
-    let output = cmd()
+    let mut command = std_cmd();
+    command
         .arg("--url")
         .arg(format!("{base}/redir-loopback"))
         .arg("--single-page")
@@ -53,10 +52,13 @@ async fn redirect_to_loopback_costs_seed_arrival_only() {
         .arg("--timeout-secs")
         .arg("10")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(std::time::Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = spawn_budgeted(
+        "redirect_to_loopback_costs_seed_arrival_only",
+        command,
+        None,
+    )
+    .await;
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(
@@ -85,7 +87,8 @@ async fn refused_literal_seed_costs_zero_arrivals() {
     // Production posture: remove the harness's entry-layer hatch so the
     // guard is fully armed. The literal sits on port 9 (discard), so any
     // followed fetch would surface a connect error, never this rejection.
-    let output = cmd()
+    let mut command = std_cmd();
+    command
         .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
         .arg("--url")
         .arg("http://127.0.0.2:9/")
@@ -96,10 +99,8 @@ async fn refused_literal_seed_costs_zero_arrivals() {
         .arg("--timeout-secs")
         .arg("5")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(std::time::Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = spawn_budgeted("refused_literal_seed_costs_zero_arrivals", command, None).await;
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
 
     assert_eq!(

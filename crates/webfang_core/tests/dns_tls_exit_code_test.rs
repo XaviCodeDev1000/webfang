@@ -19,15 +19,11 @@
 //! the snapshot normalizes it to `<RESOLVER>` while keeping the surrounding
 //! stderr shape (status progression, failure summary, exit routing message).
 
-use std::time::Duration;
-
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::{cmd, redact_nondeterministic};
+use common::cli_harness::{redact_nondeterministic, spawn_budgeted, std_cmd};
 use insta::assert_snapshot;
-
-const RUN_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Guaranteed-unresolvable host per RFC 2606: `.invalid` is a reserved TLD
 /// that no DNS server ever answers authoritatively.
@@ -45,10 +41,11 @@ fn normalize_captured(s: &str) -> String {
 /// Single-run scrape of a host that cannot resolve must exit 69
 /// (`CliExit::NetworkError` / `EXIT_UNAVAILABLE`), NOT 3
 /// (`CliExit::ScraperFailure` — the internal-bug bucket, #1824).
-#[test]
-fn unresolvable_host_exits_69_network_unavailable_not_3() {
+#[tokio::test]
+async fn unresolvable_host_exits_69_network_unavailable_not_3() {
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
-    let output = cmd()
+    let mut command = std_cmd();
+    command
         .arg("--url")
         .arg(UNRESOLVABLE_URL)
         .arg("--single-page")
@@ -58,10 +55,13 @@ fn unresolvable_host_exits_69_network_unavailable_not_3() {
         .arg("--timeout-secs")
         .arg("10")
         .arg("--max-retries")
-        .arg("0")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang");
+        .arg("0");
+    let output = spawn_budgeted(
+        "unresolvable_host_exits_69_network_unavailable_not_3",
+        command,
+        None,
+    )
+    .await;
 
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
     let code = output.status.code().unwrap_or(0);
