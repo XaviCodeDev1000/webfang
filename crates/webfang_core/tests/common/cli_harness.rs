@@ -191,16 +191,47 @@ pub(crate) fn cmd() -> Command {
 /// 20 s (~6x the healthy run) proved too narrow to absorb a loaded runner:
 /// on run 40407265924 (2026-10-26) BOTH internal attempts of
 /// `batch_empty_stdin_exits_64` overran and the nextest retry pass converted
-/// into a red FLKY-FL (#2331). 60 s widens the two-attempt window to ~120 s
+/// into a red FLKY-FL (#2331). 60 s widened the two-attempt window to ~120 s
 /// while staying under the per-attempt ceilings a killed overrun must sit
 /// inside — the `default` profile's 180 s and the `ci` profile's 240 s — so a
 /// genuinely stuck attempt is still abandoned far before nextest's
 /// `terminate-after`.
 ///
-/// The budget only bounds hangs. A real regression never depends on this
-/// number: a wrong exit code or message fails through the attempt's own
-/// assertion in under a second.
-pub(crate) const SPAWN_LATENCY_BUDGET: Duration = Duration::from_secs(60);
+/// Then the #2658 backlog multiplied this budget's users by ~20 without
+/// re-asking whether it still fit them, and the answer on the `windows-latest`
+/// lane is no. Measured on that runner against an idle Linux box, inside the
+/// window where the trybuild `compile_fail_cases_fail_to_compile` build
+/// compiles this crate plus BoringSSL for ~10 minutes:
+///
+/// - the same test ran 318 x SLOWER (`orphan_threshold_warning_...`: 0.181 s
+///   Linux -> 57.664 s Windows), 108 x (`row3_rfc1918_172_16`: 0.796 ->
+///   85.976 s) and 105 x (`the_retired_shim_env_vars_are_ignored`);
+/// - an audit of the whole migrated surface found 96 tests that spawn the
+///   binary, 72 of them above 0.6 s locally — at those ratios every one of
+///   them clears 60 s inside the window;
+/// - two of them actually went red: `ssrf_rfc1918_e2e_test::row2` and
+///   `batch_delay_pacing::batch_delay_ms_paces_across_urls_at_default_burst`,
+///   both with the harness's own signature (attempt killed at its budget,
+///   retry passing in seconds once the window closed).
+///
+/// So the budget is now PLATFORM-SCOPED rather than per-test: the load window
+/// is a property of the `windows-latest` lane, not of any individual test, and
+/// 72 per-test constants would be churn that rots with the next test added.
+/// On that host the ceiling is 240 s — ~3x the slowest healthy latency ever
+/// measured there (85.976 s), and still inside the `ci` profile's per-attempt
+/// ceiling once the matching nextest override in `.config/nextest.toml` raises
+/// it. Everywhere else it stays 60 s, where it is calibrated and precise: a
+/// genuine hang there is still abandoned in ~120 s.
+///
+/// What this does NOT do is bound hangs less strictly on Windows by accident:
+/// a real regression hangs with no ceiling at all, so it still fails naming
+/// the latencies the harness MEASURED. What changes is only how much LOAD a
+/// healthy child may absorb before the budget calls it a hang.
+pub(crate) const SPAWN_LATENCY_BUDGET: Duration = if cfg!(target_os = "windows") {
+    Duration::from_secs(240)
+} else {
+    Duration::from_secs(60)
+};
 
 /// #1697: run a spawned-binary assertion under a wall-clock budget THIS
 /// harness enforces, retrying once before it declares failure.
