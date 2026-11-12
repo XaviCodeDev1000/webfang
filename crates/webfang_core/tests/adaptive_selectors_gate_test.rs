@@ -35,15 +35,10 @@
 #[path = "common/cli_harness.rs"]
 mod common;
 
-use std::time::Duration;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use common::cmd;
-
-/// Wall-clock budget for one spawned-binary attempt. Generous because
-/// `webfang_path()` may shell out to `cargo build` on a cold target dir.
-const RUN_TIMEOUT: Duration = Duration::from_secs(180);
+use common::{spawn_budgeted, std_cmd};
 
 /// The rejection text `preflight::check_adaptive_selectors_feature` emits.
 /// A build WITH the feature must never print it — this marker is what makes
@@ -71,13 +66,14 @@ async fn start_mock_site() -> (MockServer, String) {
 }
 
 /// Spawn a `--dry-run --max-pages 1` scrape of `base_url`, optionally
-/// requesting `--adaptive-selectors`, returning the finished output.
+/// requesting `--adaptive-selectors`, under the shared spawn budget (#2658
+/// backlog), returning the finished output.
 ///
 /// Each lane compiles exactly one caller (flag-absent in the negative lane,
 /// flag-present in the positive lane), so the helper is live under both
 /// feature combinations and never trips `dead_code`.
 async fn run_dry_run(base_url: &str, with_adaptive_flag: bool) -> std::process::Output {
-    let mut command = cmd();
+    let mut command = std_cmd();
     if with_adaptive_flag {
         command.arg("--adaptive-selectors");
     }
@@ -86,10 +82,8 @@ async fn run_dry_run(base_url: &str, with_adaptive_flag: bool) -> std::process::
         .arg(base_url)
         .arg("--dry-run")
         .arg("--max-pages")
-        .arg("1")
-        .timeout(RUN_TIMEOUT)
-        .output()
-        .expect("spawn webfang")
+        .arg("1");
+    spawn_budgeted("run_dry_run", command, None).await
 }
 
 /// Non-adaptive build: `--adaptive-selectors` must exit 78 with a message
@@ -99,12 +93,18 @@ async fn run_dry_run(base_url: &str, with_adaptive_flag: bool) -> std::process::
 async fn adaptive_selectors_on_non_adaptive_build_fails_closed_naming_the_feature() {
     let (mock_server, base_url) = start_mock_site().await;
 
-    cmd()
+    let mut command = std_cmd();
+    command
         .arg("--url")
         .arg(&base_url)
-        .arg("--adaptive-selectors")
-        .timeout(RUN_TIMEOUT)
-        .assert()
+        .arg("--adaptive-selectors");
+    let output = spawn_budgeted(
+        "adaptive_selectors_on_non_adaptive_build_fails_closed_naming_the_feature",
+        command,
+        None,
+    )
+    .await;
+    assert_cmd::assert::Assert::new(output)
         .code(78)
         .stderr(predicates::str::contains("--adaptive-selectors"))
         .stderr(predicates::str::contains("adaptive-selectors"));

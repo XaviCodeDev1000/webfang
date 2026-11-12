@@ -38,13 +38,7 @@
 
 #[path = "common/cli_harness.rs"]
 mod common;
-use common::{redact_nondeterministic, BehavioralTest};
-
-use std::time::Duration;
-
-/// Wall-clock budget for the spawned binary. The run stops at the
-/// configuration gate, so this is a hang guard, not a latency budget.
-const RUN_TIMEOUT_SECS: u64 = 60;
+use common::{redact_nondeterministic, spawn_budgeted, std_scraper_cmd, BehavioralTest};
 
 /// `--clean-ai` with no resolvable embedding provider must fail fast with the
 /// real cause (exit 78, `ConfigError`), never a generic "recompile with a
@@ -59,12 +53,14 @@ async fn clean_ai_without_embedding_provider_surfaces_config_error() {
     let t = BehavioralTest::new().await;
     common::mount_single_page_site(&t).await;
 
-    let output = t
-        .scraper_cmd()
-        .arg("--clean-ai")
-        .timeout(Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("run webfang binary");
+    let mut command = std_scraper_cmd(&t.server.uri(), t.out.path());
+    command.arg("--clean-ai");
+    let output = spawn_budgeted(
+        "clean_ai_without_embedding_provider_surfaces_config_error",
+        command,
+        None,
+    )
+    .await;
 
     assert_eq!(
         output.status.code(),
