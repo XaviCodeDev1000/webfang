@@ -66,8 +66,33 @@ on:
 concurrency:
   # event_name in the group key: merge_group runs must not cancel (or be
   # canceled by) pull_request runs on the same head branch.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  # `run_id` ONLY for workflow_dispatch (see the long note below): two manual
+  # runs of this workflow would otherwise share one group and kill each other.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-run-{0}', github.run_id) || '' }}
   cancel-in-progress: true
+
+  # WHY `run_id` FOR workflow_dispatch. On `workflow_dispatch` `github.head_ref`
+  # is empty (it is only defined on `pull_request`), so the expression above fell
+  # back to `github.ref` — `refs/heads/main` for every manual run of this
+  # workflow. Every manual run therefore shared the group
+  # `CI-workflow_dispatch-refs/heads/main`, and `cancel-in-progress: true` made
+  # each new one CANCEL the running one. Measured on 2026-11-12: a dispatch at
+  # 17:46:08 was killed at 128 of its 240-min budget by a second dispatch at
+  # 17:55:51, so the `Miri (core)` result of that run is permanently unknown —
+  # not a failure, a lost measurement, which is worse because it is silent.
+  # The class is the one `scripts/check_concurrency_lints.sh` names for Rust:
+  # a one-line edit that is invisible at review time and only fails at runtime.
+  #
+  # The cost, stated rather than discovered: two manual runs no longer cancel
+  # each other, so repeated dispatches now ACCUMULATE (~4 h of runner each).
+  # For a lane whose whole purpose is measurement, completing the run is worth
+  # more than a single in-flight manual run. The other four events keep the old
+  # behaviour exactly — `push` still cancels the CI of a superseded commit,
+  # which is what one wants when a newer commit arrives.
+  #
+  # `github.run_id` is unique per run and `github` is an allowed context for
+  # `concurrency` (GitHub docs: the concurrency group accepts `github`, `inputs`,
+  # `vars`, `needs`, `strategy` and `matrix`).
 
 env:
   CARGO_TERM_COLOR: always
