@@ -75,6 +75,45 @@ pub const DELAY_MS: OptionSpec = OptionSpec {
     value_delimiter: None,
 };
 
+/// `--jitter-ms <JITTER_MS>` — random addition to each paced interval
+/// (#2610). Metadata-only entry, same shape as [`DELAY_MS`]: the parsing
+/// stays with clap's built-in `u64` parser and no bound exists today.
+///
+/// The value is an ADDITION to `--delay-ms`, not a replacement: the
+/// effective interval is uniform over `[delay_ms, delay_ms + jitter_ms]`, so
+/// the mean interval is `delay_ms + jitter_ms / 2` — a run that needs the
+/// rate it had before must lower `--delay-ms` accordingly.
+///
+/// What the operator sees:
+///
+/// - **The first request leaves immediately**; the gate governs every
+///   interval AFTER it. A run of N requests therefore takes about
+///   `(N-1) * (delay_ms + jitter_ms/2)`, not `N` times that.
+/// - **The burst is not a burst on the wire.** With the jitter on, the
+///   token bucket's `concurrency` permits are paced too — the first of them
+///   leaves at once, the rest wait their slot. Without the jitter they
+///   would leave together, which is the other half of the metronome.
+/// - **Zero — the default — keeps today's behavior exactly**: no jitter gate
+///   is built, the token bucket alone paces the run, and a run that fits
+///   inside the burst is not paced at all.
+pub const JITTER_MS: OptionSpec = OptionSpec {
+    id: "jitter_ms",
+    value_name: "JITTER_MS",
+    long: "jitter-ms",
+    short: None,
+    aliases: &[],
+    env: Some("WEBFANG_JITTER_MS"),
+    default: Some(DefaultValue::Uint(0)),
+    nullable: false,
+    description_override: None,
+    help: "Random addition to each delay between requests, in milliseconds (0 = fixed delay; the mean interval becomes delay + jitter/2, so the request rate drops; with 0, a run that fits in the burst is not paced at all)",
+    heading: Some("Discovery"),
+    kind: ValueKind::uint_unbounded(),
+    visible_aliases: &[],
+    feature_gate: None,
+    value_delimiter: None,
+};
+
 /// `--max-pages <MAX_PAGES>` — FULLY migrated: bound enforced through
 /// [`OptionSpec::parse_uint`] with verbatim legacy messages (#780).
 ///
@@ -892,6 +931,7 @@ pub const GROUP: &[OptionSpec] = &[
     URL,
     SELECTOR,
     DELAY_MS,
+    JITTER_MS,
     MAX_PAGES,
     USE_SITEMAP,
     SITEMAP_URL,

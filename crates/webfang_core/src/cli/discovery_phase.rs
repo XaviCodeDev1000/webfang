@@ -63,6 +63,7 @@ pub(crate) fn base_crawler_config_builder(
         .timeout_secs(opts.network.timeout_secs)
         .timeout_secs_explicit(opts.network.timeout_secs_explicit)
         .delay_ms(opts.network.delay_ms)
+        .jitter_ms(opts.network.jitter_ms)
         .budget_overrides(opts.budget_overrides))
 }
 

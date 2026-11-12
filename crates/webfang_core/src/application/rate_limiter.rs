@@ -8,7 +8,9 @@
 //! - Uses `governor` crate with Token Bucket algorithm
 //! - Thread-safe via Arc (shares across async tasks)
 //! - Configurable delay and burst parameters
-//! - No Mutex needed - governor handles internal synchronization
+//! - Optional jitter gate (#2610): a cumulative schedule ON TOP of the token
+//!   bucket, with its own short-lived mutex. It exists only when
+//!   `jitter_ms > 0` — with the default 0 the bucket paces the run alone.
 //!
 //! # Waits are observable (#1610, OBS-P1-2 / OBS-H2 / OBS-M1)
 //!
@@ -35,6 +37,9 @@ use governor::{
 use tokio_util::sync::CancellationToken;
 
 use crate::error::ScraperError;
+
+mod jitter;
+use jitter::JitterSchedule;
 
 /// Clock used by the governor rate limiters.
 ///
@@ -76,6 +81,14 @@ pub struct RateLimiterConfig {
     pub delay_ms: u64,
     /// Maximum concurrent requests (burst)
     pub concurrency: u32,
+    /// Random addition to each paced interval, in milliseconds (#2610).
+    ///
+    /// `0` — the default — means "no jitter": the token bucket alone paces
+    /// the run, burst included, exactly as before this option existed.
+    /// Any positive value turns the pacing cadence into a cumulative
+    /// schedule whose gaps are `delay_ms + U[0, jitter_ms]`: never faster
+    /// than the configured delay, never the same twice.
+    pub jitter_ms: u64,
 }
 
 impl Default for RateLimiterConfig {
@@ -83,6 +96,7 @@ impl Default for RateLimiterConfig {
         Self {
             delay_ms: 100,
             concurrency: 5,
+            jitter_ms: 0,
         }
     }
 }
@@ -93,7 +107,24 @@ impl RateLimiterConfig {
         Self {
             delay_ms,
             concurrency,
+            jitter_ms: 0,
         }
+    }
+
+    /// Turn the jitter on (#2610).
+    ///
+    /// The jitter is the ADDITION to the base delay, not a replacement: the
+    /// effective interval is uniform over `[delay_ms, delay_ms + jitter_ms]`.
+    /// A mean interval of `delay_ms + jitter_ms / 2` — so a run that wants
+    /// the rate it had before must lower `delay_ms` accordingly.
+    ///
+    /// The FIRST request of a run leaves immediately; the schedule governs
+    /// every interval after it. A run of N requests therefore takes about
+    /// `(N-1) * (delay_ms + jitter_ms / 2)`.
+    #[must_use]
+    pub fn with_jitter(mut self, jitter_ms: u64) -> Self {
+        self.jitter_ms = jitter_ms;
+        self
     }
 }
 
@@ -203,7 +234,13 @@ pub fn record_pacing_wait(ctx: &PacingContext<'_>, waited: Duration, outcome: &'
 
 /// Shared rate limiter for crawl operations
 #[derive(Clone)]
-pub struct SharedRateLimiter(Arc<CrawlRateLimiter>);
+pub struct SharedRateLimiter {
+    /// The token bucket that grants the pacing permits.
+    limiter: Arc<CrawlRateLimiter>,
+    /// The jitter schedule (#2610). `None` when `jitter_ms == 0`: the token
+    /// bucket stays the ONLY pacing mechanism, burst included.
+    jitter: Option<Arc<JitterSchedule>>,
+}
 
 impl SharedRateLimiter {
     /// Create a new shared rate limiter from config
@@ -224,12 +261,28 @@ impl SharedRateLimiter {
         );
 
         let limiter = GovernorLimiter::direct_with_clock(quota, &GovernorClock::default());
-        Ok(Self(Arc::new(limiter)))
+        // #2610: the jitter gate exists only when it is asked for. With
+        // `jitter_ms == 0` the bucket alone paces the run — burst included,
+        // today's behavior byte for byte.
+        let jitter = if config.jitter_ms > 0 {
+            Some(Arc::new(JitterSchedule::new(
+                Duration::from_millis(period_ms),
+                config.jitter_ms,
+            )?))
+        } else {
+            None
+        };
+
+        Ok(Self {
+            limiter: Arc::new(limiter),
+            jitter,
+        })
     }
 
     /// Wait until a permit is available
     pub async fn until_ready(&self) {
-        self.0.until_ready().await;
+        self.limiter.until_ready().await;
+        self.await_jitter_turn().await;
     }
 
     /// Wait until a permit is available, abandoning the wait if `cancel`
@@ -237,6 +290,9 @@ impl SharedRateLimiter {
     ///
     /// Dropping the pending governor future consumes no token, so a
     /// cancelled caller leaves the bucket untouched for the next task.
+    /// A cancelled JITTER wait releases its reserved slot instead of
+    /// stranding it (#2610): the request never reached the network, so the
+    /// slot must not keep the next one waiting.
     ///
     /// # Errors
     ///
@@ -246,10 +302,7 @@ impl SharedRateLimiter {
         &self,
         cancel: &CancellationToken,
     ) -> Result<(), RateLimitCancelled> {
-        tokio::select! {
-            () = self.0.until_ready() => Ok(()),
-            () = cancel.cancelled() => Err(RateLimitCancelled),
-        }
+        self.wait_or_cancel(cancel).await
     }
 
     /// [`Self::until_ready`] with the wait measured and emitted (#1610).
@@ -260,7 +313,8 @@ impl SharedRateLimiter {
     /// rather than an absence.
     pub async fn until_ready_observed(&self, ctx: &PacingContext<'_>) -> Duration {
         let started = std::time::Instant::now();
-        self.0.until_ready().await;
+        self.limiter.until_ready().await;
+        self.await_jitter_turn().await;
         let waited = started.elapsed();
         record_pacing_wait(ctx, waited, "granted");
         waited
@@ -283,10 +337,7 @@ impl SharedRateLimiter {
         cancel: &CancellationToken,
     ) -> Result<Duration, RateLimitCancelled> {
         let started = std::time::Instant::now();
-        let result = tokio::select! {
-            () = self.0.until_ready() => Ok(()),
-            () = cancel.cancelled() => Err(RateLimitCancelled),
-        };
+        let result = self.wait_or_cancel(cancel).await;
         let waited = started.elapsed();
         record_pacing_wait(
             ctx,
@@ -298,6 +349,16 @@ impl SharedRateLimiter {
         );
         result.map(|()| waited)
     }
+
+    /// The permit AND the jitter slot, abandoned on cancellation
+    /// (#509, #2610).
+    async fn wait_or_cancel(&self, cancel: &CancellationToken) -> Result<(), RateLimitCancelled> {
+        tokio::select! {
+            () = self.limiter.until_ready() => {}
+            () = cancel.cancelled() => return Err(RateLimitCancelled),
+        }
+        self.await_jitter_turn_or_cancel(cancel).await
+    }
 }
 
 impl From<GovernorLimiter<NotKeyed, InMemoryState, GovernorClock, GovernorMiddleware>>
@@ -306,7 +367,12 @@ impl From<GovernorLimiter<NotKeyed, InMemoryState, GovernorClock, GovernorMiddle
     fn from(
         limiter: GovernorLimiter<NotKeyed, InMemoryState, GovernorClock, GovernorMiddleware>,
     ) -> Self {
-        Self(Arc::new(limiter))
+        Self {
+            limiter: Arc::new(limiter),
+            // A limiter built from a raw governor handle carries no jitter
+            // configuration, so the gate stays absent (#2610).
+            jitter: None,
+        }
     }
 }
 

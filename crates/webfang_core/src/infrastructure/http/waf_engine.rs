@@ -1701,59 +1701,6 @@ mod tests {
         assert!(verdict.is_blocked, "non-2xx silent challenge must block");
     }
 
-    #[test]
-    fn test_entropy_obfuscated_200_no_t2_passes() {
-        // REQ-WAF-06a: 200, >100KB, >5.5 b/B, no T2 marker → NOT blocked
-        // (old behavior blocked unconditionally — this is the policy change).
-        let high_entropy: String = (0u8..=255)
-            .map(|b| b as char)
-            .cycle()
-            .take(104_000)
-            .collect();
-        let ctx = ctx_with(Some(200), Some("text/html"));
-        let verdict = WafInspector::inspect(&high_entropy, &ctx);
-        assert!(
-            !verdict.is_blocked,
-            "200 high-entropy without T2 must not block"
-        );
-    }
-
-    #[test]
-    fn test_entropy_obfuscated_non_2xx_blocks() {
-        // REQ-WAF-06a: non-2xx + >100KB + >5.5 b/B → BLOCK.
-        let high_entropy: String = (0u8..=255)
-            .map(|b| b as char)
-            .cycle()
-            .take(104_000)
-            .collect();
-        let ctx = ctx_with(Some(503), Some("text/html"));
-        let verdict = WafInspector::inspect(&high_entropy, &ctx);
-        assert!(verdict.is_blocked, "non-2xx high-entropy must block");
-        assert!(verdict
-            .evidences
-            .iter()
-            .any(|e| e.provider == "Obfuscated WAF"));
-    }
-
-    #[test]
-    fn test_entropy_obfuscated_200_with_t2_blocks() {
-        // REQ-WAF-06a: 200 + >100KB + >5.5 b/B + coexisting T2 marker → BLOCK.
-        // The ascending byte cycle contains no signature, so append a
-        // boundary-clean bare vendor name to force T2 coexistence.
-        let mut high_entropy: String = (0u8..=255)
-            .map(|b| b as char)
-            .cycle()
-            .take(104_000)
-            .collect();
-        high_entropy.push_str(" cloudflare ");
-        let ctx = ctx_with(Some(200), Some("text/html"));
-        let verdict = WafInspector::inspect(&high_entropy, &ctx);
-        assert!(
-            verdict.is_blocked,
-            "200 high-entropy with T2 coexistence must block"
-        );
-    }
-
     // ========================================================================
     // #781 — Config-string false positives (Wikipedia / MediaWiki)
     //
@@ -2313,114 +2260,6 @@ mod tests {
         );
     }
 
-    /// #1615 F8 — the regression row. A large, high-entropy body is ordinary
-    /// for any modern error or index page, and it used to be reported as an
-    /// "Obfuscated WAF" on every status that was not 200. The statuses below
-    /// are the ones that made the finding expensive: 404 and 301 are routine,
-    /// 500 is a broken origin, and 204 is a successful no-content response.
-    ///
-    /// Each of these previously blocked. None of them is WAF evidence.
-    #[test]
-    fn high_entropy_does_not_block_on_an_ordinary_non_200_status() {
-        let body: String = (0u8..=255)
-            .map(|b| b as char)
-            .cycle()
-            .take(104_000)
-            .collect();
-        for status in [204u16, 301, 404, 410, 418, 500, 502] {
-            let ctx = InspectionContext {
-                status: Some(status),
-                content_type: Some("text/html".to_string()),
-                ..Default::default()
-            };
-            let verdict = WafInspector::inspect(&body, &ctx);
-            assert!(
-                !verdict.is_blocked,
-                "status {status} is not WAF evidence; a {}-byte body must not be \
-                 reported as an obfuscated-WAF challenge (evidences: {:?})",
-                body.len(),
-                verdict
-                    .evidences
-                    .iter()
-                    .map(|e| (e.provider, e.matched_pattern))
-                    .collect::<Vec<_>>()
-            );
-        }
-    }
-
-    /// The same body, degraded. `InspectionContext::default()` carries no
-    /// status, and the documented contract for degraded mode is that only
-    /// unambiguous challenge markers block — so a heuristic must not.
-    #[test]
-    fn high_entropy_does_not_block_in_degraded_mode() {
-        let body: String = (0u8..=255)
-            .map(|b| b as char)
-            .cycle()
-            .take(104_000)
-            .collect();
-        let verdict = WafInspector::inspect(&body, &InspectionContext::default());
-        assert!(
-            !verdict.is_blocked,
-            "degraded mode has no status to correlate, so entropy alone must not \
-             block (evidences: {:?})",
-            verdict
-                .evidences
-                .iter()
-                .map(|e| (e.provider, e.matched_pattern))
-                .collect::<Vec<_>>()
-        );
-    }
-
-    /// And the WAF-correlated statuses still block, so the row above is a
-    /// false-positive fix and not a disabled rule.
-    #[test]
-    fn high_entropy_still_blocks_on_a_waf_correlated_status() {
-        let body: String = (0u8..=255)
-            .map(|b| b as char)
-            .cycle()
-            .take(104_000)
-            .collect();
-        for status in [403u16, 429, 503, 520, 529] {
-            let ctx = InspectionContext {
-                status: Some(status),
-                ..Default::default()
-            };
-            assert!(
-                WafInspector::inspect(&body, &ctx).is_blocked,
-                "status {status} correlates with a WAF and must still block"
-            );
-        }
-    }
-
-    /// #1615 F8 / G-25 — the rule's thresholds must not be published.
-    ///
-    /// `matched_pattern` reaches the user through `evidence_chain`, so a label
-    /// reading `>100KB` and `>5.5 b/B` was a specification of the rule: a
-    /// hostile page could size and pad itself to sit just under both. The rule
-    /// still runs on those numbers; this row pins that it stops ADVERTISING
-    /// them, and that no number from the constants leaks into the chain.
-    #[test]
-    fn the_evidence_chain_does_not_disclose_the_entropy_thresholds() {
-        let body: String = (0u8..=255)
-            .map(|b| b as char)
-            .cycle()
-            .take(104_000)
-            .collect();
-        let ctx = InspectionContext {
-            status: Some(403),
-            ..Default::default()
-        };
-        let verdict = WafInspector::inspect(&body, &ctx);
-        assert!(verdict.is_blocked, "the rule must still fire");
-        let chain = verdict.evidence_chain();
-        for leak in ["100KB", "100_000", "5.5", "b/B", "1500", ">5"] {
-            assert!(
-                !chain.contains(leak),
-                "the evidence chain discloses the rule's threshold {leak:?}: {chain}"
-            );
-        }
-    }
-
     #[test]
     fn test_detect_body_small_low_entropy() {
         let small_content = "<html><body>Redirecting...</body></html>";
@@ -2568,3 +2407,19 @@ mod tests {
         assert!(providers.contains(&"AWS WAF"));
     }
 }
+
+// Test-module wiring for a FILE-module parent: `#[path]` points at the
+// sibling file explicitly while preserving the `waf_engine::entropy_policy`
+// module path (the pattern `infrastructure/llm/client.rs` uses for
+// `client_tests.rs`, issue #2614).
+//
+// It exists because `waf_engine.rs` is grandfathered in
+// `scripts/quality-baselines.json` at 2570 lines and the size ratchet is
+// DESCENDING: it may not grow by a single line, and the seven Miri gates this
+// lane needs are seven lines. Extracting the rows SHRINKS this file by 151
+// lines and leaves the other ninety tests of the module running under the
+// interpreter. The header of the child file carries the measurement that
+// justifies gating exactly these seven.
+#[cfg(test)]
+#[path = "waf_engine_tests.rs"]
+mod entropy_policy;

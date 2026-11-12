@@ -61,6 +61,7 @@ impl ArgSources {
             "url",
             "selector",
             "delay_ms",
+            "jitter_ms",
             "max_pages",
             "concurrency",
             "use_sitemap",
@@ -118,6 +119,7 @@ pub(crate) struct FieldBook {
     selector: ConfigValue<String>,
     // network / crawler
     delay_ms: ConfigValue<u64>,
+    jitter_ms: ConfigValue<u64>,
     timeout_secs: ConfigValue<u64>,
     concurrency: ConfigValue<ConcurrencyConfig>,
     // output / export
@@ -158,6 +160,7 @@ pub struct NormalizedConfig {
     pub use_sitemap: ConfigValue<bool>,
     pub selector: ConfigValue<String>,
     pub delay_ms: ConfigValue<u64>,
+    pub jitter_ms: ConfigValue<u64>,
     pub timeout_secs: ConfigValue<u64>,
     pub concurrency: ConfigValue<ConcurrencyConfig>,
     pub output: ConfigValue<PathBuf>,
@@ -186,6 +189,7 @@ impl NormalizedConfig {
             use_sitemap: book.use_sitemap,
             selector: book.selector,
             delay_ms: book.delay_ms,
+            jitter_ms: book.jitter_ms,
             timeout_secs: book.timeout_secs,
             concurrency: book.concurrency,
             output: book.output,
@@ -214,6 +218,7 @@ impl NormalizedConfig {
         opts.crawl.use_sitemap = self.use_sitemap.value;
         opts.crawl.selector = self.selector.value;
         opts.network.delay_ms = self.delay_ms.value;
+        opts.network.jitter_ms = self.jitter_ms.value;
         opts.network.timeout_secs = self.timeout_secs.value;
         // Explicit operator concurrency (CLI/TOML, not "auto") feeds
         // the budget model as a crawl-tier override — design D4
@@ -269,6 +274,7 @@ fn stage_defaults() -> FieldBook {
         use_sitemap: ConfigValue::new(false, ConfigSource::Default),
         selector: ConfigValue::new("body".to_string(), ConfigSource::Default),
         delay_ms: ConfigValue::new(1000, ConfigSource::Default),
+        jitter_ms: ConfigValue::new(0, ConfigSource::Default),
         timeout_secs: ConfigValue::new(30, ConfigSource::Default),
         concurrency: ConfigValue::new(ConcurrencyConfig::default(), ConfigSource::Default),
         output: ConfigValue::new(PathBuf::from("output"), ConfigSource::Default),
@@ -308,6 +314,16 @@ fn stage_config_file_crawl(book: &mut FieldBook, config: &ConfigDefaults) -> usi
     }
     if let Some(v) = config.delay_ms {
         if try_write(&mut book.delay_ms, v, ConfigSource::ConfigFile, "delay_ms") {
+            n += 1;
+        }
+    }
+    if let Some(v) = config.jitter_ms {
+        if try_write(
+            &mut book.jitter_ms,
+            v,
+            ConfigSource::ConfigFile,
+            "jitter_ms",
+        ) {
             n += 1;
         }
     }
@@ -464,6 +480,16 @@ fn stage_env_cli_crawl(book: &mut FieldBook, args: &Args, sources: &ArgSources) 
     }
     if let Some(src) = sources.source_of("delay_ms") {
         if try_write(&mut book.delay_ms, args.crawler.delay_ms, src, "delay_ms") {
+            n += 1;
+        }
+    }
+    if let Some(src) = sources.source_of("jitter_ms") {
+        if try_write(
+            &mut book.jitter_ms,
+            args.crawler.jitter_ms,
+            src,
+            "jitter_ms",
+        ) {
             n += 1;
         }
     }

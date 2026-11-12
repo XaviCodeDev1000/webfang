@@ -108,6 +108,13 @@ pub struct CrawlerConfig {
     pub concurrency: NonZeroUsize,
     /// Delay between requests in milliseconds (rate limiting)
     pub delay_ms: u64,
+    /// Random addition to each paced interval, in milliseconds (#2610).
+    ///
+    /// The effective interval is uniform over
+    /// `[delay_ms, delay_ms + jitter_ms]`: never faster than the configured
+    /// delay, never the same twice. `0` — the default — keeps the fixed
+    /// cadence exactly as it is today.
+    pub jitter_ms: u64,
     /// User agent string
     pub user_agent: String,
     /// Timeout for each request in seconds
@@ -169,6 +176,7 @@ impl CrawlerConfig {
             exclude_patterns: Vec::new(),
             concurrency: default_concurrency(), // Hardware-aware: nproc - 1 for 4C CPU
             delay_ms: 500,                      // Hardware-aware: 500ms for HDD
+            jitter_ms: 0,
             user_agent: "webfang/2.0.0 (High-Performance Extraction)".to_string(),
             timeout_secs: 30,
             timeout_secs_explicit: false,
@@ -226,6 +234,7 @@ pub struct CrawlerConfigBuilder {
     exclude_patterns: Vec<String>,
     concurrency: NonZeroUsize,
     delay_ms: u64,
+    jitter_ms: u64,
     user_agent: String,
     timeout_secs: u64,
     timeout_secs_explicit: bool,
@@ -248,6 +257,7 @@ impl CrawlerConfigBuilder {
             exclude_patterns: Vec::new(),
             concurrency: default_concurrency(),
             delay_ms: 500,
+            jitter_ms: 0,
             user_agent: "webfang/2.0.0 (High-Performance Extraction)".to_string(),
             timeout_secs: 30,
             timeout_secs_explicit: false,
@@ -309,6 +319,17 @@ impl CrawlerConfigBuilder {
     /// Set delay between requests in milliseconds
     pub fn delay_ms(mut self, ms: u64) -> Self {
         self.delay_ms = ms;
+        self
+    }
+
+    /// Set the random addition to each paced interval, in milliseconds
+    /// (#2610).
+    ///
+    /// The effective interval becomes uniform over
+    /// `[delay_ms, delay_ms + jitter_ms]`. Zero — the default — keeps the
+    /// fixed cadence.
+    pub fn jitter_ms(mut self, ms: u64) -> Self {
+        self.jitter_ms = ms;
         self
     }
 
@@ -405,6 +426,7 @@ impl CrawlerConfigBuilder {
             exclude_patterns: self.exclude_patterns,
             concurrency: self.concurrency,
             delay_ms: self.delay_ms,
+            jitter_ms: self.jitter_ms,
             user_agent: self.user_agent,
             timeout_secs: self.timeout_secs.max(1),
             timeout_secs_explicit: self.timeout_secs_explicit,
