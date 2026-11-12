@@ -169,7 +169,8 @@ miri|advisory FFI lane (continue-on-error, reported by notify)
 miri-infra-fast|advisory FFI lane
 miri-infra-slow|advisory FFI lane
 coverage|report-only upload, never gates
-flake-detection|nightly retries-0 flake report, job-level continue-on-error (#2286)"
+flake-detection|nightly retries-0 flake report, job-level continue-on-error (#2286)
+cfg-windows-lint|planner-gated cfg(windows) cross-lint (#2658 class found by #2732/#2733); deterministic lint, promoted to required after 20 consecutive green runs"
 
 while IFS= read -r job; do
   [[ -n "$job" ]] || continue

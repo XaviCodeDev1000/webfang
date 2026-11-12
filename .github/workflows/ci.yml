@@ -1491,6 +1491,89 @@ jobs:
       # coexistence are pinned by the platform module's unit tests.
 
   # ============================================================================
+  # CFG(WINDOWS) CROSS-LINT — the gate #2732/#2733 proved was missing (#2658).
+  #
+  # THE CLASS, on evidence. On 2026-11-12 the `Tests (windows-latest)` lane went
+  # red on main tip c2a1bfa7 for TWO defects that every Linux gate had passed:
+  # a `recover_spool` helper and a `std::time::Duration` import left dead behind
+  # a `#[cfg(unix)]` test, and an SSRF row whose new per-site budget sat under
+  # the latency Windows legitimately needs inside the trybuild window. Neither
+  # is visible from a Linux host: `cfg(unix)` never compiles the other arm.
+  #
+  # WHY A CROSS-CHECK AND NOT "wait for the lane". The lane that compiles
+  # cfg(windows) runs only on push/schedule (#2342), so the feedback loop for
+  # this class is "merge, push, red, new PR". This job moves it to pre-merge.
+  #
+  # WHY `check` AND NOT `test` (and why that is the whole point).
+  # `cargo check --target … --tests` type-checks the test surface under
+  # cfg(windows) WITHOUT linking or running it, so it catches exactly the
+  # class above — broken imports, dead code, cfg-gated compile errors — and
+  # carries NO spawn/timing/port flake surface at all. `unused_imports` and
+  # `dead_code` are rustc lints, so plain `-D warnings` catches them; clippy
+  # would add parity with the Linux gate but is not what detects this class.
+  #
+  # HONEST ABOUT THE COST. `cargo check` still RUNS the `-sys` build scripts
+  # (they are host programs), so btls-sys still invokes cmake and compiles
+  # BoringSSL for this target — the saving against `cargo test` is the LINK,
+  # not the C build, and the C build is the dominant cost. The cross-compile
+  # route is the official one (The Rustup developer guide, "Checking
+  # Windows-specific code on Unix"); `cargo-xwin` would add an MSVC SDK and
+  # clang-cl for no gain, since cfg(windows) is identical across both triples.
+  #
+  # NO rust-cache IN THIS PILOT, deliberately: one target directory of this
+  # workspace measures ~13 GB locally and GitHub caps repository cache at
+  # 10 GB, and ci.yml's rule (see the rust-cache block) requires every NEW
+  # consumer to justify its GB. So the pilot pays the C build cold and we
+  # MEASURE it (2-3 runs). With that number: promote, or fall back to
+  # schedule-only, or justify the GB.
+  #
+  # EXIT CONDITION (same shape as test-crossplatform above): this job is NON
+  # REQUIRED while it proves itself — a runner-image or mingw/cmake
+  # incompatibility unrelated to a PR must not be able to redden every PR.
+  # Promote it into `gate`'s needs only after 20 consecutive green runs, AND
+  # only if the measured cost is acceptable. It is a lint, so unlike the
+  # timing lane its failures are deterministic and safe to gate on — once
+  # proven.
+  #
+  # Path-gated by `needs_crossplatform`, the same fail-closed detector
+  # (scripts/ci_crossplatform_scope.sh) that gates the crossplatform lane: a
+  # diff whose changed .rs files carry cfg markers, or that touches config /
+  # the toolchain pin, runs it. Its documented residual risk (a change with no
+  # cfg marker that still breaks Windows) is the same one #2282 already
+  # accepts for the lane, and the nightly full-scope run still covers it.
+  # ============================================================================
+  cfg-windows-lint:
+    name: cfg(windows) cross-lint (linux host, windows target)
+    needs: [change-scope]
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_crossplatform == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      # The target's std plus the mingw cross-compiler its `-sys` build
+      # scripts need (BoringSSL/zstd compile C for this target). Explicit
+      # compiler selection follows the rustup guide's fallback branch: cargo
+      # usually auto-detects mingw, and being explicit keeps the job
+      # deterministic instead of depending on the runner image's PATH.
+      - name: Install the windows-gnu target and its cross-compiler
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Type-check the test surface under cfg(windows)
+        env:
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
+        run: cargo check --target x86_64-pc-windows-gnu -p webfang_core --tests --locked -- -D warnings
+
+  # ============================================================================
   # TEST RELEASE PROVENANCE (L1) — Behavioral acceptance matrix for
   # check_release_provenance.sh (webfang#1484).
   # Runs the hermetic test suite against a synthetic git repo with a fake `gh`.
