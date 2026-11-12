@@ -337,6 +337,52 @@ where
         })
 }
 
+/// Spawn a pre-built command under the shared [`SPAWN_LATENCY_BUDGET`] and
+/// hand its captured [`std::process::Output`] back to the caller, feeding
+/// `stdin` to the child when present.
+///
+/// This is the common shape of the budgeted spawn sites (#2658 backlog):
+/// build the [`std_cmd`] arguments at the call site, call this, then assert
+/// on the returned output OUTSIDE the budget — an assert inside the closure
+/// would judge the output of a child the budget may have killed. The attempt
+/// closure is `Fn` (it runs once per attempt) and `std::process::Command` has
+/// no `Clone`, so the builder is snapshotted into owned parts here and a
+/// fresh command is rebuilt per attempt; `get_envs` already collapses each
+/// variable to its final state, so the rebuild is exact.
+pub(crate) async fn spawn_budgeted(
+    what: &'static str,
+    cmd: std::process::Command,
+    stdin: Option<&[u8]>,
+) -> std::process::Output {
+    use std::ffi::{OsStr, OsString};
+    let stdin = stdin.map(<[u8]>::to_vec);
+    let program = cmd.get_program().to_os_string();
+    let args: Vec<OsString> = cmd.get_args().map(OsStr::to_os_string).collect();
+    let envs: Vec<(OsString, Option<OsString>)> = cmd
+        .get_envs()
+        .map(|(key, value)| (key.to_os_string(), value.map(OsStr::to_os_string)))
+        .collect();
+    assert_spawn_within_output_blocking(SPAWN_LATENCY_BUDGET, what, move |child| {
+        let mut command = std::process::Command::new(&program);
+        command.args(&args);
+        for (key, value) in &envs {
+            match value {
+                Some(value) => {
+                    command.env(key, value);
+                },
+                None => {
+                    command.env_remove(key);
+                },
+            }
+        }
+        match stdin.as_deref() {
+            Some(input) => child.output_with_stdin(command, input),
+            None => child.output(command),
+        }
+    })
+    .await
+}
+
 /// Sealed verdict of [`run_under_budget`], which [`assert_spawn_within`] turns
 /// into a panic.
 ///
