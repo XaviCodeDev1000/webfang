@@ -22,7 +22,7 @@ use tempfile::TempDir;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use common::cli_harness::cmd;
+use common::cli_harness::{spawn_budgeted, std_cmd};
 
 fn substantial(title: &str) -> String {
     let body =
@@ -73,17 +73,49 @@ fn count_md(root: &std::path::Path) -> usize {
         .count()
 }
 
+/// Recover a batch spool into `recovered` under the shared spawn budget
+/// (#2658 backlog), returning the captured output.
+///
+/// The spawn runs through `spawn_budgeted`, which applies
+/// `SPAWN_LATENCY_BUDGET`, kills and reaps an overrunning child and retries
+/// once; the caller asserts OUTSIDE the budget, on the returned `Output` and
+/// the files on disk.
+async fn recover_spool(
+    spool: &std::path::Path,
+    recovered: &std::path::Path,
+) -> std::process::Output {
+    let mut command = std_cmd();
+    command
+        .arg("recover")
+        .arg("--spool")
+        .arg(spool)
+        .arg("-o")
+        .arg(recovered);
+    spawn_budgeted(
+        "killed_batch_leaves_a_consistent_spool_and_sidecar_recoverable",
+        command,
+        None,
+    )
+    .await
+}
+
 /// Run `--batch` over `urls` (stdin) into `out` with extra args; assert success.
-fn run_batch_stdin(out: &std::path::Path, urls: String, extra: &[&str]) {
-    let mut c = cmd();
-    c.arg("--batch").arg("--output").arg(out);
+///
+/// The spawn runs under the shared budget via `spawn_budgeted` (#2658 backlog):
+/// the raw `.timeout(60s)` was not a bound a test process can rely on, and the
+/// success assert now lives OUTSIDE the budget, on the returned `Output`.
+async fn run_batch_stdin(out: &std::path::Path, urls: String, extra: &[&str]) {
+    let mut command = std_cmd();
+    command.arg("--batch").arg("--output").arg(out);
     for a in extra {
-        c.arg(a);
+        command.arg(a);
     }
-    c.write_stdin(urls)
-        .timeout(Duration::from_secs(60))
-        .assert()
-        .success();
+    let output = spawn_budgeted("run_batch_stdin", command, Some(urls.as_bytes())).await;
+    assert!(
+        output.status.success(),
+        "run_batch_stdin must succeed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[tokio::test]
@@ -96,7 +128,7 @@ async fn export_checkpoint_flushes_markdown_during_batch() {
         .map(|i| format!("{}/p{i}\n", server.uri()))
         .collect::<String>();
 
-    run_batch_stdin(out.path(), urls, &["--export-checkpoint", "2"]);
+    run_batch_stdin(out.path(), urls, &["--export-checkpoint", "2"]).await;
 
     // All 3 pages end up as markdown (the final flush covers the tail past
     // the last checkpoint).
@@ -136,7 +168,8 @@ async fn export_checkpoint_zero_writes_no_sidecar() {
         out.path(),
         format!("{}\n", server.uri()),
         &["--export-checkpoint", "0"],
-    );
+    )
+    .await;
 
     let sidecar = out.path().join(".webfang-batch-capture.progress.json");
     assert!(
@@ -160,25 +193,37 @@ async fn checkpoint_then_resume_skips_flushed_pages() {
         .map(|i| format!("{}/p{i}\n", server.uri()))
         .collect::<String>();
 
-    let run = |urls: String| {
-        cmd()
+    // Both runs spawn through the shared budget (`spawn_budgeted` applies
+    // `SPAWN_LATENCY_BUDGET` internally: kill+reap+one retry, #2658 backlog) —
+    // the raw `.timeout(60s)` closure is gone, and the success assert lives
+    // OUTSIDE the budget on the returned `Output`.
+    async fn run(state: &std::path::Path, out: &std::path::Path, urls: String) {
+        let mut command = std_cmd();
+        command
             .arg("--batch")
             .arg("--export-checkpoint")
             .arg("2")
             .arg("--resume")
             .arg("--state-dir")
-            .arg(state.path())
+            .arg(state)
             .arg("--output")
-            .arg(out.path())
-            .write_stdin(urls)
-            .timeout(Duration::from_secs(60))
-            .assert()
-            .success()
-    };
+            .arg(out);
+        let output = spawn_budgeted(
+            "checkpoint_then_resume_skips_flushed_pages",
+            command,
+            Some(urls.as_bytes()),
+        )
+        .await;
+        assert!(
+            output.status.success(),
+            "batch run must succeed; stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     // Run 1: checkpoint flush commits the pages.
-    run(urls.clone());
+    run(state.path(), out.path(), urls.clone()).await;
     // Run 2: same command — every URL is COMMITTED, nothing re-fetches.
-    run(urls);
+    run(state.path(), out.path(), urls).await;
 
     // wiremock's expect(1) fails the test itself if any URL was fetched
     // twice; here we additionally assert the state store holds 3 COMMITTED
@@ -280,14 +325,7 @@ async fn killed_batch_leaves_a_consistent_spool_and_sidecar_recoverable() {
 
     // S7(i)+(iii) via recover: every page in the spool converts to a .md.
     let recovered = TempDir::new().unwrap();
-    let recover_assert = cmd()
-        .arg("recover")
-        .arg("--spool")
-        .arg(&spool)
-        .arg("-o")
-        .arg(recovered.path())
-        .timeout(Duration::from_secs(60))
-        .assert();
+    let recover_output = recover_spool(&spool, recovered.path()).await;
     let md_count = count_md(recovered.path());
     let spool_lines = std::fs::read_to_string(&spool)
         .unwrap()
@@ -316,6 +354,6 @@ async fn killed_batch_leaves_a_consistent_spool_and_sidecar_recoverable() {
         fetches <= 8,
         "no URL fetched more than once: {fetches} fetches for 8 URLs"
     );
-    let _ = recover_assert;
+    let _ = recover_output;
     let _ = Stdio::null;
 }

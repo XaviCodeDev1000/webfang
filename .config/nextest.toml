@@ -208,6 +208,27 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 filter = 'test(=test_ssrf_literal_seeds_rejected_before_fetch)'
 slow-timeout = { period = "900s", terminate-after = 1, grace-period = "30s" }
 
+# `checkpoint_then_resume_skips_flushed_pages` (batch_checkpoint_test): spawnea
+# el binario DOS VECES dentro del MISMO test (la corrida inicial + el
+# relanzamiento con `--resume`), cada spawn bajo el presupuesto compartido de
+# 60s (`SPAWN_LATENCY_BUDGET`) con un reintento ⇒ 2 x 2 x 60s = 240s en el peor
+# caso, EXACTAMENTE el techo de PARED CLOCK del perfil `ci` (120s x 2 = 240s).
+# Sentarse justo SOBRE el techo es la misma falla esperando un runner más
+# lento (mismo criterio que el override de
+# `the_retired_shims_are_unknown_arguments` más arriba).
+#
+# Override POR TEST, no global: el techo común sigue cazando cuelgues reales
+# en el resto de la suite. 600s con terminate-after 1 da holgura sobre los 240s
+# del peor caso y queda por debajo del `global-timeout = "1h"` del perfil `ci`
+# (que hereda este override vía `inherits = "default"`).
+#
+# `test(=...)` es el selector de coincidencia EXACTA sobre el nombre del test:
+# a secas `test(...)` hace substring match y aplicaría este techo a cualquier
+# test futuro cuyo nombre contenga el texto.
+[[profile.default.overrides]]
+filter = 'test(=checkpoint_then_resume_skips_flushed_pages)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
+
 [profile.ci]
 # Hereda de `default` (#2306; inherits existe desde 0.9.115): la política
 # compartida — retries con backoff, default-filter, flaky-result y el override
