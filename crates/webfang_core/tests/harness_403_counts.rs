@@ -14,21 +14,25 @@
 //! seed 403 is terminal after a single arrival, so both count assertions
 //! go red (verified by temporarily reverting the rotation, then restoring).
 //!
-//! Posture: the shared `cmd()` harness (entry layer disarmed for the
+//! Posture: the shared `std_cmd()` harness (entry layer disarmed for the
 //! loopback fixture, child env only — no global mutation). Determinism:
 //! counts only, no timing assertions, no sleeps.
 
 #[path = "common/mod.rs"]
 mod common;
 
-use common::cli_harness::cmd;
+use common::cli_harness::{spawn_budgeted, std_cmd};
 use common::fixture_server::start_fixture;
 
-const RUN_TIMEOUT_SECS: u64 = 120;
-
-/// Run a single-page scrape of `url` to completion, returning the output.
-fn scrape_once(url: &str, out: &tempfile::TempDir) -> std::process::Output {
-    cmd()
+/// Run a single-page scrape of `url` to completion under the shared spawn
+/// budget, returning the captured output.
+async fn scrape_once(
+    what: &'static str,
+    url: &str,
+    out: &tempfile::TempDir,
+) -> std::process::Output {
+    let mut command = std_cmd();
+    command
         .arg("--url")
         .arg(url)
         .arg("--single-page")
@@ -38,10 +42,8 @@ fn scrape_once(url: &str, out: &tempfile::TempDir) -> std::process::Output {
         .arg("--max-retries")
         .arg("3")
         .arg("--timeout-secs")
-        .arg("10")
-        .timeout(std::time::Duration::from_secs(RUN_TIMEOUT_SECS))
-        .output()
-        .expect("spawn webfang")
+        .arg("10");
+    spawn_budgeted(what, command, None).await
 }
 
 /// Collect every `.md` artifact under `dir` (files live in domain subdirs).
@@ -72,7 +74,12 @@ async fn always_403_costs_seed_plus_one_rotation() {
     let (base, log) = start_fixture().await;
     let out = tempfile::TempDir::new().expect("temp output dir");
 
-    let output = scrape_once(&format!("{base}/forbidden-always"), &out);
+    let output = scrape_once(
+        "always_403_costs_seed_plus_one_rotation",
+        &format!("{base}/forbidden-always"),
+        &out,
+    )
+    .await;
 
     assert!(
         !output.status.success(),
@@ -104,7 +111,12 @@ async fn default_ua_403_recovers_on_the_rotated_retry() {
     let (base, log) = start_fixture().await;
     let out = tempfile::TempDir::new().expect("temp output dir");
 
-    let output = scrape_once(&format!("{base}/forbidden-default-ua"), &out);
+    let output = scrape_once(
+        "default_ua_403_recovers_on_the_rotated_retry",
+        &format!("{base}/forbidden-default-ua"),
+        &out,
+    )
+    .await;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
