@@ -386,6 +386,7 @@ make_fixture() {
     test_docs_version_pins.sh test_docs_version_pins_wiring.sh \
     test_bump_docs_version_pins.sh test_apply_release_pins.sh \
     test_release_pins_wiring.sh test_declare_pending_publication.sh \
+    test_await_release_tag.sh \
     test_mcp_surface_wiring.sh test_merge_when_green_breaking.sh \
     test_ci_merge_when_green.sh test_apply_tag_ruleset.sh test_ci_metrics.sh \
     test_ci_mutant_shards.sh test_file_size.sh test_bug_discovery_report.sh \
