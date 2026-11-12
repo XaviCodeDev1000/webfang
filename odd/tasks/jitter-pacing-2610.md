@@ -133,22 +133,28 @@ Commit 1 (`7f2ca5de`, the limiter core) is the fine-grained one — the gate, th
 arithmetic, the cancellation rollback, the unit tests. Commit 2 (`965fcac1`) is mechanical
 plumbing: spec → argv → preflight → options → the three limiter builders. Commit 3
 (`f7da4b8e`) only spells the semantics out in `--help` and the docs. Commit 4
-(`84667b71`) is the mission record (`odd/tasks/jitter-pacing-2610.md`) — no product code.
+(`f42d955b`) is the mission record (`odd/tasks/jitter-pacing-2610.md`) — no product code.
+Commit 5 (`286c6e11`) moves the gate into its own module (`rate_limiter/jitter.rs`) and
+raises the file-size ratchet. Commit 6 (`4bb4ec82`) is the independent verifier's fix
+batch — the binary's final merge now copies `jitter_ms`, the per-URL rebuild carries it,
+and the zero-delay rule answers "no pacing" only when there is no jitter either.
 
 ## Verification
 
-- `cargo nextest run --workspace --all-features` → 5504 passed, 7 skipped.
+- `cargo nextest run --workspace --all-features` → 5508 passed, 7 skipped.
 - `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` → clean.
 - `cargo fmt --all -- --check` → clean.
 - RED proof: removing the jitter from `build_batch_rate_limiter` makes
   `jitter_paces_every_request_not_only_the_refills` fail — the E2E is not vacuous.
 - `gentle-ai review assess --base-ref 92d9f241 --committed-only` → risk `high`, review due
   (the jitter gate adds shared scheduling state to the shared rate limiter).
+- Native review: APPROVED (risk / resilience / reliability; zero BLOCKER, zero CRITICAL) —
+  receipt `gentle-ai.review-acknowledged/v1`, lineage `review-3lens-a41f9c`, authority burned.
 ```
 
 ### Verification evidence
 
-- `cargo nextest run --workspace --all-features` → **5504 tests run, 5504 passed, 7 skipped** (exit 0).
+- `cargo nextest run --workspace --all-features` → **5508 tests run, 5508 passed, 7 skipped** (exit 0).
 - `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` → clean.
 - `cargo fmt --all -- --check` → clean (after one `cargo fmt --all` fixer pass).
 - `cargo doc --workspace --all-features --no-deps` with `RUSTDOCFLAGS=-D warnings` → exit 0, HTML generated.
@@ -224,3 +230,21 @@ plumbing: spec → argv → preflight → options → the three limiter builders
   `--jitter-ms` rustdoc and in `--help`. (2) `--help` now says the mean interval becomes
   `delay + jitter/2` (the request rate drops) and that with `0` a run that fits in the
   burst is not paced at all; the help snapshots were regenerated.
+- **L9** (2026-11-12) — Independent verifier (`gentle-ai-verify`) returned NEEDS_FIX: S2–S8
+  held, S1 was broken by ONE blocker (the binary's final merge in
+  `crates/webfang_cli/src/main.rs` never copied `jitter_ms`, so a TOML-configured jitter was
+  silently dropped) plus two advisories (the per-URL rebuild lost the jitter; the zero-delay
+  rule said "no pacing" while the crawl path clamped to 1 ms). All three are fixed in
+  `4bb4ec82`, each with a regression test, and the RED proof was observed by reverting the
+  fixes (the TOML test then saw `jitter_ms: 0` instead of 250, and the jitter-alone test
+  found no wiring log at all).
+- **L10** (2026-11-12) — Native review (RDD) of the corrected candidate: assess → risk
+  `high` / review due; consent GRANTED by the maintainer; lineage `review-3lens-a41f9c`
+  (risk + resilience + reliability — the readability actor produced no output through the
+  OpenCode transport and was dropped from the scope). Result: **APPROVED**, zero BLOCKER and
+  zero CRITICAL, receipt `gentle-ai.review-acknowledged/v1` with the authority burned.
+  Advisory findings left for later work, never for this candidate: `R4-001` (an OS-RNG
+  failure at construction degrades to "no pacing at all" instead of token-bucket-only
+  pacing — WARNING) and `R4-002` (a cancelled reservation that is no longer the latest
+  leaves its slot stranded — WARNING); plus suggestions on the `SLOT_HORIZON` fallback log,
+  the mutex contention, and the documentation of `jitter_ms`.
