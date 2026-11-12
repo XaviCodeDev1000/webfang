@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.7.0] - 2026-11-12
+
+
+### 🎉 Added
+
+- --jitter-ms — jitter ascendente del delay para romper la cadencia metronómica ([#2752](https://github.com/XaviCodeDev1000/webfang/pull/2752))
+
+### 🧪 Testing
+
+- Extract the >100KB WAF entropy rows so their Miri gate fits ([#2757](https://github.com/XaviCodeDev1000/webfang/pull/2757))
 ## [7.6.6] - 2026-11-12
 
 
