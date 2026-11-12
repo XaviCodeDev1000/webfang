@@ -943,6 +943,16 @@ lane_fmt_and_guards() {
     bash scripts/check_concurrency_lints.sh
   run_guard "concurrency lint semantics harness (#1616)" scripts/test_concurrency_lints.sh \
     bash scripts/test_concurrency_lints.sh
+  # Workflow-level concurrency hygiene (#2775/#2776): a `workflow_dispatch` whose
+  # concurrency group has no per-run discriminator may not cancel on that event.
+  # Deliberately does NOT demand uniqueness where `cancel-in-progress` is false:
+  # those runs queue instead of destroying each other, which the repo chooses on
+  # purpose at benches.yml ("never kill a nightly mid-measurement") and
+  # ci-health.yml ("never drop a tracking update mid-write").
+  run_guard "workflow concurrency hygiene gate (#2776)" scripts/check_workflow_concurrency_hygiene.sh \
+    bash scripts/check_workflow_concurrency_hygiene.sh
+  run_guard "workflow concurrency hygiene semantics harness (#2776)" scripts/test_workflow_concurrency_hygiene.sh \
+    bash scripts/test_workflow_concurrency_hygiene.sh
   # File-size ratchet (the AGENTS.md ~500-line rule; ODD
   # odd/tasks/file-size-ratchet.md): a file NOT in the baseline fails above
   # the hard limit, a grandfathered file cannot grow one line, and orphaned
