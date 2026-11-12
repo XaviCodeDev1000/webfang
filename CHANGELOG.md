@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.6.6] - 2026-11-12
+
+
+### 🏗️ Architecture Improvements
+
+- Split the ssrf_guard.rs test module into six topic files ([#2745](https://github.com/XaviCodeDev1000/webfang/pull/2745))
+
+### 🧪 Testing
+
+- Bound ssrf_rfc1918_e2e spawns with the shared spawn latency budget ([#2732](https://github.com/XaviCodeDev1000/webfang/pull/2732))
+- Bound the first backlog batch's spawns with the shared spawn latency budget ([#2734](https://github.com/XaviCodeDev1000/webfang/pull/2734))
+- Bound budget_override spawns with the shared spawn latency budget ([#2731](https://github.com/XaviCodeDev1000/webfang/pull/2731))
+- Bound the second backlog batch's spawns with the shared spawn latency budget ([#2736](https://github.com/XaviCodeDev1000/webfang/pull/2736))
+- Bound the third backlog batch's spawns with the shared spawn latency budget ([#2735](https://github.com/XaviCodeDev1000/webfang/pull/2735))
+- Bound batch_checkpoint spawns with the shared spawn latency budget ([#2733](https://github.com/XaviCodeDev1000/webfang/pull/2733))
+- Give the SSRF row spawns a per-site latency budget, and gate batch_checkpoint's unix-only helpers ([#2748](https://github.com/XaviCodeDev1000/webfang/pull/2748))
 ## [7.6.5] - 2026-11-12
 
 
