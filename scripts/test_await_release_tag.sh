@@ -192,5 +192,29 @@ else
   fail "(e) a pre-merge clone is fast-forwarded to the main the tag points at (rc=$RC: $(cat "$WORK/out"))"
 fi
 
+# ─── (f) a tagged version with non-releasing commits on top is not awaited ───
+# The release policy filters which commits may cut a version
+# (release-plz.toml `release_commits`), so a `test:`/`ci:`/`refactor:` commit
+# lands on main WITHOUT changing [workspace.package] version. The guard keys on
+# the DECLARED version, not on HEAD: it must exit at once, because there is no
+# tag missing.
+# NEGATION: a guard that waits for a tag at HEAD would block until the timeout
+# (and then fail) on every such commit, which is the normal state of main under
+# the filter.
+D="$WORK/nonreleasing"
+seed_repo "$D" 1.2.3
+git -C "$D/seed" commit --quiet --allow-empty -m "test: gate the resume tests"
+git -C "$D/seed" commit --quiet --allow-empty -m "ci: install nasm"
+git -C "$D/seed" push --quiet origin main
+RC=0
+run_guard "$D/clone" 1 1
+if [[ $RC -eq 0 ]] &&
+  grep -qF 'v1.2.3 is tagged' "$WORK/out" &&
+  [[ "$(git -C "$D/clone" rev-parse HEAD)" == "$(git -C "$D/origin.git" rev-parse main)" ]]; then
+  pass "(f) a tagged version with non-releasing commits on top is not awaited"
+else
+  fail "(f) a tagged version with non-releasing commits on top is not awaited (rc=$RC: $(cat "$WORK/out"))"
+fi
+
 printf '\nharness: %d ok, %d fail\n' "$PASSED" "$FAILED"
 [[ $FAILED -eq 0 ]]

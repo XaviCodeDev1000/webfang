@@ -18,6 +18,27 @@ git_only = true
 # untracked in #1200, so the checkout is clean again.
 allow_dirty = false
 
+# Which commits may cut a version. Without this key release-plz bumps on EVERY
+# commit (the official default: "release-plz updates the package on every
+# commit"), so a `test:`, `ci:`, `docs:` or plain `refactor:` commit publishes a
+# tag, a GitHub Release with binaries and a support-line entry for a change no
+# user can observe. Measured: v7.7.2 was proposed for the single `test:` commit
+# #2782.
+#
+# Rule: these types always release; ANY type releases when it is breaking
+# (`!`, with or without scope). The second branch is deliberately generic — the
+# repo's convention puts the canonical `!` in the squash subject (AGENTS.md,
+# "Breaking change"), and breaking refactors are real here
+# (`refactor(exporter)!:` #2391 -> v7.0.0, `refactor(cli)!:` #2145 -> v5.0.0).
+#
+# `chore(deps)` is in the first branch on purpose: a dependency bump changes the
+# binary, and for a binaries-only product the user cannot rebuild. The repo has
+# shipped RUSTSEC fixes under `chore(deps):` (rustix, pulldown-cmark, lru).
+#
+# Pinned by scripts/test_release_commits_regex.sh, which READS this string and
+# runs a table against it: nothing compiles a regex in TOML.
+release_commits = '^(feat|fix|perf|revert|chore\(deps\))(\([^)]+\))?!?:|^[a-z]+(\([^)]+\))?!:'
+
 # All packages move in lockstep under one tag: `v2.0.1`, not `webfang-v2.0.1`,
 # so the tag matches release.yml's `v*` trigger.
 git_tag_enable = true
