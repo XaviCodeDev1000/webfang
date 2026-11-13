@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.7.1] - 2026-11-13
+
+
+### 🏗️ Architecture Improvements
+
+- Move ForbiddenLiteral and its impls to ssrf_guard/forbidden_literal.rs ([#2774](https://github.com/XaviCodeDev1000/webfang/pull/2774))
+
+### 🔧 CI/CD
+
+- Install nasm for the cfg(windows) cross-lint — BoringSSL needs ASM_NASM ([#2773](https://github.com/XaviCodeDev1000/webfang/pull/2773))
 ## [7.7.0] - 2026-11-12
 
 
