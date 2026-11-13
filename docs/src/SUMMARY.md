@@ -5,6 +5,7 @@
 - [Installation & Uninstall](installation.md)
 - [Data Flow & Privacy](data-flow.md)
 - [Release Feature Matrix](release-feature-matrix.md)
+- [Release Process](release-process.md)
 - [Debugging & Observability](debugging.md)
 - [Testing](testing.md)
 - [Troubleshooting](troubleshooting.md)
