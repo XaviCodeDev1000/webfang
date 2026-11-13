@@ -681,11 +681,17 @@ EOF
   # lane; `lane_docs` never runs for a `scripts/**` change, which is the only
   # kind of change that can break them. Offline: mktemp fixtures, a local bare
   # git repo and a fake `gh` on PATH — no cargo, no network.
-  if grep -Eq '^(scripts/(bump_docs_version_pins|test_bump_docs_version_pins|apply_release_pins|test_apply_release_pins|test_release_pins_wiring|declare_pending_publication|test_declare_pending_publication)\.sh|\.github/workflows/(release-plz|ci)\.yml)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+  #
+  # The same block carries the release-tag await guard (webfang#2768): its
+  # script and harness are named in the trigger too, for the same reason — the
+  # only thing that can break them is a `scripts/**` change, which `lane_docs`
+  # never runs.
+  if grep -Eq '^(scripts/(bump_docs_version_pins|test_bump_docs_version_pins|apply_release_pins|test_apply_release_pins|test_release_pins_wiring|declare_pending_publication|test_declare_pending_publication|await_release_tag|test_await_release_tag)\.sh|\.github/workflows/(release-plz|ci)\.yml)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
     run_step "docs pins writer semantics (offline)" bash scripts/test_bump_docs_version_pins.sh
     run_step "release pins orchestrator semantics (offline)" bash scripts/test_apply_release_pins.sh
     run_step "release pins wiring (offline)" bash scripts/test_release_pins_wiring.sh
     run_step "pending publication declaration semantics (offline)" bash scripts/test_declare_pending_publication.sh
+    run_step "release tag await guard semantics (offline)" bash scripts/test_await_release_tag.sh
   else
     skip_step "release pins harnesses" "no release pins files changed"
   fi
@@ -943,6 +949,16 @@ lane_fmt_and_guards() {
     bash scripts/check_concurrency_lints.sh
   run_guard "concurrency lint semantics harness (#1616)" scripts/test_concurrency_lints.sh \
     bash scripts/test_concurrency_lints.sh
+  # Workflow-level concurrency hygiene (#2775/#2776): a `workflow_dispatch` whose
+  # concurrency group has no per-run discriminator may not cancel on that event.
+  # Deliberately does NOT demand uniqueness where `cancel-in-progress` is false:
+  # those runs queue instead of destroying each other, which the repo chooses on
+  # purpose at benches.yml ("never kill a nightly mid-measurement") and
+  # ci-health.yml ("never drop a tracking update mid-write").
+  run_guard "workflow concurrency hygiene gate (#2776)" scripts/check_workflow_concurrency_hygiene.sh \
+    bash scripts/check_workflow_concurrency_hygiene.sh
+  run_guard "workflow concurrency hygiene semantics harness (#2776)" scripts/test_workflow_concurrency_hygiene.sh \
+    bash scripts/test_workflow_concurrency_hygiene.sh
   # File-size ratchet (the AGENTS.md ~500-line rule; ODD
   # odd/tasks/file-size-ratchet.md): a file NOT in the baseline fails above
   # the hard limit, a grandfathered file cannot grow one line, and orphaned

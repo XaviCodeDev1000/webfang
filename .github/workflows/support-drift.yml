@@ -60,7 +60,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: support-drift-${{ github.ref }}
+  # workflow_dispatch carries its own group. `github.head_ref` is EMPTY on that
+  # event (it is only defined on pull_request), so without this the group is one
+  # constant per ref and `cancel-in-progress: true` below makes every manual
+  # run CANCEL the previous one — a run is lost rather than failed, which is the
+  # failure mode that cost ci.yml a 240-minute Miri run at minute 128 (#2776).
+  # This workflow is cheap (two ~5-min jobs), but the class is the same.
+  group: support-drift-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-run-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:

@@ -66,8 +66,33 @@ on:
 concurrency:
   # event_name in the group key: merge_group runs must not cancel (or be
   # canceled by) pull_request runs on the same head branch.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  # `run_id` ONLY for workflow_dispatch (see the long note below): two manual
+  # runs of this workflow would otherwise share one group and kill each other.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-run-{0}', github.run_id) || '' }}
   cancel-in-progress: true
+
+  # WHY `run_id` FOR workflow_dispatch. On `workflow_dispatch` `github.head_ref`
+  # is empty (it is only defined on `pull_request`), so the expression above fell
+  # back to `github.ref` — `refs/heads/main` for every manual run of this
+  # workflow. Every manual run therefore shared the group
+  # `CI-workflow_dispatch-refs/heads/main`, and `cancel-in-progress: true` made
+  # each new one CANCEL the running one. Measured on 2026-11-12: a dispatch at
+  # 17:46:08 was killed at 128 of its 240-min budget by a second dispatch at
+  # 17:55:51, so the `Miri (core)` result of that run is permanently unknown —
+  # not a failure, a lost measurement, which is worse because it is silent.
+  # The class is the one `scripts/check_concurrency_lints.sh` names for Rust:
+  # a one-line edit that is invisible at review time and only fails at runtime.
+  #
+  # The cost, stated rather than discovered: two manual runs no longer cancel
+  # each other, so repeated dispatches now ACCUMULATE (~4 h of runner each).
+  # For a lane whose whole purpose is measurement, completing the run is worth
+  # more than a single in-flight manual run. The other four events keep the old
+  # behaviour exactly — `push` still cancels the CI of a superseded commit,
+  # which is what one wants when a newer commit arrives.
+  #
+  # `github.run_id` is unique per run and `github` is an allowed context for
+  # `concurrency` (GitHub docs: the concurrency group accepts `github`, `inputs`,
+  # `vars`, `needs`, `strategy` and `matrix`).
 
 env:
   CARGO_TERM_COLOR: always
@@ -438,6 +463,23 @@ jobs:
       # exemption. Offline, no repo state touched.
       - name: Concurrency lint semantics harness
         run: bash scripts/test_concurrency_lints.sh
+      # Workflow-level concurrency hygiene (#2775/#2776): a `workflow_dispatch`
+      # whose concurrency group has no per-run discriminator may not set
+      # `cancel-in-progress` to a value that is true for that event, because
+      # `github.head_ref` is EMPTY there and the group would be one constant —
+      # so each manual run would CANCEL the previous one and lose its result
+      # instead of failing. On 2026-11-12 that cost ci.yml a 240-minute Miri
+      # run at minute 128. The tokio gate above covers Rust semaphores; this
+      # one covers the Actions keyword, which nothing covered.
+      - name: Workflow concurrency hygiene gate
+        run: bash scripts/check_workflow_concurrency_hygiene.sh
+      # Semantics harness for the gate above: proves the rule FIRES on the
+      # incident shape, that it does NOT fire where `cancel-in-progress` is
+      # false (those runs queue rather than destroy each other, and the repo
+      # chooses that deliberately at benches.yml and ci-health.yml), and that
+      # it accepts both the fixed shape and a non-dispatchable workflow.
+      - name: Workflow concurrency hygiene semantics harness
+        run: bash scripts/test_workflow_concurrency_hygiene.sh
       # Regression guard for #1784 (follow-up to #1781/#1782): no
       # `cargo nextest run` invocation may hardcode a thread-count flag
       # (`-j`, `--jobs`, `--test-threads`) — `.config/nextest.toml`
@@ -753,6 +795,16 @@ jobs:
       # identity. Without a CI entry point the harness would be inert.
       - name: Pending publication declaration semantics harness
         run: bash scripts/test_declare_pending_publication.sh
+      # The phantom Release PR of webfang#2768: `release-plz release-pr` derives
+      # the next version from `last v* tag..main`, so a main that is ahead of its
+      # own tag (a release in flight, or a broken one) makes it propose a version
+      # that is already on main. The guard refuses that state; this harness pins
+      # the refusal offline (local bare repos as the remote, a sibling release
+      # that pushes the tag mid-wait, a clone that is the pre-merge main). It
+      # belongs here, next to the other release-flow harnesses: the failure is a
+      # workflow step, and only a harness notices its removal.
+      - name: Release tag await guard semantics harness
+        run: bash scripts/test_await_release_tag.sh
       # Edges of the MCP version-marker gate below (#2038): the guard runs with
       # the event's base, `repo-guards` stays unfiltered, and `gate` waits on it
       # in both scopes. Offline, pure text plus one local `git` call: no cargo,
@@ -1575,7 +1627,26 @@ jobs:
         run: |
           rustup target add x86_64-pc-windows-gnu
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64
+          # BOTH compilers, not just gcc. `gcc-mingw-w64-x86-64` ships the C
+          # driver only; the C++ one is `g++-mingw-w64-x86-64` (Debian/Ubuntu
+          # split), and btls-sys needs it to cross-compile BoringSSL.
+          # Without it the job dies in the build script before the Rust code
+          # carrying the `cfg` is ever reached:
+          #   ToolNotFound: failed to find tool "x86_64-w64-mingw32-g++"
+          #   error: failed to run custom build command for `btls-sys`
+          # (g++ alone would be enough for btls-sys, but zstd-sys's C also
+          # needs the gcc driver, so both are installed.)
+          #
+          # AND `nasm`: BoringSSL hand-writes assembly in NASM syntax, and its
+          # own CMakeLists calls `enable_language(ASM_NASM)` (line 374). MinGW's
+          # `as` does NOT satisfy it — NASM is a different assembler with
+          # different syntax. Without it cmake dies before compiling anything:
+          #   CMake Error at CMakeLists.txt:374 (enable_language):
+          #     No CMAKE_ASM_NASM_COMPILER could be found.
+          # This was the FOURTH failure of this job (87 s, run 43294902742), after
+          # the missing C++ driver (78 s) and the cargo-flags error (28 s) — each
+          # one invisible until the job actually ran.
+          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm nasm
       - name: Type-check the test surface under cfg(windows)
         env:
           CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
