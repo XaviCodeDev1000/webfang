@@ -1211,6 +1211,7 @@ cli/preflight.rs	1647	inline	crate::domain::providers::Capability::Completion
 cli/preflight.rs	1704	inline	crate::domain::ssrf_guard::reject_forbidden_literal_url
 cli/preflight.rs	1708	inline	crate::create_http_client
 cli/preflight.rs	1763	inline	crate::should_emit_emoji
+cli/preflight/tests_obscura_version.rs	188	use	crate::infrastructure::observability::test_log_capture::LogBuffer
 cli/retention.rs	23	use	crate::application::crawl_options::CrawlOptions
 cli/retention.rs	137	use	crate::infrastructure::autotuning::env_db_path
 cli/retention.rs	137	use	crate::infrastructure::autotuning::resolve_db_path

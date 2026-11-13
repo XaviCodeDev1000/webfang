@@ -1,0 +1,87 @@
+# M3 — `preflight.rs` (paraguas #2584, ola T2): registro de misión propia
+
+Plan compartido, specs S1–S13 y § Compuertas: `odd/tasks/file-size-t2.md` (llegó a `main` con el PR A de M1; rigen sin recortes, S12). Este archivo es el registro propio de M3 (M3-T0): añade las specs M3, el reparto de tareas y el Log. Monstruo medido en el árbol de hoy (7b847a00) y re-medido en este worktree (S8): `crates/webfang_core/src/cli/preflight.rs` = 3300 líneas, `mod tests` en 1771 ⇒ producción 1770, tests 1530 (46% tests).
+
+## Specs
+
+Las S1–S13 de `file-size-t2.md` aplican íntegras. M3 añade:
+
+**S20 — Censo pre-corte de los privados que llaman los tests (S8 aplicado a visibilidad).** "Qué privados llaman los tests." En `preflight.rs` lo esperable es lo contrario que en `ssrf_guard`: los tests llaman directamente a los helpers de la región de tests (los mismos nombres que en producción). El censo se hace en este worktree ANTES del primer corte y se registra en el Log: para cada ítem de la región de producción, ¿aparece referenciado en la región de tests (línea > 1771)?
+
+**S21 — Re-parentar, nunca ensanchar (refuerza S5).** Cuando un PR mueva un bloque de producción a `cli/preflight/<modulo>.rs`, los ítems movidos quedarán privados de ese módulo y los tests, hijos de `preflight`, dejarán de verlos. La solución es re-parentar los módulos de test como hijos del módulo destino (el `#[path]` se re-apunta, el texto del test no cambia). Diff de modificadores de visibilidad vacío en los PRs de corte (compuerta C11).
+
+**S22 — Estado compartido único entre archivos de test.** Los tests de `preflight.rs` no tocan estado global (no hay `Mutex`/`OnceLock` locales; la serialización es única y ya está centralizada en `webfang_test_utils::EnvGuard`). Partir en archivos hermanos no duplica ningún mutex.
+
+**S23 — La región anidada `normalization_pipeline_tests` no se atraviesa.** `mod normalization_pipeline_tests` vive anidado DENTRO de `mod tests` (2730–3300). Los cortes de producción (1–1770) no la tocan; los tests de producción (1772–2729) se parten por tema; la región anidada se queda intacta en su sitio, con su cadena de `use super::*` re-apuntada si el padre se reestructura (S9).
+
+**S24 — Re-exports del módulo en `mod.rs` (S5).** El padre re-exporta los símbolos que otros módulos consumen: `normalize`, `ArgSources`, `NormalizedConfig`, `merge_budget_overrides`, `check_*`, `resolve_chrome_binary`, `PreflightResult`. Los `pub(crate)` (`FieldBook`, `resolve_chrome_binary_with`) no se re-exportan porque no hay uso externo crate-wide. Cualquier ensanchamiento de visibilidad para mantener un uso externo es un hallazgo de la compuerta C11.
+
+**S25 — PRs de costura por región, no por tamaño arbitrario.** La estructura de banners define las costuras naturales: Normalization (21–843, 823 líneas) · JS strategy dependency preflight (845–1611, 767) · LLM extraction provider gate (1613–1668, 56) · Pre-flight HTTP Connectivity (1670–1756, 87) · Display Helpers (1758–1770, 13). Cada PR mueve una costura completa + sus tests + el `mod` correspondiente.
+
+## Tasks
+
+| ID | Misión / Tarea | Specs | Ruta | Estado | Commit |
+|----|-----|-------|------|--------|--------|
+| M3-T0 | Worktree `refactor/2584-t3-preflight` + este registro + espejo Engram | S1,S12 | inline | done | — |
+| M3-T0a | Censo pre-corte: privados de producción referenciados desde la región de tests | S8,S20 | inline | done (L4) | — |
+| M3-T0b | Censo pre-corte: estado compartido (env, `OnceLock`, `Mutex`, serial, helpers de `mod tests`) | S22 | inline | done (L4) | — |
+| M3-T1 | **PR A** — tests de producción por tema en archivos ≤500 (1772–2721, 49 tests), archivos hermanos sin `tests_support.rs` (los 6 helpers tienen consumidores in-span) | S2,S3,S4,S5,S6,S8,S9,S20,S21 | inline | done (sin commit, L7) | — |
+| M3-T2 | **PR B** — costura Normalization (21–843, 823 líneas) → `cli/preflight/normalization.rs` con `pub use` | S4,S5,S8,S21,S24 | inline | pending | — |
+| M3-T3 | **PR C** — costura JS strategy dependency preflight (845–1611, 767) → `cli/preflight/js_strategy.rs` con `pub use` | S4,S5,S8,S21,S24 | inline | pending | — |
+| M3-T4 | **PR D** — costura LLM gate (1613–1668, 56) + HTTP Connectivity (1670–1756, 87) + Display Helpers (1758–1770, 13) → `cli/preflight/gates.rs` | S4,S5,S8,S21,S24 | inline | pending | — |
+| M3-T5 | **PR E** — re-exports de `mod.rs` verificados contra los usos reales; verificación completa | S5,S8,S12,S13 | inline | pending | — |
+
+### Notas de ejecución que no son opcionales
+
+- **La rama del PR A es la que lleva este plan.** Cada PR posterior abre worktree nuevo desde el `main` ya fusionado. Ningún `git checkout`/`switch`/`stash` en toda la misión.
+- **Los spans de este documento son reales (S8):** medidos con `grep -n` y `wc -l` en el árbol de corte, no copiados de la prosa del plan compartido (que decía 3274/1745 — el archivo creció 26 líneas desde entonces).
+- **`mod.rs` re-exports:** `normalize`, `ArgSources`, `NormalizedConfig`, `merge_budget_overrides`, `check_*`, `resolve_chrome_binary`, `PreflightResult` son los símbolos que `main.rs` consume vía `preflight::`. Se re-exportan en `mod.rs` para que el patrón `use webfang_core::cli::preflight::X` siga funcionando.
+- **`FieldBook` y `resolve_chrome_binary_with` son `pub(crate)` pero no tienen uso externo crate-wide** (verificado con `grep -rn`): no se re-exportan, cero ensanchamiento.
+- **La región anidada `normalization_pipeline_tests` (2730–3300, 28 tests) no se atraviesa en los cortes de producción.** Se re-apunta su `use super::*` si el padre cambia, pero sus 28 tests siguen en su sitio.
+- **Baseline:** `preflight.rs` 3300 en `scripts/quality-baselines.json` (grandfathered), sin drift. `ssrf_guard.rs` ya no está en el baseline (M2 lo sacó).
+
+## Log
+
+- **L1 (2026-11-13, verbatim, pedido original)**: "retome el paraguas #2584, la nueva sesión arranca con mem_context + obs #2919 (tiene el cierre de M2 con todas las cifras y SHAs), el plan odd/tasks/file-size-t2.md (S14–S19) y el registro odd/tasks/file-size-t2-ssrf-guard.md (L1–L18); antes de medir nada, reindexar codedb/codegraph y medir preflight.rs con grep -n/wc -l directo sobre el main fresco — esa fue la lección L15/L16."
+- **L2 (2026-11-13, re-medición con grep, lección L15/L16 aplicada)**: la prosa del plan compartido estaba stale. Medición en main@7b847a00 con `grep -n` y `wc -l`:
+  - `preflight.rs`: **3300 líneas** (no 3274; +26 desde la medición del plan).
+  - `mod tests` en **1771** (no 1745).
+  - Producción: 1770 líneas · Tests: 1530 (46% tests).
+  - `#[test]`: **77** en total (49 en la región de tests 1772–2729 + 28 en `normalization_pipeline_tests` anidada 2730–3300).
+  - `normalization_pipeline_tests` anidada: **2730–3300** (no 2703–3274).
+  - Baseline `scripts/quality-baselines.json`: `preflight.rs` 3300 (sin drift, grandfathered); `ssrf_guard.rs` ya no existe en el baseline (M2 lo sacó con PR #2774).
+- **L3 (2026-11-13, banners reales de las regiones de producción)**: los spans del plan compartido (Normalization 21–816 · JS 817–1584 · LLM 1585–1641 · HTTP 1642–1729 · Display 1730–1744) están desplazados. Banners medidos con `grep -n '^// ==='`:
+  - Normalization pipeline: **21–843** (823 líneas)
+  - JS strategy dependency preflight (#685): **845–1611** (767 líneas)
+  - LLM extraction provider gate (§8b): **1613–1668** (56 líneas)
+  - Pre-flight HTTP Connectivity Check (T-070): **1670–1756** (87 líneas)
+  - Display Helpers: **1758–1770** (13 líneas)
+  - Total: 823+767+56+87+13 = 1746 ≈ 1770 (la diferencia son banners/comentarios al inicio y el hueco antes de `mod tests`).
+- **L4 (2026-11-13, censos pre-corte S20/S22)**:
+  - **Privados que llaman los tests (S20):** 19 helpers privados de producción son llamados directamente desde la región de tests (línea > 1771): `stage_defaults` (21), `stage_config_file` (3), `stage_env_cli` (5), `stage_budget_overrides` (9), `budget_override` (34), `apply_cross_field_rules` (4), `validate_stage` (2), `run_version_probe_with_timeout` (2), `check_js_dependencies_with` (16), `has_path_separator` (8), `parse_pathext` (6), `bare_name_candidates` (6), `first_existing_in_dirs` (7), `resolve_executable_in_path` (6), `parse_obscura_version` (13), `assess_obscura_version` (9), `check_adaptive_selectors_feature_with` (4), `check_adaptive_selectors_capability` (4), `check_adaptive_selectors_capability_with` (4). **Conclusión (S21):** mover cualquier bloque de producción a un módulo hijo re-parentará los tests que lo consumen como hijos de ese módulo, no ensanchando visibilidad.
+  - **Estado compartido (S22):** 0 statics/`Mutex`/`OnceLock` locales en la región de tests; 0 `#[serial]`. La serialización es única y ya está centralizada en `webfang_test_utils::EnvGuard`. Partir en archivos hermanos no duplica ningún mutex.
+  - **`pub(crate)` sin uso externo:** `FieldBook` (L112) y `resolve_chrome_binary_with` (L928) son `pub(crate)` pero `grep -rn` no encuentra uso fuera de `preflight.rs` ⇒ no se re-exportan, cero ensanchamiento.
+  - **`pub` items de la región de tests:** ninguno (0 `pub fn`/`pub const` en línea > 1771).
+- **L5 (2026-11-13, re-exports verificados contra `main.rs`)**: los símbolos que `webfang_cli/src/main.rs` consume vía `preflight::` son: `ArgSources` (import directo), `normalize`, `merge_budget_overrides`, `check_js_dependencies`, `resolve_chrome_binary`, `check_elastic_sink`, `check_db_path_requires_elastic`, `check_adaptive_selectors_feature`, `check_export_format_vector`, `check_extract_with_llm`. `NormalizedConfig` se consume vía el retorno de `normalize` (`normalized.into_crawl_options()`). **Conclusión (S24):** `mod.rs` debe re-exportar `normalize`, `ArgSources`, `NormalizedConfig`, `merge_budget_overrides`, `check_*`, `resolve_chrome_binary`, `PreflightResult` para mantener `use webfang_core::cli::preflight::X`.
+- **L6 (2026-11-13, worktree creado e índices listos)**: worktree `refactor-2584-t3-preflight` creado sobre 7b847a00 (proxy de identidad OK), codedb head=7b847a000a3f, codegraph re-indexado (650 files, 15.327 nodes). Seed de `CARGO_TARGET_DIR` pendiente (obs #2307). Registro Engram pendiente.
+
+- **L7 (2026-11-13, M3-T1 ejecutado en este worktree, SIN commit)**: extracción scriptada con centinelas de `mod tests` (1770–2722, cfg `all(test, not(miri))` #775 preservado en las 8 declaraciones) a 8 archivos hermanos bajo `cli/preflight/`, cada uno con cabecera `use super::*;` verbatim (1772). Spans: js_strategy 1774–1835+2207–2336 (9 tests) · obscura_binary 1836–1991 (7) · obscura_version 1992–2205 (8) · sink_gates 2337–2405 (6) · adaptive_selectors 2406–2512 (7) · export_format 2513–2574 (4) · path_resolution 2575–2677 (6) · version_probe 2678–2721 (2). `normalization_pipeline_tests` (2729–3300) intocada; resulta ser hermana top-level (el `}` de 2722 cierra `mod tests`), su `use super::*` no cambia de significado. Verbatim: pre-fmt 861/861 líneas normalizadas idénticas línea a línea; post-fmt 7/8 archivos idénticos salvo whitespace, `tests_adaptive_selectors` difiere sólo en una coma final que rustfmt elimina al unir líneas (obligatorio para `fmt --check`); el padre fuera del bloque de declaraciones es byte-idéntico a HEAD fuera de `mod tests`. Diff de visibilidad: vacío (0 líneas `pub` en el diff). Tamaños post-fmt: padre 3300→**2370**, hijos 213/156/193/70/102/62/106/45 (todos ≤500). Baseline `--update` descendiente 3300→2370 en el mismo cambio; golden intra-crate refrescado (+1 sitio: `cli/preflight/tests_obscura_version.rs:188 use ...test_log_capture::LogBuffer`). `--list` nextest: 5402 = 5402; `preflight::tests::<fn>` (48 bajo flags por defecto; el 49º, `elastic_with_persistence_ok`, es `cfg(feature="persistence")`) → `preflight::tests_<tema>::<fn>`, 48 renombres 1:1, 0 mal colocados, conjunto de hojas idéntico. Tests: classic 74/1 (flaky conocido `unknown_verdict_names_the_expected_minimum`, igual que la base), `--test-threads=1` 75/75, nextest `--lib preflight` 75/75. Gates: check 0, clippy estricto 0, fmt --check 0, doc 0, file-size 0, test-inventory 0, dead-tests 0, duplication 0, dependency-direction 0, intra-crate 0 (+ sus harnesses 0), ci_fast_gate GREEN (code lane; NOT covered: toolchain, artifact-guards, merge-metrics-guards, test-full, security-deny/audit — ninguno tocado). Desviación del handoff: la línea 1770 no es `#[cfg(test)]` sino `#[cfg(all(test, not(miri)))] // Command::spawn unsupported by Miri (#775)` ⇒ las 8 declaraciones heredan ese cfg (movimiento puro; `#[cfg(test)]` habría cambiado el comportamiento bajo Miri). `.envrc` no escribible en este harness (path sensible bloqueado) ⇒ `ci_fast_gate.sh --allow-unregistered-target` con `CARGO_TARGET_DIR` explícito del worktree.
+- **L8 (2026-11-13, verificación independiente del padre, pre-commit)**: spot-check sobre el diff real, no sobre el reporte: `git status --short` = sólo las 3 modificaciones permitidas + `cli/preflight/` (8 archivos) + el registro; `git diff -U0` del padre = 8 hunks que arrancan TODOS en 1771+ ⇒ la región de producción (1–1770) es byte-idéntica a HEAD; las únicas inserciones netas son las 8 declaraciones `mod tests_<tema>;` con su `#[cfg(all(test, not(miri)))]` (grep de inserciones fuera de esas dos formas = vacío); declaraciones alfabéticas (adaptive_selectors → version_probe) con la nota #775 en la primera; `normalization_pipeline_tests` intacta (ahora en 1800); hijos 106/62/193/156/213/70/102/45 (todos ≤500, el mayor 213); baseline = UNA entrada (`preflight.rs`: 2370) y `check_file_size.sh` en verde. Decisión de ruta: `normalization_pipeline_tests` resulta hermana top-level de `mod tests` (el `}` de 2722 cierra `mod tests`), no hija anidada ⇒ su `use super::*` sigue resolviendo al módulo `preflight` sin re-apuntarse en los PRs B–E (corrigo la nota de S23 del plan compartido, que la describía como anidada dentro de `mod tests`). Registro commiteado CON la unidad (viaja con la rama, precedente L3 de M2).
+- **L9 (2026-11-13, commit de la unidad PR A)**: commit `f9765c7a` en la rama `refactor/2584-t3-preflight` con las 8 extracciones + padre + baseline + golden + registro (12 paths, 1051+/946−). Push/PR pendientes de confirmación explícita del maintainer (precedente M2). **Límite de slice registrado**: la unidad excede la guía de ~400 líneas (1997 líneas de movimiento) y es UNA sola unidad cohesiva por diseño — la extracción completa de `mod tests` es indivisible sin romper el tileo (precedente M2 PR A, misma forma). El slice PR A = `f9765c7a` completo; el próximo slice (PR B, corte de producción Normalization 21–843 + re-parent de sus tests) arranca de este commit y vuelve al rango normal.
+
+## Specs M3 (resumen ejecutivo)
+
+| Archivo | Total | `mod tests` | Producción | Tests | % tests |
+|---|---|---|---|---|---|
+| `preflight.rs` | 3300 | 1771 | 1770 | 1530 | 46% |
+
+Regiones de producción (costuras naturales por banner):
+| Región | Span | Líneas |
+|---|---|---|
+| Normalization pipeline | 21–843 | 823 |
+| JS strategy dependency preflight (#685) | 845–1611 | 767 |
+| LLM extraction provider gate (§8b) | 1613–1668 | 56 |
+| Pre-flight HTTP Connectivity Check (T-070) | 1670–1756 | 87 |
+| Display Helpers | 1758–1770 | 13 |
+
+Tests de producción: 1772–2729 (49 tests). `normalization_pipeline_tests` anidada: 2730–3300 (28 tests), no se atraviesa.
