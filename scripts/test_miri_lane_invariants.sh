@@ -215,6 +215,24 @@ mod tests {
     }
 }
 EOF
+
+  # scrape_flow: the pre-v2 resume fixture. Both tests that write it carry a
+  # PER-TEST gate — loading that file routes `RecordStore::load` through
+  # `migrate_v1`, whose backup-first step is `copy_file_range`, syscall 326,
+  # which Miri cannot execute (upstream miri#4183). In the real file the
+  # fixture is one `const` because `cli/scrape_flow.rs` sits exactly at its
+  # grandfathered line count and the DESCENDING ratchet leaves no room for
+  # the two gates by themselves.
+  cat >"$root/crates/webfang_core/src/cli/scrape_flow.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    #[cfg_attr(miri, ignore = "copy_file_range(326) unsupported by Miri")]
+    async fn apply_resume_mode_skips_previously_scraped_urls() {
+        std::fs::write(&state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
+    }
+}
+EOF
 }
 
 # red_surface <name> <file> <what it must reject> <body> — a tree whose ONLY
@@ -556,6 +574,36 @@ mod tests {
     #[test]
     fn version_probe_reports_normal_exit_and_output() {
         let _ = run_version_probe_with_timeout(&bin_path, std::time::Duration::from_secs(5));
+    }
+}'
+
+# scrape_flow: the eighth entry point, found by the manual run 43306869538.
+# A resume-mode state file written in the pre-v2 envelope shape (one
+# `processed_urls`, no `version` key) is routed through the explicit v1→v2
+# migration, whose contract is backup-BEFORE anything else touches the file.
+# On Linux that copy is `copy_file_range`, syscall 326, which Miri cannot
+# execute (upstream miri#4183) — the same primitive the six `record_store.rs`
+# migration tests already reach. Both of the file's consumers are gated.
+red_surface "scrape-flow" "crates/webfang_core/src/cli/scrape_flow.rs" \
+'rejects an unguarded test that writes the pre-v2 resume fixture' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn apply_resume_mode_skips_previously_scraped_urls() {
+        std::fs::write(&state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
+    }
+}'
+
+# Vacuity, per entry: `V1_ONE_PROCESSED_URL` disappears — the fixture is
+# renamed, or the two resume tests that used it are replaced by a v2 store.
+# The invariant must FAIL instead of inspecting nothing and reporting green.
+red_surface "scrape-flow-vacuity" "crates/webfang_core/src/cli/scrape_flow.rs" \
+'rejects a file whose pre-v2 fixture marker disappeared' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn apply_resume_mode_skips_previously_scraped_urls() {
+        std::fs::write(&state_dir.join("example.com.json"), v2_state()).unwrap();
     }
 }'
 
