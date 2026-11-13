@@ -170,6 +170,7 @@ pub fn disables_ssrf(raw: Option<&str>) -> bool {
 }
 
 mod classification;
+mod forbidden_literal;
 mod ip_helpers;
 
 pub use classification::{
@@ -177,37 +178,13 @@ pub use classification::{
     is_forbidden_ip_with_policy, is_ipv4_this_network, is_ipv6_link_local, is_ipv6_unique_local,
     is_permitted_loopback, is_reserved_v4,
 };
+pub use forbidden_literal::ForbiddenLiteral;
 pub use ip_helpers::{
     ipv6_6to4_embedded_v4, ipv6_isatap_embedded_v4, ipv6_nat64_embedded_v4,
     is_forbidden_literal_host, is_forbidden_literal_host_with,
     is_forbidden_literal_host_with_policy, is_forbidden_resolved_address,
     is_ipv6_nat64_non_canonical, is_ipv6_teredo, parse_ip_literal,
 };
-
-/// Rejection of a request URL whose host is a forbidden IP literal (F-06 +
-/// F-32, #1217). Carries the offending host and parsed address for typed UX.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ForbiddenLiteral {
-    /// Host as it appeared in the request URL.
-    pub host: String,
-    /// Parsed forbidden address the host denotes.
-    pub ip: IpAddr,
-}
-
-impl std::fmt::Display for ForbiddenLiteral {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Spanish user-facing copy; the `SSRF detectado` prefix is the contract
-        // the MCP probe suite asserts (`ssrf_probe_test.rs`).
-        write!(
-            f,
-            "SSRF detectado: la IP {} del host '{}' está prohibida \
-             (acceso a red interna/cloud metadata bloqueado)",
-            self.ip, self.host
-        )
-    }
-}
-
-impl std::error::Error for ForbiddenLiteral {}
 
 /// Pure, non-logging verdict of the literal entry guard (layer 2 of
 /// `docs/ssrf-layers.md`).
