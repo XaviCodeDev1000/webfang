@@ -1636,7 +1636,17 @@ jobs:
           #   error: failed to run custom build command for `btls-sys`
           # (g++ alone would be enough for btls-sys, but zstd-sys's C also
           # needs the gcc driver, so both are installed.)
-          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+          #
+          # AND `nasm`: BoringSSL hand-writes assembly in NASM syntax, and its
+          # own CMakeLists calls `enable_language(ASM_NASM)` (line 374). MinGW's
+          # `as` does NOT satisfy it — NASM is a different assembler with
+          # different syntax. Without it cmake dies before compiling anything:
+          #   CMake Error at CMakeLists.txt:374 (enable_language):
+          #     No CMAKE_ASM_NASM_COMPILER could be found.
+          # This was the FOURTH failure of this job (87 s, run 43294902742), after
+          # the missing C++ driver (78 s) and the cargo-flags error (28 s) — each
+          # one invisible until the job actually ran.
+          sudo apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 nasm nasm
       - name: Type-check the test surface under cfg(windows)
         env:
           CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
