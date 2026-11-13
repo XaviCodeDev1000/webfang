@@ -133,6 +133,24 @@ UB_SURFACE_EXEMPT=(
 #     other tests of that file under the interpreter — is tracked separately.
 #     The markers above stay declared so the surface is documented even when
 #     the module gate is what covers it.
+#   - `V1_ONE_PROCESSED_URL` (`cli/scrape_flow.rs`) →
+#     `RecordStore::load` → `migrate_v1` → `fs::copy`: an EIGHTH, unrelated
+#     interpreter limit, not aliasing. A resume-mode state file written in the
+#     pre-v2 envelope shape (one `processed_urls`, no `version` key) is routed
+#     through the explicit v1→v2 migration, whose contract is backup-BEFORE-
+#     anything-else-touches-the-file. On Linux that copy is `copy_file_range`,
+#     syscall 326, which Miri cannot execute at all (upstream miri#4183, with
+#     PR miri#5041 still waiting on its author). The manual run 43306869538
+#     aborted `Miri (core)` there after 798 tests, on
+#     `apply_resume_mode_full_skips_previously_scraped_urls` — the same
+#     primitive the six `record_store.rs` migration tests already reach, and
+#     the same one `checkpoint.rs` and `state_store.rs` reach through
+#     `preserve_pre_migration_backup`. Both of the `scrape_flow.rs` consumers
+#     carry a per-test gate here, and the fixture itself is hoisted into one
+#     `const` because `cli/scrape_flow.rs` sits exactly at its grandfathered
+#     line count and the DESCENDING ratchet leaves no room for the two gates
+#     alone: the duplicated 6-line write blocks became one line each, which
+#     pays for them.
 #
 # Why `application/extraction.rs` itself is NOT an entry: a marker matches the
 # TEXT of a test body, and there the tests that reach the rewrite
@@ -154,6 +172,7 @@ UB_SURFACE_ENTRIES=(
   "crates/webfang_core/src/domain/keyring_store.rs~store.build|default_store.build~0~keyctl (syscall 250) building a real kernel-keyring credential"
   "crates/webfang_core/src/cli/preflight.rs~check_js_dependencies_with~0~check_obscura_binary → probe_obscura_version → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
   "crates/webfang_core/src/cli/preflight.rs~run_version_probe_with_timeout~0~run_version_probe_with_timeout → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
+  "crates/webfang_core/src/cli/scrape_flow.rs~V1_ONE_PROCESSED_URL~0~RecordStore::load → migrate_v1 → fs::copy → copy_file_range (syscall 326), unsupported by Miri (upstream miri#4183)"
 )
 
 # ---------------------------------------------------------------------------

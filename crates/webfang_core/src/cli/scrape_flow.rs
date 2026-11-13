@@ -740,6 +740,12 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, Request, Respond, ResponseTemplate};
 
+    /// Pre-v2 envelope: one processed URL, no `version` key — what makes it
+    /// v1. Loading it routes `RecordStore::load` through `migrate_v1`, whose
+    /// backup-first `fs::copy` is `copy_file_range` (326), which Miri cannot
+    /// execute (upstream miri#4183). Its two consumers are gated per test.
+    const V1_ONE_PROCESSED_URL: &str = r#"{"domain":"example.com","processed_urls":["https://example.com/a"],"last_export":null,"total_exported":1}"#;
+
     // ===== scrape-path concurrency derives from the budget model (task 2.5a) =====
 
     fn fixed_cores(n: usize) -> crate::domain::budget::detector::FixedDetector {
@@ -1293,6 +1299,7 @@ mod tests {
         assert!(state_store.is_none());
     }
 
+    #[cfg_attr(miri, ignore = "copy_file_range(326) unsupported by Miri")]
     #[tokio::test]
     async fn apply_resume_mode_skips_previously_scraped_urls() {
         let root = crate::domain::CorrelationId::new();
@@ -1300,12 +1307,8 @@ mod tests {
         let state_dir = tmp.path().to_path_buf();
 
         // Pre-populate state with one processed URL
-        let state_file = state_dir.join("example.com.json");
         std::fs::create_dir_all(&state_dir).unwrap();
-        std::fs::write(
-            &state_file,
-            r#"{"domain":"example.com","processed_urls":["https://example.com/a"],"last_export":null,"total_exported":1}"#,
-        ).unwrap();
+        std::fs::write(&state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
 
         let urls = vec![
             Url::parse("https://example.com/a").unwrap(),
@@ -1334,18 +1337,15 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "copy_file_range(326) unsupported by Miri")]
     #[tokio::test]
     async fn apply_resume_mode_full_skips_previously_scraped_urls() {
         let root = crate::domain::CorrelationId::new();
         let tmp = TempDir::new().unwrap();
         let state_dir = tmp.path().to_path_buf();
 
-        let state_file = state_dir.join("example.com.json");
         std::fs::create_dir_all(&state_dir).unwrap();
-        std::fs::write(
-            &state_file,
-            r#"{"domain":"example.com","processed_urls":["https://example.com/a"],"last_export":null,"total_exported":1}"#,
-        ).unwrap();
+        std::fs::write(&state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
 
         let urls = vec![
             Url::parse("https://example.com/a").unwrap(),
