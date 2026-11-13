@@ -805,6 +805,14 @@ jobs:
       # workflow step, and only a harness notices its removal.
       - name: Release tag await guard semantics harness
         run: bash scripts/test_await_release_tag.sh
+      # The release-commits filter (release-plz.toml) is the only thing between
+      # "a commit landed on main" and "a binary release was published", and it
+      # lives in a TOML string nothing compiles: a regex one `?` away from
+      # correct either releases everything or nothing. The harness reads the
+      # pattern FROM the config and runs the table, so a duplicated regex can
+      # never pass while the config is broken. Offline: python3 + tomllib.
+      - name: Release commits filter harness
+        run: bash scripts/test_release_commits_regex.sh
       # Edges of the MCP version-marker gate below (#2038): the guard runs with
       # the event's base, `repo-guards` stays unfiltered, and `gate` waits on it
       # in both scopes. Offline, pure text plus one local `git` call: no cargo,

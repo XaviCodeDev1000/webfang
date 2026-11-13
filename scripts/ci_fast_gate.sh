@@ -695,6 +695,15 @@ EOF
   else
     skip_step "release pins harnesses" "no release pins files changed"
   fi
+  # Release-commits filter (release-plz.toml): the same class as the release
+  # pins harnesses above — the thing that decides whether a commit may cut a
+  # release is a TOML string that nothing compiles, and its failure is silent.
+  # `scripts/**` and the config itself are the only surfaces that can break it.
+  if grep -Eq '^(scripts/test_release_commits_regex\.sh|release-plz\.toml)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "release commits filter semantics (offline)" bash scripts/test_release_commits_regex.sh
+  else
+    skip_step "release commits filter harness" "no release-commits filter files changed"
+  fi
   # Wiring harness for the MCP version-marker gate (#2038): same class as the
   # version-pins harness above. A `scripts/**`-only change can strip the step,
   # add a `paths:` filter to the job, drop `repo-guards` from the narrow scope,
