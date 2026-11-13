@@ -1308,7 +1308,7 @@ mod tests {
 
         // Pre-populate state with one processed URL
         std::fs::create_dir_all(&state_dir).unwrap();
-        std::fs::write(&state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
+        std::fs::write(state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
 
         let urls = vec![
             Url::parse("https://example.com/a").unwrap(),
@@ -1345,7 +1345,7 @@ mod tests {
         let state_dir = tmp.path().to_path_buf();
 
         std::fs::create_dir_all(&state_dir).unwrap();
-        std::fs::write(&state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
+        std::fs::write(state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
 
         let urls = vec![
             Url::parse("https://example.com/a").unwrap(),
