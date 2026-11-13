@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.7.2] - 2026-11-13
+
+
+### 🧪 Testing
+
+- Gate the resume tests that reach copy_file_range, and declare the surface ([#2782](https://github.com/XaviCodeDev1000/webfang/pull/2782))
+- Gate the peak-rss probe whose measurement Miri invalidates ([#2786](https://github.com/XaviCodeDev1000/webfang/pull/2786))
 ## [7.7.1] - 2026-11-13
 
 
