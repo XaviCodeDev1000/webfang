@@ -2018,10 +2018,10 @@ mod tests {
     /// loaded every byte; the streaming reader holds ONE line at a time, so
     /// the peak grows by the size of the index (one hash per line), not by
     /// the size of the file.
-    ///
-    /// The measurement is the process PEAK rss (`VmHWM`): the current rss
-    /// falls back when the reader frees its buffer, so only the peak shows
-    /// the cost. Linux-only — the test returns early elsewhere.
+    /// The measurement is the process PEAK rss (`VmHWM`) — the current rss
+    /// falls back when the reader frees its buffer. Linux-only: it returns early.
+    #[cfg_attr(miri, ignore)]
+    // not a UB surface: the gate is about the MEASUREMENT, which Miri invalidates — its own allocation dwarfs VmHWM, so the probe reads the interpreter and not the reader (run 43359470120: +136953856 bytes for a ~16 MiB export)
     #[test]
     fn the_resume_index_is_streamed_not_read_whole() {
         if peak_rss_bytes().is_none() {
