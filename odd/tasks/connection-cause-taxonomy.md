@@ -306,3 +306,50 @@ failed at the guard, not at the network — the test asserted "a refused connect
 tool had refused to even try. That is the positive-control rule paying for itself a second time:
 **the injection must reach the layer under test**, or the case proves nothing. Both RED tests
 now arm the documented test-only hatch explicitly, with a comment naming why.
+
+### L5 — Where the cause actually dies, measured (2026-11-14)
+
+Two probes with a **freshly built binary** (`cargo build -p webfang_cli`, then the batch against
+port 9 with the entry-guard hatch armed):
+
+```
+{"error": "network error: error sending request for uri (...): client error (Connect) (status: None)", "stage": "fetch"}
+```
+
+The message is the **unclassified** `DownloadError::Network(Box<wreq::Error>)` display — so the
+wreq error never passed through the classified origin. The path, now traced end to end:
+
+```
+ProductionPageFetcher::fetch_page          (application/crawler/ports.rs)
+  → router.fetch(url)  OR  fallback.fetch_url(url.as_str(), config)
+     → the FALLBACK static fetcher is the live branch for the batch path
+       → application/http_client (the HttpClient) performs the request
+         → HttpError::Connection(msg)        ← A STRING
+           → CrawlError::Connection(msg)     ← A STRING (domain/error/crawl_error.rs)
+             → the trace site reads a chain that has nothing typed left
+```
+
+**This is the boundary the maintainer predicted**: `HttpError::Connection(String)` flattens the
+transport error into text, and everything below it sees only the text. The least intrusive fix,
+as instructed, is to keep the original error as `#[source]` in the existing variant — **without
+adding variants** — and to classify at the `HttpClient`'s own send boundary, where the wreq
+error still exists.
+
+**What that slice must verify (regression-pinned before it moves anything):**
+
+| contract | pin |
+|---|---|
+| exit codes unchanged (69 for connection failures) | a test that drives the real failed fetch and asserts the code |
+| the retry rule and its error classes unchanged | the existing retry/classify tests stay green |
+| the message texts others may parse | the existing assertions on those texts stay green, or the change is moved to its own PR |
+
+**Still pending, and the reason the PR must not claim the pair is solved:** the resolver's
+**"started and not finished" marker**. Without it, the blackholed resolver and the dropped SYN
+both surface as `connect_timeout` — the exact two causes this whole taxonomy exists to separate.
+The vocabulary and the classifier landed green (`63449239`) **cover the resolver's own typed
+failure**, not the marker case. The commit message and the PR description say so; the pair test
+is what will close it.
+
+**Also pending:** confirming with the laboratory's `tls_close` fixture that wreq's handshake
+failure really arrives as `io::ErrorKind::InvalidData`. If it does not, the `tls_handshake`
+value is unreachable and the test must say so, with everything else falling into `unknown`.
