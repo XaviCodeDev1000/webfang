@@ -231,11 +231,35 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
       - name: Run release-plz
+        id: release-plz
         uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+      # A WINDOW THAT ONLY MOVES Cargo.lock DOES NOT CUT A VERSION.
+      #
+      # With release_commits (release-plz.toml) release-plz decides by the files
+      # of each package, and Cargo.lock lives at the workspace root, outside
+      # every package: a commit that only moves the lockfile reports
+      # "no commit matches the `release_commits` regex" and does not release,
+      # even when its subject matches. Measured on release-plz 0.3.168 and
+      # 0.3.169 with a clean window (one lock-only commit on top of v7.7.1):
+      # without the filter the same commit yields 7.7.2, with it, nothing.
+      #
+      # It is material here: the repository's security patches are usually that
+      # shape (#2433 pulldown-cmark, #2361 lru), and the failure is SILENT — the
+      # fix sits on main and rides the changelog of the next release that fires
+      # for another reason.
+      #
+      # Non-blocking on purpose: a convention warning must not gate a release.
+      # The decision lives in scripts/warn_lock_only_release.sh — testable
+      # offline, same reason as the tag-await guard above.
+      - name: Warn about a lock-only window
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LOCK_WARN_PRS_CREATED: ${{ steps.release-plz.outputs.prs_created }}
+        run: bash scripts/warn_lock_only_release.sh
       # The release flow OWNS the docs version pins (#2028). release-plz bumps
       # `[workspace.package] version` and never touches the narrative, so the
       # `vX.Y.Z` literals in README.md and docs/src/*.md go stale and

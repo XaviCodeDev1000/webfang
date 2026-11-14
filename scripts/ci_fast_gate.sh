@@ -704,6 +704,15 @@ EOF
   else
     skip_step "release commits filter harness" "no release-commits filter files changed"
   fi
+  # Lock-only warning (the silent half of the filter): the warning fires only
+  # when a window moves Cargo.lock and no release was cut, and its failure mode
+  # is a warning nobody reads or a warning that never fires. The harness pins
+  # both, plus the three silent cases and the skip label.
+  if grep -Eq '^(scripts/(warn_lock_only_release|test_warn_lock_only_release)\.sh|release-plz\.toml)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "lock-only warning semantics (offline)" bash scripts/test_warn_lock_only_release.sh
+  else
+    skip_step "lock-only warning harness" "no lock-only warning files changed"
+  fi
   # Wiring harness for the MCP version-marker gate (#2038): same class as the
   # version-pins harness above. A `scripts/**`-only change can strip the step,
   # add a `paths:` filter to the job, drop `repo-guards` from the narrow scope,
