@@ -62,11 +62,43 @@ exactly the signal you want: it means a PR would have been proposed.
 *writes the new version anyway*: it puts the bumped workspace version into `Cargo.toml`
 without updating `Cargo.lock`, leaving a tree that cannot build. That is a behaviour of the
 `update` command, not of the PR path — but it makes it the wrong tool for a quick look, and a
-dangerous one to run in a working checkout.
+dangerous one to run in a working checkout. Measured on release-plz 0.3.168 and 0.3.169 (the
+version the GitHub Action installs).
+
+**A probe commit has to touch a file of the crate.** release-plz filters by the files of each
+package before it evaluates the commit message, so an empty commit (`git commit --allow-empty`)
+reports `no commit matches` no matter what the subject says, and a commit that only touches
+`docs/` or `scripts/` does the same for all three packages. To probe the *positive* path,
+append a line to a file inside the crate you expect to release (for example
+`crates/webfang_core/src/lib.rs`).
 
 Also note that the GitHub Action installs its own release-plz version; a local CLI may be a
 different one. The pre-check is a smoke test, not the verdict — the verdict is the next real
 run of the workflow.
+
+## A commit that only moves `Cargo.lock` does not cut a version
+
+With `release_commits` active, a commit that changes **only** `Cargo.lock` reports
+`no commit matches the 'release_commits' regex` and does not release — even when its subject
+matches (`chore(deps):`, or `fix:`). Measured on release-plz 0.3.168 and 0.3.169, with a clean
+window (a single lock-only commit on top of `v7.7.1`): without `release_commits` the same
+commit produces `next version is 7.7.2`; with the filter, nothing. `release-plz` decides by the
+files of each package, and `Cargo.lock` lives at the workspace root, outside every package.
+
+The hole only bites when **no other commit in the window releases**: a window with a `feat:`
+or `fix:` releases anyway and carries the lock change with it (that is how #2433 and #2361
+shipped). It is not a hypothetical shape, though: with the filter, `test:`, `ci:` and `docs:`
+commits accumulate without cutting a version, so a lock-only bump can easily be the only thing
+in the window.
+
+**The convention that closes it:** a dependency patch that must ship on its own has to touch a
+packaged file of the affected crate, so the change is attributed to that package. The honest
+way is to raise the dependency requirement in the crate's `Cargo.toml` (a real change: it
+records the new minimum). When the dependency is transitive and there is no requirement to
+raise, add a comment in that `Cargo.toml` naming the advisory, e.g.
+`# <crate>: <RUSTSEC-...> patched in the lockfile.` — measured to restore the release (all
+three packages get the patch version). The comment is a marker, not a fix: prefer the
+requirement change whenever one applies.
 
 ## Why a Release PR cannot be generated against an untagged `main`
 
@@ -103,6 +135,19 @@ questions:
 
 So seeing `latest` at a patch while `released_at` still holds the minor's date is the correct
 state, not drift.
+
+## Approving the release PR's linked issue
+
+`Validate PR metadata` checks that every linked issue carries `status:approved`, and it reads
+the label from the **issue** through the API. The `pull_request` workflow that runs the check
+listens to the PR's own events (`opened`, `synchronize`, `labeled`, …), so approving the issue
+is not a PR event: the check does not re-run on its own and the run keeps showing the old
+verdict.
+
+If the metadata check is red after the issue was approved, re-run the failed job —
+`gh run rerun <run-id> --failed`, or "Re-run jobs" in the UI. Both attempts observed on
+#2788 and #2791 were manual re-runs (same `triggering_actor`, event `pull_request`), not label
+events.
 
 ## `set-version` is not a release flow
 
