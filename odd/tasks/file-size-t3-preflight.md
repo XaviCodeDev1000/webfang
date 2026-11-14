@@ -112,3 +112,8 @@ Tests de producción: 1772–2729 (49 tests). `normalization_pipeline_tests` ani
 - Fix: `#[cfg(unix)] use super::js_strategy::*;` (forma 1, no toca preflight.rs). Verificado: check_windows_platform.sh exit 0; check unix 0 warn, fmt OK, nextest preflight 76/76.
 - Revisado el resto: solo tests_version_probe.rs es 100% cfg(unix); tests_js_strategy (6/9) y tests_obscura_version (7/8) retienen items que sobreviven cfg(windows).
 - Commit `04155d96`, pusheado. RDD del slice PR A cerrado por el otro lado: lineage review-0f88c9a96257e613 aprobado (3 hallazgos advisory non-blocking R2-001/002/003 sobre tests_version_probe, tests_adaptive_selectors, tests_path_resolution).
+### L18 — fix CI run 43601646919 (head 0bc33b32): windows cross-lint + doc quality
+- windows cross-lint: tests_obscura_version.rs tenía 7/8 tests cfg(unix); los que sobreviven a windows solo usan js_strategy::* → `use super::*` y `use crate::domain::JsStrategy` gateados con #[cfg(unix)]. (tests_version_probe ya gateado en L17.)
+- doc quality: link intra-doc [`check_elastic_sink`] en normalization.rs quedó roto al mover el módulo → target explícito super::check_elastic_sink.
+- CI Gate era solo el agregador de esos dos. Verificado local: check_windows_platform.sh OK, cargo doc -D warnings exit 0, check 0 warn, fmt OK, nextest 76/76.
+- Commit `a7143a60`, pusheado.
