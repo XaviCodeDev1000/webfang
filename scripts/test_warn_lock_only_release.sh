@@ -52,6 +52,17 @@ version = "$2"
 EOF
 }
 
+# The fixture carries a release-plz.toml with the same filter the repository
+# uses, so the guard reads a real pattern (and the "does not match" branch is
+# exercised, not the missing-config one).
+write_release_plz() {
+  cat >"$1" <<'EOF'
+[workspace]
+git_only = true
+release_commits = '^(feat|fix|perf|revert|chore\(deps\))(\([^)]+\))?!?:|^[a-z]+(\([^)]+\))?!:'
+EOF
+}
+
 # seed_repo <dir>: a bare origin with one commit at 1.0.0, tagged v1.0.0, and a
 # clone of it. The clone is the repository the guard reads.
 seed_repo() {
@@ -63,6 +74,7 @@ seed_repo() {
   git -C "$dir/seed" config user.email harness@example.com
   git -C "$dir/seed" config user.name harness
   write_cargo "$dir/seed/Cargo.toml" 1.0.0
+  write_release_plz "$dir/seed/release-plz.toml"
   git -C "$dir/seed" add -A
   git -C "$dir/seed" commit --quiet -m "chore: release v1.0.0"
   git -C "$dir/seed" remote add origin "$dir/origin.git"
@@ -176,6 +188,22 @@ if [[ $RC -eq 0 ]]; then
   pass "(f) an unknown PR state still exits 0"
 else
   fail "(f) an unknown PR state still exits 0 (rc=$RC: $(cat "$WORK/f"))"
+fi
+
+# ─── (g) a lock-only commit the filter does not release by policy is silent ──
+# The hole is "a commit that should have released and did not". A `test:` commit
+# is not supposed to release, so warning about it would train the maintainer to
+# ignore the warning.
+D="$WORK/policy"
+seed_repo "$D"
+lock_commit "$D/clone" 0.2.191 "test: gate the resume tests (touches Cargo.lock)"
+RC=0
+run_guard "$D/clone" false "$WORK/g"
+if [[ $RC -eq 0 ]] && ! grep -q '::warning::' "$WORK/g" &&
+  grep -qF 'the filter is doing its job' "$WORK/g"; then
+  pass "(g) a lock-only commit the filter does not release by policy is silent"
+else
+  fail "(g) a lock-only commit the filter does not release by policy is silent (rc=$RC: $(cat "$WORK/g"))"
 fi
 
 printf '\nharness: %d ok, %d fail\n' "$PASSED" "$FAILED"

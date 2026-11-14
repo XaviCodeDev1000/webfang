@@ -84,17 +84,54 @@ if [[ ${#LOCK_COMMITS[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# The escape hatch is a label on the PR that carried the change. `gh` may be
-# absent (a local run): then the escape cannot be read and the warning stands,
-# which is the safe direction.
+# The escape hatch is a label on the PR that carried the change. The mapping is
+# the commit -> PR endpoint, not a search by message: a squash merge keeps the
+# PR's subject, and a direct push has no PR at all (then the commit is not
+# covered, which is the safe direction).
 pr_labels() {
   local sha="$1" labels=""
   if ! command -v gh >/dev/null 2>&1; then
     return 0
   fi
-  labels="$(gh pr list --state merged --search "$sha" --json labels \
-    --jq '[.labels[].name] | join(" ")' 2>/dev/null | head -n 1 || true)"
+  local repo="${GITHUB_REPOSITORY:-}"
+  if [[ -z "$repo" ]]; then
+    repo="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null | sed -E 's#^.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#' || true)"
+  fi
+  if [[ -z "$repo" ]]; then
+    return 0
+  fi
+  labels="$(gh api "repos/$repo/commits/$sha/pulls" \
+    --jq '[.[].labels[].name] | join(" ")' 2>/dev/null | head -n 1 || true)"
   printf '%s' "$labels"
+}
+
+# 0 = the subject matches release_commits, 1 = it does not (the filter does not
+# release it by policy, so silence is correct), 2 = cannot be determined (then
+# the warning stands: a security bump must not be silenced by a missing tool).
+release_commits_matches() {
+  local subject="$1"
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 2
+  fi
+  python3 - "$REPO_ROOT/release-plz.toml" "$subject" <<'PY'
+import re
+import sys
+import tomllib
+
+cfg, subject = sys.argv[1], sys.argv[2]
+try:
+    with open(cfg, "rb") as handle:
+        pattern = tomllib.load(handle).get("workspace", {}).get("release_commits")
+except (OSError, tomllib.TOMLDecodeError):
+    sys.exit(2)
+if not pattern:
+    sys.exit(2)
+try:
+    matched = re.search(pattern, subject) is not None
+except re.error:
+    sys.exit(2)
+sys.exit(0 if matched else 1)
+PY
 }
 
 UNCOVERED=()
@@ -102,9 +139,20 @@ for sha in "${LOCK_COMMITS[@]}"; do
   labels="$(pr_labels "$sha")"
   if [[ " $labels " == *" $SKIP_LABEL "* ]]; then
     note "lock-warning: $(git -C "$REPO_ROOT" log -1 --format='%h %s' "$sha") is covered by '$SKIP_LABEL'."
-  else
-    UNCOVERED+=("$(git -C "$REPO_ROOT" log -1 --format='%h %s' "$sha")")
+    continue
   fi
+  subject="$(git -C "$REPO_ROOT" log -1 --format=%s "$sha")"
+  set +e
+  release_commits_matches "$subject"
+  matches=$?
+  set -e
+  if [[ $matches -eq 1 ]]; then
+    # The filter does not release this type by policy: not releasing is the
+    # agreed behaviour, not the hole this warning exists for.
+    note "lock-warning: $(git -C "$REPO_ROOT" log -1 --format='%h %s' "$sha") does not match release_commits; the filter is doing its job."
+    continue
+  fi
+  UNCOVERED+=("$(git -C "$REPO_ROOT" log -1 --format='%h %s' "$sha")")
 done
 
 if [[ ${#UNCOVERED[@]} -eq 0 ]]; then
