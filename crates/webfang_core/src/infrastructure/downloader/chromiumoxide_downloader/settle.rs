@@ -38,15 +38,15 @@ async fn settle_modes_capture_delayed_mutation() {
     }
     mount_page!(
         "d200",
-        "../../../../../../../evidence/mode-d/fixtures/f52/d200.html"
+        "../../../../../../evidence/mode-d/fixtures/f52/d200.html"
     );
     mount_page!(
         "d1200",
-        "../../../../../../../evidence/mode-d/fixtures/f52/d1200.html"
+        "../../../../../../evidence/mode-d/fixtures/f52/d1200.html"
     );
     mount_page!(
         "dnet",
-        "../../../../../../../evidence/mode-d/fixtures/f52/dnet.html"
+        "../../../../../../evidence/mode-d/fixtures/f52/dnet.html"
     );
     // The API round-trip responds after a server-side delay, keeping
     // the request in flight long past any CDP round-trip latency.

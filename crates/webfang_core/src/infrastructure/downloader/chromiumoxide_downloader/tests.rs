@@ -347,4 +347,5 @@ async fn fetch_rejects_non_http_scheme_before_launching_chrome() {
 }
 
 #[cfg(feature = "chromium")]
-mod e2e;
+#[path = "settle.rs"]
+mod settle;
