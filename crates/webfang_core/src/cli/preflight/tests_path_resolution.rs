@@ -1,4 +1,4 @@
-use super::*;
+use super::path_resolution::*;
 
 // ---- XP-S-04 (#1608) — platform-independent PATH resolution ----------
 

@@ -1,4 +1,4 @@
-use super::*;
+use super::js_strategy::*;
 
 // ---- XP-S-06 (#1608) — bounded --version probes ----------------------
 

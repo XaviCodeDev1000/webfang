@@ -1,4 +1,7 @@
+use super::js_strategy::*;
+use super::path_resolution::*;
 use super::*;
+use crate::domain::JsStrategy;
 
 // ========================================================================
 // #787 — --js-strategy hybrid obscura binary preflight

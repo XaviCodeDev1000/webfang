@@ -1,4 +1,6 @@
+use super::js_strategy::*;
 use super::*;
+use crate::domain::JsStrategy;
 
 // ========================================================================
 // #793 — Obscura minimum-version contract (parse / assess / gate)

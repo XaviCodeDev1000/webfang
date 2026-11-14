@@ -1,4 +1,6 @@
+use super::js_strategy::*;
 use super::*;
+use crate::domain::JsStrategy;
 
 // ========================================================================
 // #685 — --js-strategy full preflight Chrome dependency check

@@ -41,7 +41,7 @@
       "crates/webfang_core/src/cli/export_flow.rs": 753,
       "crates/webfang_core/src/cli/llm_wire.rs": 975,
       "crates/webfang_core/src/cli/orchestrator.rs": 1230,
-      "crates/webfang_core/src/cli/preflight.rs": 1577,
+      "crates/webfang_core/src/cli/preflight.rs": 1022,
       "crates/webfang_core/src/cli/scrape_flow.rs": 1444,
       "crates/webfang_core/src/cli/spec_command.rs": 895,
       "crates/webfang_core/src/cli/url_discovery.rs": 599,
