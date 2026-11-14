@@ -90,3 +90,12 @@ Regiones de producción (costuras naturales por banner):
 | Display Helpers | 1758–1770 | 13 |
 
 Tests de producción: 1772–2729 (49 tests). `normalization_pipeline_tests` anidada: 2730–3300 (28 tests), no se atraviesa.
+
+## Log
+### L15 — PR C ejecutado con pub(super) acotado (decisión maintainer "B" = b′)
+- Corte: span JS strategy (616–1171 original, 556L) → `preflight/js_strategy.rs`; sub-cluster PATH/PATHEXT (106L) → `preflight/path_resolution.rs` porque js_strategy quedó en 567 > 500.
+- Verbatim: 556/556 y 106/106 idénticos salvo visibilidad (script de comparación contra HEAD); única diff cosmética: 1 blank line en la unión.
+- pub(super) acotado en 12 helpers que tocan los tests; `resolve_chrome_binary_with` bajó de pub(crate) a pub(super) (nadie externo lo usa — codedb callers: solo main.rs usa check_js_dependencies/resolve_chrome_binary vía re-export pub).
+- Padre: 1577 → 1022 (post-fmt, medido con wc -l). Baseline --update mismo commit (1022). Golden intra-crate refrescado mismo commit (23/23).
+- Gates: check workspace all-targets all-features 0 warn/err, clippy estricto exit 0, fmt --check OK, nextest preflight 76/76, list workspace 5402=5402.
+- Commit `8dc103c5`. RDD sigue bloqueado (transporte nvidia caído; models.json provider nvidia sin modelos) — no se reintenta.
