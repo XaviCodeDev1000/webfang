@@ -20,9 +20,10 @@ Rama `feat/2539-selector-date`, apilada sobre `feat/2534-selector-fragment` (#25
   README. Cuatro snapshots: los dos de `--help` y los dos del schema MCP.
 - [x] T6 — `cargo nextest run --all-features`: 5126 tests, clippy limpio.
 - [x] T7 — paridad con legible: `date_cascade_agrees_with_legible_on_shared_sources`
-  compara, fixture por fixture, contra `article.published_time`. No es una aserción de
-  paridad total: la cascada es más amplia a propósito, y encontrar más de lo que legible
-  encuentra no puede hacer que las dos rutas discrepen (del otro lado no hay nada).
+  comparaba, fixture por fixture, contra `article.published_time`. **Retirada en #2576**:
+  las tres tablas por familia ya fijan el valor exacto de cada fuente, que es más fuerte
+  que "coincide con legible", y el test era una segunda red sobre la misma afirmación. Las
+  divergencias aceptadas siguen fijadas en T8.
 - [x] T8 — divergencias aceptadas, fijadas en `documented_divergences_from_legible`: el
   bloque JSON-LD sin `datePublished` no corta la búsqueda (legible hace `break`), y
   `og:published_time`, `name="date"` y `article time` son fuentes que legible no lee.
@@ -33,7 +34,8 @@ Rama `feat/2539-selector-date`, apilada sobre `feat/2534-selector-fragment` (#25
 ## La puerta de JSON-LD
 
 La primera versión aceptaba cualquier bloque con `datePublished`. La prueba de paridad
-la rechazó con tres fixtures, y tenía razón: legible exige `@context` de schema.org y un
+—retirada en #2576, cuando las tres tablas por familia pasaron a fijar cada caso— la
+rechazó con tres fixtures, y tenía razón: legible exige `@context` de schema.org y un
 `@type` de artículo (`Article`, `NewsArticle`, `BlogPosting`, … 19 tipos) antes de
 confiar en un bloque, resuelve `@graph` sólo cuando falta `@type`, y en un array toma el
 primer elemento con tipo de artículo. Copiar esa puerta es lo que evita que la misma
@@ -66,7 +68,7 @@ de duplicación quedó en **8315** contra el baseline de 8325.
 
 ## Verificación cruzada con el bump de legible (#2543)
 
-La paridad se mide contra la versión de legible que esté en el lock, y
+La verificación se hizo contra la versión de legible que estaba en el lock, y
 `documented_divergences_from_legible` exige que legible **siga** sin encontrar esas
 fechas. #2543 sube a 0.5.1, que reescribió su árbol interno (`Node<'_>` → arena
 `Dom` + `NodeId`). Cada PR pasa verde sola; la combinación no se había probado nunca, y
@@ -95,9 +97,9 @@ partida en tres funciones, para que la evidencia corresponda al código que se e
 
 | mutación | prueba que falla |
 |---|---|
-| quitar el chequeo de `@context` | `jsonld_blocks_outside_the_gate_are_ignored` (`jsonld_without_context_is_ignored_even_when_article_typed`, `jsonld_graph_without_context_is_ignored`) y la de paridad |
-| aceptar cualquier `@type` como artículo | `jsonld_blocks_outside_the_gate_are_ignored`, `jsonld_article_blocks_supply_the_date` y la de paridad |
-| que `@graph` tome el primer elemento | `jsonld_article_blocks_supply_the_date` (`jsonld_graph_array`), `jsonld_blocks_outside_the_gate_are_ignored` y la de paridad |
+| quitar el chequeo de `@context` | `jsonld_blocks_outside_the_gate_are_ignored` (`jsonld_without_context_is_ignored_even_when_article_typed`, `jsonld_graph_without_context_is_ignored`) |
+| aceptar cualquier `@type` como artículo | `jsonld_blocks_outside_the_gate_are_ignored`, `jsonld_article_blocks_supply_the_date` |
+| que `@graph` tome el primer elemento | `jsonld_article_blocks_supply_the_date` (`jsonld_graph_array`), `jsonld_blocks_outside_the_gate_are_ignored` |
 | caer a `dateModified` | `jsonld_blocks_outside_the_gate_are_ignored` (`date_modified_is_not_a_publish_date`) |
 | aceptar cualquier `<time datetime>` sin `<article>` | `meta_microdata_and_article_time_supply_the_date` (`stray_time_outside_article_is_ignored`) |
 
@@ -105,8 +107,8 @@ Las dos primeras familias se pisan a propósito en las mutaciones de la puerta (
 positiva también cae cuando la puerta se abre), pero `dateModified` y el `<time>` suelto
 matan **sólo** a su propia familia: la partición no es decorativa.
 
-La prueba de paridad no es vacía: con la puerta laxa vuelve a fallar en los dos fixtures
-sin `@context`.
+La puerta no queda sin red: con la puerta laxa cae
+`jsonld_blocks_outside_the_gate_are_ignored` en los dos fixtures sin `@context`.
 
 ## `cargo mutants --in-diff` no cubre este código
 
