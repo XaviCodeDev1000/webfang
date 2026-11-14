@@ -91,14 +91,21 @@ shipped). It is not a hypothetical shape, though: with the filter, `test:`, `ci:
 commits accumulate without cutting a version, so a lock-only bump can easily be the only thing
 in the window.
 
-**The convention that closes it:** a dependency patch that must ship on its own has to touch a
-packaged file of the affected crate, so the change is attributed to that package. The honest
-way is to raise the dependency requirement in the crate's `Cargo.toml` (a real change: it
-records the new minimum). When the dependency is transitive and there is no requirement to
-raise, add a comment in that `Cargo.toml` naming the advisory, e.g.
-`# <crate>: <RUSTSEC-...> patched in the lockfile.` — measured on release-plz 0.3.168 and
-0.3.169: with either the requirement or the comment, all three packages get the patch version.
-The comment is a marker, not a fix: prefer the requirement change whenever one applies.
+**The convention that closes it:** the commit has to touch a **packaged file of the affected
+crate**, so the change is attributed to that package. In this workspace that rules out the
+root `Cargo.toml`: the dependency requirements live in `[workspace.dependencies]`, and the
+root file belongs to no package — raising `libc` there still reports `no commit matches`
+(measured on 0.3.168 and 0.3.169). What works is a file inside the crate:
+
+- if the crate declares the dependency with its own version requirement, raise it there
+  (a real change: it records the new minimum);
+- when the dependency is transitive and the crate only says
+  `libc = { workspace = true }`, add a comment in that `Cargo.toml` naming the advisory, e.g.
+  `# <crate>: <RUSTSEC-...> patched in the lockfile.` — measured on release-plz 0.3.168 and
+  0.3.169: all three packages get the patch version.
+
+The comment is a marker, not a fix: prefer the requirement change whenever the crate actually
+owns one.
 
 ## Why a Release PR cannot be generated against an untagged `main`
 
