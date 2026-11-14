@@ -13,14 +13,17 @@
 //! up the error chain (the chain is preserved — `ScraperError::Network` keeps
 //! its `#[source]` — so the cause never has to be flattened to a string).
 //!
-//! The **classifier** lives in the infrastructure layer, where the foreign
-//! error types are known: it walks the chain by TYPE (`io::ErrorKind`, the
-//! client's own predicates) and never compares message strings, because the
-//! messages change between dependency versions and a text-matching taxonomy
-//! would break silently.
+//! The **classifier** lives here too, next to the vocabulary, because both
+//! fetch clients need it and the application layer must not import
+//! infrastructure (inward-only layering): the application HTTP client classifies
+//! at its own send boundary, and so does the infrastructure downloader. It walks
+//! the chain by TYPE (`io::ErrorKind`, the domain's own typed errors) and never
+//! compares message strings, because the messages change between dependency
+//! versions and a text-matching taxonomy would break silently.
 
 use std::error::Error;
 use std::fmt;
+use std::io;
 
 /// The stable, machine-readable cause of a connection failure.
 ///
@@ -251,5 +254,146 @@ mod tests {
     fn an_unclassified_chain_has_no_cause() {
         let plain = std::io::Error::other("something else");
         assert_eq!(cause_in_chain(&plain), None);
+    }
+}
+
+/// Which phase of a fetch a failure happened in.
+///
+/// The phase is known at the place the error happened, so the caller passes it
+/// in — it is never guessed from a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchPhase {
+    /// Before the response existed: the name, the TCP connect, the TLS
+    /// handshake.
+    Connect,
+    /// After the response started: the body.
+    Body,
+}
+
+/// Classify a failure by TYPE.
+///
+/// `Unknown` is the honest answer whenever the chain does not decide: an
+/// unknown `unknown` beats a supposed cause.
+#[must_use]
+pub fn classify(error: &(dyn Error + 'static), phase: FetchPhase) -> NetworkCause {
+    // The resolver's own typed failure decides the DNS class on its own: it
+    // exists only because a resolution was attempted and did not succeed.
+    if has_in_chain::<DnsResolutionError>(error) {
+        return NetworkCause::DnsResolution;
+    }
+
+    let Some(kind) = io_kind_in_chain(error) else {
+        return NetworkCause::Unknown;
+    };
+
+    match kind {
+        io::ErrorKind::ConnectionRefused => NetworkCause::ConnectRefused,
+        io::ErrorKind::ConnectionReset
+        | io::ErrorKind::UnexpectedEof
+        | io::ErrorKind::BrokenPipe => NetworkCause::ConnectionClosed,
+        io::ErrorKind::TimedOut => match phase {
+            FetchPhase::Connect => NetworkCause::ConnectTimeout,
+            FetchPhase::Body => NetworkCause::ReadTimeout,
+        },
+        // The TLS stack reports a handshake violation as invalid data, and a
+        // handshake only happens in the connect phase.
+        io::ErrorKind::InvalidData => match phase {
+            FetchPhase::Connect => NetworkCause::TlsHandshake,
+            FetchPhase::Body => NetworkCause::Unknown,
+        },
+        _ => NetworkCause::Unknown,
+    }
+}
+
+/// The `io::ErrorKind` anywhere in the chain, if there is one.
+fn io_kind_in_chain(error: &(dyn Error + 'static)) -> Option<io::ErrorKind> {
+    let mut current: Option<&(dyn Error + 'static)> = Some(error);
+    while let Some(err) = current {
+        if let Some(io_err) = err.downcast_ref::<io::Error>() {
+            return Some(io_err.kind());
+        }
+        current = err.source();
+    }
+    None
+}
+
+/// Whether the chain contains an error of type `T`.
+fn has_in_chain<T: Error + 'static>(error: &(dyn Error + 'static)) -> bool {
+    let mut current: Option<&(dyn Error + 'static)> = Some(error);
+    while let Some(err) = current {
+        if err.downcast_ref::<T>().is_some() {
+            return true;
+        }
+        current = err.source();
+    }
+    false
+}
+
+#[cfg(test)]
+mod classify_tests {
+    use super::*;
+
+    #[test]
+    fn a_refused_connection_is_classified_by_its_io_kind() {
+        let err = std::io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
+        assert_eq!(
+            classify(&err, FetchPhase::Connect),
+            NetworkCause::ConnectRefused
+        );
+    }
+
+    #[test]
+    fn a_reset_or_an_eof_is_a_closed_connection() {
+        for kind in [
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::BrokenPipe,
+        ] {
+            let err = std::io::Error::new(kind, "closed");
+            assert_eq!(
+                classify(&err, FetchPhase::Connect),
+                NetworkCause::ConnectionClosed,
+                "kind {kind:?} must classify as a closed connection"
+            );
+        }
+    }
+
+    #[test]
+    fn the_phase_decides_a_timeout() {
+        let err = std::io::Error::new(io::ErrorKind::TimedOut, "timed out");
+        assert_eq!(
+            classify(&err, FetchPhase::Connect),
+            NetworkCause::ConnectTimeout
+        );
+        assert_eq!(classify(&err, FetchPhase::Body), NetworkCause::ReadTimeout);
+    }
+
+    #[test]
+    fn the_resolvers_own_failure_decides_the_dns_class() {
+        let err = DnsResolutionError::new(Box::new(std::io::Error::other("no such host")));
+        assert_eq!(
+            classify(&err, FetchPhase::Connect),
+            NetworkCause::DnsResolution
+        );
+    }
+
+    #[test]
+    fn an_unreadable_chain_is_unknown() {
+        let err = std::io::Error::other("something else entirely");
+        assert_eq!(classify(&err, FetchPhase::Connect), NetworkCause::Unknown);
+    }
+
+    #[test]
+    fn a_plain_error_without_io_is_unknown() {
+        #[derive(Debug)]
+        struct Plain;
+        impl fmt::Display for Plain {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("plain")
+            }
+        }
+        impl Error for Plain {}
+
+        assert_eq!(classify(&Plain, FetchPhase::Connect), NetworkCause::Unknown);
     }
 }

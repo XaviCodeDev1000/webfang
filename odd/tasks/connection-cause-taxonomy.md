@@ -353,3 +353,56 @@ is what will close it.
 **Also pending:** confirming with the laboratory's `tls_close` fixture that wreq's handshake
 failure really arrives as `io::ErrorKind::InvalidData`. If it does not, the `tls_handshake`
 value is unreachable and the test must say so, with everything else falling into `unknown`.
+
+### L6 — The cause now crosses the boundary; RED → GREEN (2026-11-14)
+
+**What landed (uncommitted→committed as one work unit):**
+
+- The classifier (`FetchPhase`, `classify`) moved to the **domain** (`domain::error::cause`),
+  `pub(crate)` module, no `pub use` re-export — the application layer must not import
+  infrastructure, and a public re-export/module entry makes rustdoc's search index tip over
+  an internal rustdoc ICE under `--all-features` (see "Known blocker" below).
+- `HttpError::Connection`, `CrawlError::Connection` and `CrawlError::Network` now carry
+  `source: Option<Box<dyn Error + Send + Sync>>` **beside** the message. The `Display` of
+  every one of them is byte-identical to the former tuple shape, pinned by tests
+  (`test_http_error_connection_display_is_unchanged`, `test_crawl_error_connection_display_is_unchanged`,
+  plus `test_connection_carries_its_cause_through_the_conversion`).
+- Classification happens at every send boundary where the phase is known, and **only the
+  transport `Network` arm gains the cause** — a builder error stays `InvalidUrl`, a timeout
+  stays `Timeout`, `BodyTooLarge` stays `BodyTooLarge`, so no class, retry rule or exit code
+  moves:
+  - `infrastructure/crawler/http_client::fetch_url` — the batch/crawl fallback path — send
+    (`FetchPhase::Connect`) and body (`FetchPhase::Body`);
+  - `application/http_client` (`map_send_error`, the raw send path, the port default);
+  - `WreqDownloader::send_request` / `read_body_capped`.
+- `From<CrawlError> for ScraperError` keeps the synthetic `io::ErrorKind` (that is what makes
+  the class transient) and rides the classified cause **inside** it as its source, so
+  `cause_in_chain` finally reads it at the trace site.
+
+**Route coverage (the PR must state this — point 4):** the `cause` field exists on
+
+| route | connect | body |
+|---|---|---|
+| batch / crawl page fetch (static fallback `fetch_url`) | ✔ | ✔ |
+| `--url` scrape (`WreqDownloader` via `FetchRouter`) | ✔ | ✔ |
+| application `HttpClient` (MCP tools, robots, sitemap) | ✔ | ✘ (`HttpError::Request` still flattens) |
+
+**Not covered yet, said honestly:** `HttpError::Timeout` / `CrawlError::Timeout` carry no
+source slot, so a timeout on those routes reports no `cause`; and the resolver's
+"started and not finished" marker is still pending, so a blackholed resolver and a dropped
+SYN both surface as `connect_timeout` until the pair test lands.
+
+**Verification:** 3025 lib tests, the RED pair (25/25, both `connect_refused` and
+`dns_resolution` now in the trace), `exit_code_integration` 32/32, `ssrf_rfc1918_e2e` 22/22,
+`scraper_service_test` 56/56, `sitemap_fetch_timeout_test` 24/24, `harness_403_counts` 25/25,
+`ssrf_layer2_coverage_test` 7/7; `cargo fmt --check` and clippy `--all-targets --all-features
+-D warnings` clean.
+
+**Known blocker (needs a decision, not silently shipped):** `env RUSTDOCFLAGS=-D warnings
+cargo doc -p webfang_core --all-features --no-deps` **ICEs rustdoc deterministically on this
+branch** (`scoped-tls` panic while deserializing the search index). Evidence: `main` at
+08a323c2 with the same command and a fresh target dir is clean across 6+ runs (also with a
+dummy documented item added); this branch ICEs on every run; with default features the only
+doc errors are the two pre-existing feature-gated links in `domain/repository.rs` that also
+fail on `main`. So the ICE is a rustdoc internal bug that this diff tips over, not a lint in
+the change — but CI's `doc-quality` job runs exactly that command and would go red.

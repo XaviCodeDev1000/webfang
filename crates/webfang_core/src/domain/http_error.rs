@@ -32,7 +32,18 @@ pub enum HttpError {
     /// Request timeout
     Timeout,
     /// Connection error - contains error message
-    Connection(String),
+    ///
+    /// The message is its own field so the [`Display`](std::fmt::Display) text
+    /// stays byte-identical to the former `Connection(String)` shape. The
+    /// original transport error, when the producer still holds it, travels as
+    /// the `source`, so the typed cause survives the boundary instead of being
+    /// flattened into the message (#2784).
+    Connection {
+        /// Human-readable message (unchanged from the former tuple payload).
+        message: String,
+        /// The original transport error, when one is available.
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
     /// Request building/error - contains error message
     Request(String),
     /// WAF/CAPTCHA challenge detected in HTTP 200 (false positive)
@@ -56,7 +67,7 @@ impl std::fmt::Display for HttpError {
             HttpError::ClientError(code) => write!(f, "Client Error {code}"),
             HttpError::ServerError(code) => write!(f, "Server Error {code}"),
             HttpError::Timeout => write!(f, "Request Timeout"),
-            HttpError::Connection(msg) => write!(f, "Connection Error: {msg}"),
+            HttpError::Connection { message, .. } => write!(f, "Connection Error: {message}"),
             HttpError::Request(msg) => write!(f, "Request Error: {msg}"),
             HttpError::WafChallenge(provider) => {
                 write!(f, "WAF/CAPTCHA challenge detected ({provider})")
@@ -71,7 +82,43 @@ impl std::fmt::Display for HttpError {
     }
 }
 
-impl std::error::Error for HttpError {}
+impl std::error::Error for HttpError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            // The preserved transport error is the cause, so a consumer that
+            // walks `source()` reaches the same typed chain the producer saw.
+            Self::Connection {
+                source: Some(source),
+                ..
+            } => Some(source.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl HttpError {
+    /// A connection failure whose cause is not available.
+    #[must_use]
+    pub fn connection(message: impl Into<String>) -> Self {
+        Self::Connection {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// A connection failure that keeps the original transport error as its
+    /// cause (#2784).
+    #[must_use]
+    pub fn connection_with_cause(
+        message: impl Into<String>,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    ) -> Self {
+        Self::Connection {
+            message: message.into(),
+            source: Some(source),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -112,8 +159,27 @@ mod tests {
 
     #[test]
     fn test_http_error_connection() {
-        let err = HttpError::Connection("Connection refused".into());
-        assert!(matches!(err, HttpError::Connection(_)));
+        let err = HttpError::connection("Connection refused");
+        assert!(matches!(err, HttpError::Connection { .. }));
+    }
+
+    /// #2784: the `Display` is byte-identical to the former `Connection(String)`
+    /// shape — the payload changed, the message did not.
+    #[test]
+    fn test_http_error_connection_display_is_unchanged() {
+        let err = HttpError::connection("Connection refused");
+        assert_eq!(err.to_string(), "Connection Error: Connection refused");
+    }
+
+    /// #2784: a preserved cause is reachable through `Error::source`.
+    #[test]
+    fn test_http_error_connection_exposes_its_cause() {
+        let cause = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let err = HttpError::connection_with_cause("Connection refused", Box::new(cause));
+        let source = std::error::Error::source(&err).expect("the cause must be preserved");
+        assert_eq!(source.to_string(), "refused");
+        // The message is unchanged by the presence of a cause.
+        assert_eq!(err.to_string(), "Connection Error: Connection refused");
     }
 
     #[test]

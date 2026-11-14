@@ -50,7 +50,10 @@ impl HttpClientPort for MockHttpClient {
             Some(Err(HttpError::ClientError(c))) => Err(HttpError::ClientError(*c)),
             Some(Err(HttpError::ServerError(c))) => Err(HttpError::ServerError(*c)),
             Some(Err(HttpError::Timeout)) => Err(HttpError::Timeout),
-            Some(Err(HttpError::Connection(m))) => Err(HttpError::Connection(m.clone())),
+            // No cause to preserve: the fixture simulates the failure.
+            Some(Err(HttpError::Connection { message, .. })) => {
+                Err(HttpError::connection(message.clone()))
+            },
             Some(Err(HttpError::Request(m))) => Err(HttpError::Request(m.clone())),
             Some(Err(HttpError::WafChallenge(p))) => Err(HttpError::WafChallenge(p.clone())),
             Some(Err(HttpError::DomainBanned(d))) => Err(HttpError::DomainBanned(d.clone())),

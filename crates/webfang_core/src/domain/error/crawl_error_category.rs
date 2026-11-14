@@ -119,15 +119,17 @@ impl From<&CrawlError> for CrawlErrorCategory {
             CrawlError::Timeout => Self::Timeout,
             CrawlError::Network {
                 status_code: Some(status),
+                source: None,
                 ..
             } if matches!(*status, 401 | 403) => Self::Waf,
             CrawlError::Network {
                 status_code: Some(429),
+                source: None,
                 ..
             } => Self::RateLimit,
-            CrawlError::Network { .. } | CrawlError::Connection(..) | CrawlError::Download(..) => {
-                Self::Network
-            },
+            CrawlError::Network { .. }
+            | CrawlError::Connection { .. }
+            | CrawlError::Download(..) => Self::Network,
             CrawlError::RateLimited(..) => Self::RateLimit,
             CrawlError::Parse(..) => Self::Extraction,
             // Every arm below was previously the `_ => Self::Internal`
@@ -274,10 +276,14 @@ mod tests {
         let err = CrawlError::Network {
             message: "dns failure".into(),
             status_code: None,
+            source: None,
         };
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Network);
 
-        let err = CrawlError::Connection("refused".into());
+        let err = CrawlError::Connection {
+            message: "refused".into(),
+            source: None,
+        };
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Network);
 
         let err = CrawlError::Download(Box::new(std::io::Error::new(
@@ -295,6 +301,7 @@ mod tests {
             let err = CrawlError::Network {
                 message: format!("HTTP error: {status}"),
                 status_code: Some(status),
+                source: None,
             };
             assert_eq!(
                 CrawlErrorCategory::from(&err),
@@ -310,6 +317,7 @@ mod tests {
         let err = CrawlError::Network {
             message: "HTTP error: 429".into(),
             status_code: Some(429),
+            source: None,
         };
         assert_eq!(
             CrawlErrorCategory::from(&err),
@@ -325,6 +333,7 @@ mod tests {
             let err = CrawlError::Network {
                 message: format!("HTTP error: {status}"),
                 status_code: Some(status),
+                source: None,
             };
             assert_eq!(
                 CrawlErrorCategory::from(&err),

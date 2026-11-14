@@ -66,6 +66,13 @@ pub enum CrawlError {
         message: String,
         /// HTTP status code if the server responded; `None` for connection failures.
         status_code: Option<u16>,
+        /// The original transport error, when the producer still holds it.
+        ///
+        /// #2784: the batch path flattens the failure here (the static fetch
+        /// port builds this variant straight from the client error), so without
+        /// this field the cause dies in the message and the trace cannot name
+        /// it. `None` when the producer only had text.
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// HTTP error with structured status code and URL
@@ -193,8 +200,18 @@ pub enum CrawlError {
     Timeout,
 
     /// Connection error
-    #[error("connection error: {0}")]
-    Connection(String),
+    ///
+    /// The message keeps the former `Connection(String)` payload verbatim, and
+    /// the original transport error travels as the `source` so the cause chain
+    /// survives the conversion from [`crate::domain::http_error::HttpError`]
+    /// instead of being flattened into text (#2784).
+    #[error("connection error: {message}")]
+    Connection {
+        /// Human-readable message (unchanged from the former tuple payload).
+        message: String,
+        /// The original transport error, when one is available.
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
 
     /// Request construction or body-read failure (non-transient)
     ///
@@ -346,7 +363,7 @@ impl CrawlError {
             // Row 4.
             Self::Timeout => ErrorClass::TransientBackoff,
             // Row 1.
-            Self::Connection(_) => ErrorClass::TransientRetriable,
+            Self::Connection { .. } => ErrorClass::TransientRetriable,
             // Variant contract (variant doc): non-transient request
             // construction/body-read failure maps to InternalFatal upstream.
             Self::RequestFailed(_) => ErrorClass::InternalFatal,
@@ -392,7 +409,7 @@ impl From<crate::domain::http_error::HttpError> for CrawlError {
                 url: String::new(),
             },
             HttpError::Timeout => CrawlError::Timeout,
-            HttpError::Connection(msg) => CrawlError::Connection(msg),
+            HttpError::Connection { message, source } => CrawlError::Connection { message, source },
             HttpError::Request(msg) => CrawlError::RequestFailed(msg),
             HttpError::WafChallenge(provider) => CrawlError::WafChallenge {
                 provider,
@@ -434,6 +451,7 @@ mod tests {
         let error = CrawlError::Network {
             message: "timeout".to_string(),
             status_code: Some(408),
+            source: None,
         };
         assert!(error.to_string().contains("timeout"));
         assert!(error.to_string().contains("408"));
@@ -444,6 +462,7 @@ mod tests {
         let error = CrawlError::Network {
             message: "connection refused".to_string(),
             status_code: None,
+            source: None,
         };
         assert!(error.to_string().contains("connection refused"));
         assert!(error.to_string().contains("None"));
@@ -590,9 +609,22 @@ mod tests {
 
     #[test]
     fn test_crawl_error_connection() {
-        let error = CrawlError::Connection("refused".to_string());
+        let error = CrawlError::Connection {
+            message: "refused".to_string(),
+            source: None,
+        };
         assert!(error.to_string().contains("connection error"));
         assert!(error.to_string().contains("refused"));
+    }
+
+    /// #2784: the `Display` is byte-identical to the former `Connection(String)`.
+    #[test]
+    fn test_crawl_error_connection_display_is_unchanged() {
+        let error = CrawlError::Connection {
+            message: "refused".to_string(),
+            source: None,
+        };
+        assert_eq!(error.to_string(), "connection error: refused");
     }
 
     #[test]
@@ -707,6 +739,7 @@ mod tests {
                 CrawlError::Network {
                     message: "connection reset".to_string(),
                     status_code: None,
+                    source: None,
                 },
                 ErrorClass::TransientRetriable,
             );
@@ -776,7 +809,10 @@ mod tests {
         fn connection_is_transient_retriable() {
             // Matrix row 1.
             assert_class(
-                CrawlError::Connection("refused".to_string()),
+                CrawlError::Connection {
+                    message: "refused".to_string(),
+                    source: None,
+                },
                 ErrorClass::TransientRetriable,
             );
         }

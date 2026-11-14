@@ -62,6 +62,25 @@ pub fn log_scrape_error<E: std::fmt::Display + ?Sized>(
     correlation_id: Option<&CorrelationId>,
     context: &str,
 ) {
+    log_scrape_error_with_cause(error, url, stage, correlation_id, context, None);
+}
+
+/// [`log_scrape_error`] with the connection-failure taxonomy (#2784).
+///
+/// The classified `cause` travels in the JSONL as its own field — the stable
+/// wire name of the `NetworkCause` value, never a message fragment — so a consumer of
+/// the trace reads a contract instead of parsing text. The field is OMITTED
+/// when the failure is not a classified network failure, so its absence means
+/// exactly "not a network failure" and not "unclassified".
+#[allow(clippy::needless_pass_by_value)]
+pub fn log_scrape_error_with_cause<E: std::fmt::Display + ?Sized>(
+    error: &E,
+    url: &str,
+    stage: &str,
+    correlation_id: Option<&CorrelationId>,
+    context: &str,
+    cause: Option<crate::domain::error::cause::NetworkCause>,
+) {
     // `Option<String>` as a tracing field records the value when `Some` and is
     // omitted when `None`, so a single call handles both cases.
     tracing::error!(
@@ -69,6 +88,7 @@ pub fn log_scrape_error<E: std::fmt::Display + ?Sized>(
         url = %url,
         stage = %stage,
         trace_id = correlation_id.map(|c| c.trace_id().to_string()),
+        cause = cause.map(crate::domain::error::cause::NetworkCause::as_str),
         "{context}"
     );
 }

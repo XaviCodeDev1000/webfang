@@ -271,12 +271,13 @@ impl BatchProcessor {
                     // ScraperError conversion (#537): severity routing needs
                     // classify(), which a flattened string cannot provide.
                     let scraper_err = ScraperError::from(e);
-                    crate::infrastructure::observability::log_scrape_error(
+                    crate::infrastructure::observability::log_scrape_error_with_cause(
                         &scraper_err,
                         &url,
                         "batch_crawl",
                         Some(&run_root),
                         "batch URL crawl failed",
+                        crate::domain::error::cause::cause_in_chain(&scraper_err),
                     );
                     errors.push((url, scraper_err));
                 },
@@ -527,10 +528,10 @@ async fn process_single_url(
         {
             return Err(CrawlError::Timeout);
         }
-        return Err(CrawlError::Connection(format!(
-            "crawl completed with {} transient error(s)",
-            result.errors
-        )));
+        return Err(CrawlError::Connection {
+            message: format!("crawl completed with {} transient error(s)", result.errors),
+            source: None,
+        });
     }
 
     Ok(result)

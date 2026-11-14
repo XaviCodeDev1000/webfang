@@ -27,7 +27,7 @@ fn crawl_error_from_http(err: HttpError, url: &str) -> crate::domain::error::Cra
         },
         HttpError::RateLimited(retry_after) => CrawlError::RateLimited(retry_after),
         HttpError::Timeout => CrawlError::Timeout,
-        HttpError::Connection(msg) => CrawlError::Connection(msg),
+        HttpError::Connection { message, source } => CrawlError::Connection { message, source },
         HttpError::Request(msg) => CrawlError::RequestFailed(msg),
         HttpError::WafChallenge(provider) => CrawlError::WafChallenge {
             provider,
@@ -135,9 +135,31 @@ mod tests {
 
     #[test]
     fn test_connection_preserves_message() {
-        let err = crawl_error_from_http(HttpError::Connection("refused".to_string()), URL);
+        let err = crawl_error_from_http(HttpError::connection("refused"), URL);
         assert!(
-            matches!(&err, CrawlError::Connection(m) if m == "refused"),
+            matches!(&err, CrawlError::Connection { message, .. } if message == "refused"),
+            "got: {err:?}"
+        );
+    }
+
+    /// #2784: the cause crosses the boundary instead of dying in the message.
+    ///
+    /// This is the whole point of the slice: `HttpError::Connection` used to
+    /// carry a bare `String`, so everything below it saw only text and the
+    /// trace could not name the cause. The preserved transport error must
+    /// survive the conversion, reachable through the chain.
+    #[test]
+    fn test_connection_carries_its_cause_through_the_conversion() {
+        let cause = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let err = crawl_error_from_http(
+            HttpError::connection_with_cause("refused", Box::new(cause)),
+            URL,
+        );
+        let source = std::error::Error::source(&err).expect("the cause must survive");
+        assert_eq!(source.to_string(), "refused");
+        // The message is unchanged by the presence of a cause.
+        assert!(
+            matches!(&err, CrawlError::Connection { message, .. } if message == "refused"),
             "got: {err:?}"
         );
     }

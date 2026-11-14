@@ -5,6 +5,7 @@
 use super::factory::build_wreq_client;
 use super::retry::{compute_backoff_delay, retry_with_backoff, RetryPolicy};
 use crate::domain::body_cap;
+use crate::domain::error::cause::{classify, ClassifiedNetworkError, FetchPhase};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
 use crate::domain::session_port::{SessionId, SessionPort};
@@ -199,7 +200,7 @@ impl HttpClient {
                     HttpError::WafChallenge(_) | HttpError::Forbidden => 403,
                     HttpError::RateLimited(_) => 429,
                     HttpError::Timeout => 504,
-                    HttpError::Connection(_) => 503,
+                    HttpError::Connection { .. } => 503,
                     HttpError::ClientError(404) => return, // don't report 404
                     HttpError::ClientError(code) => *code,
                     HttpError::ServerError(code) => *code,
@@ -464,7 +465,16 @@ fn map_send_error(e: wreq::Error) -> HttpError {
     if e.is_timeout() {
         HttpError::Timeout
     } else if e.is_connect() {
-        HttpError::Connection(e.to_string())
+        // #2784: this is the client's CONNECT boundary, so the phase is known
+        // here and the cause is classified where the error still carries its
+        // TYPE. The message is rendered BEFORE the error is boxed, so the text
+        // an operator reads is unchanged; the cause travels beside it.
+        let message = e.to_string();
+        let cause = classify(&e, FetchPhase::Connect);
+        HttpError::connection_with_cause(
+            message,
+            Box::new(ClassifiedNetworkError::new(cause, Box::new(e))),
+        )
     } else {
         HttpError::Request(e.to_string())
     }
@@ -566,7 +576,15 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
                 if e.is_timeout() {
                     crate::domain::http_error::HttpError::Timeout
                 } else if e.is_connect() {
-                    crate::domain::http_error::HttpError::Connection(e.to_string())
+                    // #2784: same boundary, same classification as
+                    // `map_send_error` — the raw path must not be the one that
+                    // loses the cause.
+                    let message = e.to_string();
+                    let cause = classify(&e, FetchPhase::Connect);
+                    crate::domain::http_error::HttpError::connection_with_cause(
+                        message,
+                        Box::new(ClassifiedNetworkError::new(cause, Box::new(e))),
+                    )
                 } else {
                     crate::domain::http_error::HttpError::Request(e.to_string())
                 }

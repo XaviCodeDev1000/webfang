@@ -122,10 +122,8 @@ fn assert_policy_refusal(err: &ScraperError) {
 async fn test_scrape_with_config_invalid_url() {
     let url = url::Url::parse("https://invalid-host-that-does-not-exist-12345.com").unwrap();
     let config = ScraperConfig::default();
-    let mock = MockHttpClient::new().with_response(
-        url.as_str(),
-        Err(HttpError::Connection("no route to host".into())),
-    );
+    let mock = MockHttpClient::new()
+        .with_response(url.as_str(), Err(HttpError::connection("no route to host")));
 
     let root = CorrelationId::new();
     let result =
@@ -563,7 +561,7 @@ fn mock_failure_cases() -> Vec<MockFailureCase> {
         MockFailureCase {
             name: "connection refused",
             url: "https://unreachable.example.com",
-            error: HttpError::Connection("connection refused".into()),
+            error: HttpError::connection("connection refused"),
             expect: MockFailureExpectation::MessageContains("connection refused"),
         },
         MockFailureCase {

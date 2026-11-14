@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 
+use crate::domain::error::cause::{classify, ClassifiedNetworkError, FetchPhase};
 use crate::domain::http_error::{HttpError, HttpResult};
 
 // Re-export so `crate::application::http_client::port::{HttpClientPort,
@@ -32,7 +33,14 @@ impl HttpClientPort for wreq::Client {
                 if e.is_timeout() {
                     HttpError::Timeout
                 } else if e.is_connect() {
-                    HttpError::Connection(e.to_string())
+                    // #2784: the port's default path classifies exactly like
+                    // the client's, so no route drops the cause.
+                    let message = e.to_string();
+                    let cause = classify(&e, FetchPhase::Connect);
+                    HttpError::connection_with_cause(
+                        message,
+                        Box::new(ClassifiedNetworkError::new(cause, Box::new(e))),
+                    )
                 } else {
                     HttpError::Request(e.to_string())
                 }

@@ -248,6 +248,7 @@ fn classify_synthetic_io_other_kind_with_dns_text_is_transient_retriable() {
     let crawl_err = CrawlError::Network {
         message: "tls handshake failed: certificate verify failed".to_string(),
         status_code: None,
+        source: None,
     };
     let scraper_err = ScraperError::from(crawl_err);
     assert_eq!(

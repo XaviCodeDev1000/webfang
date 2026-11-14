@@ -18,7 +18,9 @@ use wreq::header::{HeaderMap, HeaderName, HeaderValue};
 use wreq::Client;
 use wreq_util::Profile;
 
+use super::cause::{classify, FetchPhase};
 use super::{Cookie, DownloadError, Downloader, FetchedPage};
+use crate::domain::error::cause::{cause_in_chain, ClassifiedNetworkError};
 use crate::domain::waf::{is_t2_blocking_status, waf_inspector, InspectionContext};
 use crate::error::ErrorClass;
 use crate::infrastructure::user_agent::UserAgentCache;
@@ -408,10 +410,27 @@ impl WreqDownloader {
             None => builder,
         };
         builder.send().await.map_err(|e| {
-            if e.is_timeout() {
+            // #2784: classify where the failure still carries its TYPE, in
+            // the phase this call knows (the response does not exist yet), and
+            // let the CAUSE travel up the chain as a typed carrier. The
+            // variant underneath keeps its shape and its Display, so the
+            // retry rule and the exit code do not move — only the operator
+            // learns which class of failure it was.
+            let cause = classify(&e, FetchPhase::Connect);
+            let original = if e.is_timeout() {
                 DownloadError::Timeout(self.timeout_secs)
             } else {
                 DownloadError::from(e)
+            };
+            // ONLY the transport `Network` arm gains the cause. A builder
+            // error stays `InvalidUrl` and a timeout stays `Timeout`, so the
+            // retry rule, the error class and the exit code are untouched —
+            // the taxonomy adds knowledge, it never moves a verdict.
+            match original {
+                DownloadError::Network(inner) => {
+                    DownloadError::Network(Box::new(ClassifiedNetworkError::new(cause, inner)))
+                },
+                other => other,
             }
         })
     }
@@ -488,8 +507,26 @@ impl WreqDownloader {
     /// Content-Length). Charset handling mirrors wreq's `text_with_charset`:
     /// the Content-Type charset param wins, UTF-8 as fallback.
     async fn read_body_capped(&self, response: wreq::Response) -> Result<String, DownloadError> {
+        // #2784: the BODY phase — a timeout here is a READ timeout, never a
+        // connect one. Only the page path is classified; the WAF sniff path
+        // below keeps its own errors (its failure is not the page's).
         self.read_body_bounded(response, self.max_page_bytes, BoundedRead::Abort)
             .await
+            .map_err(|error| {
+                if cause_in_chain(&error).is_some() {
+                    return error;
+                }
+                let cause = classify(&error, FetchPhase::Body);
+                // Same rule as the connect boundary: only the transport arm
+                // gains the cause. `BodyTooLarge` and the rest keep their
+                // variant, their class and their message.
+                match error {
+                    DownloadError::Network(inner) => {
+                        DownloadError::Network(Box::new(ClassifiedNetworkError::new(cause, inner)))
+                    },
+                    other => other,
+                }
+            })
     }
 
     /// Read at most [`WAF_SNIFF_MAX_BYTES`] of a response body for challenge

@@ -17,6 +17,7 @@ use wreq_util::Profile;
 
 use crate::domain::crawler_port::{HttpFetchResult, StaticFetchPort};
 use crate::domain::downloader_port::Cookie;
+use crate::domain::error::cause::{classify, ClassifiedNetworkError, FetchPhase};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::{CrawlError, CrawlerConfig};
 use crate::error::Result as ScraperResult;
@@ -146,6 +147,7 @@ pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<HttpFetchRes
     let requested = Url::parse(url).map_err(|e| CrawlError::Network {
         message: format!("invalid URL {url}: {e}"),
         status_code: None,
+        source: None,
     })?;
 
     // SSRF layer 2 (F-06 + F-32 #1217), applied here so every consumer of the
@@ -166,9 +168,19 @@ pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<HttpFetchRes
         .timeout(Duration::from_secs(config.timeout_secs))
         .send()
         .await
-        .map_err(|e| CrawlError::Network {
-            message: e.to_string(),
-            status_code: e.status().map(|s| s.as_u16()),
+        .map_err(|e| {
+            // #2784: this is the port's CONNECT boundary — the response does
+            // not exist yet, so a timeout here is a connect timeout and never a
+            // read one. Classify where the error still carries its TYPE, render
+            // the message first, and let the cause ride beside it.
+            let message = e.to_string();
+            let status_code = e.status().map(|s| s.as_u16());
+            let cause = classify(&e, FetchPhase::Connect);
+            CrawlError::Network {
+                message,
+                status_code,
+                source: Some(Box::new(ClassifiedNetworkError::new(cause, Box::new(e)))),
+            }
         })?;
 
     let status = response.status().as_u16();
@@ -202,12 +214,20 @@ pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<HttpFetchRes
         return Err(CrawlError::Network {
             message: format!("HTTP error: {}", response.status()),
             status_code: Some(status),
+            source: None,
         });
     }
 
-    let text = response.text().await.map_err(|e| CrawlError::Network {
-        message: e.to_string(),
-        status_code: None,
+    let text = response.text().await.map_err(|e| {
+        // #2784: the BODY phase — the response existed, so a timeout here is a
+        // read timeout and never a connect one.
+        let message = e.to_string();
+        let cause = classify(&e, FetchPhase::Body);
+        CrawlError::Network {
+            message,
+            status_code: None,
+            source: Some(Box::new(ClassifiedNetworkError::new(cause, Box::new(e)))),
+        }
     })?;
 
     Ok(HttpFetchResult {
