@@ -52,7 +52,7 @@
       "crates/webfang_core/src/domain/entities/content.rs": 1155,
       "crates/webfang_core/src/domain/entities/progress.rs": 629,
       "crates/webfang_core/src/domain/error/crawl_error.rs": 1044,
-      "crates/webfang_core/src/domain/html_extraction/date_extractor.rs": 730,
+      "crates/webfang_core/src/domain/html_extraction/date_extractor.rs": 659,
       "crates/webfang_core/src/domain/network_policy.rs": 756,
       "crates/webfang_core/src/domain/options_spec/crawler.rs": 974,
       "crates/webfang_core/src/domain/options_spec/mod.rs": 1110,
