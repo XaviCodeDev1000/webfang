@@ -212,3 +212,52 @@ the taxonomy, the message and the trace field together), with the RED evidence r
 (The target is named after the file: `connection_cause_taxonomy_test`, not
 `connection_cause_taxonomy` — cargo derives it from the stem, and the repo's own convention
 keeps the `_test` suffix on files that have one.)
+
+### L3 — The GREEN, first slice: the vocabulary and the classifier (2026-11-14)
+
+**Landed** (`63449239`): the taxonomy's vocabulary and the type-based classifier, with 14
+new tests, `cargo fmt` clean and `cargo clippy --all-targets --all-features -D warnings`
+clean.
+
+- `crates/webfang_core/src/domain/error/cause.rs` — the stable values, the Spanish messages,
+  the `ClassifiedNetworkError` carrier (which KEEPS the original error as its `#[source]`, so
+  the cause is added to the chain and never substituted for it), `DnsResolutionError` (the
+  resolver's own typed failure) and `cause_in_chain` (the chain walk, by TYPE).
+- `crates/webfang_core/src/infrastructure/downloader/cause.rs` — the classifier and the phase
+  it needs: `FetchPhase::Connect` (before the response) or `FetchPhase::Body` (after it). It
+  walks the chain by `io::ErrorKind` and by the domain's typed errors, and **never** compares
+  message text.
+
+**The classification, by type:**
+
+| signal (by TYPE) | cause |
+|---|---|
+| `DnsResolutionError` anywhere in the chain | `dns_resolution` |
+| `io::ErrorKind::ConnectionRefused` | `connect_refused` |
+| `ConnectionReset` / `UnexpectedEof` / `BrokenPipe` | `connection_closed` |
+| `TimedOut` in the connect phase | `connect_timeout` |
+| `TimedOut` in the body phase | `read_timeout` |
+| `InvalidData` in the connect phase (the TLS stack's handshake violation) | `tls_handshake` |
+| anything else | `unknown` |
+
+**The wiring that remains** (the next slice, with its RED):
+
+1. the **resolver** raises `DnsResolutionError` instead of a bare I/O error
+   (`infrastructure/ssrf.rs`, `gai_lookup`);
+2. the **downloader** classifies at the ORIGIN — where the phase is known — and lets the cause
+   travel: the non-timeout failures become `DownloadError::Network(Box::new(classified))`, and
+   the timeout keeps its `DownloadError::Timeout(secs)` variant (so the retry rule and the exit
+   code do not move) with the classified error wrapped around it;
+3. the **trace** gains the `cause` field: `log_scrape_error` takes an optional cause and emits
+   it as a field, omitted when there is none;
+4. the RED's two tests go green, the value-set snapshot lands, and the pair tests (the
+   in-process never-resolving resolver and the accept-queue SYN drop, with the positive control
+   and the written skip reason) join the slice.
+
+**Why the wiring is not in this commit.** The retry rule reads `dl_err.classify()`, and the
+classification of a `Network` variant and of a `Timeout` variant is not identical — so wrapping
+the timeout changes what the domain classifier sees. That is exactly the kind of change that
+must not be rushed: it needs its own RED (the retry behavior pinned) before it moves.
+
+**The RED stays uncommitted** (`crates/webfang_core/tests/connection_cause_taxonomy_test.rs`),
+with its patch and copy at `~/.cache/webfang-lab/red/`: the branch never carries a red commit.
