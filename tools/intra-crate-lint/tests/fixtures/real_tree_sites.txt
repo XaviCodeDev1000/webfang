@@ -1252,8 +1252,8 @@ cli/preflight/normalization_tests_support.rs	3	use	crate::Args
 cli/preflight/tests_adaptive_selectors.rs	3	use	crate::Args
 cli/preflight/tests_js_strategy.rs	3	use	crate::domain::JsStrategy
 cli/preflight/tests_obscura_binary.rs	4	use	crate::domain::JsStrategy
-cli/preflight/tests_obscura_version.rs	3	use	crate::domain::JsStrategy
-cli/preflight/tests_obscura_version.rs	190	use	crate::infrastructure::observability::test_log_capture::LogBuffer
+cli/preflight/tests_obscura_version.rs	5	use	crate::domain::JsStrategy
+cli/preflight/tests_obscura_version.rs	192	use	crate::infrastructure::observability::test_log_capture::LogBuffer
 cli/retention.rs	23	use	crate::application::crawl_options::CrawlOptions
 cli/retention.rs	137	use	crate::infrastructure::autotuning::env_db_path
 cli/retention.rs	137	use	crate::infrastructure::autotuning::resolve_db_path
