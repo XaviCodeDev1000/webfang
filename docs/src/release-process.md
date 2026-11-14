@@ -96,9 +96,9 @@ packaged file of the affected crate, so the change is attributed to that package
 way is to raise the dependency requirement in the crate's `Cargo.toml` (a real change: it
 records the new minimum). When the dependency is transitive and there is no requirement to
 raise, add a comment in that `Cargo.toml` naming the advisory, e.g.
-`# <crate>: <RUSTSEC-...> patched in the lockfile.` — measured to restore the release (all
-three packages get the patch version). The comment is a marker, not a fix: prefer the
-requirement change whenever one applies.
+`# <crate>: <RUSTSEC-...> patched in the lockfile.` — measured on release-plz 0.3.168 and
+0.3.169: with either the requirement or the comment, all three packages get the patch version.
+The comment is a marker, not a fix: prefer the requirement change whenever one applies.
 
 ## Why a Release PR cannot be generated against an untagged `main`
 
