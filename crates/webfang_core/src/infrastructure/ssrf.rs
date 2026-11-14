@@ -293,10 +293,14 @@ impl ValidatingResolver {
     ) -> Result<Addrs, BoxedLookupError> {
         // #2784: the resolution is MARKED while it is in flight, so a failure
         // that arrives before it finishes is a RESOLUTION failure.
-        let _mark = crate::domain::error::resolution::resolution_tracker().begin(&host);
+        let mut mark = crate::domain::error::resolution::resolution_tracker().begin(&host);
         let addrs = name_source.lookup(host.clone()).await.map_err(|err| {
             crate::domain::error::mapping::dns_resolution_failure(err) as BoxedLookupError
         })?;
+        // The name came back: record it, so a CONCURRENT request whose own
+        // resolution hangs is not mistaken for this one's (#2784).
+        mark.succeeded();
+        drop(mark);
 
         if validate {
             Self::fail_closed_scan(&host, &addrs, allow_loopback, &policy)?;

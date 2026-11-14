@@ -34,7 +34,19 @@ pub enum ResolutionState {
 /// resolution that never came back (#2784).
 #[derive(Debug, Default)]
 pub struct ResolutionTracker {
-    in_flight: std::sync::Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>,
+    marks: std::sync::Mutex<std::collections::HashMap<String, HostResolutions>>,
+}
+
+/// What the tracker knows about one host.
+#[derive(Debug, Default)]
+struct HostResolutions {
+    /// The resolutions still running, with the instant each one started.
+    in_flight: Vec<std::time::Instant>,
+    /// When the last resolution for this host completed SUCCESSFULLY.
+    ///
+    /// It is what tells two requests for the same host apart: if a resolution
+    /// finished after this request began, that request's name came back.
+    last_success: Option<std::time::Instant>,
 }
 
 impl ResolutionTracker {
@@ -44,32 +56,62 @@ impl ResolutionTracker {
     /// resolution never leaves a phantom mark behind.
     pub fn begin(&self, host: &str) -> ResolutionGuard<'_> {
         let started = std::time::Instant::now();
-        if let Ok(mut marks) = self.in_flight.lock() {
-            marks.entry(host.to_owned()).or_default().push(started);
+        if let Ok(mut marks) = self.marks.lock() {
+            marks
+                .entry(host.to_owned())
+                .or_default()
+                .in_flight
+                .push(started);
         }
         ResolutionGuard {
             tracker: self,
             host: host.to_owned(),
             started,
+            succeeded: false,
         }
     }
 
-    /// The state of the resolutions in flight for `host`.
+    /// The state of the resolutions for `host`, from this request's point of view.
     ///
-    /// `request_started` is when the request that failed began: a resolution
-    /// that started at or after it belongs to that request.
+    /// `request_started` is when the request that failed began.
+    ///
+    /// The rule is deliberately CONSERVATIVE: a hung resolution is only
+    /// attributed to this request when nothing proves otherwise.
+    ///
+    /// - no resolution in flight: the name resolved, so the failure is not a
+    ///   resolution failure;
+    /// - a resolution in flight that started at or after this request began,
+    ///   AND no resolution for that host completed successfully after this
+    ///   request began: this request's own name never came back;
+    /// - anything else: the evidence does not decide, and `unknown` is the
+    ///   honest answer.
+    ///
+    /// The third case is the one concurrency creates: request A resolves and
+    /// its SYN is dropped while request B (started later) hangs its
+    /// resolution — B's mark started after A began, so without the successful
+    /// completion A would be labelled a resolution failure. With it, A is
+    /// `unknown`: never a wrong attribution.
     #[must_use]
     pub fn state(&self, host: &str, request_started: std::time::Instant) -> ResolutionState {
-        let Ok(marks) = self.in_flight.lock() else {
+        let Ok(marks) = self.marks.lock() else {
             return ResolutionState::None;
         };
-        let Some(starts) = marks.get(host) else {
+        let Some(host_marks) = marks.get(host) else {
             return ResolutionState::None;
         };
-        if starts.iter().any(|started| *started >= request_started) {
-            ResolutionState::ThisRequest
-        } else {
-            ResolutionState::OtherRequest
+        if host_marks.in_flight.is_empty() {
+            return ResolutionState::None;
+        }
+        let completed_after = host_marks
+            .last_success
+            .is_some_and(|finished| finished >= request_started);
+        let started_after = host_marks
+            .in_flight
+            .iter()
+            .any(|started| *started >= request_started);
+        match (completed_after, started_after) {
+            (false, true) => ResolutionState::ThisRequest,
+            _ => ResolutionState::OtherRequest,
         }
     }
 }
@@ -80,14 +122,30 @@ pub struct ResolutionGuard<'a> {
     tracker: &'a ResolutionTracker,
     host: String,
     started: std::time::Instant,
+    succeeded: bool,
+}
+
+impl ResolutionGuard<'_> {
+    /// Record that the resolution COMPLETED SUCCESSFULLY.
+    ///
+    /// Without it, a concurrent request that hung its own resolution would
+    /// make this request look like a resolution failure.
+    pub fn succeeded(&mut self) {
+        self.succeeded = true;
+    }
 }
 
 impl Drop for ResolutionGuard<'_> {
     fn drop(&mut self) {
-        if let Ok(mut marks) = self.tracker.in_flight.lock() {
-            if let Some(starts) = marks.get_mut(&self.host) {
-                starts.retain(|started| *started != self.started);
-                if starts.is_empty() {
+        if let Ok(mut marks) = self.tracker.marks.lock() {
+            if let Some(host_marks) = marks.get_mut(&self.host) {
+                host_marks
+                    .in_flight
+                    .retain(|started| *started != self.started);
+                if self.succeeded {
+                    host_marks.last_success = Some(std::time::Instant::now());
+                }
+                if host_marks.in_flight.is_empty() && host_marks.last_success.is_none() {
                     marks.remove(&self.host);
                 }
             }
