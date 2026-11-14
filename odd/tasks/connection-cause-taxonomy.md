@@ -261,3 +261,48 @@ must not be rushed: it needs its own RED (the retry behavior pinned) before it m
 
 **The RED stays uncommitted** (`crates/webfang_core/tests/connection_cause_taxonomy_test.rs`),
 with its patch and copy at `~/.cache/webfang-lab/red/`: the branch never carries a red commit.
+
+### L4 — The wiring, half landed: the cause dies at the CrawlError boundary (2026-11-14)
+
+The wiring was written and probed, and the probe found exactly where it stops. **Uncommitted**
+on purpose (the branch stays at the green `63449239`; the patch and the RED are at
+`~/.cache/webfang-lab/red/`).
+
+**What the wiring does today:**
+
+- `WreqDownloader::send_request` classifies at the origin (the phase it knows: Connect) and lets
+  the cause travel inside a `ClassifiedNetworkError`, keeping the variant underneath (`Timeout`
+  keeps its shape, so the retry rule and the exit code do not move);
+- `read_body_capped` classifies the body phase;
+- `ValidatingResolver`'s failed lookup raises `DnsResolutionError` — **and the SSRF scan's
+  rejection is deliberately NOT wrapped** (a refusal is not a DNS failure, and the guard's
+  callers must keep seeing what they see today);
+- `log_scrape_error_with_cause` emits the stable wire name as the `cause` field, omitted when
+  there is none. The old 5-argument `log_scrape_error` is preserved (it delegates with `None`)
+  because there are **9+ call sites**: changing all of them would have made this a much wider
+  diff than PR 1 should be, and two of them (the batch crawl site and the fetch site) are the
+  ones that matter for the field.
+
+**Where it stops — measured, not assumed.** With the entry-guard hatch armed and the batch
+against port 9:
+
+```
+{"error": "network error: error sending request for uri (...): client error (Connect) ...", "stage": "fetch"}
+```
+
+No `cause` field, and the message is the **unclassified** one. Two discoveries:
+
+1. the batch path does not run through `WreqDownloader::send_request` — the crawler's
+   `fetch_page` path produces the error, and its conversion to `CrawlError` flattens the cause
+   away (the same flattening D4 removed from the *message*, which the cause must also cross);
+2. the cause therefore has to survive the conversion boundary, not just the downloader.
+
+**The next slice** (its own RED, its own GREEN): find the fetch path the batch actually uses,
+carry the cause through that conversion, add the field to the event that path logs, and turn the
+two RED tests green together with the value-set snapshot.
+
+**One lesson about the harness itself.** The first manual probe without the entry-guard hatch
+failed at the guard, not at the network — the test asserted "a refused connection" while the
+tool had refused to even try. That is the positive-control rule paying for itself a second time:
+**the injection must reach the layer under test**, or the case proves nothing. Both RED tests
+now arm the documented test-only hatch explicitly, with a comment naming why.
