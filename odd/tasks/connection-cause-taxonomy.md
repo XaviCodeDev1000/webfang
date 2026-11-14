@@ -88,7 +88,9 @@ operator reads "the server did not answer in time" and not "a worker stalled".
   message.
 - **The trace**: the error events gain the `cause` field. The schema change is announced in the
   PR body, as a public contract, and documented next to the trace schema
-  (`docs/src/debugging.md`, which the maintainer asked to update).
+  (`docs/src/debugging.md`). The maintainer's instruction — "Documéntalos junto al esquema de la
+  traza" — is the authorization for that file: the field and its values belong next to the
+  schema they extend.
 - **The value set is snapshotted**: a snapshot test of the whole set of values, so adding one is
   a **visible** change (the snapshot diff) and not a silent extension of a public contract.
 
@@ -102,21 +104,39 @@ than the connect timeout, the connect timeout fires first, the resolver never ge
 its own failure, and the case is classified as `connect_timeout`. The DNS class would be
 unreachable exactly where it matters.
 
-**The design answers it with a phase marker, not with a longer timeout:**
+**A resolver timeout would be a BEHAVIOR change, and PR 1 is classification only.** A shorter
+resolver timeout makes a slow-but-valid resolution fail earlier than today (glibc's defaults are
+5 s per attempt and 2 attempts, so even 8 s would cut resolutions that succeed now). So **PR 1
+introduces no timeout at all**; if a resolver timeout is ever wanted, it belongs to its own PR,
+with a documented, configurable and justified value.
 
-- the resolver marks its own failure with a **typed error** (`DnsResolutionError`) — the
-  "resolution started and did not finish" record, per request;
-- the resolver gets **its own timeout, shorter than the connect timeout**, so the marker is
-  always written before the connect phase can give up;
-- the classifier reads the marker **out of the error chain**, so the DNS class survives every
-  wrapper between the resolver and the operator.
+**The design instead records the PHASE, per request.** The resolver marks each resolution as
+"started" and "finished" (ok or failed). When the **outer** timeout fires — the client's, the
+same one that fires today — the classifier reads the marker: "started and not finished" means the
+request was still waiting for the name, so the cause is `dns_resolution`; "finished" means the
+resolution was already done and the timeout belongs to the connect phase, so the cause is
+`connect_timeout`.
 
-**The RED requires the pair.** The test set must demand `dns_resolution` for the blackholed
-resolver and `connect_timeout` for the dropped SYN — one pair, two different verdicts. The pair
-lives in two places: the laboratory harness (the oracle, with the positive control) and a
-repository test that re-execs itself inside `unshare -rmn`, **skipping with the written reason**
-where the environment denies the namespace (the CI runners do — obs #2394, the same pattern the
-crash-matrix test uses).
+The marker must be **per request, not global**: a shared global flag would attribute one
+request's resolution to another one's timeout. The correlation mechanism (a request-scoped
+tracker shared between the resolver and the classifier — a token, a task-local, or an explicit
+per-resolution cell) is an implementation detail, and the **pair test is what pins it**: if the
+correlation is wrong, the pair test fails.
+
+**Nothing about the observable behavior changes**: the same requests fail at the same moment
+with the same exit codes. Only the *name* of the cause changes.
+
+**The RED requires the pair**, and it must not depend on the namespace — the CI runners deny
+it, so a namespace-only pair would be skipped exactly where it protects most. The pair is
+covered **in process**, with the namespace version as an extra confirmation:
+
+| half of the pair | in-process construction | namespace confirmation |
+|---|---|---|
+| the blackholed resolver | a `Resolve` implementation that **never resolves** (the repository already has the `NameSource` seam for it) | the fake resolver that swallows the query |
+| the dropped SYN | a listener with a **minimal backlog** whose accept queue is already full: on Linux the kernel then drops the following SYNs, and the client's connect never completes. **Measured here**: the control connect completes in 0,00 s, and the case does not complete at all | the `nft` rule that drops the SYN |
+
+The SYN half is verified with a **positive control** like every other injection: the same client
+against a normal listener connects instantly, so the hang is the injection and not the path.
 
 ### 2. Classify by type, never by text
 
@@ -130,6 +150,18 @@ by the real dependency** — an in-process refused connection to `127.0.0.1:9` y
 `wreq`/hyper error, and the test asserts the verdict. When a dependency update changes the
 error's shape, the mapping stops matching and the test fails — that is the pin, and it needs no
 string comparison to work.
+
+## The repo guards (do not repeat #2752's round)
+
+The new module adds **intra-crate dependency sites**, and touching the trace documentation can
+activate the **documentation guards**. Before the PR:
+
+- `scripts/refresh_real_tree_golden.sh`, with the refreshed golden **in the same commit** as
+  the tree that changed;
+- the two checks the local gate already runs (the intra-crate direction check and the CLI
+  reference drift check) — since #2763 the gate runs them itself, so the requirement is simply
+  **not to skip the gate**;
+- the golden set and the baselines are refreshed in the same commit, never in a follow-up.
 
 ## The RED phase
 
