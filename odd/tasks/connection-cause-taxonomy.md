@@ -398,11 +398,62 @@ SYN both surface as `connect_timeout` until the pair test lands.
 `ssrf_layer2_coverage_test` 7/7; `cargo fmt --check` and clippy `--all-targets --all-features
 -D warnings` clean.
 
-**Known blocker (needs a decision, not silently shipped):** `env RUSTDOCFLAGS=-D warnings
-cargo doc -p webfang_core --all-features --no-deps` **ICEs rustdoc deterministically on this
-branch** (`scoped-tls` panic while deserializing the search index). Evidence: `main` at
-08a323c2 with the same command and a fresh target dir is clean across 6+ runs (also with a
-dummy documented item added); this branch ICEs on every run; with default features the only
-doc errors are the two pre-existing feature-gated links in `domain/repository.rs` that also
-fail on `main`. So the ICE is a rustdoc internal bug that this diff tips over, not a lint in
-the change — but CI's `doc-quality` job runs exactly that command and would go red.
+**Known condition (not a blocker — corrected):** `env RUSTDOCFLAGS=-D warnings cargo doc
+--workspace --all-features --no-deps` prints several rustdoc ICEs on this branch (the known
+`search_index::PathData` scoped-tls panic, obs #2707) — **but the command exits 0**, so the
+`doc-quality` job is GREEN. The ICEs are noise from a known rustdoc 1.91.1 bug, not a lint in
+this change. See L7 for the full picture.
+
+### L7 — The rustdoc ICE, diagnosed; and the breaking surface (2026-11-14)
+
+**The ICE, bisected per the maintainer's order.** First, the correction that matters: the
+command **exits 0** — the ICEs are printed by rustdoc's search-index rendering and the run
+still succeeds, so the `doc-quality` job is **green**. (My first reading of the printed
+`error:` lines as "the gate goes red" was wrong: I had not checked the exit code. This is the
+pre-existing panic of obs #2707 — same stack, same shape, reproduced on another branch and on
+its base.) With that out of the way, the bisect:
+
+It is a **rustdoc internal panic** in the pinned toolchain, not a lint in this change:
+
+| probe | result |
+|---|---|
+| `main` @08a323c2, `--all-features`, fresh target dir | 0 ICEs (8+ runs) |
+| `main` + a dummy documented public item | 0 ICEs |
+| `main` + a public item with ~4000 extra doc lines | 0 ICEs (not a size threshold) |
+| this branch, `--all-features` | ICE on **every** run (12+), deterministic — and **exit 0** |
+| `main`, `--workspace --all-features`, fresh target AND a forced re-doc of all five crates (`touch` each `lib.rs`, so the cache cannot mask it) | 0 ICEs, exit 0 — so in THIS tree the panic correlates with the vocabulary commit `63449239`, not with the cache or the environment |
+| this branch, default features | only the 2 PRE-EXISTING feature-gated links in `domain/repository.rs` (also red on `main`) |
+| **this branch on NIGHTLY (rustc 1.100.0-nightly, 2026-08-15)** | **0 ICEs** — the same source documents, with only 2 pre-existing lint errors in `infrastructure/converter/{obsidian,wikilinks}.rs` (untouched by this change) |
+
+So the panic is a **rustdoc 1.91.1 bug that a newer rustdoc does not have**. The trigger sits
+in commit `63449239` (the vocabulary + the classifier), **not** in the wiring: the pre-wiring
+state ICEs too.
+
+Mitigations measured, all ineffective: a type alias for the source field; `#[doc(hidden)]` on
+the field (the sanctioned temporary exit); removing the shim's re-export; renaming the module
+or the enum; stripping the new module's docs. Minimal reproductions attempted on `main` — a
+public enum with a struct variant carrying a boxed source (with and without `thiserror`), and
+a `pub(crate)` module plus a private shim re-exporting its items — do **not** reproduce it.
+
+**Consequence:** none for the gate — and note the two lessons this cost: (a) a printed
+`error:` is not a gate failure, the exit code is (0 here); (b) the causal test against the base
+must FORCE the re-documentation, because a cached target dir makes the base look clean (obs
+#2875 spells out both). **Search Engram before bisecting:** obs #2707 and obs #2875 already
+described this panic, its non-fatality and its proof, and the right way to isolate it.
+
+**Consequence:** none for the gate — the command exits 0, the job stays enabled and green,
+and nothing was turned off. What remains is a **known rustdoc 1.91.1 noise** on this repo
+(obs #2707): the same panic prints on other branches and on their base. On nightly (a newer
+rustdoc) the panic is gone entirely, which is the eventual fix for the noise.
+
+**The breaking surface (public API change).** `HttpError::Connection`, `CrawlError::Connection`
+and `CrawlError::Network` change from tuple to struct variants, so downstream matches on the
+old `String` payload break. `webfang_core` is a published crate and the whole workspace
+(`mcp`, `cli`, `test_utils`, `benchmark`) compiles green against the change.
+
+- The marker is `feat(domain)!:` — on the commit **and** on the PR title, because the branch
+  has 8 commits and SQUASH keeps the title.
+- Local guard, offline mode: `bash scripts/check_breaking_surface.sh --fixture <file>
+  --strategy squash` → **OK** with the marker on the title, **red** without it (the negation
+  proves the check bites).
+- The label the auto-label job derives from a `!` title is `type:breaking-change`.
