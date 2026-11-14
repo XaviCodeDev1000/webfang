@@ -206,5 +206,21 @@ else
   fail "(g) a lock-only commit the filter does not release by policy is silent (rc=$RC: $(cat "$WORK/g"))"
 fi
 
+# ─── (h) an unreadable filter says so instead of asserting a skipped release ──
+D="$WORK/indeterminate"
+seed_repo "$D"
+lock_commit "$D/clone" 0.2.191 "chore(deps): patch libc 0.2.186 -> 0.2.191 (RUSTSEC-2026-1)"
+rm -f "$D/clone/release-plz.toml"
+git -C "$D/clone" -c commit.gpgsign=false commit -qam "chore: drop the filter config"
+RC=0
+run_guard "$D/clone" false "$WORK/h"
+if [[ $RC -eq 0 ]] && grep -q '::warning::' "$WORK/h" &&
+  grep -qF 'could not be determined' "$WORK/h" &&
+  ! grep -qF 'will ship with the next release' "$WORK/h"; then
+  pass "(h) an unreadable filter reports the state as undetermined"
+else
+  fail "(h) an unreadable filter reports the state as undetermined (rc=$RC: $(cat "$WORK/h"))"
+fi
+
 printf '\nharness: %d ok, %d fail\n' "$PASSED" "$FAILED"
 [[ $FAILED -eq 0 ]]

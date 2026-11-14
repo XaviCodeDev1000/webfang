@@ -23,7 +23,15 @@
 #     * `[workspace.package] version` is the same as the last tag's (no release
 #       was cut);
 #     * at least one commit since that tag touches `Cargo.lock`;
+#     * that commit's subject matches `release_commits` (read from
+#       release-plz.toml): when it does not, not releasing is the agreed policy
+#       and silence is correct;
 #     * none of those commits is covered by the `skip-lock-warning` label.
+#
+#   When the filter cannot be read (no release-plz.toml, no python3, an invalid
+#   pattern) the step still warns, but it says the state is UNDETERMINED instead
+#   of asserting that a release was skipped: a security bump must not be silenced
+#   by a missing tool, and it must not be explained by a guess either.
 #
 #   It never fails the job: the release pipeline must not be blocked by a
 #   warning about a convention.
@@ -135,6 +143,7 @@ PY
 }
 
 UNCOVERED=()
+INDETERMINATE=0
 for sha in "${LOCK_COMMITS[@]}"; do
   labels="$(pr_labels "$sha")"
   if [[ " $labels " == *" $SKIP_LABEL "* ]]; then
@@ -152,6 +161,9 @@ for sha in "${LOCK_COMMITS[@]}"; do
     note "lock-warning: $(git -C "$REPO_ROOT" log -1 --format='%h %s' "$sha") does not match release_commits; the filter is doing its job."
     continue
   fi
+  if [[ $matches -eq 2 ]]; then
+    INDETERMINATE=1
+  fi
   UNCOVERED+=("$(git -C "$REPO_ROOT" log -1 --format='%h %s' "$sha")")
 done
 
@@ -160,5 +172,13 @@ if [[ ${#UNCOVERED[@]} -eq 0 ]]; then
   exit 0
 fi
 
+if [[ $INDETERMINATE -eq 1 ]]; then
+  # No regex, no python3, or an unreadable config: the state cannot be decided,
+  # so the message must not claim the filter skipped a release.
+  printf '::warning::%s\n' \
+    "The window since $LAST_TAG moves Cargo.lock and the workspace version is still $VERSION_TAG, but it could not be determined whether these commits match release_commits (release-plz.toml or python3 unreadable), so whether this should have released is unknown. Commits: ${UNCOVERED[*]}. Check the filter manually before assuming the patch ships with the next release."
+  exit 0
+fi
+
 printf '::warning::%s\n' \
-  "The window since $LAST_TAG moves Cargo.lock and no release was cut (workspace version is still $VERSION_TAG). With release_commits, a commit that only touches Cargo.lock does not release, so this dependency patch will ship with the next release that fires for another reason. Commits: ${UNCOVERED[*]}. If it must ship now, touch a packaged file of the affected crate (raise the dependency requirement, or name the advisory in its Cargo.toml). Silence it with the '$SKIP_LABEL' label if that is intended."
+  "The window since $LAST_TAG moves Cargo.lock and no release was cut (workspace version is still $VERSION_TAG). With release_commits, a commit that only touches Cargo.lock does not release, so this dependency patch will ship with the next release that fires for another reason. Commits: ${UNCOVERED[*]}. If it must ship now, touch a packaged file of the affected crate (a version requirement it owns, or a comment naming the advisory in its Cargo.toml). Silence it with the '$SKIP_LABEL' label if that is intended."
