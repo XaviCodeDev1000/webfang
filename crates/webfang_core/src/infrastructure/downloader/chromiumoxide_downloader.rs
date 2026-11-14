@@ -48,6 +48,19 @@ const NAV_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(feature = "chromium")]
 const CONTENT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Explicit bound for the full browser launch (spawn + DevTools ws URL +
+/// websocket connect). chromiumoxide 0.7 defaults to 20s (LAUNCH_TIMEOUT),
+/// which is what killed the first attempt of settle_modes_capture_delayed_mutation
+/// in run 43522335058 (issue #2793): the retry passed with zero source changes,
+/// so the failure was launch latency, not the settle windows. 60s = 6x the
+/// slowest cold start documented in the ecosystem (chromedp users: 20-40s on
+/// Lambda/WSL2; chromedp PR #1134 runs 120s in prod) while still fitting the
+/// retry budget: 60s + a full retry stays under the 240s ci slow-timeout.
+/// Never rely on the upstream default: pin it here.
+/// Failure evidence: run 43522335058, attempt 1 died at 20.972s in Browser::launch; attempt 2 passed unchanged.
+#[cfg(feature = "chromium")]
+const CHROME_LAUNCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// RAII guard over the CDP pump task spawned per `fetch` (#1129).
 ///
 /// Dropping a `tokio` [`JoinHandle`](tokio::task::JoinHandle) only detaches
@@ -442,6 +455,7 @@ impl Downloader for ChromiumoxideDownloader {
             let mut config_builder = BrowserConfig::builder()
                 .headless_mode(HeadlessMode::True)
                 .no_sandbox()
+                .launch_timeout(CHROME_LAUNCH_TIMEOUT)
                 .user_data_dir(profile.path());
             if let Some(path) = &self.chrome_binary {
                 tracing::debug!(chrome_binary = %path.display(), "using gate-certified chrome binary");
@@ -452,9 +466,18 @@ impl Downloader for ChromiumoxideDownloader {
                 // LCOV_EXCL_LINE defensive: browser-config-build — static builder flags cannot fail at runtime
                 .map_err(DownloadError::Internal)?;
 
-            let (mut browser, mut handler) = Browser::launch(config)
-                .await
-                .map_err(|e| DownloadError::Internal(format!("Chrome launch failed: {e}")))?;
+            let launch_started = std::time::Instant::now();
+            let (mut browser, mut handler) = Browser::launch(config).await.map_err(|e| {
+                DownloadError::Internal(format!(
+                    "Chrome launch failed: after {}ms (bound {}ms): {e}",
+                    waited_ms_since(launch_started),
+                    CHROME_LAUNCH_TIMEOUT.as_millis()
+                ))
+            })?;
+            tracing::info!(
+                launch_ms = waited_ms_since(launch_started),
+                "chrome launched"
+            );
 
             // 3. Process CDP messages in isolated task to prevent hangs.
             // `HandlerGuard` aborts the pump on every non-`join` exit
@@ -619,6 +642,13 @@ mod tests {
         );
         assert!(dl.supports_interactions());
         assert_eq!(dl.memory_cost(), 200_000_000);
+    }
+
+    #[test]
+    #[cfg(feature = "chromium")]
+    fn launch_bound_is_explicit_not_upstream_default() {
+        assert!(CHROME_LAUNCH_TIMEOUT > std::time::Duration::from_secs(20));
+        assert!(CHROME_LAUNCH_TIMEOUT <= std::time::Duration::from_secs(120));
     }
 
     /// #1367 regression kit.
