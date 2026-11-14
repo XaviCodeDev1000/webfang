@@ -99,3 +99,11 @@ Tests de producción: 1772–2729 (49 tests). `normalization_pipeline_tests` ani
 - Padre: 1577 → 1022 (post-fmt, medido con wc -l). Baseline --update mismo commit (1022). Golden intra-crate refrescado mismo commit (23/23).
 - Gates: check workspace all-targets all-features 0 warn/err, clippy estricto exit 0, fmt --check OK, nextest preflight 76/76, list workspace 5402=5402.
 - Commit `8dc103c5`. RDD sigue bloqueado (transporte nvidia caído; models.json provider nvidia sin modelos) — no se reintenta.
+### L16 — PR D ejecutado; M3 CUMPLIDO: preflight.rs 1022 → 311 (<500, sale del baseline)
+- Corte: span normalization (27–616 pre-D, 590L) + bloque adaptive (146L) → `normalization.rs` (382L) + `config_stages.rs` (174L) + `env_cli_stages.rs` (188L).
+- Verbatim: multiconjunto de líneas idéntico salvo pub(super); único attr `#[instrument]` de stage_config_file restaurado a mano tras el corte (verificado por diff de multilíneas: 0 diferencias restantes).
+- pub(super) acotado: stage_defaults, stage_config_file, stage_env_cli, stage_budget_overrides, apply_cross_field_rules, validate_stage, try_write, check_adaptive_selectors_capability(_with), check_adaptive_selectors_feature(_with). Re-exports pub: normalize, merge_budget_overrides, check_adaptive_selectors_feature (main.rs y tests usan preflight::…).
+- Gates: check 0 warn/err, clippy estricto exit 0, fmt OK, nextest preflight 76/76, list 5402=5402, golden intra-crate 23/23 refrescado mismo commit.
+- Baseline: preflight.rs ELIMINADO del baseline (--remove, ya mide 311 ≤ 500). Ratchet verde.
+- Commit `a511d82b`. PR E cancelado: el padre ya cumple el límite duro de 500.
+- Estado total M3: 3300 → 311 en preflight.rs; hijos: js_strategy 464, path_resolution 110, normalization 382, config_stages 174, env_cli_stages 188, field_book 234 — todos <500.
