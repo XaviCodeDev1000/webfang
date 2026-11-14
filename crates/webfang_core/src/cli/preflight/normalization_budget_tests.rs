@@ -1,8 +1,11 @@
 // ========================================================================
 // merge_budget_overrides (#897 item 1 + review M1 of PR #925)
 // ========================================================================
+use super::normalization::*;
 use super::normalization_tests_support::*;
 use super::*;
+use crate::cli::config::ConfigDefaults;
+use crate::domain::budget::{BudgetOverrides, BurstPermits};
 
 #[test]
 fn merge_staged_crawl_outranks_cli_capture() {

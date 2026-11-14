@@ -3,8 +3,13 @@
 // These tests pin the rank-guard pipeline per design D3/D4. They intentionally
 // fail to compile while the production symbols do not exist (strict TDD RED).
 // ============================================================================
+use super::config_stages::*;
+use super::env_cli_stages::*;
+use super::normalization::*;
 use super::normalization_tests_support::*;
 use super::*;
+use crate::cli::config::ConfigDefaults;
+use crate::domain::budget::BurstPermits;
 use crate::domain::config_value::ConfigSource;
 
 #[test]

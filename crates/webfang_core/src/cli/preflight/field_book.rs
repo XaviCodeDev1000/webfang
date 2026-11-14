@@ -1,6 +1,9 @@
 //! Field book of the normalization pipeline: `ArgSources`, `FieldBook`,
 //! `NormalizedConfig`. Moved verbatim from `preflight.rs` (M3 PR B, option a).
 use super::*;
+use crate::domain::budget::BudgetOverrides;
+
+use super::normalization::stage_defaults;
 
 // ============================================================================
 // Normalization pipeline (stabilization-config-normalization, Phase 3 — D3/D4)
