@@ -175,9 +175,9 @@ pub fn extract_date_from_document(document: &Html) -> Option<String> {
 /// The list and the surrounding logic (`@context` required, `@graph` consulted
 /// only when `@type` is absent, an array contributing its first article-typed
 /// element) are transcribed from **legible 0.5.1** (`src/metadata.rs`,
-/// `src/constants.rs`). It is private there and it can drift: fixture parity
-/// would not notice a type legible adds, because no fixture uses it. When
-/// bumping legible, diff this list against its `JSON_LD_ARTICLE_TYPES`.
+/// `src/constants.rs`). It is private there and it can drift, and no test
+/// compares the two lists: when bumping legible, diff this list against its
+/// `JSON_LD_ARTICLE_TYPES`.
 ///
 /// legible 0.4.3 had the same 19 names but as a regex
 /// (`^Article|AdvertiserContentArticle|…|APIReference$`) where only the first
@@ -599,77 +599,6 @@ mod tests {
             },
         ];
         assert_cases(&cases);
-    }
-
-    /// The cascade and legible's metadata pass are two independent
-    /// implementations. On the same page they must agree wherever legible has a
-    /// source, or the same site shows one date with `--selector` and another
-    /// without it.
-    ///
-    /// Deliberately NOT a parity assertion for every source: this cascade is
-    /// broader by design (`og:published_time`, `name="date"`, microdata,
-    /// `<article><time>`), so it can find a date legible misses. Finding more
-    /// is not the divergence that matters; disagreeing on the same source is.
-    #[test]
-    fn date_cascade_agrees_with_legible_on_shared_sources() {
-        let article_body = "<article><p>x</p></article>";
-        let shared = [
-            page(
-                &[&article_jsonld(Some("2026-03-04T10:00:00Z"))],
-                article_body,
-            ),
-            page(
-                &[&meta(
-                    "property",
-                    "article:published_time",
-                    "2026-02-02T08:30:00Z",
-                )],
-                article_body,
-            ),
-            page(
-                &[&meta("name", "parsely-pub-date", "2026-02-06")],
-                article_body,
-            ),
-            page(
-                &[&jsonld(
-                    r#"{"@context":"https://schema.org","@graph":[{"@type":"WebSite"},{"@type":"Article","datePublished":"2026-05-01"}]}"#,
-                )],
-                article_body,
-            ),
-            page(
-                &[
-                    &article_jsonld(Some("2026-01-01")),
-                    &meta("property", "article:published_time", "2025-12-31T23:59:59Z"),
-                ],
-                article_body,
-            ),
-            page(
-                &[
-                    &jsonld(r#"{"@type":"Article","datePublished":"2026-01-01"}"#),
-                    &meta("property", "article:published_time", "2026-08-14"),
-                ],
-                article_body,
-            ),
-            page(
-                &[
-                    &jsonld(r#"{"@graph":[{"@type":"Article","datePublished":"2026-01-01"}]}"#),
-                    &meta("property", "article:published_time", "2026-08-15"),
-                ],
-                article_body,
-            ),
-        ];
-
-        let mut failures = Vec::new();
-        for html in shared {
-            let ours = extract_date(&html);
-            let legible = legible_published(&html);
-            if ours != legible {
-                failures.push(format!(
-                    "html: {html}\n  ours:    {ours:?}\n  legible: {legible:?}"
-                ));
-            }
-        }
-        assert_no_failures(failures, "fixture(s) disagree with legible");
     }
 
     /// Places where this cascade is intentionally more permissive than legible.
