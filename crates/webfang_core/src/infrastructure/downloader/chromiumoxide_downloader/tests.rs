@@ -483,3 +483,25 @@ fn test_chromiumoxide_metadata_stub() {
     assert!(!dl.supports_interactions());
     assert_eq!(dl.memory_cost(), 0);
 }
+
+/// Kills the cargo-mutants body-replacement survivor of `fetch` (#2793 PR
+/// gate): the mutants shard runs without Chrome, so the E2E gate skips and a
+/// mutant replacing the whole fetch body with `Ok(Default::default())`
+/// survived. This exercises the scheme guard, the first fetch behavior that
+/// runs before any Chrome launch, with no Chrome dependency.
+#[tokio::test]
+#[cfg(feature = "chromium")]
+async fn fetch_rejects_non_http_scheme_before_launching_chrome() {
+    let dl = ChromiumoxideDownloader::new(
+        Arc::new(RwLock::new(CookieBridge::new())),
+        PostLoadWait::None,
+        30,
+        None,
+    );
+    let url: Url = "ftp://example.com/file".parse().unwrap();
+    let err = dl.fetch(&url).await.unwrap_err();
+    assert!(
+        matches!(err, DownloadError::InvalidUrl(ref msg) if msg.contains("unsupported scheme: ftp")),
+        "expected InvalidUrl for a non-http scheme, got: {err}"
+    );
+}
