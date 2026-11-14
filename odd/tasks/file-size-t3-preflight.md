@@ -107,3 +107,8 @@ Tests de producción: 1772–2729 (49 tests). `normalization_pipeline_tests` ani
 - Baseline: preflight.rs ELIMINADO del baseline (--remove, ya mide 311 ≤ 500). Ratchet verde.
 - Commit `a511d82b`. PR E cancelado: el padre ya cumple el límite duro de 500.
 - Estado total M3: 3300 → 311 en preflight.rs; hijos: js_strategy 464, path_resolution 110, normalization 382, config_stages 174, env_cli_stages 188, field_book 234 — todos <500.
+### L17 — fix CI cfg(windows): tests_version_probe import gateado (reporte sesión 01a1c698, run 43555381437)
+- Síntoma: bajo cfg(windows) el módulo queda vacío (2 tests, ambos #[cfg(unix)]) y `use super::js_strategy::*;` daba unused_imports bajo -D warnings.
+- Fix: `#[cfg(unix)] use super::js_strategy::*;` (forma 1, no toca preflight.rs). Verificado: check_windows_platform.sh exit 0; check unix 0 warn, fmt OK, nextest preflight 76/76.
+- Revisado el resto: solo tests_version_probe.rs es 100% cfg(unix); tests_js_strategy (6/9) y tests_obscura_version (7/8) retienen items que sobreviven cfg(windows).
+- Commit `04155d96`, pusheado. RDD del slice PR A cerrado por el otro lado: lineage review-0f88c9a96257e613 aprobado (3 hallazgos advisory non-blocking R2-001/002/003 sobre tests_version_probe, tests_adaptive_selectors, tests_path_resolution).
