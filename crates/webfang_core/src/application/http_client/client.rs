@@ -5,7 +5,6 @@
 use super::factory::build_wreq_client;
 use super::retry::{compute_backoff_delay, retry_with_backoff, RetryPolicy};
 use crate::domain::body_cap;
-use crate::domain::error::cause::{classify, ClassifiedNetworkError, FetchPhase};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
 use crate::domain::session_port::{SessionId, SessionPort};
@@ -282,11 +281,13 @@ impl HttpClient {
         let mut attempt = 0;
         loop {
             let request = self.build_request(url, ua, ua_index);
+            let request_started = std::time::Instant::now();
+            let url_host = url_host_of(url);
             match request.send().await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     if !e.is_timeout() {
-                        return Err(map_send_error(e));
+                        return Err(map_send_error(e, url_host.as_deref(), request_started));
                     }
                     if attempt >= self.config.max_retries {
                         return Err(HttpError::Timeout);
@@ -460,24 +461,16 @@ impl HttpClient {
     }
 }
 
+/// The host of a URL, for the resolver's marker.
+fn url_host_of(url: &str) -> Option<String> {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+}
+
 /// Map a transport error to the corresponding [`HttpError`].
-fn map_send_error(e: wreq::Error) -> HttpError {
-    if e.is_timeout() {
-        HttpError::Timeout
-    } else if e.is_connect() {
-        // #2784: this is the client's CONNECT boundary, so the phase is known
-        // here and the cause is classified where the error still carries its
-        // TYPE. The message is rendered BEFORE the error is boxed, so the text
-        // an operator reads is unchanged; the cause travels beside it.
-        let message = e.to_string();
-        let cause = classify(&e, FetchPhase::Connect);
-        HttpError::connection_with_cause(
-            message,
-            Box::new(ClassifiedNetworkError::new(cause, Box::new(e))),
-        )
-    } else {
-        HttpError::Request(e.to_string())
-    }
+fn map_send_error(e: wreq::Error, host: Option<&str>, started: std::time::Instant) -> HttpError {
+    crate::domain::error::mapping::http_failure(e, host, started)
 }
 
 /// Return a WAF-challenge error when the body is classified as blocked.
@@ -572,18 +565,16 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
         Box::pin(async move {
             // Use the inner wreq client for the raw request, then build
             // a full HttpResponse (status + body + headers).
+            let request_started = std::time::Instant::now();
             let resp = self.client.get(url.as_str()).send().await.map_err(|e| {
                 if e.is_timeout() {
                     crate::domain::http_error::HttpError::Timeout
                 } else if e.is_connect() {
-                    // #2784: same boundary, same classification as
-                    // `map_send_error` — the raw path must not be the one that
-                    // loses the cause.
-                    let message = e.to_string();
-                    let cause = classify(&e, FetchPhase::Connect);
-                    crate::domain::http_error::HttpError::connection_with_cause(
-                        message,
-                        Box::new(ClassifiedNetworkError::new(cause, Box::new(e))),
+                    crate::domain::error::mapping::http_connection_failure(
+                        e,
+                        crate::domain::error::cause::FetchPhase::Connect,
+                        url_host_of(&url).as_deref(),
+                        request_started,
                     )
                 } else {
                     crate::domain::http_error::HttpError::Request(e.to_string())

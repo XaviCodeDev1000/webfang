@@ -277,7 +277,6 @@ impl BatchProcessor {
                         "batch_crawl",
                         Some(&run_root),
                         "batch URL crawl failed",
-                        crate::domain::error::cause::cause_in_chain(&scraper_err),
                     );
                     errors.push((url, scraper_err));
                 },
@@ -528,8 +527,9 @@ async fn process_single_url(
         {
             return Err(CrawlError::Timeout);
         }
+        let message = format!("crawl completed with {} transient error(s)", result.errors);
         return Err(CrawlError::Connection {
-            message: format!("crawl completed with {} transient error(s)", result.errors),
+            message,
             source: None,
         });
     }

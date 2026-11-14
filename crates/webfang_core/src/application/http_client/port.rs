@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 
-use crate::domain::error::cause::{classify, ClassifiedNetworkError, FetchPhase};
 use crate::domain::http_error::{HttpError, HttpResult};
 
 // Re-export so `crate::application::http_client::port::{HttpClientPort,
@@ -29,17 +28,16 @@ impl HttpClientPort for wreq::Client {
     ) -> Pin<Box<dyn std::future::Future<Output = HttpResult<HttpResponse>> + Send + '_>> {
         let url = url.to_owned();
         Box::pin(async move {
+            let request_started = std::time::Instant::now();
             let response = self.get(url.as_str()).send().await.map_err(|e| {
                 if e.is_timeout() {
                     HttpError::Timeout
                 } else if e.is_connect() {
-                    // #2784: the port's default path classifies exactly like
-                    // the client's, so no route drops the cause.
-                    let message = e.to_string();
-                    let cause = classify(&e, FetchPhase::Connect);
-                    HttpError::connection_with_cause(
-                        message,
-                        Box::new(ClassifiedNetworkError::new(cause, Box::new(e))),
+                    crate::domain::error::mapping::http_connection_failure(
+                        e,
+                        crate::domain::error::cause::FetchPhase::Connect,
+                        None,
+                        request_started,
                     )
                 } else {
                     HttpError::Request(e.to_string())

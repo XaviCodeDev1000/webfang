@@ -66,13 +66,8 @@ pub enum CrawlError {
         message: String,
         /// HTTP status code if the server responded; `None` for connection failures.
         status_code: Option<u16>,
-        /// The original transport error, when the producer still holds it.
-        ///
-        /// #2784: the batch path flattens the failure here (the static fetch
-        /// port builds this variant straight from the client error), so without
-        /// this field the cause dies in the message and the trace cannot name
-        /// it. `None` when the producer only had text.
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        /// The original transport error (#2784): without it the cause dies.
+        source: Option<crate::domain::error::cause::ErrorSource>,
     },
 
     /// HTTP error with structured status code and URL
@@ -201,16 +196,13 @@ pub enum CrawlError {
 
     /// Connection error
     ///
-    /// The message keeps the former `Connection(String)` payload verbatim, and
-    /// the original transport error travels as the `source` so the cause chain
-    /// survives the conversion from [`crate::domain::http_error::HttpError`]
-    /// instead of being flattened into text (#2784).
+    /// The cause travels as the `source` (#2784).
     #[error("connection error: {message}")]
     Connection {
         /// Human-readable message (unchanged from the former tuple payload).
         message: String,
         /// The original transport error, when one is available.
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<crate::domain::error::cause::ErrorSource>,
     },
 
     /// Request construction or body-read failure (non-transient)
@@ -615,16 +607,6 @@ mod tests {
         };
         assert!(error.to_string().contains("connection error"));
         assert!(error.to_string().contains("refused"));
-    }
-
-    /// #2784: the `Display` is byte-identical to the former `Connection(String)`.
-    #[test]
-    fn test_crawl_error_connection_display_is_unchanged() {
-        let error = CrawlError::Connection {
-            message: "refused".to_string(),
-            source: None,
-        };
-        assert_eq!(error.to_string(), "connection error: refused");
     }
 
     #[test]

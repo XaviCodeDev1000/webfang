@@ -4,6 +4,7 @@
 //! context (url, stage, trace_id) so errors captured in a trace file can be
 //! correlated with the operation that produced them.
 
+use crate::domain::error::cause::{cause_in_chain, NetworkCause};
 use crate::domain::CorrelationId;
 
 /// Log a structured error carrying its operational [`ErrorClass`](crate::domain::error::ErrorClass).
@@ -62,7 +63,7 @@ pub fn log_scrape_error<E: std::fmt::Display + ?Sized>(
     correlation_id: Option<&CorrelationId>,
     context: &str,
 ) {
-    log_scrape_error_with_cause(error, url, stage, correlation_id, context, None);
+    log_error(error, url, stage, correlation_id, context, None);
 }
 
 /// [`log_scrape_error`] with the connection-failure taxonomy (#2784).
@@ -73,13 +74,27 @@ pub fn log_scrape_error<E: std::fmt::Display + ?Sized>(
 /// when the failure is not a classified network failure, so its absence means
 /// exactly "not a network failure" and not "unclassified".
 #[allow(clippy::needless_pass_by_value)]
-pub fn log_scrape_error_with_cause<E: std::fmt::Display + ?Sized>(
+pub fn log_scrape_error_with_cause<E: std::error::Error + 'static>(
     error: &E,
     url: &str,
     stage: &str,
     correlation_id: Option<&CorrelationId>,
     context: &str,
-    cause: Option<crate::domain::error::cause::NetworkCause>,
+) {
+    // The cause is read out of the chain the error already carries, so no
+    // call site can forget to ask for it (#2784).
+    let cause = cause_in_chain(error);
+    log_error(error, url, stage, correlation_id, context, cause);
+}
+
+/// The one tracing call behind both loggers.
+fn log_error<E: std::fmt::Display + ?Sized>(
+    error: &E,
+    url: &str,
+    stage: &str,
+    correlation_id: Option<&CorrelationId>,
+    context: &str,
+    cause: Option<NetworkCause>,
 ) {
     // `Option<String>` as a tracing field records the value when `Some` and is
     // omitted when `None`, so a single call handles both cases.
@@ -88,7 +103,7 @@ pub fn log_scrape_error_with_cause<E: std::fmt::Display + ?Sized>(
         url = %url,
         stage = %stage,
         trace_id = correlation_id.map(|c| c.trace_id().to_string()),
-        cause = cause.map(crate::domain::error::cause::NetworkCause::as_str),
+        cause = cause.map(NetworkCause::as_str),
         "{context}"
     );
 }

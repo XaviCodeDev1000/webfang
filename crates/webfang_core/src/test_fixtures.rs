@@ -45,21 +45,9 @@ impl HttpClientPort for MockHttpClient {
                 body: resp.body.clone(),
                 headers: resp.headers.clone(),
             }),
-            Some(Err(HttpError::Forbidden)) => Err(HttpError::Forbidden),
-            Some(Err(HttpError::RateLimited(r))) => Err(HttpError::RateLimited(*r)),
-            Some(Err(HttpError::ClientError(c))) => Err(HttpError::ClientError(*c)),
-            Some(Err(HttpError::ServerError(c))) => Err(HttpError::ServerError(*c)),
-            Some(Err(HttpError::Timeout)) => Err(HttpError::Timeout),
-            // No cause to preserve: the fixture simulates the failure.
-            Some(Err(HttpError::Connection { message, .. })) => {
-                Err(HttpError::connection(message.clone()))
-            },
-            Some(Err(HttpError::Request(m))) => Err(HttpError::Request(m.clone())),
-            Some(Err(HttpError::WafChallenge(p))) => Err(HttpError::WafChallenge(p.clone())),
-            Some(Err(HttpError::DomainBanned(d))) => Err(HttpError::DomainBanned(d.clone())),
-            Some(Err(HttpError::BodyTooLarge { limit })) => {
-                Err(HttpError::BodyTooLarge { limit: *limit })
-            },
+            // The fixture simulates the failure: it has no transport error to
+            // carry, so the preserved cause is dropped.
+            Some(Err(err)) => Err(err.without_cause()),
             None => Err(HttpError::ClientError(404)),
         };
         Box::pin(async move { result })

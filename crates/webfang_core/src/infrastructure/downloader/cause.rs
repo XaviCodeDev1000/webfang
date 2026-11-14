@@ -7,4 +7,4 @@
 //! infrastructure-side path (`infrastructure::downloader::cause`) stable for the
 //! downloader and its tests.
 
-pub(crate) use crate::domain::error::cause::{classify, FetchPhase};
+pub(crate) use crate::domain::error::cause::FetchPhase;

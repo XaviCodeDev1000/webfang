@@ -16,9 +16,7 @@
 //!
 //! This test needs no new API to be written: it runs the binary against a
 //! CLOSED port (nothing listens on port 9 — the same proof the SSRF guard's
-//! own tests use) and asserts the trace classifies the failure. Today the
-//! field does not exist, so it fails for the right reason: the behavior is
-//! missing, not the API.
+//! own tests use) and asserts the trace classifies the failure.
 
 #[path = "common/mod.rs"]
 mod common;
@@ -46,6 +44,26 @@ fn causes_in(trace: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+/// Arrange: a batch run that writes its trace to `trace`.
+///
+/// Both hatches are the documented test-only ones, and they are armed on the
+/// spawned child's environment only — the same posture the pacing tests use.
+fn batch_with_trace(output: &std::path::Path, trace: &std::path::Path) -> assert_cmd::Command {
+    let mut batch_cmd = cmd();
+    batch_cmd
+        .env(DISABLE_VALIDATING_RESOLVER_ENV, "1")
+        // The loopback fixture is refused by the production SSRF entry
+        // guard, so the test arms ONLY the documented test-only hatch.
+        .env("WEBFANG_DISABLE_SSRF_ENTRY_GUARD", "1")
+        .arg("--batch")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(output)
+        .arg("--trace-file")
+        .arg(trace);
+    batch_cmd
+}
+
 /// Positive: a refused connection is classified in the trace (#2784).
 ///
 /// Port 9 (discard) has nothing listening on it, so the connection is refused
@@ -56,19 +74,7 @@ async fn a_refused_connection_is_classified_in_the_trace() {
     let out = tempfile::TempDir::new().expect("temp output dir");
     let trace = out.path().join("trace.jsonl");
 
-    let mut batch_cmd = cmd();
-    batch_cmd
-        .env(DISABLE_VALIDATING_RESOLVER_ENV, "1")
-        // The loopback fixture is refused by the production SSRF entry
-        // guard, so the test arms ONLY the documented test-only hatch —
-        // the same posture the pacing tests use.
-        .env("WEBFANG_DISABLE_SSRF_ENTRY_GUARD", "1")
-        .arg("--batch")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out.path())
-        .arg("--trace-file")
-        .arg(&trace)
+    batch_with_trace(out.path(), &trace)
         .write_stdin("http://127.0.0.1:9/".to_string())
         .timeout(std::time::Duration::from_secs(60))
         .assert()
@@ -92,19 +98,7 @@ async fn an_unresolvable_name_is_classified_in_the_trace() {
     let out = tempfile::TempDir::new().expect("temp output dir");
     let trace = out.path().join("trace.jsonl");
 
-    let mut batch_cmd = cmd();
-    batch_cmd
-        .env(DISABLE_VALIDATING_RESOLVER_ENV, "1")
-        // The loopback fixture is refused by the production SSRF entry
-        // guard, so the test arms ONLY the documented test-only hatch —
-        // the same posture the pacing tests use.
-        .env("WEBFANG_DISABLE_SSRF_ENTRY_GUARD", "1")
-        .arg("--batch")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out.path())
-        .arg("--trace-file")
-        .arg(&trace)
+    batch_with_trace(out.path(), &trace)
         .write_stdin("http://webfang-lab-nonexistent.invalid/".to_string())
         .timeout(std::time::Duration::from_secs(60))
         .assert()

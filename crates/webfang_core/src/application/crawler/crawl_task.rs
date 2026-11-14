@@ -282,7 +282,6 @@ async fn fetch_page(
                     "fetch",
                     Some(page_correlation),
                     "page fetch failed",
-                    crate::domain::error::cause::cause_in_chain(&e),
                 );
             }
             Err(e)
@@ -437,7 +436,7 @@ async fn extract_and_queue_links(
             }
         },
         Err(e) => {
-            log_scrape_error(
+            log_scrape_error_with_cause(
                 &e,
                 url_str,
                 "extract_links",

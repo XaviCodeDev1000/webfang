@@ -70,7 +70,6 @@ use crate::domain::ssrf_guard::{
     redirect_policy_with_loopback, redirect_policy_with_policy, DISABLE_VALIDATING_RESOLVER_ENV,
 };
 
-use crate::domain::error::cause::DnsResolutionError;
 use std::net::IpAddr;
 use std::sync::Arc;
 use wreq::dns::{Addrs, Name, Resolve, Resolving};
@@ -292,15 +291,12 @@ impl ValidatingResolver {
         policy: Arc<NetworkPolicy>,
         name_source: Arc<dyn NameSource>,
     ) -> Result<Addrs, BoxedLookupError> {
-        // #2784: a failed lookup is a RESOLUTION failure, typed so the
-        // classifier reads its type instead of parsing a message. The scan's
-        // rejection below is deliberately NOT wrapped: an SSRF refusal is not
-        // a DNS failure, and the guard's callers must keep seeing what they
-        // see today.
-        let addrs = name_source
-            .lookup(host.clone())
-            .await
-            .map_err(|err| Box::new(DnsResolutionError::new(err)) as BoxedLookupError)?;
+        // #2784: the resolution is MARKED while it is in flight, so a failure
+        // that arrives before it finishes is a RESOLUTION failure.
+        let _mark = crate::domain::error::resolution::resolution_tracker().begin(&host);
+        let addrs = name_source.lookup(host.clone()).await.map_err(|err| {
+            crate::domain::error::mapping::dns_resolution_failure(err) as BoxedLookupError
+        })?;
 
         if validate {
             Self::fail_closed_scan(&host, &addrs, allow_loopback, &policy)?;

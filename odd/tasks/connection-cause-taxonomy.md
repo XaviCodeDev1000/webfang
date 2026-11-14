@@ -457,3 +457,40 @@ old `String` payload break. `webfang_core` is a published crate and the whole wo
   --strategy squash` → **OK** with the marker on the title, **red** without it (the negation
   proves the check bites).
 - The label the auto-label job derives from a `!` title is `type:breaking-change`.
+
+### L8 — The resolver marker, and the two CI reds (2026-11-14)
+
+**The marker (the maintainer's point 2).** A hung resolver used to read as
+`connect_timeout` — a CONCRETE but wrong attribution, worse than `unknown` because it is
+consumable. Now the resolver marks the host while a resolution is in flight
+(`domain/error/resolution.rs`): the mark is dropped when the resolution ends (even on
+cancellation), and a connect-phase timeout is refined with it:
+
+| marker state | cause |
+|---|---|
+| a resolution for that host started at/after this request began and has NOT finished | `dns_resolution` |
+| a resolution is in flight but it started BEFORE this request (another request's) | `unknown` |
+| no resolution in flight (the name resolved) | `connect_timeout` (unchanged) |
+
+The request's start instant is what makes the attribution per request instead of per host. The
+concurrent case is the honest one: `unknown`, never a false attribution.
+
+**Two CI reds that only the FULL run showed** (the local checklist did not):
+
+1. **Code quality (duplication ratchet)**: +46 duplicated lines. Fixed by making the DOMAIN
+   own the mappings (`domain/error/mapping.rs`: `http_failure`, `download_failure`,
+   `crawl_network_failure`, `http_connection_failure`, `with_cause`) so each call site is ONE
+   line, and by giving the two mocks a single `HttpError::without_cause`. Now **8211 ≤ 8219**.
+2. **Repo guards**: the file-size ratchet. The typed cause adds a field to three PUBLIC
+   variants and the marker lives at the resolver's own boundary, so six grandfathered files
+   grew. Everything that COULD leave them did (the classifier, the mappings and the tracker
+   moved into the domain), leaving **+42 lines in total** — measured per file: processor.rs +2,
+   ssrf.rs +5, crawl_task.rs +1, wreq_downloader.rs +7, crawl_error.rs +18, client.rs +9. The
+   fields and their doc comments are mandatory under `deny(missing_docs)`, rustfmt expands the
+   struct literals, and an enum's variants cannot be split across files, so the residual is
+   structural. The six entries were raised by a MANUAL JSON edit — the mechanism the policy
+   names ("a maintainer decision visible in review") — with the measurement in the notes.
+
+`domain/error/cause.rs` also had to be split (it passed the 500-line hard limit): the
+vocabulary and the classifier stay in `cause.rs`, the mappings in `mapping.rs`, the resolution
+tracker in `resolution.rs`.

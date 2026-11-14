@@ -42,7 +42,7 @@ pub enum HttpError {
         /// Human-readable message (unchanged from the former tuple payload).
         message: String,
         /// The original transport error, when one is available.
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+        source: Option<crate::domain::error::cause::ErrorSource>,
     },
     /// Request building/error - contains error message
     Request(String),
@@ -103,6 +103,27 @@ impl HttpError {
         Self::Connection {
             message: message.into(),
             source: None,
+        }
+    }
+
+    /// A copy of this error without its preserved cause.
+    ///
+    /// The fixtures and the mocks SIMULATE failures: they have no transport
+    /// error to carry, and a boxed source cannot be cloned. One place decides
+    /// what "the same error, without the cause" means for every variant.
+    #[must_use]
+    pub fn without_cause(&self) -> Self {
+        match self {
+            Self::Forbidden => Self::Forbidden,
+            Self::RateLimited(seconds) => Self::RateLimited(*seconds),
+            Self::ClientError(code) => Self::ClientError(*code),
+            Self::ServerError(code) => Self::ServerError(*code),
+            Self::Timeout => Self::Timeout,
+            Self::Connection { message, .. } => Self::connection(message.clone()),
+            Self::Request(message) => Self::Request(message.clone()),
+            Self::WafChallenge(provider) => Self::WafChallenge(provider.clone()),
+            Self::DomainBanned(domain) => Self::DomainBanned(domain.clone()),
+            Self::BodyTooLarge { limit } => Self::BodyTooLarge { limit: *limit },
         }
     }
 

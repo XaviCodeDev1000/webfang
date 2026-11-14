@@ -75,12 +75,9 @@ struct ConnectionFailure {
 }
 
 impl ConnectionFailure {
-    /// A failure whose cause is not available.
-    fn message_only(message: String) -> Self {
-        Self {
-            message,
-            cause: None,
-        }
+    /// A failure that keeps the cause when there is one.
+    fn new(message: String, cause: Option<crate::domain::error::cause::ErrorSource>) -> Self {
+        Self { message, cause }
     }
 }
 
@@ -124,13 +121,7 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
                     // it rides INSIDE the io::Error as its source: the class and
                     // the message are unchanged, and `cause_in_chain` can read
                     // the cause out of the chain (#2784).
-                    let inner = match source {
-                        Some(cause) => ConnectionFailure {
-                            message,
-                            cause: Some(cause),
-                        },
-                        None => ConnectionFailure::message_only(message),
-                    };
+                    let inner = ConnectionFailure::new(message, source);
                     ScraperError::Network(Box::new(std::io::Error::new(
                         io_kind_for_network_message(&inner.to_string()),
                         inner,
@@ -186,13 +177,7 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
                 // source: the class and the message are unchanged, and
                 // `cause_in_chain` can finally read the cause out of the chain
                 // (#2784).
-                let inner = match source {
-                    Some(cause) => ConnectionFailure {
-                        message,
-                        cause: Some(cause),
-                    },
-                    None => ConnectionFailure::message_only(message),
-                };
+                let inner = ConnectionFailure::new(message, source);
                 ScraperError::Network(Box::new(std::io::Error::new(
                     std::io::ErrorKind::ConnectionReset,
                     inner,

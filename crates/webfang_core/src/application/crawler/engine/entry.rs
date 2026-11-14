@@ -19,7 +19,7 @@ use crate::domain::persistence::{CheckpointCfg, PersistenceMode};
 use crate::domain::{
     post_load_wait::PostLoadWait, CorrelationId, CrawlError, CrawlResult, CrawlerConfig, JsStrategy,
 };
-use crate::infrastructure::observability::log_scrape_error;
+use crate::infrastructure::observability::log_scrape_error_with_cause;
 
 /// Crawl a website starting from the seed URL
 ///
@@ -161,7 +161,7 @@ fn build_crawl_session(
         })
         .build()
         .map_err(|err| {
-            log_scrape_error(
+            log_scrape_error_with_cause(
                 &err,
                 &seed_url,
                 "session",

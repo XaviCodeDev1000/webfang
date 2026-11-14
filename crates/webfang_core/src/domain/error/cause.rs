@@ -25,6 +25,13 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
+/// A preserved transport error — the original failure, carried opaquely.
+///
+/// The alias exists so the contract that carries the cause reads the same
+/// everywhere it appears (`Option<ErrorSource>`), instead of repeating the
+/// `Box<dyn Error + Send + Sync>` spelling at every boundary.
+pub type ErrorSource = Box<dyn Error + Send + Sync>;
+
 /// The stable, machine-readable cause of a connection failure.
 ///
 /// The values are a **public contract** (they travel in the JSONL trace):
