@@ -1,5 +1,7 @@
 use super::js_strategy::*;
+#[cfg(unix)]
 use super::*;
+#[cfg(unix)]
 use crate::domain::JsStrategy;
 
 // ========================================================================

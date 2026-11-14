@@ -292,7 +292,7 @@ fn adaptive_selectors_unavailable(adaptive_enabled: bool, requested: bool) -> Re
 /// `adaptive-selectors` feature must fail before any network request (#1813).
 ///
 /// Direct sibling of the `--elastic`/`persistence` gate
-/// ([`check_elastic_sink`]): an explicitly
+/// ([`check_elastic_sink`](super::check_elastic_sink)): an explicitly
 /// requested capability the binary was not compiled to honor is a
 /// build-configuration problem, never a silent no-op. Before this gate the
 /// flag survived argv parsing as the hidden compatibility placeholder built in
