@@ -6,7 +6,7 @@
 
 use crate::domain::downloader_port::DownloadError;
 use crate::domain::error::cause::{
-    cause_in_chain, classify, ClassifiedNetworkError, DnsResolutionError, FetchPhase,
+    cause_in_chain, classify, ClassifiedNetworkError, DnsResolutionError, FetchPhase, NetworkCause,
 };
 use crate::domain::error::resolution::refine_connect_cause;
 
@@ -37,31 +37,39 @@ pub fn download_failure(
     request_started: std::time::Instant,
 ) -> DownloadError {
     use DownloadError;
-    let original = if error.is_timeout() {
-        DownloadError::Timeout(timeout_secs)
+    // The cause is decided on the RAW transport error: narrowing it into a
+    // variant BELOW erases the resolver's typed failure and the I/O kinds
+    // the classifier reads (#2784). The variant — and with it the class, the
+    // retry rule and the exit code — still comes from the narrowing, so the
+    // verdict never moves; only the cause is added.
+    let timed_out = error.is_timeout();
+    let cause = if timed_out {
+        // The client's own deadline fired in this phase: the phase decides.
+        phase_cause(phase)
     } else {
-        DownloadError::from(error)
+        classify(&error, phase)
     };
-    let cause = classify(&original, phase);
     let cause = match host {
         Some(host) => {
             refine_connect_cause(cause, host, request_started, phase == FetchPhase::Connect)
         },
         None => cause,
     };
-    let original = match original {
-        DownloadError::Network(inner) => {
-            DownloadError::Network(Box::new(ClassifiedNetworkError::new(cause, inner)))
-        },
-        other => other,
+    let original = if timed_out {
+        DownloadError::Timeout {
+            secs: timeout_secs,
+            source: None,
+        }
+    } else {
+        DownloadError::from(error)
     };
-    with_cause(original, phase)
+    attach_cause(original, cause)
 }
 
 /// Attach the classified cause to a transport failure, keeping every other
 /// variant untouched.
 ///
-/// A builder error stays `InvalidUrl`, a timeout stays `Timeout`, a
+/// A builder error stays `InvalidUrl`, a timeout keeps its own variant, a
 /// `BodyTooLarge` stays `BodyTooLarge`: the taxonomy ADDS knowledge, it never
 /// moves a verdict (#2784).
 #[must_use]
@@ -73,13 +81,91 @@ pub fn with_cause(
     if cause_in_chain(&error).is_some() {
         return error;
     }
-    let cause = classify(&error, phase);
+    let cause = match &error {
+        // A timeout carries no chain evidence: the phase decides.
+        DownloadError::Timeout { .. } => phase_cause(phase),
+        other => classify(other, phase),
+    };
+    attach_cause(error, cause)
+}
+
+/// Attach a KNOWN cause to a transport failure.
+///
+/// The cause travels in the error's CHAIN, beside the variant that decides
+/// the class, the retry rule and the exit code — never instead of them
+/// (#2784). Every transport variant has a place for it:
+///
+/// | variant | where the cause travels |
+/// |---|---|
+/// | `Network` | the carrier IS the payload |
+/// | `Io` | the carrier is the I/O error's payload (the kind survives) |
+/// | `Dns` / `Tls` / `Timeout` | the carrier is the variant's `source` |
+#[must_use]
+pub fn attach_cause(error: DownloadError, cause: NetworkCause) -> DownloadError {
+    use crate::domain::error::cause::ErrorSource;
     match error {
         DownloadError::Network(inner) => {
             DownloadError::Network(Box::new(ClassifiedNetworkError::new(cause, inner)))
         },
+        DownloadError::Io(io_err) => {
+            // An `io::Error` does not expose its payload as a source, but it
+            // keeps the KIND — the retry rule's input — and renders the
+            // payload, so the message names the cause (#2784).
+            let kind = io_err.kind();
+            DownloadError::Io(std::io::Error::new(
+                kind,
+                ClassifiedNetworkError::new(cause, Box::new(io_err)),
+            ))
+        },
+        DownloadError::Dns { message, source } => {
+            let original: ErrorSource =
+                source.unwrap_or_else(|| Box::new(std::io::Error::other(message.clone())));
+            DownloadError::Dns {
+                message: compose(cause, &message),
+                source: Some(Box::new(ClassifiedNetworkError::new(cause, original))),
+            }
+        },
+        DownloadError::Tls { message, source } => {
+            let original: ErrorSource =
+                source.unwrap_or_else(|| Box::new(std::io::Error::other(message.clone())));
+            DownloadError::Tls {
+                message: compose(cause, &message),
+                source: Some(Box::new(ClassifiedNetworkError::new(cause, original))),
+            }
+        },
+        DownloadError::Timeout { secs, source } => {
+            let original: ErrorSource = source.unwrap_or_else(|| {
+                Box::new(std::io::Error::other(format!(
+                    "request timed out after {secs}s"
+                )))
+            });
+            DownloadError::Timeout {
+                secs,
+                source: Some(Box::new(ClassifiedNetworkError::new(cause, original))),
+            }
+        },
         other => other,
     }
+}
+
+/// The cause of a failure that carries no chain evidence: the phase decides.
+///
+/// A deadline that fired in the connect phase is a connect timeout; one that
+/// fired while the response was on its way is a read timeout (#2784).
+fn phase_cause(phase: FetchPhase) -> NetworkCause {
+    match phase {
+        FetchPhase::Connect => NetworkCause::ConnectTimeout,
+        FetchPhase::Body => NetworkCause::ReadTimeout,
+    }
+}
+
+/// The user-facing text of a classified failure: the cause in Spanish, then
+/// the transport detail behind it.
+///
+/// The operator reads WHAT failed before the transport's own words, and the
+/// two causes a run mixes are never the same sentence (#2784).
+fn compose(cause: NetworkCause, detail: &str) -> String {
+    format!("{}: {}", cause.message(), detail)
 }
 
 /// Build the crawler failure for a transport error, with the cause attached.
@@ -104,7 +190,9 @@ pub fn crawl_network_failure(
         None => cause,
     };
     CrawlError::Network {
-        message,
+        // The message names the cause: the batch report must tell "the site
+        // refused us" from "our DNS failed" (#2784).
+        message: compose(cause, &message),
         status_code,
         source: Some(Box::new(ClassifiedNetworkError::new(
             cause,
@@ -116,7 +204,8 @@ pub fn crawl_network_failure(
 /// Build the HTTP failure for a transport error, with the cause attached.
 ///
 /// The message is rendered before the error is moved, so the text an operator
-/// reads is unchanged; the cause travels beside it (#2784).
+/// reads keeps the transport's own words; the cause travels beside it, and
+/// the message names it (#2784).
 #[must_use]
 pub fn http_connection_failure(
     error: wreq::Error,
@@ -134,7 +223,7 @@ pub fn http_connection_failure(
         None => cause,
     };
     HttpError::Connection {
-        message,
+        message: compose(cause, &message),
         source: Some(Box::new(ClassifiedNetworkError::new(
             cause,
             Box::new(error),
@@ -152,4 +241,53 @@ pub fn dns_resolution_failure(
     error: Box<dyn std::error::Error + Send + Sync>,
 ) -> Box<dyn std::error::Error + Send + Sync> {
     Box::new(DnsResolutionError::new(error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::downloader_port::DownloadError;
+
+    /// #2784: EVERY transport variant carries the cause.
+    ///
+    /// The cause used to travel only in the `Network` variant, so the
+    /// narrowing of the transport error discarded it for exactly the
+    /// failures that matter most: a refused connection (`Io`), a name that
+    /// does not resolve (`Dns`), a handshake that fails (`Tls`) and a
+    /// deadline (`Timeout`). Each one is pinned here.
+    #[test]
+    fn every_transport_variant_carries_the_cause() {
+        let cases = [
+            DownloadError::Network(Box::new(std::io::Error::other("boom"))),
+            DownloadError::Io(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "connection refused",
+            )),
+            DownloadError::dns("name resolution failed"),
+            DownloadError::tls("handshake failed"),
+            DownloadError::timeout(30),
+        ];
+
+        for error in cases {
+            let classified = attach_cause(error, NetworkCause::ConnectRefused);
+            assert_eq!(
+                cause_in_chain(&classified),
+                Some(NetworkCause::ConnectRefused),
+                "the cause must travel with the variant: {classified}"
+            );
+        }
+    }
+
+    /// #2784: the message names the cause, in Spanish, before the detail.
+    #[test]
+    fn the_message_names_the_cause_before_the_detail() {
+        let error = attach_cause(
+            DownloadError::dns("name resolution failed"),
+            NetworkCause::DnsResolution,
+        );
+        assert_eq!(
+            error.to_string(),
+            "DNS error: no se pudo resolver el nombre del dominio: name resolution failed"
+        );
+    }
 }

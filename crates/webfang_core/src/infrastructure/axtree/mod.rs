@@ -196,7 +196,7 @@ where
         // re-validates final URL via literal-IP guard (out-of-scope hostname DNS already checked at entry).
         timeout(NAV_TIMEOUT, page.goto(url.as_str()))
             .await
-            .map_err(|_| DownloadError::Timeout(NAV_TIMEOUT.as_secs()))?
+            .map_err(|_| DownloadError::timeout(NAV_TIMEOUT.as_secs()))?
             .map_err(|e| DownloadError::Internal(e.to_string()))?;
 
         f(page).await
@@ -264,7 +264,7 @@ pub(crate) async fn fetch_raw_axtree(
             }),
         )
         .await
-        .map_err(|_| DownloadError::Timeout(SNAPSHOT_TIMEOUT.as_secs()))?
+        .map_err(|_| DownloadError::timeout(SNAPSHOT_TIMEOUT.as_secs()))?
         .map_err(|e| DownloadError::Internal(e.to_string()))?;
         Ok(response.result.nodes)
     })

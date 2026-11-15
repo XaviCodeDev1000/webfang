@@ -565,3 +565,70 @@ real defect:
 The debugging leftovers are gone: zero `eprintln!`/`dbg!`/`println!` in the
 added lines of the whole diff (the one that broke three stderr snapshots is
 removed).
+
+### L11 — The maintainer's review: the cause was computed and thrown away (2026-11-15)
+
+The maintainer reviewed the whole PR and asked for changes. The verdict: *"la arquitectura es
+correcta; la honestidad de las claims no lo es"*. Six blocking points, of which one was a real
+defect in the code and the rest were claims the PR could not carry.
+
+**The defect (§2): on the `--url` route the cause was computed and then DISCARDED.**
+
+`download_failure` narrowed the transport error into a variant FIRST (`Io`, `Dns`, `Tls`,
+`Timeout`) and classified the NARROWED error; only the `Network` variant carried the carrier.
+So every failure that narrowed into another variant reached the trace with no cause at all —
+including the refused connection, the most common failure of all. Two things had to change:
+
+1. **the cause is decided on the RAW `wreq::Error`**, before the narrowing erases the
+   resolver's typed failure and the I/O kinds the classifier reads. The retry rule reads the
+   error CLASS, never the cause, so classifying earlier moves no verdict;
+2. **every transport variant carries the cause**, not only `Network`:
+
+   | variant | where the cause travels |
+   |---|---|
+   | `Network` | the carrier IS the payload |
+   | `Io` | the carrier is the I/O error's payload — the `kind` (the retry rule's input) survives |
+   | `Dns` / `Tls` / `Timeout` | the carrier is the variant's `source` |
+
+   The `Io` variant needed no shape change: an `io::Error` keeps its payload AND its kind, and
+   the payload is where the carrier travels. What it does NOT do is expose that payload as a
+   source — `io::Error::source()` returns the payload's *own* source — so the chain walk has to
+   look into `get_ref()`. That is one extra check in `cause_in_chain`, pinned by a test.
+
+**The RED was observed in this tree, not asserted.** With the fix reverted (the source patch
+alone; the new tests stayed), the three new tests fail:
+
+```
+the `--url` route must classify the refused connection as `connect_refused`; causes found: []
+the refused connection's message must name its cause; messages:
+  network error: error sending request for uri (http://127.0.0.1:9/): client error (Connect) (status: None)
+```
+
+The second line is the issue's own complaint, verbatim: every failure of a real run printed the
+same sentence. The batch route's two tests stayed green through the revert — the batch already
+worked, exactly as the review's table said.
+
+**What else changed in this round:**
+
+- **the message names the cause** (the issue's first acceptance criterion): every classified
+  failure reads `"{cause in Spanish}: {the transport's own words}"`, on every route. The
+  `cause` FIELD stays the machine contract; the text is prose that says the same thing.
+- **three values are declared, not measured** (`read_timeout`, `connection_closed`,
+  `tls_handshake`): the transport does not expose the evidence they need, so they arrive as
+  `unknown`. The doc and the enum now say so, instead of presenting all seven as equally
+  observed.
+- **the ignored half of the pair asserts the full verdict**: `assert_eq!(ConnectTimeout)`
+  instead of "not a DNS failure" — an `unknown` would have satisfied the old assertion.
+- **`Clone` keeps the class** and loses only the cause, and that is pinned by a test.
+- **`docs/src/debugging.md`**: the claim "the field's absence means 'not a network failure'"
+  was FALSE and is gone; the absence means "not classified". The field is the contract; the
+  text is not.
+
+**Decisions that are the maintainer's, and are NOT taken here:** the `last_success` veto (the
+marker is per HOST with a veto, not per request as the spec promised) and the file-size raise
+(+59 lines over six grandfathered files). Both are open in the review thread.
+
+**Verification:** the whole workspace suite green (5,564 tests) after the five snapshots that
+carry the new `cause` field were reviewed by hand — the DNS one now reads
+`cause: "dns_resolution"` on the `--url` route, which is the defect itself, visible in a
+pinned snapshot.

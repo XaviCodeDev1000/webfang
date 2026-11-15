@@ -516,7 +516,7 @@ impl Downloader for ChromiumoxideDownloader {
             // missed-navigation race; a missing record fails closed below.
             timeout(NAV_TIMEOUT, page.goto(url.as_str()))
                 .await
-                .map_err(|_| DownloadError::Timeout(NAV_TIMEOUT.as_secs()))?
+                .map_err(|_| DownloadError::timeout(NAV_TIMEOUT.as_secs()))?
                 .map_err(|e| DownloadError::Internal(e.to_string()))?;
             let status = Self::navigation_status(&page, url).await?;
 
@@ -534,7 +534,7 @@ impl Downloader for ChromiumoxideDownloader {
             // 6. Extract rendered DOM with timeout
             let html = timeout(CONTENT_TIMEOUT, page.content())
                 .await
-                .map_err(|_| DownloadError::Timeout(CONTENT_TIMEOUT.as_secs()))?
+                .map_err(|_| DownloadError::timeout(CONTENT_TIMEOUT.as_secs()))?
                 .map_err(|e| DownloadError::Internal(e.to_string()))?;
 
             // 7. Deterministic shutdown: graceful close, then drain the pump

@@ -181,7 +181,7 @@ impl ObscuraDownloader {
             Ok(Err(e)) => Err(DownloadError::Internal(format!(
                 "obscura process failed while running: {e}"
             ))),
-            Err(_) => Err(DownloadError::Timeout(self.timeout.as_secs())),
+            Err(_) => Err(DownloadError::timeout(self.timeout.as_secs())),
         }
     }
 }
@@ -336,7 +336,7 @@ mod tests {
             .await
             .expect_err("a fetch past the timeout must fail");
         assert!(
-            matches!(err, DownloadError::Timeout(1)),
+            matches!(err, DownloadError::Timeout { .. }),
             "expected Timeout, got: {err:?}"
         );
 

@@ -155,10 +155,10 @@ mod pair {
             .await
             .expect_err("an address that never answers must fail the request");
 
-        assert_ne!(
+        assert_eq!(
             cause_of(err, &url, request_started),
-            NetworkCause::DnsResolution,
-            "the name came back: the marker holds no evidence, so the cause is not a DNS failure"
+            NetworkCause::ConnectTimeout,
+            "a dropped SYN is a CONNECT timeout: the name came back, so the marker holds no DNS evidence"
         );
     }
 

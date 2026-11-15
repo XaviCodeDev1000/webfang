@@ -623,7 +623,7 @@ mod tests {
     // TDD RED for 990 task 2.1: downloader_port must exist in domain
     #[test]
     fn downloader_port_trait_exists() {
-        let err = crate::domain::downloader_port::DownloadError::Timeout(5);
+        let err = crate::domain::downloader_port::DownloadError::timeout(5);
         assert!(err.to_string().contains("timed out"));
     }
 

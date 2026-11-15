@@ -45,10 +45,23 @@ pub enum NetworkCause {
     /// The TCP connect did not complete in time — the SYN never got through.
     ConnectTimeout,
     /// The connection was established and the response never arrived.
+    ///
+    /// NOTE: declared, not yet observed end to end — the transport does not
+    /// expose a readable kind for a stalled response, so it arrives as
+    /// [`NetworkCause::Unknown`] today. The name and its meaning are already
+    /// fixed (#2784).
     ReadTimeout,
     /// The peer closed the connection before answering (EOF).
+    ///
+    /// NOTE: declared, not yet observed end to end — same reason as
+    /// [`NetworkCause::ReadTimeout`]: the transport erases the kind before
+    /// the classifier can read it (#2784).
     ConnectionClosed,
     /// The TLS handshake failed.
+    ///
+    /// NOTE: declared, not yet observed end to end — the handshake violation
+    /// is inferred from an invalid-data kind, which no measured failure has
+    /// produced yet (#2784).
     TlsHandshake,
     /// The failure could not be classified.
     ///
@@ -195,6 +208,19 @@ pub fn cause_in_chain(error: &(dyn Error + 'static)) -> Option<NetworkCause> {
         if let Some(classified) = err.downcast_ref::<ClassifiedNetworkError>() {
             return Some(classified.cause());
         }
+        // An I/O error does NOT expose its payload as a source: `source()`
+        // returns the payload's OWN source, so a carrier travelling in the
+        // payload is invisible to this walk. `get_ref()` is where the payload
+        // actually lives (#2784). The carrier's own source stays reachable
+        // through the normal walk, so the chain loses nothing.
+        if let Some(io_err) = err.downcast_ref::<io::Error>() {
+            if let Some(classified) = io_err
+                .get_ref()
+                .and_then(|payload| payload.downcast_ref::<ClassifiedNetworkError>())
+            {
+                return Some(classified.cause());
+            }
+        }
         current = err.source();
     }
     None
@@ -246,6 +272,42 @@ mod tests {
         assert_eq!(
             NetworkCause::ConnectRefused.message(),
             "el servidor rechazó la conexión"
+        );
+    }
+
+    /// #2784: a carrier travelling in an I/O error's PAYLOAD is still found.
+    ///
+    /// An `io::Error` does not expose its payload as a source: `source()`
+    /// returns the payload's own source. The carrier is therefore invisible to
+    /// a plain chain walk, and the walk has to look into `get_ref()`. The
+    /// `Io` variant relies on this to keep the error's `kind` — the retry
+    /// rule's input — so the mechanism is pinned here.
+    #[test]
+    fn a_carrier_in_an_io_errors_payload_is_still_found() {
+        let carrier = ClassifiedNetworkError::new(
+            NetworkCause::ConnectRefused,
+            Box::new(io::Error::other("connection refused")),
+        );
+        let error = crate::domain::downloader_port::DownloadError::Io(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            carrier,
+        ));
+
+        assert_eq!(
+            cause_in_chain(&error),
+            Some(NetworkCause::ConnectRefused),
+            "the carrier travels in the I/O error's payload"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("el servidor rechazó la conexión"),
+            "the message must name the cause: {error}"
+        );
+        assert_eq!(
+            error.classify(),
+            crate::domain::error::ErrorClass::InternalFatal,
+            "the kind survives the carrier: a refused connection is not retried"
         );
     }
 
