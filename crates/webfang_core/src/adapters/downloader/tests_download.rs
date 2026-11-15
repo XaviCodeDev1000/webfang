@@ -249,3 +249,80 @@ async fn test_redirect_to_forbidden_literal_ip_is_stopped() {
         other => panic!("expected redirect to be stopped, got: {other:?}"),
     }
 }
+
+/// cargo-mutants PR-diff gate: a transient (5xx) failure must be RETRIED, not
+/// returned immediately. The mutant `classify() != TransientRetriable` → `==`
+/// in `download_with_retry` makes the first 503 surface as the final error;
+/// this test fails under that mutant because the second mock (200) would
+/// never be reached and the result would be the 503.
+#[cfg_attr(miri, ignore = "btls-sys FFI (wreq Client) not supported by Miri")]
+#[tokio::test]
+async fn transient_5xx_is_retried_until_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/flaky-500.png"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("busy"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/flaky-500.png"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(b"ok".to_vec())
+                .insert_header("content-type", "image/png"),
+        )
+        .mount(&server)
+        .await;
+
+    let temp_dir = TempDir::new().unwrap();
+    let downloader = Downloader::new(DownloadConfig {
+        output_dir: temp_dir.path().to_path_buf(),
+        max_retries: 2,
+        backoff_base_ms: 1,
+        backoff_max_ms: 2,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let url = vu(&format!("{}/flaky-500.png", server.uri()));
+    let asset = downloader
+        .download(&url)
+        .await
+        .expect("retry must heal the 503");
+    assert_eq!(asset.size, 2);
+    server.verify().await;
+}
+
+/// Same gate, other mutant direction: a NON-transient (4xx) failure must NOT
+/// be retried — the mutant `attempt == max_retries` → `!=` would retry it.
+/// `expect(1)` on the 404 mock proves exactly one wire request happened.
+#[cfg_attr(miri, ignore = "btls-sys FFI (wreq Client) not supported by Miri")]
+#[tokio::test]
+async fn permanent_4xx_is_not_retried() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/gone.png"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("gone"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let temp_dir = TempDir::new().unwrap();
+    let downloader = Downloader::new(DownloadConfig {
+        output_dir: temp_dir.path().to_path_buf(),
+        max_retries: 3,
+        backoff_base_ms: 1,
+        backoff_max_ms: 2,
+        ..Default::default()
+    })
+    .unwrap();
+
+    let url = vu(&format!("{}/gone.png", server.uri()));
+    let failure = downloader.download(&url).await;
+    assert!(
+        matches!(failure, Err(ScraperError::Http { status: 404, .. })),
+        "4xx must surface immediately: {failure:?}"
+    );
+    server.verify().await;
+}

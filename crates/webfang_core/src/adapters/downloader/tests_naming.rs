@@ -19,6 +19,22 @@ fn test_mime_type_to_extension() {
     );
     assert_eq!(mime_type_to_extension("application/unknown"), None);
     assert_eq!(mime_type_to_extension(""), None);
+    // Arms pinned by the cargo-mutants PR-diff gate: deleting any of these
+    // arms must fail this test.
+    assert_eq!(
+        mime_type_to_extension("image/svg+xml"),
+        Some("svg".to_string())
+    );
+    assert_eq!(mime_type_to_extension("image/bmp"), Some("bmp".to_string()));
+    assert_eq!(
+        mime_type_to_extension("application/json"),
+        Some("json".to_string())
+    );
+    assert_eq!(
+        mime_type_to_extension("application/xml"),
+        Some("xml".to_string())
+    );
+    assert_eq!(mime_type_to_extension("text/xml"), Some("xml".to_string()));
 }
 
 #[cfg_attr(miri, ignore = "btls-sys FFI (wreq Client) not supported by Miri")]
