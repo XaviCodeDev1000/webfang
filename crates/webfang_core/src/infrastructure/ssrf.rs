@@ -473,6 +473,11 @@ impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::Default
     }
 }
 
+// The pair, in process: the resolver that never answers against the accept
+// queue that swallows the SYN (#2784). Its own file, so this one does not grow.
+#[cfg(test)]
+mod resolution_pair;
+
 #[cfg(test)]
 mod tests {
     use super::*;

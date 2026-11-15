@@ -2010,6 +2010,16 @@ infrastructure/ssrf.rs	460	choke	dns_resolver
 infrastructure/ssrf.rs	470	choke	redirect
 infrastructure/ssrf.rs	472	choke	ValidatingResolver::with_policy
 infrastructure/ssrf.rs	472	choke	dns_resolver
+infrastructure/ssrf/resolution_pair.rs	23	use	crate::domain::error::cause::NetworkCause
+infrastructure/ssrf/resolution_pair.rs	52	choke	ValidatingResolver
+infrastructure/ssrf/resolution_pair.rs	53	choke	ValidatingResolver
+infrastructure/ssrf/resolution_pair.rs	64	inline	crate::domain::error::mapping::crawl_network_failure
+infrastructure/ssrf/resolution_pair.rs	66	inline	crate::domain::error::cause::FetchPhase::Connect
+infrastructure/ssrf/resolution_pair.rs	70	inline	crate::domain::error::cause::cause_in_chain
+infrastructure/ssrf/resolution_pair.rs	86	choke	dns_resolver
+infrastructure/ssrf/resolution_pair.rs	138	choke	dns_resolver
+infrastructure/ssrf/resolution_pair.rs	168	choke	ValidatingResolver::fail_closed_scan
+infrastructure/ssrf/resolution_pair.rs	180	inline	crate::domain::error::cause::cause_in_chain
 infrastructure/stream/mod.rs	62	use	crate::domain::clock::SystemUtcClock
 infrastructure/stream/mod.rs	62	use	crate::domain::clock::UtcClock
 infrastructure/stream/mod.rs	63	use	crate::domain::repository::VectorRepository

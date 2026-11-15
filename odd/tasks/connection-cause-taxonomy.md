@@ -535,3 +535,33 @@ Two honest gaps remain, both caught by `unknown` rather than mislabelled:
 At the repo level the taxonomy's six other causes were already proven by unit tests; the
 laboratory is the venue for the process-level pair, and #2784 stays open until that fixture
 lives in the repo suite.
+
+### L10 — The maintainer's pre-merge review (four findings)
+
+The maintainer asked for four things before merging, and one of them was a
+real defect:
+
+1. **The checks**: verified by hand, not asserted — `headRefOid` of the PR and
+   the `headSha` of every run agree on `84184d4c`, and the four workflows
+   (`CI`, `PR Validation`, `Docs`, `Mutation Testing`) report `success` on it.
+2. **The tracker could grow without bound** — CONFIRMED, and fixed. The bound
+   that existed covered only the marks of ONE host (16); the map of HOSTS had
+   no cap and no expiry, so a batch against thousands of hosts (or a long run
+   with a broken DNS) grew the tracker forever. It is now bounded on three
+   axes: 16 marks per host, 256 hosts, and a mark that is older than 5 minutes
+   is no longer evidence at all (an expired mark cannot classify anything; it
+   stops being evidence and the classifier's own cause stands). Three tests
+   pin the bounds, and the drop is observable (`tracing::debug!`).
+3. **The fail-closed scan** — confirmed unchanged, and now PROVEN by a test:
+   `gai_lookup` marks the resolution and then runs the scan, so the marker
+   cannot alter the scan; and an SSRF refusal keeps its class and carries NO
+   cause, so it can never be read as a DNS failure.
+4. **The pair now lives in the repo**: `infrastructure/ssrf/resolution_pair.rs`
+   proves the hung resolver IN PROCESS (injectable lookup seam, no network,
+   no privileges, 0.3 s), and the other side — the accept queue that swallows
+   the SYN — is declared, skipped and written out with its probe, because
+   dropping a SYN needs a kernel no CI should have.
+
+The debugging leftovers are gone: zero `eprintln!`/`dbg!`/`println!` in the
+added lines of the whole diff (the one that broke three stderr snapshots is
+removed).
