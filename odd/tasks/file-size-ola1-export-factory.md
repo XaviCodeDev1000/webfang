@@ -63,7 +63,7 @@ que lleve a un archivo no-grandfathered por encima de 500 = ROJO en `check_file_
 | T1 | CodeGraph explore + outline + estructura medida | S4 | inline | done | (sin commit: no toca código) |
 | T2 | Registro de misión + espejo Engram | S2 | inline | done | (este archivo) |
 | T3 | Propuesta de slice PR 1 al maintainer | S1,S3 | inline | pending | — |
-| T4 | PR 1: `mod tests` inline → archivos hijos ≤500 | S5 | worktree propio | pending | — |
+| T4 | PR 1: `mod tests` inline → archivos hijos ≤500 | S5 | inline (writer agotó quota; padre completó y verificó) | done | 49b94519 |
 | T5 | PRs siguientes: seams de producción 1–5 | S2,S4 | worktree propio | pending | — |
 
 ## Log
@@ -75,3 +75,4 @@ L2 — Medición inicial (S4, árbol `8aecddc2`): 1293 de producción + 1350 de 
 seams 1–5 identificados en la sección de estructura. Propuesta de PR 1: partir el `mod
 tests` primero (mueve ~1350 líneas de golpe, bajo riesgo, precedentes en engine.rs) antes
 de los seams de producción.
+L3 — PR 1 ejecutado (commit `49b94519`, rama `refactor/ola1-export-factory-tests`): writer delegado agotó quota tras producir los 7 hijos; el padre completó el wiring (imports prescritos por rustc: `RecordStore`, `ScrapedContent`, `ValidUrl`, `make_ai_chunk`/`jsonl_lines` en `pub(super)`; limpieza de doc-comments huérfanos que clippy `empty_line_after_doc_comments` rechazó). Verificación: invariante `--list` 37=37 solo renombres de módulo (diff normalizado OK); nextest lib **3009 passed / 5 skipped / 0 failed**; clippy `--all-targets --all-features -D warnings` 0; fmt OK; file-size OK con `--update 2643→1307` (sigue grandfathered, banda Ola 3 ahora); jscpd sin clones nuevos sobre los tocados. Siguiente: PR 2 — seams de producción (CommitSession ~L99-575 primero).
