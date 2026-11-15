@@ -1,6 +1,7 @@
 //! Tests de naming/filtros (filename, slug, content-disposition, filters).
 //! Split desde `adapters/downloader/mod.rs` bajo la regla ~500 (#2584, Ola 1).
 
+use super::naming::*;
 use super::tests_common::vu;
 use super::*;
 use tempfile::TempDir;
