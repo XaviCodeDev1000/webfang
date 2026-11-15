@@ -1,3 +1,4 @@
+use super::serialization::record_batch_metrics_by_domain;
 use super::tests_common::*;
 use super::*;
 // --- record_batch_metrics_by_domain (#696) ---
