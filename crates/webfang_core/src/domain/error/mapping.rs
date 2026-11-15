@@ -44,7 +44,9 @@ pub fn download_failure(
     };
     let cause = classify(&original, phase);
     let cause = match host {
-        Some(host) => refine_connect_cause(cause, host, request_started),
+        Some(host) => {
+            refine_connect_cause(cause, host, request_started, phase == FetchPhase::Connect)
+        },
         None => cause,
     };
     let original = match original {
@@ -96,7 +98,9 @@ pub fn crawl_network_failure(
     let status_code = error.status().map(|status| status.as_u16());
     let cause = classify(&error, phase);
     let cause = match url.host_str() {
-        Some(host) => refine_connect_cause(cause, host, request_started),
+        Some(host) => {
+            refine_connect_cause(cause, host, request_started, phase == FetchPhase::Connect)
+        },
         None => cause,
     };
     CrawlError::Network {
@@ -124,7 +128,9 @@ pub fn http_connection_failure(
     let message = error.to_string();
     let cause = classify(&error, phase);
     let cause = match host {
-        Some(host) => refine_connect_cause(cause, host, request_started),
+        Some(host) => {
+            refine_connect_cause(cause, host, request_started, phase == FetchPhase::Connect)
+        },
         None => cause,
     };
     HttpError::Connection {

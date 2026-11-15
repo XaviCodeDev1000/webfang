@@ -40,8 +40,13 @@ pub struct ResolutionTracker {
 /// What the tracker knows about one host.
 #[derive(Debug, Default)]
 struct HostResolutions {
-    /// The resolutions still running, with the instant each one started.
-    in_flight: Vec<std::time::Instant>,
+    /// The resolutions that started and NEVER COMPLETED, with the instant each
+    /// one started.
+    ///
+    /// A resolution that was CANCELLED — the client gave up waiting for it —
+    /// stays here: that abandonment IS the evidence that the name never came
+    /// back. A resolution that completed (answer or error) is removed.
+    unfinished: Vec<std::time::Instant>,
     /// When the last resolution for this host completed SUCCESSFULLY.
     ///
     /// It is what tells two requests for the same host apart: if a resolution
@@ -52,22 +57,26 @@ struct HostResolutions {
 impl ResolutionTracker {
     /// Mark a resolution as started for `host`.
     ///
-    /// The returned guard clears the mark when it is dropped, so a cancelled
-    /// resolution never leaves a phantom mark behind.
+    /// The returned guard reports the resolution's end. A resolution that
+    /// COMPLETES leaves the tracker; one that was ABANDONED stays in it, since
+    /// the abandonment is the evidence (#2784).
     pub fn begin(&self, host: &str) -> ResolutionGuard<'_> {
         let started = std::time::Instant::now();
         if let Ok(mut marks) = self.marks.lock() {
-            marks
-                .entry(host.to_owned())
-                .or_default()
-                .in_flight
-                .push(started);
+            let host_marks = marks.entry(host.to_owned()).or_default();
+            host_marks.unfinished.push(started);
+            // Bounded: only the most recent unfinished resolutions are evidence
+            // worth keeping.
+            if host_marks.unfinished.len() > 16 {
+                let excess = host_marks.unfinished.len() - 16;
+                host_marks.unfinished.drain(..excess);
+            }
         }
         ResolutionGuard {
             tracker: self,
             host: host.to_owned(),
             started,
-            succeeded: false,
+            completed: false,
         }
     }
 
@@ -99,14 +108,14 @@ impl ResolutionTracker {
         let Some(host_marks) = marks.get(host) else {
             return ResolutionState::None;
         };
-        if host_marks.in_flight.is_empty() {
+        if host_marks.unfinished.is_empty() {
             return ResolutionState::None;
         }
         let completed_after = host_marks
             .last_success
             .is_some_and(|finished| finished >= request_started);
         let started_after = host_marks
-            .in_flight
+            .unfinished
             .iter()
             .any(|started| *started >= request_started);
         match (completed_after, started_after) {
@@ -116,40 +125,43 @@ impl ResolutionTracker {
     }
 }
 
-/// Clears a resolution mark when the resolution ends.
+/// Tracks one resolution, from the moment it starts to the moment it ends.
 #[derive(Debug)]
 pub struct ResolutionGuard<'a> {
     tracker: &'a ResolutionTracker,
     host: String,
     started: std::time::Instant,
-    succeeded: bool,
+    completed: bool,
 }
 
 impl ResolutionGuard<'_> {
-    /// Record that the resolution COMPLETED SUCCESSFULLY.
+    /// Record that the resolution COMPLETED, successfully or not.
     ///
-    /// Without it, a concurrent request that hung its own resolution would
-    /// make this request look like a resolution failure.
-    pub fn succeeded(&mut self) {
-        self.succeeded = true;
+    /// A completed resolution is not evidence of a hang, so it leaves the
+    /// tracker. A successful one also records WHEN the name came back, which
+    /// is what separates two requests for the same host (#2784).
+    pub fn finished(&mut self, succeeded: bool) {
+        self.completed = true;
+        if let Ok(mut marks) = self.tracker.marks.lock() {
+            if let Some(host_marks) = marks.get_mut(&self.host) {
+                host_marks
+                    .unfinished
+                    .retain(|started| *started != self.started);
+                if succeeded {
+                    host_marks.last_success = Some(std::time::Instant::now());
+                }
+            }
+        }
     }
 }
 
 impl Drop for ResolutionGuard<'_> {
     fn drop(&mut self) {
-        if let Ok(mut marks) = self.tracker.marks.lock() {
-            if let Some(host_marks) = marks.get_mut(&self.host) {
-                host_marks
-                    .in_flight
-                    .retain(|started| *started != self.started);
-                if self.succeeded {
-                    host_marks.last_success = Some(std::time::Instant::now());
-                }
-                if host_marks.in_flight.is_empty() && host_marks.last_success.is_none() {
-                    marks.remove(&self.host);
-                }
-            }
-        }
+        // Nothing to do: a resolution that COMPLETED already left the tracker
+        // in `finished`, and one that was ABANDONED (the client gave up waiting
+        // for the name) leaves its mark behind on purpose — that abandonment is
+        // exactly the evidence the marker exists for (#2784). The marks are
+        // bounded by `begin()`.
     }
 }
 
@@ -173,10 +185,25 @@ pub fn refine_connect_cause(
     cause: NetworkCause,
     host: &str,
     request_started: std::time::Instant,
+    connect_phase: bool,
 ) -> NetworkCause {
-    if !matches!(cause, NetworkCause::ConnectTimeout) {
+    // Only the CONNECT phase can be a resolution failure, and only two causes
+    // can be refined: a connect timeout, and an UNCLASSIFIED connect failure.
+    // The second one matters: a hung resolver produces a connect deadline whose
+    // chain carries no `io::Error` (the resolution never came back, so nothing
+    // was ever wrapped) and wreq does not even call it a timeout — the
+    // classifier alone cannot tell it from anything else. The marker can.
+    if !connect_phase {
         return cause;
     }
+    if !matches!(cause, NetworkCause::ConnectTimeout | NetworkCause::Unknown) {
+        return cause;
+    }
+    eprintln!(
+        "DEBUG marker host={host} req_started={:?} state={:?}",
+        request_started,
+        resolution_tracker().state(host, request_started)
+    );
     match resolution_tracker().state(host, request_started) {
         ResolutionState::ThisRequest => NetworkCause::DnsResolution,
         ResolutionState::OtherRequest => NetworkCause::Unknown,
@@ -222,7 +249,8 @@ mod tests {
     fn a_finished_resolution_leaves_no_mark() {
         let tracker = ResolutionTracker::default();
         {
-            let _mark = tracker.begin("example.test");
+            let mut mark = tracker.begin("example.test");
+            mark.finished(true);
         }
         assert_eq!(
             tracker.state("example.test", Instant::now()),
@@ -241,7 +269,8 @@ mod tests {
             refine_connect_cause(
                 NetworkCause::ConnectTimeout,
                 "webfang-taxonomy-probe.test",
-                request_started
+                request_started,
+                true,
             ),
             NetworkCause::DnsResolution
         );
@@ -250,7 +279,8 @@ mod tests {
             refine_connect_cause(
                 NetworkCause::ConnectRefused,
                 "webfang-taxonomy-probe.test",
-                request_started
+                request_started,
+                true,
             ),
             NetworkCause::ConnectRefused
         );

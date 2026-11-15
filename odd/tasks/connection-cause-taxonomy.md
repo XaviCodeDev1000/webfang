@@ -494,3 +494,44 @@ concurrent case is the honest one: `unknown`, never a false attribution.
 `domain/error/cause.rs` also had to be split (it passed the 500-line hard limit): the
 vocabulary and the classifier stay in `cause.rs`, the mappings in `mapping.rs`, the resolution
 tracker in `resolution.rs`.
+
+### L9 — The pair, proven end to end in the laboratory (2026-11-14)
+
+The laboratory harness (`~/.cache/webfang-lab/case.sh`: each cause isolated in an unprivileged
+`unshare -rmn` namespace, every injection with a positive control) re-measured the full matrix
+against the PR's binary, batch route, `TIMEOUT_SECS=20` so the CONNECT deadline fires:
+
+| injected cause | trace `cause` | elapsed |
+|---|---|---|
+| `dns_blackhole` (the resolver never answers) | **`dns_resolution`** | 10.1s |
+| `syn_drop` (the SYN is dropped) | **`connect_timeout`** | 10.1s |
+| `dns_fail` (NXDOMAIN) | `dns_resolution` | 0.1s |
+| `rst` (connection refused) | `connect_refused` | 0.1s |
+| `eof` (the connection closes mid-request) | `unknown` | 0.1s |
+| `read_timeout` (the server stalls) | `unknown` | 20.1s |
+
+**The pair the whole line exists for is proven**: the hung resolver is `dns_resolution` and the
+dropped SYN is `connect_timeout` — the two causes this taxonomy exists to separate, and the one
+a bare classifier could NOT tell apart (wreq reports the hung-resolver deadline neither as a
+timeout nor with an `io::Error` in its chain, because the resolution never came back to be
+wrapped).
+
+Two honest gaps remain, both caught by `unknown` rather than mislabelled:
+
+- `eof` and `read_timeout` are connect-phase/body-phase failures whose wreq chains expose no
+  `io::Error`, so the classifier cannot read their kind. They are `unknown` — the classifier
+  ran and could not decide — never a wrong cause. Follow-up: read wreq's own error kinds
+  (`SendRequest`/body-timeout) in the classifier.
+
+**Two defects the laboratory found in the marker itself**, both fixed:
+
+1. The RAII guard erased the evidence: a resolution the client ABANDONED (the connect deadline
+   firing) dropped its mark, so the hung-resolver case looked like "nothing in flight". The
+   mark now survives abandonment and only leaves the tracker when the resolution COMPLETES.
+2. The refinement only engaged on `ConnectTimeout`, but the hung resolver's failure is
+   `Unknown` (see above). It now engages on either, gated by the connect phase — which the
+   caller knows and passes.
+
+At the repo level the taxonomy's six other causes were already proven by unit tests; the
+laboratory is the venue for the process-level pair, and #2784 stays open until that fixture
+lives in the repo suite.
