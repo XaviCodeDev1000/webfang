@@ -23,7 +23,7 @@
       "crates/webfang_core/src/application/crawler/session.rs": 1006,
       "crates/webfang_core/src/application/crawler/sitemap_discovery.rs": 1400,
       "crates/webfang_core/src/application/elastic_ingestion.rs": 878,
-      "crates/webfang_core/src/application/export_factory.rs": 2643,
+      "crates/webfang_core/src/application/export_factory.rs": 1307,
       "crates/webfang_core/src/application/extraction.rs": 780,
       "crates/webfang_core/src/application/http_client/client.rs": 1453,
       "crates/webfang_core/src/application/llm_extraction.rs": 677,
