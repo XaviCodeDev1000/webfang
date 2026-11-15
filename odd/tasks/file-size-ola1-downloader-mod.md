@@ -46,3 +46,19 @@ clippy `-D warnings`, fmt, file-size. RDD por slice con baseRef = commit anterio
 L1 — Pedido (verbatim, 2026-11-15): "OK, Arrancamos la misión de downloader/mod.rs en un
 worktree nuevo". Elegido porque server.rs (2012) y downloader/mod.rs (2008) son los dos
 monstruos libres; downloader/mod.rs primero (webfang_core, método probado, el más chico).
+
+## Log (continuación)
+
+L2 — Slice 1 (`5ee3634c`): 3 mod tests inline (968 líneas) → 6 hijos (tests_config 118,
+tests_naming 286, tests_download 251, tests_memory_probe 43, tests_bounded_cache 278,
+tests_common 8 con `vu`). mod.rs 2008→1052. Nota entorno: /tmp (tmpfs 16G) se llenó con
+el build de btls-sys del target propio → se usó CARGO_TARGET_DIR compartido de main
+(`~/.cache/cargo-target/main`) con TMPDIR reubicado; seed_target cold (no-seed).
+L3 — Slice 2 (`24fdd812`): helpers naming/filters/stream (162) → naming.rs (178). mod.rs →895.
+L4 — Slice 3 (`3b4a82ec`): maquinaria de cache acotada (InsertionLedger/CellState/
+InFlightGuard/capacity) → cache.rs (92). mod.rs →810.
+L5 — Slice 4 (`1b6ba14f`): pipeline de descarga (download/retry/once/batch/
+generate_filename, 398) → fetch.rs (421) como `impl Downloader` en hijo.
+**mod.rs 810→398 ≤500 ⇒ `--remove` del baseline.** Verificación final: --list 36=36,
+nextest lib 3012/5/0, clippy -D warnings 0, fmt OK, workspace check 0 errores,
+file-size verde. Rama lista para RDD por slices + push + PR.
