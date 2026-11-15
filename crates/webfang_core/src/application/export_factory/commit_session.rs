@@ -17,8 +17,9 @@ use crate::domain::persistence::{
 };
 use crate::domain::record_transition;
 
+use super::jsonl_index::build_content_hash_index;
 use super::record_redrive::{drive_to_processed, fresh_discovered, now_millis};
-use super::{build_content_hash_index, ExportOutcome};
+use super::ExportOutcome;
 
 /// Per-run resume/commit context handed to the export functions (D5 seams).
 ///
