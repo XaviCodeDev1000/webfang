@@ -1,12 +1,12 @@
 //! Resume/cancellation tests: SC7/E8 drain ordering and P8-6 (ADR-0016
 //! §4) failed-record re-drive semantics.
 
+use super::tests_common::RecordStore;
 use super::tests_common::*;
 use super::*;
 use crate::application::resume::canonical_key;
 use crate::domain::page_state::PageStatus;
 use crate::domain::persistence::{DomainRecords, LastError, RawRecord};
-use crate::infrastructure::export::RecordStore;
 use tempfile::TempDir;
 
 #[test]

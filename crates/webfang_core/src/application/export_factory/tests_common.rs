@@ -8,6 +8,9 @@ use crate::domain::entities::ScrapedContent;
 use crate::domain::ValidUrl;
 use tempfile::TempDir;
 
+#[cfg(test)]
+pub(crate) use crate::infrastructure::export::RecordStore;
+
 pub(super) fn make_scraped_content(url: &str, title: &str, content: &str) -> ScrapedContent {
     ScrapedContent {
         title: title.to_string(),

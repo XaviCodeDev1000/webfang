@@ -1,11 +1,11 @@
 //! AI chunk export tests: resume gate before batch export (BUG F3-A),
 //! #1812 dedup/commit honesty, #2269 drain branch.
 
+use super::tests_common::RecordStore;
 use super::*;
 use crate::domain::entities::ScrapedContent;
 use crate::domain::page_state::PageStatus;
 use crate::domain::ValidUrl;
-use crate::infrastructure::export::RecordStore;
 use tempfile::TempDir;
 
 use crate::domain::DocumentChunkUnvalidated;
