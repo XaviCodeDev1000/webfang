@@ -12,96 +12,10 @@
 //! - **Cleanup**: Temp file removed on size limit exceeded
 //! - **Hash On-The-Fly**: SHA256 computed during streaming, no buffer needed
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-
-/// Entries retained per Asset-tier permit in the dedup cache (Q3 MEASURE
-/// FIRST: BEFORE data measured ~600 B/entry; default tier 3 x 8_192 =
-/// 24_576 entries ~= 15 MiB ceiling, far below the 50 MB materiality line).
-pub const ASSET_CACHE_ENTRIES_PER_PERMIT: usize = 8_192;
-
-/// Derive the bounded asset-cache capacity from the budget model's Asset
-/// tier. Single source of truth with every other derived bound.
-#[must_use]
-pub fn asset_cache_capacity(asset_tier_permits: usize) -> usize {
-    asset_tier_permits
-        .saturating_mul(ASSET_CACHE_ENTRIES_PER_PERMIT)
-        .max(ASSET_CACHE_ENTRIES_PER_PERMIT)
-}
-
-/// Insertion-order ledger for the bounded dedup cache. A `HashSet` makes
-/// membership O(1) so every new cache insert stays O(1) under the single
-/// ledger mutex instead of scanning the whole FIFO queue.
-#[derive(Default)]
-struct InsertionLedger {
-    queue: VecDeque<String>,
-    seen: HashSet<String>,
-}
-
-impl InsertionLedger {
-    fn push_new(&mut self, key: String) {
-        if self.seen.insert(key.clone()) {
-            self.queue.push_back(key);
-        }
-    }
-
-    /// Rotate an entry (still tracked in `seen`) back to the tail.
-    fn requeue(&mut self, key: String) {
-        self.queue.push_back(key);
-    }
-
-    fn pop_oldest(&mut self) -> Option<String> {
-        self.queue.pop_front()
-    }
-
-    /// Drop membership tracking for an entry that left the cache.
-    fn forget(&mut self, key: &str) {
-        self.seen.remove(key);
-    }
-
-    fn len(&self) -> usize {
-        self.queue.len()
-    }
-}
-
-/// Lifecycle class of a candidate cache cell during eviction.
-enum CellState {
-    /// Holds a successful `DownloadedAsset`.
-    Initialized,
-    /// Empty but a download is executing for this URL right now.
-    InFlight,
-    /// Empty with no active download: a permanent-failure leftover.
-    Abandoned,
-    /// Key already removed from the map (evicted elsewhere).
-    Gone,
-}
-
-/// RAII marker for a URL whose download is actively executing. Inserted
-/// before `get_or_try_init` and removed on drop — including tokio task
-/// cancellation (#509), which drops the future and therefore the guard,
-/// so a cancelled download can never leave a stale in-flight marker.
-struct InFlightGuard<'a> {
-    map: &'a DashMap<String, ()>,
-    url: String,
-}
-
-impl<'a> InFlightGuard<'a> {
-    fn new(map: &'a DashMap<String, ()>, url: &str) -> Self {
-        map.insert(url.to_string(), ());
-        Self {
-            map,
-            url: url.to_string(),
-        }
-    }
-}
-
-impl Drop for InFlightGuard<'_> {
-    fn drop(&mut self) {
-        self.map.remove(&self.url);
-    }
-}
 
 use crate::domain::ValidUrl;
 use crate::error::{ErrorClass, Result, ScraperError};
@@ -115,11 +29,9 @@ use uuid::Uuid;
 use wreq::Client;
 use wreq_util::Profile;
 
-/// Strategy for generating downloaded asset filenames — domain-owned VO.
-///
-/// Re-exported from `crate::domain::config` so `ScraperConfig` (domain) does
-/// not depend on `adapters` (outward). The `adapters` implementation re-uses the
-/// domain type via this pub use (inward `adapters → domain` is allowed).
+/// Entries retained per Asset-tier permit in the dedup cache (Q3 MEASURE
+/// FIRST: BEFORE data measured ~600 B/entry; default tier 3 x 8_192 =
+/// 24_576 entries ~= 15 MiB ceiling, far below the 50 MB materiality line).
 pub use crate::domain::config::AssetNamingStrategy;
 
 /// Result of a successful download
@@ -876,7 +788,10 @@ impl crate::domain::asset_downloader_factory::AssetDownloaderFactory
 }
 
 /// Convert a Response into a stream of bytes
+mod cache;
 mod naming;
+pub use cache::{asset_cache_capacity, ASSET_CACHE_ENTRIES_PER_PERMIT};
+pub(crate) use cache::{CellState, InFlightGuard, InsertionLedger};
 pub(crate) use naming::{
     compute_backoff_delay, derive_slug_from_url, into_stream, mime_type_to_extension,
     parse_content_disposition_header, sanitize_filename, url_matches_filters,

@@ -7,7 +7,7 @@
     "hard_limit": 500,
     "grandfathered": {
       "crates/webfang_cli/src/main.rs": 1174,
-      "crates/webfang_core/src/adapters/downloader/mod.rs": 895,
+      "crates/webfang_core/src/adapters/downloader/mod.rs": 810,
       "crates/webfang_core/src/adapters/url_path.rs": 895,
       "crates/webfang_core/src/application/adaptive_engine/real.rs": 755,
       "crates/webfang_core/src/application/batch/processor.rs": 1253,
