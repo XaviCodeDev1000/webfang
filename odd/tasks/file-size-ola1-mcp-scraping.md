@@ -34,9 +34,14 @@ S8 — Bootstrap del target: el guard `scripts/check_target_isolation.sh` (#1679
 | T5 | PR 1 — extraer `mod tests` a hijos ≤500 por tema, un commit de unidad por cluster, tests verdes entre unidades + `--update` del baseline | S2,S3,S4,S5 | PR | in_progress | 6 commits (e470663c docs, a5d46275 common, 9030e6a6 budget, 1a497159 ssrf, 0a319653 robots+discovery, 1305584d crawl, fa6aaf83 batch+discovered+ratchet) |
 | T6 | PR 2 — seams de producción: helpers puros (guard/robots, serialización JSONL) a módulos hermanos | S2,S3 | PR | pending | |
 | T7 | PR 3 — dividir los dos `impl McpHandler` por herramienta/seam hasta ≤500 todas las partes | S2,S3 | PR | pending | |
-| T8 | `--remove` de la entrada del baseline + verificación final (jscpd, gate) | S2,S3 | inline | pending | |
+| T8 | `--remove` de la entrada del baseline + verificación final (jscpd, gate) | S2,S3 | inline | done | c4915648 (entry removed; scraping.rs 85) |
+| T9 | PR 2/3 — seams de producción hasta <=500 + `--remove` | S2,S3 | inline | done | 7b61e082, 8a96e3de, 1955d6b0, 20161c27, 1a17081f, c4915648 |
 
 ## Log
+
+L6 — Producción (2026-11-15), T6: tres extracciones verbatim a hijos por seam real: `serialization.rs` (163: 4 helpers de salida), `session_budget.rs` (99: const + struct + 3 fns del presupuesto), `safety.rs` (75: robots gate + filtro SSRF). scraping.rs 1517→1190. Ratchet `--update` a 1188 y corrección manual declarada a 1190 (la medida previa al fmt quedó 2 corta; precedente #2569 de corrección de medida, el ratchet rechaza subir por script).
+
+L7 — Cierre (2026-11-15), T7/T9: **scraping.rs 2513→85 líneas** ⇒ `--remove` del baseline ⇒ misión del monolito CERRADA. 11 módulos, todos ≤500: safety 75, tools_discovery 293, tools_scrape 323, tools_crawl 344, session_capture 159, serialization 163, session_budget 99, + 8 hijos de tests (41–206). SEAM DESCUBIERTO Y PROBADO: rmcp 1.8.0 solo recolecta `#[tool]` del impl que lleva `#[tool_router]` (sin él el handshake cae a 35 tools — medido) y `ToolRouter::merge` (router/tool.rs) fusiona routers por familia: `build_router` ahora crea desde `tool_router_crawl` y mergea discovery + scrape. Los métodos movidos llevan `pub(super)` (visibilidad solo para scrape y sus descendientes). ERROR PAGADO DOS VECES: cortar el span un línea antes del doc/attr del método se come el `#[tool(`/*doc — el síntoma es el handshake en 35 y los tests de schema_bridge; ambos se restauraron desde `git show HEAD`. Verbatim final probado por multiconjunto: 489=485 con deltas exactos = 5 firmas pub(super) + 2 líneas del attr viejo del hub + 1 doc restituido. Gate de cierre corriendo (job-4).
 
 L1 — Pedido (verbatim, 2026-11-15): "debes tomar parte del plan y organizarte con los otros agentes para atacar algun archivo pendienta sin colisionar con los otros agentes" — tabla de los 5 monstruos >2000 restantes entregada por el usuario; `export_factory.rs` ocupado por `ola1-export-factory`, `waf_engine.rs` por `ola1-waf-engine`.
 
