@@ -224,7 +224,7 @@ async fn test_redirect_to_forbidden_literal_ip_is_stopped() {
     // process (a no-op under nextest, which gives every test its own
     // process; defensive against shared-process harnesses).
     let _guard = webfang_test_utils::EnvGuard::clean(&[
-        crate::infrastructure::ssrf::DISABLE_REDIRECT_GUARD_ENV,
+        crate::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
     ]);
     let mock_server = MockServer::start().await;
 
