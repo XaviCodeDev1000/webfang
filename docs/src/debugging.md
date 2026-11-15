@@ -98,6 +98,40 @@ run). It returns every page plus errors for that run. The same query is
 {{#include ../samples/debugging/03-errors-with-context.sh}}
 ```
 
+### The `cause` field (connection failures)
+
+The error events carry a `cause` field: the **machine-readable class** of a connection
+failure, as a stable wire value. It is not a message fragment — the values are a contract:
+
+| `cause` | meaning |
+| :--- | :--- |
+| `dns_resolution` | the name never came back: the resolution itself failed or hung |
+| `connect_refused` | the peer refused the connection (RST) |
+| `connect_timeout` | the name resolved and the TCP connect did not complete in time |
+| `read_timeout` | the connection was established and the response never arrived |
+| `connection_closed` | the peer closed the connection before answering (EOF/reset) |
+| `tls_handshake` | the TLS handshake failed |
+| `unknown` | the classifier ran and could not decide — see below |
+
+The field is **omitted** when the failure is not a classified network failure, so its absence
+means "not a network failure" and never "unclassified".
+
+**`unknown` is the honest answer, and it is not a shrug.** It covers two cases: a chain the
+classifier could not read by type, and a **name resolution that was still in flight when the
+request failed but could not be attributed to that request** — typically because another
+request for the same host was running at the same time. The rule is deliberately conservative:
+a failure is only called `dns_resolution` when the evidence points at THAT request's own
+resolution. With one request in flight per host the attribution is reliable; with several, it
+is not, and the value is `unknown` rather than a wrong cause.
+
+```bash
+# the failures by cause
+jq -r 'select(.fields.cause) | .fields.cause' trace.jsonl | sort | uniq -c | sort -rn
+
+# every failure with its cause, in order
+jq -c 'select(.fields.cause) | {url: .fields.url, cause: .fields.cause, error: .fields.error}' trace.jsonl
+```
+
 ### Slowest spans (where the time goes)
 
 ```bash
