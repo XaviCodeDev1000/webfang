@@ -1,3 +1,4 @@
+use super::session_budget::{retained_record_bytes, session_budget_message};
 use super::tests_common::{test_state, ARTICLE_HTML};
 use super::*;
 
