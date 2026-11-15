@@ -27,8 +27,12 @@ use webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV;
 /// The `cause` values the trace may carry.
 const CAUSE_FIELD: &str = "cause";
 
-/// Every `cause` value the JSONL carries, in observation order.
-fn causes_in(trace: &std::path::Path) -> Vec<String> {
+/// Every value stored under `field` in the `fields` object of each JSONL
+/// event, in observation order.
+///
+/// Both channels are the same walk with a different key: the machine contract
+/// (`cause`) and the rendered message (`error`).
+fn values_in(trace: &std::path::Path, field: &str) -> Vec<String> {
     let Ok(text) = std::fs::read_to_string(trace) else {
         return Vec::new();
     };
@@ -37,25 +41,8 @@ fn causes_in(trace: &std::path::Path) -> Vec<String> {
         .filter_map(|event| {
             event
                 .get("fields")
-                .and_then(|fields| fields.get(CAUSE_FIELD))
-                .and_then(|cause| cause.as_str())
-                .map(ToOwned::to_owned)
-        })
-        .collect()
-}
-
-/// Every rendered error message the JSONL carries.
-fn errors_in(trace: &std::path::Path) -> Vec<String> {
-    let Ok(text) = std::fs::read_to_string(trace) else {
-        return Vec::new();
-    };
-    text.lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter_map(|event| {
-            event
-                .get("fields")
-                .and_then(|fields| fields.get("error"))
-                .and_then(|error| error.as_str())
+                .and_then(|fields| fields.get(field))
+                .and_then(|value| value.as_str())
                 .map(ToOwned::to_owned)
         })
         .collect()
@@ -107,6 +94,57 @@ fn url_with_trace(
     url_cmd
 }
 
+/// One observed run: what the trace said, in both channels.
+struct Observed {
+    /// The `cause` of every event that carried one.
+    causes: Vec<String>,
+    /// Every rendered error message, joined by newlines.
+    errors: String,
+}
+
+impl Observed {
+    fn from_trace(trace: &std::path::Path) -> Self {
+        Self {
+            causes: values_in(trace, CAUSE_FIELD),
+            errors: values_in(trace, "error").join("\n"),
+        }
+    }
+}
+
+/// Run one command to failure in a fresh directory and read its trace back.
+///
+/// Every test here needs the same four things: an isolated output directory, a
+/// trace file, a proof that the run actually failed, and both channels of the
+/// trace. The route decides only how the command is built.
+fn observe(
+    configure: impl FnOnce(&std::path::Path, &std::path::Path) -> assert_cmd::Command,
+) -> Observed {
+    let out = tempfile::TempDir::new().expect("temp output dir");
+    let trace = out.path().join("trace.jsonl");
+    configure(out.path(), &trace)
+        .timeout(std::time::Duration::from_secs(60))
+        .assert()
+        .failure();
+    Observed::from_trace(&trace)
+}
+
+/// Run a batch scrape against `url`.
+///
+/// The target is unreachable by construction, so the run is expected to fail:
+/// a success would mean the taxonomy was never exercised.
+fn run_batch(url: &str) -> Observed {
+    observe(|output, trace| {
+        let mut command = batch_with_trace(output, trace);
+        command.write_stdin(url.to_string());
+        command
+    })
+}
+
+/// The `--url` route of [`run_batch`].
+fn run_url(url: &str) -> Observed {
+    observe(|output, trace| url_with_trace(url, output, trace))
+}
+
 /// Positive: a refused connection is classified in the trace (#2784).
 ///
 /// Port 9 (discard) has nothing listening on it, so the connection is refused
@@ -114,16 +152,7 @@ fn url_with_trace(
 /// the taxonomy must name.
 #[tokio::test]
 async fn a_refused_connection_is_classified_in_the_trace() {
-    let out = tempfile::TempDir::new().expect("temp output dir");
-    let trace = out.path().join("trace.jsonl");
-
-    batch_with_trace(out.path(), &trace)
-        .write_stdin("http://127.0.0.1:9/".to_string())
-        .timeout(std::time::Duration::from_secs(60))
-        .assert()
-        .failure();
-
-    let causes = causes_in(&trace);
+    let causes = run_batch("http://127.0.0.1:9/").causes;
     assert!(
         causes.iter().any(|cause| cause == "connect_refused"),
         "the trace must classify the refused connection as `connect_refused`; causes found: {causes:?}"
@@ -138,16 +167,7 @@ async fn a_refused_connection_is_classified_in_the_trace() {
 /// connection (`client error (Connect)` at 0 s).
 #[tokio::test]
 async fn an_unresolvable_name_is_classified_in_the_trace() {
-    let out = tempfile::TempDir::new().expect("temp output dir");
-    let trace = out.path().join("trace.jsonl");
-
-    batch_with_trace(out.path(), &trace)
-        .write_stdin("http://webfang-lab-nonexistent.invalid/".to_string())
-        .timeout(std::time::Duration::from_secs(60))
-        .assert()
-        .failure();
-
-    let causes = causes_in(&trace);
+    let causes = run_batch("http://webfang-lab-nonexistent.invalid/").causes;
     assert!(
         causes.iter().any(|cause| cause == "dns_resolution"),
         "the trace must classify the unresolvable name as `dns_resolution`; causes found: {causes:?}"
@@ -163,15 +183,7 @@ async fn an_unresolvable_name_is_classified_in_the_trace() {
 /// cause at all.
 #[tokio::test]
 async fn the_url_route_classifies_a_refused_connection() {
-    let out = tempfile::TempDir::new().expect("temp output dir");
-    let trace = out.path().join("trace.jsonl");
-
-    url_with_trace("http://127.0.0.1:9/", out.path(), &trace)
-        .timeout(std::time::Duration::from_secs(60))
-        .assert()
-        .failure();
-
-    let causes = causes_in(&trace);
+    let causes = run_url("http://127.0.0.1:9/").causes;
     assert!(
         causes.iter().any(|cause| cause == "connect_refused"),
         "the `--url` route must classify the refused connection as `connect_refused`; causes found: {causes:?}"
@@ -184,19 +196,7 @@ async fn the_url_route_classifies_a_refused_connection() {
 /// match on "dns error", so the DNS class could not be reached on this route.
 #[tokio::test]
 async fn the_url_route_classifies_an_unresolvable_name() {
-    let out = tempfile::TempDir::new().expect("temp output dir");
-    let trace = out.path().join("trace.jsonl");
-
-    url_with_trace(
-        "http://webfang-lab-nonexistent.invalid/",
-        out.path(),
-        &trace,
-    )
-    .timeout(std::time::Duration::from_secs(60))
-    .assert()
-    .failure();
-
-    let causes = causes_in(&trace);
+    let causes = run_url("http://webfang-lab-nonexistent.invalid/").causes;
     assert!(
         causes.iter().any(|cause| cause == "dns_resolution"),
         "the `--url` route must classify the unresolvable name as `dns_resolution`; causes found: {causes:?}"
@@ -211,24 +211,8 @@ async fn the_url_route_classifies_an_unresolvable_name() {
 /// contract that goes with it.
 #[tokio::test]
 async fn the_user_facing_message_names_the_cause() {
-    let out = tempfile::TempDir::new().expect("temp output dir");
-
-    let refused_trace = out.path().join("refused.jsonl");
-    batch_with_trace(out.path(), &refused_trace)
-        .write_stdin("http://127.0.0.1:9/".to_string())
-        .timeout(std::time::Duration::from_secs(60))
-        .assert()
-        .failure();
-
-    let dns_trace = out.path().join("dns.jsonl");
-    batch_with_trace(out.path(), &dns_trace)
-        .write_stdin("http://webfang-lab-nonexistent.invalid/".to_string())
-        .timeout(std::time::Duration::from_secs(60))
-        .assert()
-        .failure();
-
-    let refused = errors_in(&refused_trace).join("\n");
-    let dns = errors_in(&dns_trace).join("\n");
+    let refused = run_batch("http://127.0.0.1:9/").errors;
+    let dns = run_batch("http://webfang-lab-nonexistent.invalid/").errors;
 
     assert!(
         refused.contains("el servidor rechazó la conexión"),
