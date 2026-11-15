@@ -27,14 +27,46 @@ pub enum ResolutionState {
     OtherRequest,
 }
 
+/// How long a mark stays EVIDENCE.
+///
+/// A mark older than this says nothing about the request that is failing now:
+/// it belongs to a resolution abandoned long before this request began. The
+/// expired marks are dropped, so the tracker cannot grow with the history of a
+/// long run (#2784).
+const MARK_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// How many hosts the tracker holds at most.
+///
+/// A batch against thousands of different hosts must not turn the tracker into
+/// a memory leak. Dropping a host can only COST an attribution (the cause
+/// falls back to `unknown` or to the classifier's own), never invent one
+/// (#2784).
+const MAX_TRACKED_HOSTS: usize = 256;
+
+/// How many unfinished resolutions are kept per host.
+const MAX_MARKS_PER_HOST: usize = 16;
+
 /// Tracks the name resolutions in flight, per host.
 ///
 /// The resolver marks a host as "resolving" when it starts and clears the mark
 /// when it finishes. A failure that arrives while a mark is still set is a
 /// resolution that never came back (#2784).
-#[derive(Debug, Default)]
+///
+/// The tracker is BOUNDED on three axes, because a marker that grows with the
+/// run is a leak wearing a diagnosis as a hat: at most [`MAX_MARKS_PER_HOST`]
+/// marks per host, at most [`MAX_TRACKED_HOSTS`] hosts, and a mark that is
+/// older than [`MARK_TTL`] is no longer evidence at all.
+#[derive(Debug)]
 pub struct ResolutionTracker {
     marks: std::sync::Mutex<std::collections::HashMap<String, HostResolutions>>,
+    /// How long a mark stays evidence.
+    ttl: std::time::Duration,
+}
+
+impl Default for ResolutionTracker {
+    fn default() -> Self {
+        Self::with_ttl(MARK_TTL)
+    }
 }
 
 /// What the tracker knows about one host.
@@ -55,6 +87,18 @@ struct HostResolutions {
 }
 
 impl ResolutionTracker {
+    /// A tracker whose marks expire after `ttl`.
+    ///
+    /// A zero TTL expires every mark at once: the shape a test needs to
+    /// observe the expiry without waiting for it (#2784).
+    #[must_use]
+    pub fn with_ttl(ttl: std::time::Duration) -> Self {
+        Self {
+            marks: std::sync::Mutex::new(std::collections::HashMap::new()),
+            ttl,
+        }
+    }
+
     /// Mark a resolution as started for `host`.
     ///
     /// The returned guard reports the resolution's end. A resolution that
@@ -63,14 +107,16 @@ impl ResolutionTracker {
     pub fn begin(&self, host: &str) -> ResolutionGuard<'_> {
         let started = std::time::Instant::now();
         if let Ok(mut marks) = self.marks.lock() {
+            self.drop_expired(&mut marks);
             let host_marks = marks.entry(host.to_owned()).or_default();
             host_marks.unfinished.push(started);
             // Bounded: only the most recent unfinished resolutions are evidence
             // worth keeping.
-            if host_marks.unfinished.len() > 16 {
-                let excess = host_marks.unfinished.len() - 16;
+            if host_marks.unfinished.len() > MAX_MARKS_PER_HOST {
+                let excess = host_marks.unfinished.len() - MAX_MARKS_PER_HOST;
                 host_marks.unfinished.drain(..excess);
             }
+            self.enforce_host_cap(&mut marks);
         }
         ResolutionGuard {
             tracker: self,
@@ -108,19 +154,89 @@ impl ResolutionTracker {
         let Some(host_marks) = marks.get(host) else {
             return ResolutionState::None;
         };
-        if host_marks.unfinished.is_empty() {
+        // An EXPIRED mark is not evidence about this request: the resolution
+        // it belonged to was abandoned long before this request began, so it
+        // says nothing about the failure being classified right now.
+        let live: Vec<&std::time::Instant> = host_marks
+            .unfinished
+            .iter()
+            .filter(|started| started.elapsed() < self.ttl)
+            .collect();
+        if live.is_empty() {
             return ResolutionState::None;
         }
         let completed_after = host_marks
             .last_success
-            .is_some_and(|finished| finished >= request_started);
-        let started_after = host_marks
-            .unfinished
-            .iter()
-            .any(|started| *started >= request_started);
+            .is_some_and(|finished| finished.elapsed() < self.ttl && finished >= request_started);
+        let started_after = live.iter().any(|started| **started >= request_started);
         match (completed_after, started_after) {
             (false, true) => ResolutionState::ThisRequest,
             _ => ResolutionState::OtherRequest,
+        }
+    }
+
+    /// Drop the marks that are no longer evidence, and the hosts left with
+    /// nothing at all.
+    fn drop_expired(&self, marks: &mut std::collections::HashMap<String, HostResolutions>) {
+        let ttl = self.ttl;
+        marks.retain(|_, host| {
+            host.unfinished.retain(|started| started.elapsed() < ttl);
+            if host
+                .last_success
+                .is_some_and(|finished| finished.elapsed() >= ttl)
+            {
+                host.last_success = None;
+            }
+            !host.unfinished.is_empty() || host.last_success.is_some()
+        });
+    }
+
+    /// Keep the tracker within [`MAX_TRACKED_HOSTS`].
+    ///
+    /// The hosts with no live evidence go first; when every host still carries
+    /// evidence, the one whose oldest mark is the oldest goes. Losing a host
+    /// can only COST an attribution — the cause falls back to `unknown` or to
+    /// the classifier's own — never invent one.
+    fn enforce_host_cap(&self, marks: &mut std::collections::HashMap<String, HostResolutions>) {
+        while marks.len() > MAX_TRACKED_HOSTS {
+            let victim = marks
+                .iter()
+                .min_by_key(|(_, host)| match host.unfinished.first() {
+                    Some(oldest) => (1u8, *oldest),
+                    None => (0u8, std::time::Instant::now()),
+                })
+                .map(|(host, _)| host.clone());
+            let Some(victim) = victim else {
+                break;
+            };
+            marks.remove(&victim);
+            tracing::debug!(
+                host = %victim,
+                tracked_hosts = marks.len(),
+                "resolution tracker dropped a host to stay bounded"
+            );
+        }
+    }
+
+    /// How many hosts the tracker currently holds.
+    ///
+    /// The bound is observable, not a promise in a comment (#2784).
+    #[cfg(test)]
+    #[must_use]
+    pub fn tracked_hosts(&self) -> usize {
+        match self.marks.lock() {
+            Ok(marks) => marks.len(),
+            Err(_) => 0,
+        }
+    }
+
+    /// How many unfinished marks the tracker holds for `host`.
+    #[cfg(test)]
+    #[must_use]
+    pub fn unfinished_marks(&self, host: &str) -> usize {
+        match self.marks.lock() {
+            Ok(marks) => marks.get(host).map_or(0, |host| host.unfinished.len()),
+            Err(_) => 0,
         }
     }
 }
@@ -249,6 +365,45 @@ mod tests {
         }
         assert_eq!(
             tracker.state("example.test", Instant::now()),
+            ResolutionState::None
+        );
+    }
+
+    /// The tracker is BOUNDED: a batch against thousands of hosts cannot grow
+    /// it without limit (#2784).
+    #[test]
+    fn the_tracker_does_not_grow_without_bound() {
+        let tracker = ResolutionTracker::default();
+        for index in 0..(MAX_TRACKED_HOSTS * 4) {
+            let _mark = tracker.begin(&format!("host-{index}.test"));
+        }
+        assert!(
+            tracker.tracked_hosts() <= MAX_TRACKED_HOSTS,
+            "the tracker must stay bounded, it holds {} hosts",
+            tracker.tracked_hosts()
+        );
+    }
+
+    /// The marks of ONE host are bounded too: a thousand URLs against a broken
+    /// DNS keep at most the most recent ones (#2784).
+    #[test]
+    fn the_marks_of_one_host_are_bounded() {
+        let tracker = ResolutionTracker::default();
+        for _ in 0..(MAX_MARKS_PER_HOST * 3) {
+            let _mark = tracker.begin("example.test");
+        }
+        assert_eq!(tracker.unfinished_marks("example.test"), MAX_MARKS_PER_HOST);
+    }
+
+    /// An EXPIRED mark is not evidence: the cause the classifier found stands
+    /// instead of being rewritten into a DNS failure (#2784).
+    #[test]
+    fn an_expired_mark_is_no_longer_evidence() {
+        let tracker = ResolutionTracker::with_ttl(std::time::Duration::ZERO);
+        let request_started = Instant::now();
+        let _mark = tracker.begin("example.test");
+        assert_eq!(
+            tracker.state("example.test", request_started),
             ResolutionState::None
         );
     }
