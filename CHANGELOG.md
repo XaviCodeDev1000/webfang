@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [8.0.0] - 2026-11-15
+
+
+### ⚠️ Breaking Changes
+
+- Carry the connection cause across the HttpError/CrawlError boundary ([#2784](https://github.com/XaviCodeDev1000/webfang/pull/2784)) ([#2803](https://github.com/XaviCodeDev1000/webfang/pull/2803))
+
+### 🏗️ Architecture Improvements
+
+- Extract the scraping handler test suite into sibling modules ([#2816](https://github.com/XaviCodeDev1000/webfang/pull/2816))
+- Extract scraping production helpers into sibling modules ([#2818](https://github.com/XaviCodeDev1000/webfang/pull/2818))
+- Split preflight.rs tests and extract field_book (part of #2584) ([#2800](https://github.com/XaviCodeDev1000/webfang/pull/2800))
+- Split export_factory.rs under the ~500-line rule; entry out of the baseline ([#2810](https://github.com/XaviCodeDev1000/webfang/pull/2810))
+
+### 🔧 Fixed
+
+- Bound the chrome launch explicitly at 60s with launch observability ([#2793](https://github.com/XaviCodeDev1000/webfang/pull/2793)) ([#2802](https://github.com/XaviCodeDev1000/webfang/pull/2802))
+- Reclaim a stranded jitter slot when a cancelled reservation is not the latest ([#2750](https://github.com/XaviCodeDev1000/webfang/pull/2750)) ([#2809](https://github.com/XaviCodeDev1000/webfang/pull/2809))
+
+### 🔧 Other
+
+- Retire the date_extractor parity test against legible ([#2801](https://github.com/XaviCodeDev1000/webfang/pull/2801))
+
+### 🧪 Testing
+
+- Gate the resume tests that reach copy_file_range, and declare the surface ([#2782](https://github.com/XaviCodeDev1000/webfang/pull/2782))
+- Gate the peak-rss probe whose measurement Miri invalidates ([#2786](https://github.com/XaviCodeDev1000/webfang/pull/2786))
 ## [7.7.1] - 2026-11-13
 
 
