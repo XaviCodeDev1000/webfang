@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.7.2] - 2026-11-15
+
+
+### 🏗️ Architecture Improvements
+
+- Split preflight.rs tests and extract field_book (part of #2584) ([#2800](https://github.com/XaviCodeDev1000/webfang/pull/2800))
+
+### 🔧 Fixed
+
+- Bound the chrome launch explicitly at 60s with launch observability ([#2793](https://github.com/XaviCodeDev1000/webfang/pull/2793)) ([#2802](https://github.com/XaviCodeDev1000/webfang/pull/2802))
+- Reclaim a stranded jitter slot when a cancelled reservation is not the latest ([#2750](https://github.com/XaviCodeDev1000/webfang/pull/2750)) ([#2809](https://github.com/XaviCodeDev1000/webfang/pull/2809))
+
+### 🔧 Other
+
+- Retire the date_extractor parity test against legible ([#2801](https://github.com/XaviCodeDev1000/webfang/pull/2801))
+
+### 🧪 Testing
+
+- Gate the resume tests that reach copy_file_range, and declare the surface ([#2782](https://github.com/XaviCodeDev1000/webfang/pull/2782))
+- Gate the peak-rss probe whose measurement Miri invalidates ([#2786](https://github.com/XaviCodeDev1000/webfang/pull/2786))
 ## [7.7.1] - 2026-11-13
 
 
