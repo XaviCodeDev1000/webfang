@@ -568,11 +568,7 @@ mod tests {
                         kind: crate::domain::error::WafDetectionKind::BodySignature,
                         url: String::new(),
                     }),
-                    FetchBehavior::NetworkError(msg) => Err(CrawlError::Network {
-                        message: msg.clone(),
-                        status_code: None,
-                        source: None,
-                    }),
+                    FetchBehavior::NetworkError(msg) => Err(CrawlError::network(msg.clone(), None)),
                 }
             })
         }

@@ -671,10 +671,18 @@ baselines (§6). Ninguna de las dos se resuelve desde este lado.
 
 Con el permiso del maintainer se cerró lo que quedaba abierto sin cambiar el diseño:
 
-- **§6 — baselines**: la subida de +59 sobre las seis entradas grandfathered queda **aprobada**
-  (decisión del maintainer, 2026-11-15). El note del JSON ya no dice "recorded in the #2803
-  review": decía una aprobación que el hilo no contenía, y el propio review lo marcó como el
-  "sí forzado por commitearlo". La cita ahora es la fecha de la decisión.
+- **§6 — baselines**: el mantenedor **rechazó** la subida ("nuestra política es reducir no aumentar"), así
+  que las seis entradas **BAJAN** en vez de subir: ssrf.rs 1298 → 1274, crawl_error.rs 1044 → 1027,
+  wreq_downloader.rs 1874 → 1856, client.rs 1453 → 1451, crawl_task.rs 1461 → 1460; processor.rs queda
+  en 1253. Los +59 se absorbieron **sacando código** de los seis ficheros: la conversión
+  `HttpError` → `CrawlError` a `domain/error/crawl_error/conversions.rs`, el lookup marcado del
+  resolver a `infrastructure/ssrf/gai_lookup.rs`, los dos entry points de lectura acotada a
+  `infrastructure/downloader/wreq_downloader/wreq_body.rs`, y el extractor de host a
+  `domain/error/mapping.rs`. Se midió y se **descartó** la primera idea (mover los módulos de test
+  fuera, como ya hace `error.rs`): los ficheros extraídos superan el límite duro de 500 líneas y
+  entrarían al baseline como ofensores NUEVOS, que es un ratchet peor que el que arregla. Toda
+  extracción es un movimiento puro: ni una aserción, ni un snapshot, ni una línea de producción
+  cambiaron de comportamiento.
 - **§8a — `CrawlErrorCategory`**: las ramas WAF/RateLimit emparejaban `source: None` **y** el
   status. Con #2784 todo fallo de transporte lleva `source: Some(..)`, así que un 401/403/429
   real caía a `Network` y perdía la atribución. Se eliminó la restricción (manda el status) y se

@@ -5,6 +5,7 @@
 use super::factory::build_wreq_client;
 use super::retry::{compute_backoff_delay, retry_with_backoff, RetryPolicy};
 use crate::domain::body_cap;
+use crate::domain::error::mapping::{http_failure, url_host_of};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
 use crate::domain::session_port::{SessionId, SessionPort};
@@ -287,7 +288,7 @@ impl HttpClient {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     if !e.is_timeout() {
-                        return Err(map_send_error(e, url_host.as_deref(), request_started));
+                        return Err(http_failure(e, url_host.as_deref(), request_started));
                     }
                     if attempt >= self.config.max_retries {
                         return Err(HttpError::Timeout);
@@ -459,18 +460,6 @@ impl HttpClient {
         )
         .await
     }
-}
-
-/// The host of a URL, for the resolver's marker.
-fn url_host_of(url: &str) -> Option<String> {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|parsed| parsed.host_str().map(str::to_owned))
-}
-
-/// Map a transport error to the corresponding [`HttpError`].
-fn map_send_error(e: wreq::Error, host: Option<&str>, started: std::time::Instant) -> HttpError {
-    crate::domain::error::mapping::http_failure(e, host, started)
 }
 
 /// Return a WAF-challenge error when the body is classified as blocked.

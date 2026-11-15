@@ -207,6 +207,13 @@ pub fn crawl_network_failure(
 /// reads keeps the transport's own words; the cause travels beside it, and
 /// the message names it (#2784).
 #[must_use]
+/// The host of a URL, for the resolver's marker.
+pub fn url_host_of(url: &str) -> Option<String> {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+}
+
 pub fn http_connection_failure(
     error: wreq::Error,
     phase: FetchPhase,

@@ -527,9 +527,8 @@ async fn process_single_url(
         {
             return Err(CrawlError::Timeout);
         }
-        let message = format!("crawl completed with {} transient error(s)", result.errors);
         return Err(CrawlError::Connection {
-            message,
+            message: format!("crawl completed with {} transient error(s)", result.errors),
             source: None,
         });
     }
