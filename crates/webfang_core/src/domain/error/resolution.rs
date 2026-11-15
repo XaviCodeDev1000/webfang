@@ -199,11 +199,6 @@ pub fn refine_connect_cause(
     if !matches!(cause, NetworkCause::ConnectTimeout | NetworkCause::Unknown) {
         return cause;
     }
-    eprintln!(
-        "DEBUG marker host={host} req_started={:?} state={:?}",
-        request_started,
-        resolution_tracker().state(host, request_started)
-    );
     match resolution_tracker().state(host, request_started) {
         ResolutionState::ThisRequest => NetworkCause::DnsResolution,
         ResolutionState::OtherRequest => NetworkCause::Unknown,
