@@ -19,6 +19,8 @@
 //!   deliberately dumb: each `#[tool(` owns everything up to the next
 //!   `#[tool(` (or end of file); that region must contain the notice.
 
+#[path = "common/mod.rs"]
+mod common;
 use std::path::{Path, PathBuf};
 
 use webfang_mcp::mcp_server::MCP_TOOL_COUNT;
@@ -56,8 +58,9 @@ fn tool_chunks(source: &str) -> Vec<&str> {
 fn handlers_never_construct_tool_content_directly() {
     let dir = manifest_dir().join(HANDLERS_DIR);
     let mut checked = 0usize;
-    for entry in std::fs::read_dir(&dir).expect("handlers dir must exist") {
-        let path = entry.expect("dir entry").path();
+    let mut files = common::walk_dir(&dir);
+    files.sort();
+    for path in files {
         if path.extension().and_then(|e| e.to_str()) != Some("rs") {
             continue;
         }
@@ -93,8 +96,9 @@ fn every_tool_description_carries_the_injection_notice() {
     let notice = webfang_mcp::mcp_server::provenance::INJECTION_NOTICE;
     let mut total = 0usize;
     let mut marked = 0usize;
-    for entry in std::fs::read_dir(&dir).expect("handlers dir must exist") {
-        let path = entry.expect("dir entry").path();
+    let mut files = common::walk_dir(&dir);
+    files.sort();
+    for path in files {
         if path.extension().and_then(|e| e.to_str()) != Some("rs") {
             continue;
         }
