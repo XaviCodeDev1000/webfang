@@ -1,4 +1,4 @@
-use super::*;
+use super::serialization::discovered_urls_tool_result;
 use crate::mcp_server::handlers::test_support::result_text;
 /// #1613 EC-06: `discover_urls` / `discover_sitemap` share
 /// `discovered_urls_tool_result` — a serialization failure there is a
