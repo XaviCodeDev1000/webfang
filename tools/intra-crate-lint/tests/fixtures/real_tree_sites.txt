@@ -29,7 +29,7 @@ adapters/downloader/tests_bounded_cache.rs	5	use	crate::infrastructure::observab
 adapters/downloader/tests_bounded_cache.rs	249	inline	crate::adapters::downloader::ASSET_CACHE_ENTRIES_PER_PERMIT
 adapters/downloader/tests_bounded_cache.rs	250	inline	crate::domain::budget::tiers::DownloadConcurrency::new
 adapters/downloader/tests_config.rs	5	use	crate::domain::config::ScraperConfig
-adapters/downloader/tests_download.rs	227	inline	crate::infrastructure::ssrf::DISABLE_REDIRECT_GUARD_ENV
+adapters/downloader/tests_download.rs	227	inline	crate::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV
 adapters/downloader/tests_memory_probe.rs	5	use	crate::infrastructure::observability::memory_probe
 adapters/extractor/mod.rs	5	use	crate::adapters::detector::get_extension
 adapters/extractor/mod.rs	8	use	crate::extractor::AssetUrl
