@@ -714,7 +714,7 @@ application/progress_observer.rs	8	use	crate::domain::ports::ProgressObserver
 application/rate_limiter.rs	42	use	crate::error::ScraperError
 application/rate_limiter.rs	173	inline	crate::domain::CorrelationId
 application/rate_limiter.rs	196	inline	crate::domain::CorrelationId
-application/rate_limiter/jitter.rs	22	use	crate::error::ScraperError
+application/rate_limiter/jitter.rs	23	use	crate::error::ScraperError
 application/rate_limiter/test_support.rs	43	inline	crate::infrastructure::observability::FileTraceLayer::new
 application/resume.rs	16	use	crate::domain::page_state::Committed
 application/resume.rs	17	use	crate::domain::page_state::Stateful
