@@ -71,9 +71,9 @@ pub fn log_scrape_error<E: std::fmt::Display + ?Sized>(
 /// The classified `cause` travels in the JSONL as its own field — the stable
 /// wire name of the `NetworkCause` value, never a message fragment — so a consumer of
 /// the trace reads a contract instead of parsing text. The field is OMITTED
-/// when the failure is not a classified network failure, so its absence means
-/// exactly "not a network failure" and not "unclassified".
-#[allow(clippy::needless_pass_by_value)]
+/// when the failure carries no classified cause, and that absence means "not
+/// classified": a transport failure whose evidence the wiring cannot read is
+/// reported without the field, so absence never means "not a network failure".
 pub fn log_scrape_error_with_cause<E: std::error::Error + 'static>(
     error: &E,
     url: &str,

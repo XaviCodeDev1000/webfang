@@ -666,3 +666,33 @@ heurística de DIRECTORIO del generador, no una copia a mano.
 
 **Lo que queda abierto, y es del maintainer:** el veto de `last_success` (§4) y la subida de
 baselines (§6). Ninguna de las dos se resuelve desde este lado.
+
+### L13 — Cierre de los puntos del review que sí eran aplicables (2026-11-15)
+
+Con el permiso del maintainer se cerró lo que quedaba abierto sin cambiar el diseño:
+
+- **§6 — baselines**: la subida de +59 sobre las seis entradas grandfathered queda **aprobada**
+  (decisión del maintainer, 2026-11-15). El note del JSON ya no dice "recorded in the #2803
+  review": decía una aprobación que el hilo no contenía, y el propio review lo marcó como el
+  "sí forzado por commitearlo". La cita ahora es la fecha de la decisión.
+- **§8a — `CrawlErrorCategory`**: las ramas WAF/RateLimit emparejaban `source: None` **y** el
+  status. Con #2784 todo fallo de transporte lleva `source: Some(..)`, así que un 401/403/429
+  real caía a `Network` y perdía la atribución. Se eliminó la restricción (manda el status) y se
+  añadieron los casos con causa en el source a los dos tests.
+- **§8g — test tautológico**: `message.chars().all(|c| c.is_ascii() || !c.is_ascii())` no podía
+  fallar. Reemplazado por el contrato real: los siete mensajes son **distintos** entre sí (el
+  criterio de aceptación de la issue) y ninguno está vacío.
+- **§8h — `#[allow(needless_pass_by_value)]`**: el parámetro ya es `&E`; el allow no aplicaba a
+  nada. Eliminado.
+- **§7.7 — la frase falsa sobre la ausencia**: sobrevivía en el doc comment de
+  `log_scrape_error_with_cause`. Corregida para que diga lo mismo que `debugging.md`: la ausencia
+  significa "no clasificado", nunca "no es un fallo de red".
+
+**§4 no se toca**: el veto `last_success` sigue implementado y documentado con todas las letras
+(`debugging.md`: con un request en vuelo por host la atribución es fiable; con varios, es
+`unknown`). Si el maintainer quiere (a) correlación por request o (c) quitar el veto, es otro
+cambio, con su propio RED.
+
+**Verificación:** `scripts/check_duplication.sh` (8190, igual que antes del cierre: los cambios
+son netos-cero para el detector, 29 líneas por debajo del baseline), `cargo nextest run` de los
+tres targets tocados, `cargo clippy --all-targets --all-features` y `cargo fmt --check`.

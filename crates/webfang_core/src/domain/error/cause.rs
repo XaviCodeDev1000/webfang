@@ -261,14 +261,19 @@ mod tests {
 
     #[test]
     fn the_user_facing_messages_are_spanish() {
-        for cause in NetworkCause::ALL {
-            let message = cause.message();
-            assert!(!message.is_empty());
-            assert!(
-                message.chars().all(|c| c.is_ascii() || !c.is_ascii()),
-                "the message must be plain text: {message}"
-            );
-        }
+        let messages: Vec<&str> = NetworkCause::ALL
+            .iter()
+            .map(|cause| cause.message())
+            .collect();
+        assert!(messages.iter().all(|message| !message.is_empty()));
+        // The issue's first acceptance criterion, pinned here: two causes must
+        // never produce the same sentence, or the message stops being evidence.
+        let unique: std::collections::BTreeSet<&str> = messages.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            messages.len(),
+            "two causes must never share a message: {messages:?}"
+        );
         assert_eq!(
             NetworkCause::ConnectRefused.message(),
             "el servidor rechazó la conexión"
