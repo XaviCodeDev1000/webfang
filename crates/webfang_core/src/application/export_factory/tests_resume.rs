@@ -3,6 +3,9 @@
 
 use super::tests_common::*;
 use super::*;
+use crate::application::resume::canonical_key;
+use crate::domain::page_state::PageStatus;
+use crate::domain::persistence::{DomainRecords, LastError, RawRecord};
 use crate::infrastructure::export::RecordStore;
 use tempfile::TempDir;
 

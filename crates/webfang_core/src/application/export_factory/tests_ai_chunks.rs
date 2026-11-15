@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::domain::entities::ScrapedContent;
+use crate::domain::page_state::PageStatus;
 use crate::domain::ValidUrl;
 use crate::infrastructure::export::RecordStore;
 use tempfile::TempDir;

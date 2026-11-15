@@ -3,6 +3,7 @@
 
 use super::tests_ai_chunks::{jsonl_lines, make_ai_chunk};
 use super::*;
+use crate::domain::page_state::PageStatus;
 use crate::infrastructure::export::RecordStore;
 use tempfile::TempDir;
 
