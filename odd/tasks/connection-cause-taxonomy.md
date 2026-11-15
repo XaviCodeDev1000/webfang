@@ -632,3 +632,37 @@ marker is per HOST with a veto, not per request as the spec promised) and the fi
 carry the new `cause` field were reviewed by hand — the DNS one now reads
 `cause: "dns_resolution"` on the `--url` route, which is the defect itself, visible in a
 pinned snapshot.
+
+### L12 — La fusión con main, el cierre del review y el estado final (2026-11-15)
+
+**El árbol se movió debajo del PR.** `main` avanzó cuatro commits mientras el review estaba
+abierto, y dos de ellos tocan lo que este PR toca:
+
+- `#2813` baja el baseline de `chromiumoxide_downloader.rs` a 609, y este PR cambia dos llamadas
+  en ese fichero (el constructor `Timeout`);
+- `#2810` parte `export_factory.rs` y lo saca del baseline.
+
+Git fusionó solo los dos ficheros: `chromiumoxide_downloader.rs` (el split de main se llevó el
+fichero a un directorio y mi cambio de constructor cayó en la línea correcta, verificado:
+`chromiumoxide_downloader.rs:542` usa `DownloadError::timeout(...)`) y
+`quality-baselines.json` (las seis entradas de este PR conviven con el 609 de main; las seis
+siguen clavadas en el tamaño real, sin holgura). El único conflicto fue el golden set intra-crate
+`tools/intra-crate-lint/tests/fixtures/real_tree_sites.txt`, y se resolvió **regenerándolo** con
+`scripts/refresh_real_tree_golden.sh` (97+/66−), nunca a mano: el fixture pinnea números de línea
+y un merge manual produce un golden que miente.
+
+**Verificación tras la fusión:** `cargo check --workspace --all-targets --all-features` limpio;
+`scripts/check_file_size.sh` OK; `scripts/check_test_inventory.sh` OK; `intra-crate-lint` 23/23
+(incluido `the_real_tree_parses_without_errors_and_matches_the_golden_set`); suite completa del
+workspace **5.564 pasados, 0 fallos, 8 skipped** (lib: 3.039 tests, 6 skipped).
+
+**Las cinco preguntas del review, respondidas en el cuerpo del PR:** (1) clasificar tras el
+estrechamiento fue un accidente de la extracción a `mapping.rs`, no una decisión, y el retry rule
+lee la clase, no la causa; (2) no hay `debugging.md` sin commitear: la sección está en `849bbde1`
+y `main` no tiene ninguna; (3) el CI se verifica comparando `headRefOid` con el `headSha` de cada
+run, no por el estado global del PR; (4) el veto solo degrada la atribución DNS en batches
+concurrency > 1 contra un mismo host, el resto de clases no las toca; (5) `snapshot_usage` es una
+heurística de DIRECTORIO del generador, no una copia a mano.
+
+**Lo que queda abierto, y es del maintainer:** el veto de `last_success` (§4) y la subida de
+baselines (§6). Ninguna de las dos se resuelve desde este lado.
