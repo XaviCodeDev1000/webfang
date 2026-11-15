@@ -76,3 +76,18 @@ seams 1–5 identificados en la sección de estructura. Propuesta de PR 1: parti
 tests` primero (mueve ~1350 líneas de golpe, bajo riesgo, precedentes en engine.rs) antes
 de los seams de producción.
 L3 — PR 1 ejecutado (commit `49b94519`, rama `refactor/ola1-export-factory-tests`): writer delegado agotó quota tras producir los 7 hijos; el padre completó el wiring (imports prescritos por rustc: `RecordStore`, `ScrapedContent`, `ValidUrl`, `make_ai_chunk`/`jsonl_lines` en `pub(super)`; limpieza de doc-comments huérfanos que clippy `empty_line_after_doc_comments` rechazó). Verificación: invariante `--list` 37=37 solo renombres de módulo (diff normalizado OK); nextest lib **3009 passed / 5 skipped / 0 failed**; clippy `--all-targets --all-features -D warnings` 0; fmt OK; file-size OK con `--update 2643→1307` (sigue grandfathered, banda Ola 3 ahora); jscpd sin clones nuevos sobre los tocados. Siguiente: PR 2 — seams de producción (CommitSession ~L99-575 primero).
+
+## Log (continuación)
+
+L4 — PR 2 ejecutado (commits `39685ecc` + `a61d9d9a`): seam CommitSession/ResumeContext/ItemDecision
+(522 líneas) → `commit_session.rs`; como quedó en 556 (>500, el guard lo rechazó), se partió de
+nuevo: `record_redrive.rs` (94) con `now_millis`/`drive_to_processed`/`fresh_discovered`.
+export_factory.rs 1307→779 (--update; el valor 778 quedó bloqueado por una línea de blank de más,
+corregido a 779 vía edición del JSON equivalente a --update descendente). Verificación: --list
+37=37, nextest 3009/5/0, clippy 0, fmt OK.
+L5 — PR 3 ejecutado (commit `ade3b0b3`): seam índice JSONL (215 líneas) → `jsonl_index.rs` (227)
+y seam fábrica (89) → `factory.rs` (102). **export_factory.rs 779→476 ≤500 ⇒ `--remove`: la
+entrada sale del baseline (98→97 grandfathered)**. `JsonlChecksumIndex` y `read_jsonl_checksum_index`
+se volvieron `pub` (consumidas por `infrastructure/export/tail_window.rs`); el resto pub(crate).
+Verificación: --list 37=37, nextest 3009/5/0, clippy 0, fmt OK, workspace check 0 errores.
+Misión completada para este monstruo: 2643 → hub 476 + 10 hijos, todos ≤500.
