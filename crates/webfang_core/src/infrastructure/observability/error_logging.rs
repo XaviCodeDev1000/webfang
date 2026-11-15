@@ -4,6 +4,7 @@
 //! context (url, stage, trace_id) so errors captured in a trace file can be
 //! correlated with the operation that produced them.
 
+use crate::domain::error::cause::{cause_in_chain, NetworkCause};
 use crate::domain::CorrelationId;
 
 /// Log a structured error carrying its operational [`ErrorClass`](crate::domain::error::ErrorClass).
@@ -62,6 +63,39 @@ pub fn log_scrape_error<E: std::fmt::Display + ?Sized>(
     correlation_id: Option<&CorrelationId>,
     context: &str,
 ) {
+    log_error(error, url, stage, correlation_id, context, None);
+}
+
+/// [`log_scrape_error`] with the connection-failure taxonomy (#2784).
+///
+/// The classified `cause` travels in the JSONL as its own field — the stable
+/// wire name of the `NetworkCause` value, never a message fragment — so a consumer of
+/// the trace reads a contract instead of parsing text. The field is OMITTED
+/// when the failure carries no classified cause, and that absence means "not
+/// classified": a transport failure whose evidence the wiring cannot read is
+/// reported without the field, so absence never means "not a network failure".
+pub fn log_scrape_error_with_cause<E: std::error::Error + 'static>(
+    error: &E,
+    url: &str,
+    stage: &str,
+    correlation_id: Option<&CorrelationId>,
+    context: &str,
+) {
+    // The cause is read out of the chain the error already carries, so no
+    // call site can forget to ask for it (#2784).
+    let cause = cause_in_chain(error);
+    log_error(error, url, stage, correlation_id, context, cause);
+}
+
+/// The one tracing call behind both loggers.
+fn log_error<E: std::fmt::Display + ?Sized>(
+    error: &E,
+    url: &str,
+    stage: &str,
+    correlation_id: Option<&CorrelationId>,
+    context: &str,
+    cause: Option<NetworkCause>,
+) {
     // `Option<String>` as a tracing field records the value when `Some` and is
     // omitted when `None`, so a single call handles both cases.
     tracing::error!(
@@ -69,6 +103,7 @@ pub fn log_scrape_error<E: std::fmt::Display + ?Sized>(
         url = %url,
         stage = %stage,
         trace_id = correlation_id.map(|c| c.trace_id().to_string()),
+        cause = cause.map(NetworkCause::as_str),
         "{context}"
     );
 }

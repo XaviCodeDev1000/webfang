@@ -17,6 +17,8 @@ use wreq_util::Profile;
 
 use crate::domain::crawler_port::{HttpFetchResult, StaticFetchPort};
 use crate::domain::downloader_port::Cookie;
+use crate::domain::error::cause::FetchPhase;
+use crate::domain::error::mapping::crawl_network_failure;
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::{CrawlError, CrawlerConfig};
 use crate::error::Result as ScraperResult;
@@ -146,6 +148,7 @@ pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<HttpFetchRes
     let requested = Url::parse(url).map_err(|e| CrawlError::Network {
         message: format!("invalid URL {url}: {e}"),
         status_code: None,
+        source: None,
     })?;
 
     // SSRF layer 2 (F-06 + F-32 #1217), applied here so every consumer of the
@@ -161,14 +164,18 @@ pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<HttpFetchRes
         // LCOV_EXCL_LINE defensive: wreq-client-build — client construction fails only on invalid TLS profile, an invariant
         .map_err(|e| CrawlError::Internal(format!("Failed to create HTTP client: {e}")))?;
 
+    let request_started = std::time::Instant::now();
     let response = client
         .get(url)
         .timeout(Duration::from_secs(config.timeout_secs))
         .send()
         .await
-        .map_err(|e| CrawlError::Network {
-            message: e.to_string(),
-            status_code: e.status().map(|s| s.as_u16()),
+        .map_err(|e| {
+            // #2784: this is the port's CONNECT boundary — the response does
+            // not exist yet, so a timeout here is a connect timeout and never a
+            // read one. Classify where the error still carries its TYPE, render
+            // the message first, and let the cause ride beside it.
+            crawl_network_failure(e, FetchPhase::Connect, &requested, request_started)
         })?;
 
     let status = response.status().as_u16();
@@ -202,12 +209,14 @@ pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<HttpFetchRes
         return Err(CrawlError::Network {
             message: format!("HTTP error: {}", response.status()),
             status_code: Some(status),
+            source: None,
         });
     }
 
-    let text = response.text().await.map_err(|e| CrawlError::Network {
-        message: e.to_string(),
-        status_code: None,
+    let text = response.text().await.map_err(|e| {
+        // #2784: the BODY phase — the response existed, so a timeout here is a
+        // read timeout and never a connect one.
+        crawl_network_failure(e, FetchPhase::Body, &requested, request_started)
     })?;
 
     Ok(HttpFetchResult {

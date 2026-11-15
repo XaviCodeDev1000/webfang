@@ -74,40 +74,8 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use wreq::dns::{Addrs, Name, Resolve, Resolving};
 
-/// Error produced when a DNS answer violates SSRF policy.
-///
-/// The whole answer set is rejected fail-closed: a single forbidden address
-/// among the returned records poisons the resolution, mirroring the
-/// entry-level validator's semantics (never hand wreq a "safe subset" that an
-/// attacker could pin connections to).
-#[derive(Debug, thiserror::Error)]
-#[error("DNS resolution of '{host}' returned forbidden address {ip} (SSRF)")]
-pub struct ForbiddenResolutionError {
-    /// Host whose answer set contained the forbidden address.
-    pub host: String,
-    /// The first forbidden address found in the answer set.
-    pub ip: IpAddr,
-}
-
-/// Dial refused by the B2 allowlist's host half (slice 2, #1947).
-///
-/// Distinct from [`ForbiddenResolutionError`] on purpose: the address WAS
-/// allowlisted, and what is missing is the declared hostname — a config
-/// omission with an obvious fix, not an SSRF attempt. It therefore names the
-/// field that closes it (`allow_hosts`), in Spanish, because it surfaces
-/// verbatim in the operator's terminal through the transport error chain.
-///
-/// Reported only when the AND decision is what denied the dial: the resolved
-/// IP is inside an allowlisted CIDR and the hostname is not declared, so
-/// both facts are actionable.
-#[derive(Debug, thiserror::Error)]
-#[error("el host '{host}' resolvió a {ip}, una red privada: declaralo también en `allow_hosts` del provider (en `network_policy`) para permitir ese endpoint; `allow_cidrs` por sí solo es la precondición, no el permiso")]
-pub struct ForbiddenHostNotAllowlistedError {
-    /// Hostname dialed (never an IP literal: literals skip this check).
-    pub host: String,
-    /// Resolved address that IS inside an allowlisted CIDR.
-    pub ip: IpAddr,
-}
+mod resolution_errors;
+pub use resolution_errors::{ForbiddenHostNotAllowlistedError, ForbiddenResolutionError};
 
 /// Connect-time SSRF-enforcing DNS resolver installed on every scrape client.
 ///
@@ -291,7 +259,23 @@ impl ValidatingResolver {
         policy: Arc<NetworkPolicy>,
         name_source: Arc<dyn NameSource>,
     ) -> Result<Addrs, BoxedLookupError> {
-        let addrs = name_source.lookup(host.clone()).await?;
+        // #2784: the resolution is MARKED while it is in flight, so a failure
+        // that arrives before it finishes is a RESOLUTION failure.
+        let mut mark = crate::domain::error::resolution::resolution_tracker().begin(&host);
+        let addrs = match name_source.lookup(host.clone()).await {
+            Ok(addrs) => {
+                // The name came back: record it, so a CONCURRENT request whose
+                // own resolution hangs is not mistaken for this one's (#2784).
+                mark.finished(true);
+                addrs
+            },
+            Err(err) => {
+                mark.finished(false);
+                return Err(
+                    crate::domain::error::mapping::dns_resolution_failure(err) as BoxedLookupError
+                );
+            },
+        };
 
         if validate {
             Self::fail_closed_scan(&host, &addrs, allow_loopback, &policy)?;
@@ -456,6 +440,11 @@ impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::Default
             .dns_resolver(ValidatingResolver::with_policy(allow_loopback, policy))
     }
 }
+
+// The pair, in process: the resolver that never answers against the accept
+// queue that swallows the SYN (#2784). Its own file, so this one does not grow.
+#[cfg(test)]
+mod resolution_pair;
 
 #[cfg(test)]
 mod tests {

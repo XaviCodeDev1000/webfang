@@ -9,21 +9,13 @@
 use super::ScraperError;
 use wreq::Error as WreqError;
 
-/// Map a `CrawlError::Network` message to a synthetic `io::Error` with the
-/// kind that best matches the transport failure (#537).
+/// The `io::ErrorKind` the transport text implies.
 ///
-/// `CrawlError::Network` has already crossed the infrastructure → domain
-/// boundary and lost its typed source; all that survives is a `String`
-/// message. Re-deriving the io kind from that message text lets
-/// `is_transient_network` (which downcasts on `io::Error` FIRST and never
-/// reaches the text fallback for an io-typed boxed error) classify it
-/// correctly. Unknown transport text conservatively maps to
-/// `ErrorKind::Other`, which is NOT in the transient list and so falls back
-/// to `InternalFatal` — preserving the safety net for genuinely unknown
-/// internal failures.
-fn io_error_for_network_message(message: &str) -> std::io::Error {
+/// Split out of [`io_error_for_network_message`] so the caller that DOES have a
+/// typed cause can keep this class and still attach the cause (#2784).
+fn io_kind_for_network_message(message: &str) -> std::io::ErrorKind {
     let msg = message.to_ascii_lowercase();
-    let kind = if msg.contains("connection refused")
+    if msg.contains("connection refused")
         || msg.contains("client error (connect)")
         || msg.contains("connect error")
     {
@@ -52,8 +44,7 @@ fn io_error_for_network_message(message: &str) -> std::io::Error {
         std::io::ErrorKind::BrokenPipe
     } else {
         std::io::ErrorKind::Other
-    };
-    std::io::Error::new(kind, message.to_string())
+    }
 }
 
 impl From<WreqError> for ScraperError {
@@ -69,6 +60,41 @@ impl From<WreqError> for ScraperError {
 // Error Map V2: From impls for layer-specific errors
 // ============================================================================
 
+/// A connection failure that renders exactly the message it was given and, when
+/// the producer still had it, keeps the classified cause as its source.
+///
+/// It exists so #2784 does not have to choose between two things the error
+/// matrix needs at once: the `ConnectionReset` `io::ErrorKind` that makes the
+/// class transient (row 1), and the typed cause that `cause_in_chain` reads.
+/// The `Display` is the message alone — byte-identical to the flattened string
+/// this used to carry.
+#[derive(Debug)]
+struct ConnectionFailure {
+    message: String,
+    cause: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl ConnectionFailure {
+    /// A failure that keeps the cause when there is one.
+    fn new(message: String, cause: Option<crate::domain::error::cause::ErrorSource>) -> Self {
+        Self { message, cause }
+    }
+}
+
+impl std::fmt::Display for ConnectionFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ConnectionFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cause
+            .as_ref()
+            .map(|cause| cause.as_ref() as &(dyn std::error::Error + 'static))
+    }
+}
+
 impl From<crate::domain::error::CrawlError> for ScraperError {
     fn from(e: crate::domain::error::CrawlError) -> Self {
         use crate::domain::error::CrawlError;
@@ -76,6 +102,7 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
             CrawlError::Network {
                 message,
                 status_code,
+                source,
             } => {
                 if let Some(status) = status_code {
                     ScraperError::Http {
@@ -89,7 +116,16 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
                     // Wrap the message in a synthetic `io::Error` whose kind
                     // is sniffed from the transport text so `classify()` can
                     // route to TransientRetriable when appropriate.
-                    ScraperError::Network(Box::new(io_error_for_network_message(&message)))
+                    // The synthetic kind is what makes this class transient,
+                    // so it stays. When the producer preserved the typed cause,
+                    // it rides INSIDE the io::Error as its source: the class and
+                    // the message are unchanged, and `cause_in_chain` can read
+                    // the cause out of the chain (#2784).
+                    let inner = ConnectionFailure::new(message, source);
+                    ScraperError::Network(Box::new(std::io::Error::new(
+                        io_kind_for_network_message(&inner.to_string()),
+                        inner,
+                    )))
                 }
             },
             CrawlError::Http { status, url } => ScraperError::Http { status, url },
@@ -134,10 +170,19 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
                 std::io::ErrorKind::TimedOut,
                 "request timeout",
             ))),
-            CrawlError::Connection(msg) => ScraperError::Network(Box::new(std::io::Error::new(
-                std::io::ErrorKind::ConnectionReset,
-                msg,
-            ))),
+            CrawlError::Connection { message, source } => {
+                // The synthetic `ConnectionReset` is what keeps this class
+                // transient (row 1), so it stays. When the producer preserved
+                // the typed cause, it rides INSIDE that io::Error as its
+                // source: the class and the message are unchanged, and
+                // `cause_in_chain` can finally read the cause out of the chain
+                // (#2784).
+                let inner = ConnectionFailure::new(message, source);
+                ScraperError::Network(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    inner,
+                )))
+            },
             // Rows 11/12 (#957): typed 1:1 pass-through. Flattening every
             // kind into `Internal` collapsed row 11 (DomainRecoverable) and
             // row 12 (TransientBackoff) to InternalFatal at this layer.

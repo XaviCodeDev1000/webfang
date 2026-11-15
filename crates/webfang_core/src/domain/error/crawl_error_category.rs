@@ -117,6 +117,10 @@ impl From<&CrawlError> for CrawlErrorCategory {
                 }
             },
             CrawlError::Timeout => Self::Timeout,
+            // The `source` is deliberately NOT matched: a transport failure
+            // now carries the classified cause there (#2784), so requiring
+            // `source: None` would silently drop the WAF/RateLimit attribution
+            // for every real 401/403/429. The status is what decides.
             CrawlError::Network {
                 status_code: Some(status),
                 ..
@@ -125,9 +129,9 @@ impl From<&CrawlError> for CrawlErrorCategory {
                 status_code: Some(429),
                 ..
             } => Self::RateLimit,
-            CrawlError::Network { .. } | CrawlError::Connection(..) | CrawlError::Download(..) => {
-                Self::Network
-            },
+            CrawlError::Network { .. }
+            | CrawlError::Connection { .. }
+            | CrawlError::Download(..) => Self::Network,
             CrawlError::RateLimited(..) => Self::RateLimit,
             CrawlError::Parse(..) => Self::Extraction,
             // Every arm below was previously the `_ => Self::Internal`
@@ -185,6 +189,7 @@ impl From<&CrawlError> for CrawlErrorCategory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::error::cause::ErrorSource;
     use crate::domain::error::WafDetectionKind;
     use crate::domain::CrawlResult;
 
@@ -274,10 +279,14 @@ mod tests {
         let err = CrawlError::Network {
             message: "dns failure".into(),
             status_code: None,
+            source: None,
         };
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Network);
 
-        let err = CrawlError::Connection("refused".into());
+        let err = CrawlError::Connection {
+            message: "refused".into(),
+            source: None,
+        };
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Network);
 
         let err = CrawlError::Download(Box::new(std::io::Error::new(
@@ -287,35 +296,53 @@ mod tests {
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Network);
     }
 
+    /// A transport `Network` failure with the given status, optionally carrying
+    /// the classified cause #2784 puts in its `source`.
+    fn network_with(status: u16, source: Option<ErrorSource>) -> CrawlError {
+        CrawlError::Network {
+            message: format!("HTTP error: {status}"),
+            status_code: Some(status),
+            source,
+        }
+    }
+
     #[test]
     fn categorize_network_with_waf_status_as_waf() {
         // Issue #629: CrawlError::Network carrying a 401/403 status code (from
         // http_client non-success responses) must promote to Waf, not Network.
+        // #2784: with or without the cause in the source — every real
+        // transport failure carries one now, and the status still decides.
         for status in [401u16, 403] {
-            let err = CrawlError::Network {
-                message: format!("HTTP error: {status}"),
-                status_code: Some(status),
-            };
-            assert_eq!(
-                CrawlErrorCategory::from(&err),
-                CrawlErrorCategory::Waf,
-                "Network with status {status} must classify as waf"
-            );
+            for source in [
+                None,
+                Some(Box::new(std::io::Error::other("classified")) as ErrorSource),
+            ] {
+                let has_source = source.is_some();
+                let err = network_with(status, source);
+                assert_eq!(
+                    CrawlErrorCategory::from(&err),
+                    CrawlErrorCategory::Waf,
+                    "Network with status {status} must classify as waf, with source: {has_source}"
+                );
+            }
         }
     }
 
     #[test]
     fn categorize_network_with_429_as_rate_limit() {
         // Issue #629: CrawlError::Network carrying a 429 must promote to RateLimit.
-        let err = CrawlError::Network {
-            message: "HTTP error: 429".into(),
-            status_code: Some(429),
-        };
-        assert_eq!(
-            CrawlErrorCategory::from(&err),
-            CrawlErrorCategory::RateLimit,
-            "Network with status 429 must classify as rate_limit"
-        );
+        for source in [
+            None,
+            Some(Box::new(std::io::Error::other("classified")) as ErrorSource),
+        ] {
+            let has_source = source.is_some();
+            let err = network_with(429, source);
+            assert_eq!(
+                CrawlErrorCategory::from(&err),
+                CrawlErrorCategory::RateLimit,
+                "Network with status 429 must classify as rate_limit, with source: {has_source}"
+            );
+        }
     }
 
     #[test]
@@ -325,6 +352,7 @@ mod tests {
             let err = CrawlError::Network {
                 message: format!("HTTP error: {status}"),
                 status_code: Some(status),
+                source: None,
             };
             assert_eq!(
                 CrawlErrorCategory::from(&err),

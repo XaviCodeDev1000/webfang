@@ -28,7 +28,7 @@ use crate::domain::persistence::StateStorePort;
 use crate::domain::{CorrelationId, ScrapedContent};
 use crate::infrastructure::downloader::Downloader;
 use crate::infrastructure::export::RecordStore;
-use crate::infrastructure::observability::log_scrape_error;
+use crate::infrastructure::observability::log_scrape_error_with_cause;
 use crate::HttpClientConfig;
 
 use crate::application::adaptive_engine::AdaptiveSelectorEngine;
@@ -575,7 +575,7 @@ async fn scrape_one_url(
         },
         Err(e) => {
             let url_str = url.as_str().to_string();
-            log_scrape_error(
+            log_scrape_error_with_cause(
                 &e,
                 &url_str,
                 "scrape",

@@ -274,7 +274,7 @@ fn test_unknown_profile_error_wraps_to_scraper_config() {
 
 #[test]
 fn test_download_error_wraps_to_scraper_download() {
-    let download_err = crate::infrastructure::downloader::DownloadError::Timeout(30);
+    let download_err = crate::infrastructure::downloader::DownloadError::timeout(30);
     let scraper_err: ScraperError = download_err.into();
     assert!(
         matches!(scraper_err, ScraperError::Download(_)),

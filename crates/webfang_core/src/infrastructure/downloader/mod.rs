@@ -7,6 +7,7 @@
 //! and `strip_display_marker` helper remain infrastructure-owned (they would be
 //! an outward `domain→wreq` dependency if they lived in `domain`).
 
+mod cause;
 /// Chrome profile directory helper for unique user-data-dir per launch.
 #[cfg(feature = "chromium")]
 pub mod chrome_profile;
@@ -40,22 +41,93 @@ impl From<wreq::Error> for DownloadError {
             return DownloadError::InvalidUrl(e.to_string());
         }
 
-        let mut source = e.source();
-        while let Some(s) = source {
-            if let Some(io_err) = s.downcast_ref::<std::io::Error>() {
-                return DownloadError::Io(std::io::Error::new(io_err.kind(), io_err.to_string()));
-            }
-            let msg = s.to_string().to_lowercase();
-            if msg.contains("dns") || msg.contains("resolve") {
-                return DownloadError::Dns(strip_display_marker(&s.to_string(), "dns error"));
-            }
-            if msg.contains("tls") || msg.contains("certificate") || msg.contains("ssl") {
-                return DownloadError::Tls(strip_display_marker(&s.to_string(), "tls error"));
-            }
-            source = s.source();
+        // The resolver's OWN typed failure decides the DNS class (#2784). It
+        // sits BELOW the transport's "dns error" text in the chain, so it has
+        // to be looked for BEFORE any text match narrows the chain away.
+        if let Some(detail) = typed_dns_failure(&e) {
+            return DownloadError::Dns {
+                message: detail,
+                source: Some(Box::new(e)),
+            };
         }
-        DownloadError::Network(Box::new(e))
+
+        let narrowed = {
+            let mut source = e.source();
+            let mut narrowed = None;
+            while let Some(s) = source {
+                if let Some(io_err) = s.downcast_ref::<std::io::Error>() {
+                    narrowed = Some(Narrowed::Io(std::io::Error::new(
+                        io_err.kind(),
+                        io_err.to_string(),
+                    )));
+                    break;
+                }
+                let msg = s.to_string().to_lowercase();
+                if msg.contains("dns") || msg.contains("resolve") {
+                    narrowed = Some(Narrowed::Dns(strip_display_marker(
+                        &s.to_string(),
+                        "dns error",
+                    )));
+                    break;
+                }
+                if msg.contains("tls") || msg.contains("certificate") || msg.contains("ssl") {
+                    narrowed = Some(Narrowed::Tls(strip_display_marker(
+                        &s.to_string(),
+                        "tls error",
+                    )));
+                    break;
+                }
+                source = s.source();
+            }
+            narrowed
+        };
+
+        match narrowed {
+            Some(Narrowed::Dns(message)) => DownloadError::Dns {
+                message,
+                source: Some(Box::new(e)),
+            },
+            Some(Narrowed::Tls(message)) => DownloadError::Tls {
+                message,
+                source: Some(Box::new(e)),
+            },
+            Some(Narrowed::Io(io_err)) => DownloadError::Io(io_err),
+            None => DownloadError::Network(Box::new(e)),
+        }
     }
+}
+
+/// The transport failure, narrowed to the variant that decides its class.
+enum Narrowed {
+    /// A name resolution failure, with the detail behind it.
+    Dns(String),
+    /// A TLS failure, with the detail behind it.
+    Tls(String),
+    /// An I/O failure, with its kind preserved.
+    Io(std::io::Error),
+}
+
+/// The detail behind the resolver's typed failure, if the chain carries one.
+///
+/// The typed failure is the resolver's own: it exists only because a
+/// resolution was attempted and did not succeed, and it decides the DNS class
+/// by TYPE. It sits BELOW the transport's "dns error" text, so the text match
+/// would narrow the chain away before the walk ever reached it (#2784).
+fn typed_dns_failure(error: &(dyn std::error::Error + 'static)) -> Option<String> {
+    use crate::domain::error::cause::DnsResolutionError;
+    let mut current = error.source();
+    while let Some(err) = current {
+        if err.downcast_ref::<DnsResolutionError>().is_some() {
+            // The detail behind the typed failure, without the cause's own
+            // words: the cause is composed by the mapping that knows it.
+            return Some(
+                err.source()
+                    .map_or_else(|| err.to_string(), |inner| inner.to_string()),
+            );
+        }
+        current = err.source();
+    }
+    None
 }
 
 /// Strip a leading marker that the variant's `Display` already prints.
@@ -132,7 +204,7 @@ mod tests {
         let err = DownloadError::SpaDetected("React SPA".into());
         assert!(err.to_string().contains("React SPA"));
 
-        let err = DownloadError::Timeout(30);
+        let err = DownloadError::timeout(30);
         assert!(err.to_string().contains("30"));
     }
 
@@ -161,12 +233,9 @@ mod tests {
         use crate::error::ErrorClass;
 
         let cases: &[(DownloadError, ErrorClass)] = &[
+            (DownloadError::dns("NXDOMAIN"), ErrorClass::PermanentFatal),
             (
-                DownloadError::Dns("NXDOMAIN".into()),
-                ErrorClass::PermanentFatal,
-            ),
-            (
-                DownloadError::Tls("certificate expired".into()),
+                DownloadError::tls("certificate expired"),
                 ErrorClass::PermanentFatal,
             ),
             (
@@ -187,7 +256,7 @@ mod tests {
                 DownloadError::Io(std::io::Error::other("bug")),
                 ErrorClass::InternalFatal,
             ),
-            (DownloadError::Timeout(1), ErrorClass::TransientBackoff),
+            (DownloadError::timeout(1), ErrorClass::TransientBackoff),
             (
                 DownloadError::Http {
                     status: 503,

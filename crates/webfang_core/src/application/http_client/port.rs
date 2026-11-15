@@ -28,11 +28,17 @@ impl HttpClientPort for wreq::Client {
     ) -> Pin<Box<dyn std::future::Future<Output = HttpResult<HttpResponse>> + Send + '_>> {
         let url = url.to_owned();
         Box::pin(async move {
+            let request_started = std::time::Instant::now();
             let response = self.get(url.as_str()).send().await.map_err(|e| {
                 if e.is_timeout() {
                     HttpError::Timeout
                 } else if e.is_connect() {
-                    HttpError::Connection(e.to_string())
+                    crate::domain::error::mapping::http_connection_failure(
+                        e,
+                        crate::domain::error::cause::FetchPhase::Connect,
+                        None,
+                        request_started,
+                    )
                 } else {
                     HttpError::Request(e.to_string())
                 }

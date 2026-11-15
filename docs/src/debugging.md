@@ -98,6 +98,54 @@ run). It returns every page plus errors for that run. The same query is
 {{#include ../samples/debugging/03-errors-with-context.sh}}
 ```
 
+### The `cause` field (connection failures)
+
+The error events carry a `cause` field: the **machine-readable class** of a connection
+failure, as a stable wire value. It is not a message fragment — the values are a contract:
+
+| `cause` | meaning | observed end to end |
+| :--- | :--- | :--- |
+| `dns_resolution` | the name never came back: the resolution itself failed or hung | yes |
+| `connect_refused` | the peer refused the connection (RST) | yes |
+| `connect_timeout` | the name resolved and the TCP connect did not complete in time | yes |
+| `read_timeout` | the connection was established and the response never arrived | **not yet** |
+| `connection_closed` | the peer closed the connection before answering (EOF/reset) | **not yet** |
+| `tls_handshake` | the TLS handshake failed | **not yet** |
+| `unknown` | the classifier ran and could not decide — see below | yes |
+
+The three values marked **not yet** are DECLARED, not measured: the transport does not expose
+the evidence they need (an EOF and a stalled response reach the classifier with no readable
+kind), so they arrive as `unknown` today. Their names and their meaning are already fixed —
+a value never changes meaning — but they are not expected in a trace until the transport
+surfaces the evidence behind them.
+
+**The field is the contract; the message is prose.** Every classified failure also names its
+cause in the message, in Spanish, before the transport's own words. A consumer must still read
+the `cause` field: the message is written for a human and its wording may change, while the
+wire value will not.
+
+**The field is omitted when the failure carries no classified cause.** That absence means "this
+failure was not classified" — it does NOT mean "this was not a network failure": a transport
+failure whose evidence the wiring cannot read is reported without the field. `unknown` is the
+classified version of that same fact, and it is the value to look for when a network failure
+carries no better answer.
+
+**`unknown` is the honest answer, and it is not a shrug.** It covers two cases: a chain the
+classifier could not read by type, and a **name resolution that was still in flight when the
+request failed but could not be attributed to that request** — typically because another
+request for the same host was running at the same time. The rule is deliberately conservative:
+a failure is only called `dns_resolution` when the evidence points at THAT request's own
+resolution. With one request in flight per host the attribution is reliable; with several, it
+is not, and the value is `unknown` rather than a wrong cause.
+
+```bash
+# the failures by cause
+jq -r 'select(.fields.cause) | .fields.cause' trace.jsonl | sort | uniq -c | sort -rn
+
+# every failure with its cause, in order
+jq -c 'select(.fields.cause) | {url: .fields.url, cause: .fields.cause, error: .fields.error}' trace.jsonl
+```
+
 ### Slowest spans (where the time goes)
 
 ```bash

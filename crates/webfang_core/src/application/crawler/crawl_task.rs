@@ -24,7 +24,9 @@ use crate::domain::downloader_port::Cookie;
 use crate::domain::session_port::SessionId;
 use crate::domain::url_validation::is_internal_link;
 use crate::domain::{CorrelationId, CrawlError, CrawlErrorCategory, DiscoveredUrl};
-use crate::infrastructure::observability::{log_classified_error, log_scrape_error};
+use crate::infrastructure::observability::{
+    log_classified_error, log_scrape_error, log_scrape_error_with_cause,
+};
 
 /// Handle result from a completed crawl task
 pub(crate) fn handle_crawl_result(
@@ -274,7 +276,7 @@ async fn fetch_page(
                     "WAF challenge detected",
                 );
             } else {
-                log_scrape_error(
+                log_scrape_error_with_cause(
                     &e,
                     url_str,
                     "fetch",
@@ -434,7 +436,7 @@ async fn extract_and_queue_links(
             }
         },
         Err(e) => {
-            log_scrape_error(
+            log_scrape_error_with_cause(
                 &e,
                 url_str,
                 "extract_links",
@@ -566,10 +568,7 @@ mod tests {
                         kind: crate::domain::error::WafDetectionKind::BodySignature,
                         url: String::new(),
                     }),
-                    FetchBehavior::NetworkError(msg) => Err(CrawlError::Network {
-                        message: msg.clone(),
-                        status_code: None,
-                    }),
+                    FetchBehavior::NetworkError(msg) => Err(CrawlError::network(msg.clone(), None)),
                 }
             })
         }

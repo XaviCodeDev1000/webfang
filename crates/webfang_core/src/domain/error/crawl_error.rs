@@ -12,6 +12,8 @@
 
 use thiserror::Error;
 
+mod conversions;
+
 /// WAF detection classification for observability and retry decisions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WafDetectionKind {
@@ -66,6 +68,8 @@ pub enum CrawlError {
         message: String,
         /// HTTP status code if the server responded; `None` for connection failures.
         status_code: Option<u16>,
+        /// The original transport error (#2784): without it the cause dies.
+        source: Option<crate::domain::error::cause::ErrorSource>,
     },
 
     /// HTTP error with structured status code and URL
@@ -193,8 +197,15 @@ pub enum CrawlError {
     Timeout,
 
     /// Connection error
-    #[error("connection error: {0}")]
-    Connection(String),
+    ///
+    /// The cause travels as the `source` (#2784).
+    #[error("connection error: {message}")]
+    Connection {
+        /// Human-readable message (unchanged from the former tuple payload).
+        message: String,
+        /// The original transport error, when one is available.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
 
     /// Request construction or body-read failure (non-transient)
     ///
@@ -254,6 +265,16 @@ pub enum CrawlError {
 }
 
 impl CrawlError {
+    /// A transport `Network` failure with no classified cause (#2784).
+    #[must_use]
+    pub fn network(message: impl Into<String>, status_code: Option<u16>) -> Self {
+        Self::Network {
+            message: message.into(),
+            status_code,
+            source: None,
+        }
+    }
+
     /// Classify this error per the Error Classification Matrix.
     ///
     /// Contract: `docs/error-classification-matrix.md` (closed, ID
@@ -346,7 +367,7 @@ impl CrawlError {
             // Row 4.
             Self::Timeout => ErrorClass::TransientBackoff,
             // Row 1.
-            Self::Connection(_) => ErrorClass::TransientRetriable,
+            Self::Connection { .. } => ErrorClass::TransientRetriable,
             // Variant contract (variant doc): non-transient request
             // construction/body-read failure maps to InternalFatal upstream.
             Self::RequestFailed(_) => ErrorClass::InternalFatal,
@@ -374,41 +395,6 @@ impl CrawlError {
     }
 }
 
-impl From<crate::domain::http_error::HttpError> for CrawlError {
-    fn from(e: crate::domain::http_error::HttpError) -> Self {
-        use crate::domain::http_error::HttpError;
-        match e {
-            HttpError::Forbidden => CrawlError::Http {
-                status: 403,
-                url: String::new(),
-            },
-            HttpError::RateLimited(retry_after) => CrawlError::RateLimited(retry_after),
-            HttpError::ClientError(code) => CrawlError::Http {
-                status: code,
-                url: String::new(),
-            },
-            HttpError::ServerError(code) => CrawlError::Http {
-                status: code,
-                url: String::new(),
-            },
-            HttpError::Timeout => CrawlError::Timeout,
-            HttpError::Connection(msg) => CrawlError::Connection(msg),
-            HttpError::Request(msg) => CrawlError::RequestFailed(msg),
-            HttpError::WafChallenge(provider) => CrawlError::WafChallenge {
-                provider,
-                kind: WafDetectionKind::BodySignature,
-                url: String::new(),
-            },
-            HttpError::DomainBanned(domain) => {
-                CrawlError::SessionPool(format!("domain banned: {domain}"))
-            },
-            HttpError::BodyTooLarge { limit } => CrawlError::RequestFailed(format!(
-                "response body exceeded the limit of {limit} bytes"
-            )),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,20 +417,14 @@ mod tests {
 
     #[test]
     fn test_crawl_error_network_no_reqwest() {
-        let error = CrawlError::Network {
-            message: "timeout".to_string(),
-            status_code: Some(408),
-        };
+        let error = CrawlError::network("timeout", Some(408));
         assert!(error.to_string().contains("timeout"));
         assert!(error.to_string().contains("408"));
     }
 
     #[test]
     fn test_crawl_error_network_no_status() {
-        let error = CrawlError::Network {
-            message: "connection refused".to_string(),
-            status_code: None,
-        };
+        let error = CrawlError::network("connection refused", None);
         assert!(error.to_string().contains("connection refused"));
         assert!(error.to_string().contains("None"));
     }
@@ -590,7 +570,10 @@ mod tests {
 
     #[test]
     fn test_crawl_error_connection() {
-        let error = CrawlError::Connection("refused".to_string());
+        let error = CrawlError::Connection {
+            message: "refused".to_string(),
+            source: None,
+        };
         assert!(error.to_string().contains("connection error"));
         assert!(error.to_string().contains("refused"));
     }
@@ -704,10 +687,7 @@ mod tests {
             // Matrix rows 1/8: connection-reset-style and indeterminate
             // network errors are overwhelmingly transient.
             assert_class(
-                CrawlError::Network {
-                    message: "connection reset".to_string(),
-                    status_code: None,
-                },
+                CrawlError::network("connection reset", None),
                 ErrorClass::TransientRetriable,
             );
         }
@@ -776,7 +756,10 @@ mod tests {
         fn connection_is_transient_retriable() {
             // Matrix row 1.
             assert_class(
-                CrawlError::Connection("refused".to_string()),
+                CrawlError::Connection {
+                    message: "refused".to_string(),
+                    source: None,
+                },
                 ErrorClass::TransientRetriable,
             );
         }

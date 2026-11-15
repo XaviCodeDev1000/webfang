@@ -5,6 +5,7 @@
 use super::factory::build_wreq_client;
 use super::retry::{compute_backoff_delay, retry_with_backoff, RetryPolicy};
 use crate::domain::body_cap;
+use crate::domain::error::mapping::{http_failure, url_host_of};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
 use crate::domain::session_port::{SessionId, SessionPort};
@@ -199,7 +200,7 @@ impl HttpClient {
                     HttpError::WafChallenge(_) | HttpError::Forbidden => 403,
                     HttpError::RateLimited(_) => 429,
                     HttpError::Timeout => 504,
-                    HttpError::Connection(_) => 503,
+                    HttpError::Connection { .. } => 503,
                     HttpError::ClientError(404) => return, // don't report 404
                     HttpError::ClientError(code) => *code,
                     HttpError::ServerError(code) => *code,
@@ -281,11 +282,13 @@ impl HttpClient {
         let mut attempt = 0;
         loop {
             let request = self.build_request(url, ua, ua_index);
+            let request_started = std::time::Instant::now();
+            let url_host = url_host_of(url);
             match request.send().await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
                     if !e.is_timeout() {
-                        return Err(map_send_error(e));
+                        return Err(http_failure(e, url_host.as_deref(), request_started));
                     }
                     if attempt >= self.config.max_retries {
                         return Err(HttpError::Timeout);
@@ -459,17 +462,6 @@ impl HttpClient {
     }
 }
 
-/// Map a transport error to the corresponding [`HttpError`].
-fn map_send_error(e: wreq::Error) -> HttpError {
-    if e.is_timeout() {
-        HttpError::Timeout
-    } else if e.is_connect() {
-        HttpError::Connection(e.to_string())
-    } else {
-        HttpError::Request(e.to_string())
-    }
-}
-
 /// Return a WAF-challenge error when the body is classified as blocked.
 fn waf_block_error(
     url: &str,
@@ -562,11 +554,17 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
         Box::pin(async move {
             // Use the inner wreq client for the raw request, then build
             // a full HttpResponse (status + body + headers).
+            let request_started = std::time::Instant::now();
             let resp = self.client.get(url.as_str()).send().await.map_err(|e| {
                 if e.is_timeout() {
                     crate::domain::http_error::HttpError::Timeout
                 } else if e.is_connect() {
-                    crate::domain::http_error::HttpError::Connection(e.to_string())
+                    crate::domain::error::mapping::http_connection_failure(
+                        e,
+                        crate::domain::error::cause::FetchPhase::Connect,
+                        url_host_of(&url).as_deref(),
+                        request_started,
+                    )
                 } else {
                     crate::domain::http_error::HttpError::Request(e.to_string())
                 }

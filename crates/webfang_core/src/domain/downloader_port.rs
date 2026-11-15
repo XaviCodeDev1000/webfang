@@ -67,14 +67,35 @@ pub enum DownloadError {
     Network(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// DNS resolution failure (NXDOMAIN).
-    #[error("DNS error: {0}")]
-    Dns(String),
+    ///
+    /// The message names the classified cause in Spanish and the transport
+    /// detail behind it; the original error travels as the `source`, so the
+    /// cause is in the chain and not only in the text (#2784).
+    #[error("DNS error: {message}")]
+    Dns {
+        /// Human-readable description: the classified cause, then the detail.
+        message: String,
+        /// The original transport error: the classified cause rides in its chain.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
 
     /// TLS/SSL failure (expired cert, self-signed).
-    #[error("TLS error: {0}")]
-    Tls(String),
+    ///
+    /// Same contract as [`DownloadError::Dns`]: the message names the cause
+    /// and the original error travels as the `source` (#2784).
+    #[error("TLS error: {message}")]
+    Tls {
+        /// Human-readable description: the classified cause, then the detail.
+        message: String,
+        /// The original transport error: the classified cause rides in its chain.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
 
     /// I/O error with preserved `std::io::ErrorKind`.
+    ///
+    /// The kind is the retry rule's input and it survives the classified
+    /// carrier: the carrier travels in the error's payload, where an
+    /// `io::Error` keeps it without touching the kind (#2784).
     #[error("I/O error: {0}")]
     Io(#[source] std::io::Error),
 
@@ -96,8 +117,17 @@ pub enum DownloadError {
     InvalidUrl(String),
 
     /// Request timed out.
-    #[error("request timed out after {0}s")]
-    Timeout(u64),
+    ///
+    /// The text stays the one the tool has always printed; the classified
+    /// cause (a connect deadline or a read deadline) travels as the `source`,
+    /// so the trace tells the two apart (#2784).
+    #[error("request timed out after {secs}s")]
+    Timeout {
+        /// The deadline that elapsed, in seconds.
+        secs: u64,
+        /// The original transport error: the classified cause rides in its chain.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
 
     /// Internal error (should not happen in normal operation).
     #[error("internal error: {0}")]
@@ -127,6 +157,12 @@ pub enum DownloadError {
     },
 }
 
+/// Best-effort clone.
+///
+/// A boxed cause cannot be cloned, so the copy keeps the **variant**, the
+/// message and the class, and drops the classified cause (#2784). The class
+/// is what the retry rule reads — never the cause — so a copy never changes
+/// the retry behaviour; it only loses the cause's presence in the chain.
 impl Clone for DownloadError {
     fn clone(&self) -> Self {
         match self {
@@ -137,11 +173,20 @@ impl Clone for DownloadError {
                         io_err.to_string(),
                     )))
                 } else {
-                    DownloadError::Internal(e.to_string())
+                    // The classified carrier cannot be cloned: keep the
+                    // variant (the class does not move) and the rendered
+                    // message, drop the cause from the chain.
+                    DownloadError::Network(Box::new(std::io::Error::other(e.to_string())))
                 }
             },
-            DownloadError::Dns(s) => DownloadError::Dns(s.clone()),
-            DownloadError::Tls(s) => DownloadError::Tls(s.clone()),
+            DownloadError::Dns { message, .. } => DownloadError::Dns {
+                message: message.clone(),
+                source: None,
+            },
+            DownloadError::Tls { message, .. } => DownloadError::Tls {
+                message: message.clone(),
+                source: None,
+            },
             DownloadError::Io(e) => DownloadError::Io(std::io::Error::new(e.kind(), e.to_string())),
             DownloadError::Http { status, message } => DownloadError::Http {
                 status: *status,
@@ -150,7 +195,10 @@ impl Clone for DownloadError {
             DownloadError::WafChallenge(s) => DownloadError::WafChallenge(s.clone()),
             DownloadError::SpaDetected(s) => DownloadError::SpaDetected(s.clone()),
             DownloadError::InvalidUrl(s) => DownloadError::InvalidUrl(s.clone()),
-            DownloadError::Timeout(s) => DownloadError::Timeout(*s),
+            DownloadError::Timeout { secs, .. } => DownloadError::Timeout {
+                secs: *secs,
+                source: None,
+            },
             DownloadError::Internal(s) => DownloadError::Internal(s.clone()),
             DownloadError::ResourceExhausted(s) => DownloadError::ResourceExhausted(s.clone()),
             DownloadError::FeatureGated(s) => DownloadError::FeatureGated(s.clone()),
@@ -161,6 +209,30 @@ impl Clone for DownloadError {
 }
 
 impl DownloadError {
+    /// A DNS resolution failure with no transport error behind it.
+    #[must_use]
+    pub fn dns(message: impl Into<String>) -> Self {
+        Self::Dns {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// A TLS failure with no transport error behind it.
+    #[must_use]
+    pub fn tls(message: impl Into<String>) -> Self {
+        Self::Tls {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// A timeout with no transport error behind it.
+    #[must_use]
+    pub fn timeout(secs: u64) -> Self {
+        Self::Timeout { secs, source: None }
+    }
+
     /// Classify this download error by operational severity.
     #[must_use]
     pub fn classify(&self) -> crate::domain::error::ErrorClass {
@@ -169,8 +241,8 @@ impl DownloadError {
         match self {
             Self::Io(e) if is_transient_io(e) => ErrorClass::TransientRetriable,
             Self::Io(_) => ErrorClass::InternalFatal,
-            Self::Dns(_) | Self::Tls(_) => ErrorClass::PermanentFatal,
-            Self::Timeout(_) => ErrorClass::TransientBackoff,
+            Self::Dns { .. } | Self::Tls { .. } => ErrorClass::PermanentFatal,
+            Self::Timeout { .. } => ErrorClass::TransientBackoff,
             Self::Http { status, .. } if (500..=599).contains(status) => {
                 ErrorClass::TransientRetriable
             },
@@ -236,10 +308,43 @@ mod tests {
     #[test]
     fn test_download_error_classify() {
         use crate::domain::error::ErrorClass;
-        let dns = DownloadError::Dns("NXDOMAIN".into());
+        let dns = DownloadError::dns("NXDOMAIN");
         assert_eq!(dns.classify(), ErrorClass::PermanentFatal);
-        let timeout = DownloadError::Timeout(5);
+        let timeout = DownloadError::timeout(5);
         assert_eq!(timeout.classify(), ErrorClass::TransientBackoff);
+    }
+
+    /// #2784: a copy keeps the class and the message, and loses only the cause.
+    ///
+    /// The class is what the retry rule reads — never the cause — so a copy
+    /// must never move it. The cause cannot be cloned (it is a boxed error),
+    /// and losing it is the documented price of the copy.
+    #[test]
+    fn a_clone_keeps_the_class_and_drops_only_the_cause() {
+        use crate::domain::error::cause::{cause_in_chain, ClassifiedNetworkError, NetworkCause};
+        use crate::domain::error::ErrorClass;
+
+        let carrier = ClassifiedNetworkError::new(
+            NetworkCause::ConnectRefused,
+            Box::new(std::io::Error::other("connection refused")),
+        );
+        let original = DownloadError::Network(Box::new(carrier));
+        assert_eq!(original.classify(), ErrorClass::InternalFatal);
+
+        let copy = original.clone();
+        assert_eq!(
+            copy.classify(),
+            ErrorClass::InternalFatal,
+            "the class must not move: the retry rule reads it"
+        );
+        assert!(
+            copy.to_string().contains("el servidor rechazó la conexión"),
+            "the message must survive the copy: {copy}"
+        );
+        assert!(
+            cause_in_chain(&copy).is_none(),
+            "the cause cannot be cloned: the copy carries none"
+        );
     }
 
     #[test]

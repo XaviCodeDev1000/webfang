@@ -204,7 +204,10 @@ fn test_crawl_timeout_classifies_as_transient_retriable() {
 
 #[test]
 fn test_crawl_connection_classifies_as_transient_retriable() {
-    let crawl_err = crate::domain::error::CrawlError::Connection("refused".into());
+    let crawl_err = crate::domain::error::CrawlError::Connection {
+        message: "refused".into(),
+        source: None,
+    };
     let scraper_err: ScraperError = crawl_err.into();
     assert_eq!(
         scraper_err.classify(),
@@ -256,7 +259,10 @@ fn test_timeout_maps_to_transient_io_source() {
 #[test]
 fn test_connection_preserves_message_and_transient() {
     // EC-CONNECTION: original message preserved, classifies TransientRetriable.
-    let crawl_err = crate::domain::error::CrawlError::Connection("peer reset".into());
+    let crawl_err = crate::domain::error::CrawlError::Connection {
+        message: "peer reset".into(),
+        source: None,
+    };
     let scraper_err: ScraperError = crawl_err.into();
     assert_eq!(scraper_err.classify(), ErrorClass::TransientRetriable);
     match &scraper_err {
