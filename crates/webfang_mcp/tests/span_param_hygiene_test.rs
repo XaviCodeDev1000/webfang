@@ -38,17 +38,16 @@
 //!   `handlers/content.rs` and `handlers/security.rs` (`*_span_records_*`)
 //!   cover the three handlers whose params carry raw content.
 
-use std::path::PathBuf;
+#[path = "common/mod.rs"]
+mod common;
+use std::path::{Path, PathBuf};
 
 /// Repository-relative location of the handler modules.
 const HANDLERS_DIR: &str = "src/mcp_server/handlers";
 
 /// Read one handler module from this crate's source tree.
-fn handler_source(file_name: &str) -> String {
-    let path: PathBuf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(HANDLERS_DIR)
-        .join(file_name);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+fn handler_source(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
 /// The `#[instrument(...)]` attribute bodies in `source`, in order.
@@ -85,19 +84,18 @@ fn issue_1615_no_handler_span_records_its_params() {
     let mut recorded = 0_usize;
     let mut violations: Vec<String> = Vec::new();
 
-    for entry in std::fs::read_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(HANDLERS_DIR))
-        .expect("handlers dir is readable")
-    {
-        let path = entry.expect("dir entry is readable").path();
+    let mut files = common::walk_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(HANDLERS_DIR));
+    files.sort();
+    for path in files {
         if path.extension().and_then(std::ffi::OsStr::to_str) != Some("rs") {
             continue;
         }
         let file_name = path
-            .file_name()
-            .and_then(std::ffi::OsStr::to_str)
-            .expect("utf-8 file name")
+            .strip_prefix(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(HANDLERS_DIR))
+            .unwrap_or(&path)
+            .display()
             .to_string();
-        let source = handler_source(&file_name);
+        let source = handler_source(&path);
 
         for (idx, attr) in instrument_attributes(&source) {
             let line = source[..idx].lines().count();
@@ -165,7 +163,11 @@ fn issue_1615_the_guard_actually_sees_the_attributes_it_claims_to() {
     // green forever. Pin the count so a refactor that moves the handlers
     // elsewhere fails HERE, with a message naming the move, instead of
     // failing vacuously in the test above.
-    let source = handler_source("content.rs");
+    let source = handler_source(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(HANDLERS_DIR)
+            .join("content.rs"),
+    );
     let attrs = instrument_attributes(&source);
     assert!(
         attrs.len() >= 7,
