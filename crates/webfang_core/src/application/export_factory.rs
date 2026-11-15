@@ -34,8 +34,9 @@ use crate::domain::{
     exporter::{ExporterError, CHECKSUM_FIELD},
     Exporter, ExporterConfig,
 };
-
+/// Per-run commit session and record-lifecycle re-drive helpers (D3 protocol).
 mod commit_session;
+mod record_redrive;
 pub use commit_session::ResumeContext;
 pub(crate) use commit_session::{CommitSession, ItemDecision};
 
