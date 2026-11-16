@@ -91,11 +91,9 @@ What the compiler **cannot** catch; the rest comes from the harness or the table
   lines, labels), link the source.
 - **Do not touch `CHANGELOG.md`** in a work PR — there is a single writer (the Release PR).
 - **Do not touch `docs/`** unless explicitly asked.
-- **`docs/` holds living decisions; `evidence/` holds frozen run-records.** Mission
-  evidence (audits, measurements, PRDs anchored to a SHA) lives in `evidence/<mission>/` —
-  annotate, never rewrite. Artifacts a gate reads (`baseline.json`, sentinel markers) stay
-  next to that evidence; `docs/adr/` is the home for living ADRs referencing a frozen
-  bundle; raw scraping-download audits live outside the repo (`/webfang-audit/`).
+- **`docs/` holds living decisions; `evidence/<mission>/` holds frozen mission records** —
+  annotate, never rewrite. Gate-read artifacts (`baseline.json`, markers) stay next to their
+  evidence; download audits live outside the repo (`/webfang-audit/`); ADRs: `docs/adr/`.
 
 ### The local gate mirrors `gate.needs`
 
@@ -406,12 +404,8 @@ tests in green — uncommitted work can be lost silently. The full pattern: the
 From the **main** repo, after verifying `state: MERGED`: sync main **ff-only** (failure = main
 diverged — **STOP**), remove the mission's worktree, delete its local branch with `-D` (squash
 rewrites history; never touch `main`, `gh-pages`, `backup/*` or the current branch), `git
-worktree prune`, then delete the mission's target dir **by ownership** (the exact name you
-exported — never enumerate the parent), re-checked with a moving window (file count stable
-across 60 s + zero live `cargo`/`rustc`/`cargo-nextest`) and removed as a **standalone** command
-with the literal absolute path — never `$HOME`/`~`, never chained (`rm -rf ~` is hard-deny and
-blocks the chain). Verify the handoff: no leftovers **of the mission you merged**. The 7-step
-runbook: **obs #2307**.
+worktree prune`, delete the mission's target dir **by ownership** — never enumerate, never
+chained — and verify no leftovers **of the mission you merged**. 7 steps: **obs #2307**.
 
 ### Shared vs per-worktree resources
 
@@ -431,8 +425,7 @@ denylist, is what stops invention. Detail: **obs #2307**.
 
 If you operated outside your worktree, or a `git stash pop` applied unexpected changes:
 **STOP** immediately; do **NOT** clean up (no `git reset`, force-push or manual patching); report
-exactly *"Contamination detected. Worktree: `<path>`. Intruder commit: `<hash>` or unexpected
-stash applied. Awaiting human instructions."*; wait for explicit human authorization.
+the exact sentence from **obs #2307** and wait for explicit human authorization.
 
 ### Pushed history is immutable
 
