@@ -37,6 +37,7 @@
 //! constant, not an aliasing invariant.
 
 use super::*;
+use crate::domain::waf::InspectionContext;
 
 #[test]
 #[cfg_attr(miri, ignore)] // >100KB entropy body; the transport group's dominant cost under Miri
