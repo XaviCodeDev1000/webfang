@@ -219,6 +219,11 @@ jobs:
   repo-guards:
     name: Repo guards
     runs-on: ubuntu-latest
+    # fetch-depth: 0 en el checkout de abajo: `check_migration_evidence.sh`
+    # verifica que el SHA de F0 siga siendo ancestro de HEAD. Con el depth-1
+    # por defecto ese objeto no existe en un PR y el gate fallaría por el
+    # checkout, no por una deriva real. Es el mismo patrón que `change-scope`
+    # y `pr-validation.yml` ya usan para los guards que leen historia/tags.
     # 20 min: warm runs finish in ~4 min, but a PR with a stale rust-cache
     # builds the intra-crate lint tool cold and measured 10.2 min when the
     # 10-minute wall killed it (PR #2260 run 39904199331, 2026-10-23). Per
@@ -230,6 +235,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          fetch-depth: 0
           persist-credentials: false
       # The intra-crate lint tool (tools/intra-crate-lint) is a STANDALONE
       # cargo project — excluded from the workspace, so it never touches the
@@ -1116,6 +1122,16 @@ jobs:
       # defect one level up. Offline, pure bash, never touches this tree.
       - name: Guard coverage meta-guard semantics harness
         run: bash scripts/tests/test_guard_coverage.sh
+      # PRD-MIG-2026-01 F0: the migration document may not describe a tree that
+      # no longer exists. This gate re-derives the versioning/backport/Miri/
+      # edition DECISIONS from the live policy files and fails on drift while
+      # evidence/mig-2026-01/TRAIN_OPEN is present. It does NOT gate counters
+      # (a gate that reddens on every new test gets disabled). Wired in the same
+      # PR as its negation harness, as #2056 requires.
+      - name: Migration evidence baseline
+        run: bash scripts/check_migration_evidence.sh
+      - name: Migration evidence semantics harness
+        run: bash scripts/test_migration_evidence.sh
       # Semantic harnesses for two policy guards. `check-topology.sh` decides
       # the branch topology of every PR (an enforcing required check), and
       # `check_intra_crate_direction.sh` decides the intra-crate layering:
