@@ -32,10 +32,12 @@ puede citar no se puede auditar.
 | `ADR-0016` | [0016-interruption-resume-lifecycle.md](0016-interruption-resume-lifecycle.md) | Ciclo interrupción/resume: dueño único, precedencia fijada, residual F-R3-7 | Accepted |
 | `ADR-0016-POST-LOAD-WAIT` | [0016-post-load-wait-policy.md](0016-post-load-wait-policy.md) | Política de espera post-load: network-idle por defecto (F-52-b) | Accepted — shipped |
 | `ADR-0017` | [0017-crawlsession-run-owner.md](0017-crawlsession-run-owner.md) | `CrawlSession`: un dueño único por corrida | Accepted |
-| `ADR-0018` | [0018-egress-strategy-without-third-party-proxies.md](0018-egress-strategy-without-third-party-proxies.md) | Estrategia de egress sin proxies de terceros | Proposed — draft |
+| `ADR-0018` | [0018-egress-strategy-without-third-party-proxies.md](0018-egress-strategy-without-third-party-proxies.md) | Estrategia de egress sin proxies de terceros | Proposed — draft; acotada para egress AI por `ADR-0021` |
 | `ADR-0019` | [0019-boundedness-lives-in-the-capture-sink.md](0019-boundedness-lives-in-the-capture-sink.md) | La acotación vive en el capture sink; el bloqueo está fuera de alcance | Accepted |
+| `ADR-0020` | [0020-shared-llm-transport-primitives.md](0020-shared-llm-transport-primitives.md) | Primitivas de transporte compartidas con políticas por port para clientes OpenAI-compatibles | Accepted |
+| `ADR-0021` | [0021-explicit-ai-egress-proxy.md](0021-explicit-ai-egress-proxy.md) | Proxy explícito por provider para egreso AI con políticas SSRF separadas por tipo y sin lectura del entorno | Proposed — draft (decisión de `#2551`) |
 
-**Total: 17 archivos, 16 decisiones + 1 runbook.**
+**Total: 19 archivos, 18 decisiones + 1 runbook.**
 
 ## Huecos de numeración
 
