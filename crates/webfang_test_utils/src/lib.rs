@@ -150,6 +150,9 @@
 //! Keep the idempotent init at its original call site as well — after priming
 //! it is a no-op, and it still covers harnesses that run without a guard.
 
+/// OS-dependent connection-failure collapse used by the shared redactor.
+mod redaction_network;
+
 use regex::Regex;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -660,33 +663,10 @@ pub fn redact_nondeterministic(dir: &Path, text: &str) -> String {
     // so moving a function between files does not break snapshots (#462).
     let file_path = Regex::new(r"(at\s+)\S+\.rs").expect("valid file path regex");
     let text = file_path.replace_all(&text, "$1<FILE>.rs").into_owned();
-    // INT-1 (#1631): collapse the OS-dependent connection-failure surface to
-    // ONE token. Unix reports `I/O error: Connection refused (os error 111)`,
-    // Windows reports our own `request timed out after 2s` (a refused
-    // connection never happens there — it degrades to the request timeout), and
-    // a Windows WSA refusal reads `No connection could be made ... (os error
-    // 10061)`. Redaction cannot bridge a different error, so the timeout tail
-    // collapses to the same token.
-    //
-    // The `I/O error: ` layer is part of the SAME collapse and must be
-    // consumed with it: it is our `DownloadError::Io` wrapper, present only
-    // when the inner error is an `io::Error`. On Unix the io::Error is what
-    // carries the connection failure; on the timeout path the error is
-    // `DownloadError::Timeout`, which has no such wrapper. Collapsing only the
-    // tail would still leave `error de red: I/O error: <NET_ERR>` on Linux
-    // against `error de red: <NET_ERR>` on Windows — same failure, different
-    // snapshot. Verified against the Windows lane log, not inferred.
-    //
-    // The token therefore records THAT a network failure happened, not WHICH
-    // one: an intentional loss, because the affected test asserts a failure is
-    // mentioned rather than its kind (the same tradeoff #1645 accepted for the
-    // panic payload). Pinned below against the byte-exact strings both
-    // platforms produce.
-    let net_err = Regex::new(
-        r"(?i)(?:I/O error:\s*)?(?:(?:connection refused|connection timed out|no connection could be made[^()\n]*|an attempt to connect[^()\n]*)\s*(?:\(\s*os error\s*\d+\s*\))?|request timed out after \d+\s*s)",
-    )
-    .expect("valid network error regex");
-    net_err.replace_all(&text, "<NET_ERR>").into_owned()
+    // #1631 + #2836: one canonical token for the OS-dependent connection
+    // surface and the classified cause. Rules and rationale live with the
+    // collapse, not here: this file is grandfathered by the size ratchet.
+    redaction_network::collapse_connection_surface(text)
 }
 
 /// Resolve the workspace root by climbing from a crate manifest directory.

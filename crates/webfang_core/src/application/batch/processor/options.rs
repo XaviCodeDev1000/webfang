@@ -1,11 +1,11 @@
-//! Per-URL seam of the batch processor (#2827): the config, rate-limiter and
-//! engine-options builders plus the single-URL runner moved verbatim out of
-//! [`super::processor`] so `processor.rs` stays under its size baseline.
+//! Per-URL configuration and execution for the batch processor.
 //!
-//! One batch run builds the run-wide [`EngineOptions`] and the run-scoped rate
-//! limiter once ([`build_batch_engine_options`], [`build_batch_rate_limiter`]),
-//! then dispatches one [`process_single_url`] task per URL, each rebuilding a
-//! seed-only [`CrawlerConfig`] through [`build_per_url_config`].
+//! Builds the seed-only [`CrawlerConfig`], the run-scoped rate limiter and the
+//! shared [`EngineOptions`], then runs one URL through the explicit engine
+//! entry.
+//!
+//! Extracted from `processor.rs` to keep that grandfathered file from growing:
+//! a pure move, no behaviour change.
 
 use std::sync::Arc;
 
@@ -16,6 +16,8 @@ use crate::application::crawler::engine::EngineOptions;
 use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
 use crate::domain::budget::detector::SystemDetector;
 use crate::domain::budget::BudgetModel;
+use crate::domain::downloader_factory::DownloaderFactory;
+use crate::domain::error::cause::{ClassifiedNetworkError, NetworkCause};
 use crate::domain::{CorrelationId, CrawlError, CrawlErrorCategory, CrawlerConfig, JsStrategy};
 use crate::ValidUrl;
 
@@ -29,7 +31,7 @@ use crate::ValidUrl;
 /// `url_depth >= max_depth`); `max_pages 1` is the backstop so the seed
 /// itself can never be budget-starved. Every other knob (patterns, robots,
 /// TLS profile, timeouts, delay, budget overrides) still rides along.
-pub(super) fn build_per_url_config(
+pub(crate) fn build_per_url_config(
     url: &str,
     base_config: &CrawlerConfig,
 ) -> Result<CrawlerConfig, CrawlError> {
@@ -81,7 +83,7 @@ pub(super) fn build_per_url_config(
 /// scrape-path precedent. It is unreachable in practice:
 /// `SharedRateLimiter::new` rejects only a zero period (clamped to 1 ms)
 /// or a zero burst (the budget tier is non-zero by construction).
-pub(super) fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<SharedRateLimiter> {
+pub(crate) fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<SharedRateLimiter> {
     // A zero delay means "no pacing" — but only when the operator asked for
     // no pacing. A jitter on its own IS a pacing request, so the run-scoped
     // limiter is built even with a zero base delay (#2610): the gate then
@@ -127,7 +129,7 @@ pub(super) fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<Sh
 ///   every per-URL config — so the run-wide option mirrors it. Identical to
 ///   what `crawl_site_inner` derived per call before.
 /// - `content_sink`: the shared sink attached via
-///   [`super::processor::BatchProcessor::with_content_sink`] (#631); `None` keeps the batch
+///   [`BatchProcessor::with_content_sink`] (#631); `None` keeps the batch
 ///   metadata-only (bodies discarded — the historical zero-files gotcha).
 /// - `checkpoint_path` / `session_pool_enabled` / `js_strategy` /
 ///   `downloader_factory`: the batch has no operator source for these, so
@@ -144,16 +146,18 @@ pub(super) fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<Sh
 /// `process_batch_cancellable`. The split keeps this constructor a pure
 /// DTO build (its seam test pins every knob source) while the limiter
 /// documents its own budget-derived source separately.
-pub(super) fn build_batch_engine_options(
+pub(crate) fn build_batch_engine_options(
     base_config: &CrawlerConfig,
     content_sink: Option<Arc<dyn CrawlContentSink>>,
+    downloader_factory: Option<Arc<dyn DownloaderFactory>>,
 ) -> EngineOptions {
     EngineOptions {
         checkpoint_path: None,
         session_pool_enabled: false,
         ignore_robots: base_config.ignore_robots,
         js_strategy: JsStrategy::Static,
-        downloader_factory: None,
+        // `None` in production: the batch keeps the static `fetch_url` path.
+        downloader_factory,
         content_sink,
         ..Default::default()
     }
@@ -170,7 +174,7 @@ pub(super) fn build_batch_engine_options(
 ///
 /// Returns `Err(CrawlError)` if the crawl result has any errors (e.g., timeouts),
 /// ensuring the batch processor correctly counts failed URLs.
-pub(super) async fn process_single_url(
+pub(crate) async fn process_single_url(
     url: &str,
     base_config: CrawlerConfig,
     options: EngineOptions,
@@ -220,6 +224,28 @@ pub(super) async fn process_single_url(
             )));
         }
 
+        // #2823: a resolution failure is OUR resolver, not the site refusing
+        // us. Surface it as its own typed failure so the batch can tell the two
+        // populations apart and stop dispatching, instead of running the whole
+        // list as if every URL were blocked. The cause rides in the source so
+        // the classification stays by TYPE (#2784), never by message text.
+        if result.resolution_failures > 0 {
+            return Err(CrawlError::Network {
+                message: format!(
+                    "{}: {} URL(s) failed to resolve",
+                    NetworkCause::DnsResolution.message(),
+                    result.resolution_failures
+                ),
+                status_code: None,
+                source: Some(Box::new(ClassifiedNetworkError::new(
+                    NetworkCause::DnsResolution,
+                    Box::new(std::io::Error::other(
+                        "the resolver did not answer".to_string(),
+                    )),
+                ))),
+            });
+        }
+
         // Purely transient/external: surface as a transient error → exit 69.
         // A timeout is the most common batch failure here.
         if breakdown
@@ -230,10 +256,9 @@ pub(super) async fn process_single_url(
         {
             return Err(CrawlError::Timeout);
         }
-        return Err(CrawlError::Connection {
-            message: format!("crawl completed with {} transient error(s)", result.errors),
-            source: None,
-        });
+        // #2824: the aggregate keeps the cause the run already classified,
+        // instead of rebuilding a `source: None` error that drops it.
+        return Err(super::aggregate::aggregate_transient_failure(&result));
     }
 
     Ok(result)

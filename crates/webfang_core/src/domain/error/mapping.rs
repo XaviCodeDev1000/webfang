@@ -6,7 +6,8 @@
 
 use crate::domain::downloader_port::DownloadError;
 use crate::domain::error::cause::{
-    cause_in_chain, classify, ClassifiedNetworkError, DnsResolutionError, FetchPhase, NetworkCause,
+    cause_in_chain, classify, CauseCarrier, ClassifiedNetworkError, DnsResolutionError, FetchPhase,
+    NetworkCause,
 };
 use crate::domain::error::resolution::refine_connect_cause;
 
@@ -66,6 +67,21 @@ pub fn download_failure(
     attach_cause(original, cause)
 }
 
+/// Whether a transport failure is a NAME RESOLUTION failure.
+///
+/// The cause travels in the error's chain (#2784), so this is the one
+/// predicate a retry policy reads to tell OUR broken resolver from a site
+/// refusing us: a `dns_resolution` never reached the peer, so the
+/// site-rejection ladder must not be spent on it (#2823).
+///
+/// A failure with NO classified cause is NOT a resolution failure: the
+/// predicate fails open towards the historical behavior, never the other way
+/// around — an unclassified error keeps the ladder it has today.
+#[must_use]
+pub fn is_resolution_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    cause_in_chain(error).is_some_and(NetworkCause::is_resolution)
+}
+
 /// Attach the classified cause to a transport failure, keeping every other
 /// variant untouched.
 ///
@@ -98,7 +114,7 @@ pub fn with_cause(
 /// | variant | where the cause travels |
 /// |---|---|
 /// | `Network` | the carrier IS the payload |
-/// | `Io` | the carrier is the I/O error's payload (the kind survives) |
+/// | `Io` | the carrier is the I/O error's payload, behind a `CauseCarrier` (the kind survives) |
 /// | `Dns` / `Tls` / `Timeout` | the carrier is the variant's `source` |
 #[must_use]
 pub fn attach_cause(error: DownloadError, cause: NetworkCause) -> DownloadError {
@@ -110,11 +126,14 @@ pub fn attach_cause(error: DownloadError, cause: NetworkCause) -> DownloadError 
         DownloadError::Io(io_err) => {
             // An `io::Error` does not expose its payload as a source, but it
             // keeps the KIND — the retry rule's input — and renders the
-            // payload, so the message names the cause (#2784).
+            // payload, so the message names the cause (#2784). The payload is
+            // a `CauseCarrier`, whose `source()` IS the classified error: the
+            // plain `source()` walk reaches the typed cause without knowing
+            // the `io::Error` quirk (#2824). The kind does not move.
             let kind = io_err.kind();
             DownloadError::Io(std::io::Error::new(
                 kind,
-                ClassifiedNetworkError::new(cause, Box::new(io_err)),
+                CauseCarrier::new(ClassifiedNetworkError::new(cause, Box::new(io_err))),
             ))
         },
         DownloadError::Dns { message, source } => {

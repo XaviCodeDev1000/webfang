@@ -4,7 +4,7 @@
 - **Date:** 2026-08-21
 - **Issue:** #813 (follow-up #789 / PR #806 `ca602a1`, #702, research `REPORT.md` §2 open question #2, `findings/F2.md` [9][12])
 - **Deciders:** Lead Rust Architect (bridge NotebookLM `Senior_Rust_Developer` 6b7f010b…)
-- **Scope:** Decisión documentada con tabla comparativa A/B/C; **fuera de scope** implementar el SLM si el benchmark lo recomienda (follow-up SDD propio).
+- **Scope:** Decisión documentada con tabla comparativa A/B/C; **fuera de scope** implementar el SLM si el benchmark lo recomienda (follow-up ODD propio).
 
 > **Nota (2026-10-20).** La **opción B** de este documento —SLM local sobre ONNX— ya no es
 > implementable. ADR-0004 paso 6 retiró la feature Cargo `ai`, el crate `webfang_ai` y toda la
@@ -135,7 +135,7 @@ Research reporta: SmolLM2-360M quantizado ~90MB extra, 70-85% JSON válido en sc
 
 ## 6. Fuera de scope de esta issue
 
-Implementar el SLM bundled si el benchmark lo recomienda (va en follow-up con SDD propia, incluyendo `cargo bloat` y `ort` session sharing `Arc<Mutex<Session>>` `#648`).
+Implementar el SLM bundled si el benchmark lo recomienda (va en follow-up con ODD propia, incluyendo `cargo bloat` y `ort` session sharing `Arc<Mutex<Session>>` `#648`).
 
 ## 7. Bitácora de auditoría (3 rondas con NotebookLM `Senior_Rust_Developer`)
 

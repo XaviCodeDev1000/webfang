@@ -112,6 +112,9 @@ fn test_batch_result_display() {
                 ))),
             ),
         ],
+        resolution_failures: 0,
+        block_failures: 0,
+        aborted_on_resolution: false,
     };
 
     assert_eq!(result.total, 10);
@@ -143,6 +146,9 @@ fn test_batch_result_all_succeeded() {
         succeeded: 3,
         failed: 0,
         errors: vec![],
+        resolution_failures: 0,
+        block_failures: 0,
+        aborted_on_resolution: false,
     };
     assert_eq!(result.total, result.succeeded);
     assert_eq!(result.failed, 0);
@@ -166,6 +172,9 @@ fn test_batch_result_all_failed() {
                 ScraperError::Internal("error b".to_string()),
             ),
         ],
+        resolution_failures: 0,
+        block_failures: 0,
+        aborted_on_resolution: false,
     };
     assert_eq!(result.succeeded, 0);
     assert_eq!(result.failed, result.total);
@@ -188,6 +197,9 @@ fn test_batch_result_counts_consistent() {
         succeeded: 5,
         failed: 5,
         errors,
+        resolution_failures: 0,
+        block_failures: 0,
+        aborted_on_resolution: false,
     };
     assert_eq!(result.succeeded + result.failed, result.total);
     assert_eq!(result.errors.len(), result.failed);

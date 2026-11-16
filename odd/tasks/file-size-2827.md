@@ -213,3 +213,19 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
   (240), processor_tests.rs (317), processor_run_tests.rs (375), crawl_task_errors.rs
   (65), crawl_task_fetch.rs (142), crawl_task_pipeline.rs (125),
   crawl_task_{support,fetch,pipeline,errors}_tests.rs (358/201/292/171).
+- **L13 — Resolución de conflictos al mergear `main` en la rama (PR #2856)**: `main`
+  ya había partido ambos archivos por su cuenta (#2835/#2838: `processor/options.rs`,
+  `processor/aggregate.rs`, `crawl_task/{errors,fetch,sessions}.rs`, contador de
+  resolución y causa de transporte conservada en el aggregate). Se conserva el código
+  funcional de `main` en los hubs y se adopta la extracción de tests de esta misión
+  (`#[path]`), de modo que `processor.rs` 407 y `crawl_task.rs` 315 siguen ≤500 y ambas
+  entradas salen del baseline. El bloque `BatchTally`/abort por resolver se extrajo a
+  `processor_tally.rs` (135) para sostener el ratchet. Se borraron los módulos planos que
+  `main` reemplaza (`processor_url.rs`, `crawl_task_errors.rs`, `crawl_task_fetch.rs`,
+  `crawl_task_pipeline.rs`); los 7 tests de `handle_crawl_result` se adaptaron a la firma
+  de 5 args (contador de resolución + causa). Golden refrescado en el mismo commit y el
+  symbol map del skill `webfang-fetch-path` apunta ahora a `processor/options.rs`.
+  Compuertas: check/clippy/fmt/doc limpios, nextest workspace 5588 PASS / 0 FAIL,
+  jscpd 8163 ≤ 8219, fast gate PASS=48 FAIL=0. El estado de L12 queda así actualizado:
+  los archivos con headroom para el paso 2 son `crawl_task/errors.rs::handle_task_error`
+  y `processor/options.rs::process_single_url`.

@@ -249,6 +249,12 @@ impl BatchManager {
                     summary.total_urls += r.total;
                     summary.succeeded += r.succeeded;
                     summary.failed += r.failed;
+                    // #2823: resolution and site refusals are two populations,
+                    // reported apart so a resolver outage cannot masquerade as
+                    // a site blocking the run.
+                    summary.resolution_failures += r.resolution_failures;
+                    summary.block_failures += r.block_failures;
+                    summary.aborted_on_resolution |= r.aborted_on_resolution;
                     summary.errors.extend(r.errors);
                 },
                 Err(e) => {
@@ -292,6 +298,13 @@ pub struct BatchManagerSummary {
     pub succeeded: usize,
     /// Number of failed URLs
     pub failed: usize,
+    /// Failed URLs attributed to NAME RESOLUTION — our resolver, not the site
+    /// refusing us (#2823).
+    pub resolution_failures: usize,
+    /// Failed URLs the site refused (everything else) (#2823).
+    pub block_failures: usize,
+    /// Whether any job stopped dispatching because the resolver was down.
+    pub aborted_on_resolution: bool,
     /// Errors from failed jobs, preserving the [`ScraperError`] variant so
     /// exit-code routing can aggregate severity via
     /// [`ScraperError::classify`] (#537).

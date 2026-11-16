@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [8.0.2] - 2026-11-16
+
+
+### 🔧 Fixed
+
+- Keep shutdown listener test clear of Miri sigaction ([#2845](https://github.com/XaviCodeDev1000/webfang/pull/2845)) ([#2852](https://github.com/XaviCodeDev1000/webfang/pull/2852))
+## [8.0.1] - 2026-11-16
+
+
+### 🏗️ Architecture Improvements
+
+- Split mcp_server/server.rs under the ~500-line rule; entry out of the baseline ([#2830](https://github.com/XaviCodeDev1000/webfang/pull/2830))
+- Unify the cause vocabulary with CrawlErrorCategory ([#2826](https://github.com/XaviCodeDev1000/webfang/pull/2826))
+- Split waf_engine.rs into 7 modules by seam ([#2831](https://github.com/XaviCodeDev1000/webfang/pull/2831))
+
+### 🔧 Fixed
+
+- Stop a broken resolver from stalling a run like a WAF ([#2823](https://github.com/XaviCodeDev1000/webfang/pull/2823)) ([#2835](https://github.com/XaviCodeDev1000/webfang/pull/2835))
+- Make connection-error snapshots platform-neutral ([#2843](https://github.com/XaviCodeDev1000/webfang/pull/2843))
 ## [8.0.0] - 2026-11-15
 
 

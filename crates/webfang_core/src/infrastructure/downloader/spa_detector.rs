@@ -100,8 +100,7 @@ const BOILERPLATE_TAGS: [&str; 4] = ["nav", "header", "footer", "aside"];
 /// [`BOILERPLATE_TAGS`] (#785): link text is navigation, not content. A plain
 /// listing page ("Item A Item B Item C …" all in `<a>` tags) thus escalates —
 /// conservative and acceptable (escalation only costs an extra render pass
-/// and still yields the content); see sdd/785-hybrid-shell-escalation for the
-/// tradeoff.
+/// and still yields the content); issue #785 records the tradeoff.
 const ANCHOR_TAG: &str = "a";
 
 // WAF challenge classification is delegated to the shared inspection verdict

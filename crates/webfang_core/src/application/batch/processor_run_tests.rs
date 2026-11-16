@@ -9,7 +9,7 @@ fn entry_off() -> webfang_test_utils::EnvGuard {
 use super::*;
 use crate::application::batch::BatchJob;
 use crate::domain::CrawlerConfig;
-use crate::{application::batch::processor_url::build_per_url_config, domain::JsStrategy};
+use crate::domain::JsStrategy;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use url::Url;
 
@@ -163,7 +163,7 @@ fn batch_engine_options_make_every_knob_source_explicit() {
     let base = CrawlerConfig::builder(Url::parse("https://example.com").unwrap())
         .ignore_robots(true)
         .build();
-    let options = build_batch_engine_options(&base, None);
+    let options = build_batch_engine_options(&base, None, None);
     assert!(
         options.ignore_robots,
         "the batch's robots source is the base config"
@@ -197,7 +197,7 @@ fn batch_engine_options_make_every_knob_source_explicit() {
     );
 
     let sink = Arc::new(crate::application::crawler::content_sink::InMemoryContentSink::new());
-    let options = build_batch_engine_options(&base, Some(sink));
+    let options = build_batch_engine_options(&base, Some(sink), None);
     assert!(
         options.content_sink.is_some(),
         "the processor's shared sink must ride on the options"
@@ -205,7 +205,7 @@ fn batch_engine_options_make_every_knob_source_explicit() {
 
     let enforcing = CrawlerConfig::new(Url::parse("https://example.com").unwrap());
     assert!(
-        !build_batch_engine_options(&enforcing, None).ignore_robots,
+        !build_batch_engine_options(&enforcing, None, None).ignore_robots,
         "the default config's respect-robots must flow through both ways"
     );
 }
@@ -225,7 +225,7 @@ fn batch_engine_options_make_every_knob_source_explicit() {
 #[test]
 fn batch_engine_options_transport_scalars_pin_the_audited_policy() {
     let base = CrawlerConfig::new(Url::parse("https://example.com").unwrap());
-    let options = build_batch_engine_options(&base, None);
+    let options = build_batch_engine_options(&base, None, None);
 
     // Expected values are literals copied from the audited
     // `crawl_site_inner` TransportPolicy (engine.rs #1369 migration),

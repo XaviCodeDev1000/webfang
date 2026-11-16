@@ -817,6 +817,22 @@ fn log_batch_summary(summary: &BatchManagerSummary, root_correlation: &domain::C
         summary.succeeded, summary.total_urls, summary.failed
     );
 
+    // #2823: the two failure populations are reported APART. A run whose
+    // resolver was down used to print exactly like a site that blocked every
+    // URL, and the operator had no way to tell them apart from the output.
+    if summary.resolution_failures > 0 || summary.block_failures > 0 {
+        println!(
+            "Failures by cause: {} resolution, {} site refusals",
+            summary.resolution_failures, summary.block_failures
+        );
+    }
+    if summary.aborted_on_resolution {
+        println!(
+            "Batch stopped early: the resolver is not answering ({} resolution failures)",
+            summary.resolution_failures
+        );
+    }
+
     for (url, err) in &summary.errors {
         crate::infrastructure::observability::log_scrape_error_with_cause(
             err,

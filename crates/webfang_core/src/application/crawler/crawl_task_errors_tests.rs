@@ -3,31 +3,54 @@ use super::*;
 
 use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use crate::domain::error::cause::NetworkCause;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 // --- handle_crawl_result unit tests (PR #476) ---
 
-fn counters() -> (Arc<AtomicUsize>, Arc<[AtomicUsize; 8]>) {
+type Counters = (
+    Arc<AtomicUsize>,
+    Arc<[AtomicUsize; 8]>,
+    Arc<AtomicUsize>,
+    Arc<OnceLock<NetworkCause>>,
+);
+
+fn counters() -> Counters {
     (
         Arc::new(AtomicUsize::new(0)),
         Arc::new(std::array::from_fn(|_| AtomicUsize::new(0))),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(OnceLock::new()),
     )
 }
 
 #[test]
 fn success_leaves_counters_unchanged() {
-    let (error_count, breakdown) = counters();
-    handle_crawl_result(Ok(Ok(())), &error_count, &breakdown);
+    let (error_count, breakdown, resolution_failures, transport_cause) = counters();
+    handle_crawl_result(
+        Ok(Ok(())),
+        &error_count,
+        &breakdown,
+        &resolution_failures,
+        &transport_cause,
+    );
     assert_eq!(error_count.load(Ordering::SeqCst), 0);
     assert!(breakdown.iter().all(|c| c.load(Ordering::SeqCst) == 0));
 }
 
 #[test]
 fn crawl_error_increments_count_and_own_category() {
-    let (error_count, breakdown) = counters();
-    handle_crawl_result(Ok(Err(CrawlError::Timeout)), &error_count, &breakdown);
+    let (error_count, breakdown, resolution_failures, transport_cause) = counters();
+    handle_crawl_result(
+        Ok(Err(CrawlError::Timeout)),
+        &error_count,
+        &breakdown,
+        &resolution_failures,
+        &transport_cause,
+    );
     assert_eq!(error_count.load(Ordering::SeqCst), 1);
     assert_eq!(
         breakdown[CrawlErrorCategory::Timeout.index()].load(Ordering::SeqCst),
@@ -43,7 +66,7 @@ fn crawl_error_increments_count_and_own_category() {
 #[test]
 fn http_403_increments_waf_category() {
     // Issue #603: a 403 must be counted as errors_waf, not network/http.
-    let (error_count, breakdown) = counters();
+    let (error_count, breakdown, resolution_failures, transport_cause) = counters();
     handle_crawl_result(
         Ok(Err(CrawlError::Http {
             status: 403,
@@ -51,6 +74,8 @@ fn http_403_increments_waf_category() {
         })),
         &error_count,
         &breakdown,
+        &resolution_failures,
+        &transport_cause,
     );
     assert_eq!(error_count.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -70,11 +95,13 @@ fn http_403_increments_waf_category() {
 
 #[test]
 fn crawl_error_category_is_derived_from_error() {
-    let (error_count, breakdown) = counters();
+    let (error_count, breakdown, resolution_failures, transport_cause) = counters();
     handle_crawl_result(
         Ok(Err(CrawlError::Parse("bad html".into()))),
         &error_count,
         &breakdown,
+        &resolution_failures,
+        &transport_cause,
     );
     assert_eq!(error_count.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -90,9 +117,15 @@ fn crawl_error_category_is_derived_from_error() {
 
 #[tokio::test]
 async fn join_error_increments_panic_category() {
-    let (error_count, breakdown) = counters();
+    let (error_count, breakdown, resolution_failures, transport_cause) = counters();
     let join_err = tokio::spawn(async { panic!("boom") }).await.unwrap_err();
-    handle_crawl_result(Err(join_err), &error_count, &breakdown);
+    handle_crawl_result(
+        Err(join_err),
+        &error_count,
+        &breakdown,
+        &resolution_failures,
+        &transport_cause,
+    );
     assert_eq!(error_count.load(Ordering::SeqCst), 1);
     assert_eq!(
         breakdown[CrawlErrorCategory::Panic.index()].load(Ordering::SeqCst),
@@ -111,8 +144,14 @@ async fn join_error_increments_panic_category() {
 
 #[test]
 fn cancelled_result_is_not_counted_as_error() {
-    let (error_count, breakdown) = counters();
-    handle_crawl_result(Ok(Err(CrawlError::Cancelled)), &error_count, &breakdown);
+    let (error_count, breakdown, resolution_failures, transport_cause) = counters();
+    handle_crawl_result(
+        Ok(Err(CrawlError::Cancelled)),
+        &error_count,
+        &breakdown,
+        &resolution_failures,
+        &transport_cause,
+    );
     assert_eq!(
         error_count.load(Ordering::SeqCst),
         0,
@@ -123,13 +162,19 @@ fn cancelled_result_is_not_counted_as_error() {
 
 #[tokio::test]
 async fn aborted_join_result_is_not_counted_as_panic() {
-    let (error_count, breakdown) = counters();
+    let (error_count, breakdown, resolution_failures, transport_cause) = counters();
     let handle = tokio::spawn(std::future::pending::<Result<(), CrawlError>>());
     handle.abort();
     let join_err = handle.await.unwrap_err();
     assert!(join_err.is_cancelled());
 
-    handle_crawl_result(Err(join_err), &error_count, &breakdown);
+    handle_crawl_result(
+        Err(join_err),
+        &error_count,
+        &breakdown,
+        &resolution_failures,
+        &transport_cause,
+    );
     assert_eq!(
         error_count.load(Ordering::SeqCst),
         0,

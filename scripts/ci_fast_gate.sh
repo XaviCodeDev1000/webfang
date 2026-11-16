@@ -423,6 +423,14 @@ EOF
   # reintroduce a false claim without touching a line of code.
   run_guard "docs claims gate (README truth)" scripts/check_docs_claims.sh \
     bash scripts/check_docs_claims.sh
+  # AGENTS.md size/structure gate (#2839): this lane is where a markdown-only
+  # edit lands — exactly the edit that regrew the router 740 -> 862 lines.
+  # Blocking, like the required CI step it mirrors: the budget (agents_doc in
+  # quality-baselines.json) is already met on main, so it reds only on growth.
+  # The baseline/code side is covered by the same guard in
+  # lane_fmt_and_guards, and the scripts themselves by lane_ci.
+  run_guard "agents doc size/structure gate (#2839)" scripts/check_agents_doc.sh \
+    bash scripts/check_agents_doc.sh
   # Release feature matrix (#2430): the DOC side of the drift — a manifest
   # entry edited without touching Cargo.toml. Blocking, like the two doc↔code
   # gates above: the CI step is required, so this mirror blocks too. The
@@ -655,6 +663,19 @@ EOF
     run_step "docs claims wiring (offline)" bash scripts/test_docs_claims_wiring.sh
   else
     skip_step "docs claims gates" "no docs claims or version-pins files changed"
+  fi
+  # AGENTS.md gate harnesses (#2839): same shape as the docs-claims block —
+  # the semantics harness pins the DECISIONS (oversize, odd fences, line
+  # citations, fail-closed inputs, descending-only --update) and the wiring
+  # harness pins the EDGES (repo-guards steps, required marker, these
+  # mirrors). Both live here and NOT in lane_docs beside the gate they pin:
+  # lane_docs never runs for a `scripts/**` change, the only kind of change
+  # that can break them. Offline mktemp fixtures, no cargo, <1s.
+  if grep -Eq '^(scripts/check_agents_doc\.sh|scripts/test_agents_doc\.sh|scripts/test_agents_doc_wiring\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "agents doc semantics (offline)" bash scripts/test_agents_doc.sh
+    run_step "agents doc wiring (offline)" bash scripts/test_agents_doc_wiring.sh
+  else
+    skip_step "agents doc gate harnesses" "no agents-doc guard files changed"
   fi
   # AI providers doc drift (#2136): the same blocking mirror the other two
   # lanes run, here for the lane that fires when `scripts/**` changed. A
@@ -1028,6 +1049,12 @@ lane_fmt_and_guards() {
   # that only saw docs would miss it. Same guard as lane_docs, same block.
   run_guard "docs claims gate (README truth)" scripts/check_docs_claims.sh \
     bash scripts/check_docs_claims.sh
+  # AGENTS.md size/structure gate (#2839): the baseline side of the same
+  # drift — a quality-baselines.json edit (or any code-lane change) never
+  # reaches lane_docs, and the budget lives in that JSON. Same guard as
+  # lane_docs, same block, like the required CI step it mirrors.
+  run_guard "agents doc size/structure gate (#2839)" scripts/check_agents_doc.sh \
+    bash scripts/check_agents_doc.sh
   # Release feature matrix (#2430): the CODE side of the drift — a feature
   # added, removed or re-typed in crates/webfang_cli/Cargo.toml without
   # updating the doc's manifest block. Blocking, like every mirror of a
