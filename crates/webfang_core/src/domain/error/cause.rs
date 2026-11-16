@@ -87,6 +87,17 @@ impl NetworkCause {
         Self::Unknown,
     ];
 
+    /// Whether this cause is a NAME RESOLUTION failure.
+    ///
+    /// A resolution failure is OURS: the site never saw the request, so
+    /// waiting longer cannot help and the peer is not refusing us (#2823).
+    /// Every other cause is the site's answer (or the network path to it),
+    /// which is what the exponential backoff is for.
+    #[must_use]
+    pub const fn is_resolution(self) -> bool {
+        matches!(self, Self::DnsResolution)
+    }
+
     /// The metric bucket this cause belongs to.
     ///
     /// The cause vocabulary and `CrawlErrorCategory`

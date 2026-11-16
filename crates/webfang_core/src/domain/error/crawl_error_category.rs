@@ -203,7 +203,7 @@ mod tests {
     fn categorize_partial_run_lands_in_internal() {
         let err = CrawlError::PartialRun {
             message: "crawl stalled: test".into(),
-            partial: CrawlResult::empty(),
+            partial: Box::new(CrawlResult::empty()),
         };
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Internal);
     }

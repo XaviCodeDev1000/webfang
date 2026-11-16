@@ -17,7 +17,6 @@
 //! to process multiple URLs concurrently while respecting concurrency limits via
 //! [`tokio::sync::Semaphore`].
 
-mod aggregate;
 pub mod manager;
 pub mod processor;
 pub mod progress;

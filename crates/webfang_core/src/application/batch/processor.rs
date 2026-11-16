@@ -2,7 +2,8 @@
 //!
 //! Uses [`tokio::sync::Semaphore`] for job-level concurrency control.
 //! Each URL in the batch is a separate `crawl_site_with_options()` call, with
-//! the run-wide [`EngineOptions`] built once by `build_batch_engine_options`
+//! the run-wide [`EngineOptions`](crate::application::crawler::engine::EngineOptions)
+//! built once by `build_batch_engine_options`
 //! (#1369 — the knobless `crawl_site` entry is deprecated) and the job's ONE
 //! run-root correlation adopted by every engine call (#1439 — carried via
 //! [`BatchProcessor::with_correlation`], or minted once per job otherwise, so
@@ -41,15 +42,47 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn, Instrument};
 
-use super::BatchJob;
+mod aggregate;
+mod options;
+
+#[cfg(test)]
+use options::build_per_url_config;
+pub(crate) use options::{
+    build_batch_engine_options, build_batch_rate_limiter, process_single_url,
+};
+
+/// Errors that can occur during batch processing
+#[derive(Debug, thiserror::Error)]
+pub enum BatchError {
+    /// Batch contains no URLs
+    #[error("batch contains no URLs")]
+    EmptyBatch,
+
+    /// Concurrency limit must be greater than zero
+    #[error("max_concurrent must be > 0")]
+    InvalidConcurrency,
+
+    /// Semaphore was closed unexpectedly
+    #[error("concurrency semaphore was closed")]
+    SemaphoreClosed,
+
+    /// Crawl operation failed
+    #[error("crawl failed for {url}: {error}")]
+    CrawlFailed {
+        /// URL that failed to crawl
+        url: String,
+        /// The underlying crawl error
+        error: CrawlError,
+    },
+}
+
+use super::{BatchJob, BatchProgress};
 use crate::application::crawler::content_sink::CrawlContentSink;
-use crate::application::crawler::engine::EngineOptions;
-use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
-use crate::domain::budget::detector::SystemDetector;
-use crate::domain::budget::BudgetModel;
-use crate::domain::{CorrelationId, CrawlError, CrawlErrorCategory, CrawlerConfig, JsStrategy};
+use crate::domain::downloader_factory::DownloaderFactory;
+#[cfg(test)]
+use crate::domain::JsStrategy;
+use crate::domain::{CorrelationId, CrawlError};
 use crate::error::ScraperError;
-use crate::ValidUrl;
 
 /// Result of processing a batch job
 ///
@@ -72,6 +105,21 @@ pub struct BatchResult {
     /// so exit-code routing can aggregate severity via
     /// [`ScraperError::classify`] (#537).
     pub errors: Vec<(String, ScraperError)>,
+    /// Failed URLs whose cause was NAME RESOLUTION — our resolver, not the site
+    /// refusing us (#2823).
+    ///
+    /// Reported APART from [`Self::block_failures`]: the category taxonomy
+    /// folds both into `Network`, so a run that only ever failed to resolve
+    /// used to look exactly like a site that blocked every URL.
+    pub resolution_failures: usize,
+    /// Failed URLs the SITE refused (WAF challenge, 401/403/429, any other
+    /// non-resolution failure) (#2823).
+    pub block_failures: usize,
+    /// Whether the run stopped dispatching because the resolver was down.
+    ///
+    /// `true` means some URLs were never attempted; `total` counts the ones
+    /// that were.
+    pub aborted_on_resolution: bool,
 }
 
 /// Batch processor with concurrency control
@@ -96,6 +144,13 @@ pub struct BatchProcessor {
     /// job honest: `process_batch_cancellable` mints exactly one root at
     /// the job boundary — never one per URL (the old #687-class split).
     correlation: Option<CorrelationId>,
+    /// Optional fetch-downloader factory (#2823).
+    ///
+    /// `None` (production) keeps the batch on the static `fetch_url` path, the
+    /// historical behavior. `Some` replaces the transport for the whole run, so
+    /// a caller can inject a resolver that never answers and exercise the
+    /// resolution-abort path deterministically — no real network, no real DNS.
+    downloader_factory: Option<Arc<dyn DownloaderFactory>>,
 }
 
 impl BatchProcessor {
@@ -126,6 +181,7 @@ impl BatchProcessor {
             semaphore: Arc::new(Semaphore::new(max_concurrent.get())),
             content_sink: None,
             correlation: None,
+            downloader_factory: None,
         }
     }
 
@@ -136,6 +192,18 @@ impl BatchProcessor {
     #[must_use]
     pub fn with_content_sink(mut self, sink: Arc<dyn CrawlContentSink>) -> Self {
         self.content_sink = Some(sink);
+        self
+    }
+
+    /// Replace the run's fetch transport with `factory` (#2823).
+    ///
+    /// Production leaves this unset and the batch keeps the static
+    /// `fetch_url` path. It exists so the resolution-abort path can be driven
+    /// by an injected resolver instead of a real one: a batch pointed at a
+    /// dead resolver is otherwise only reproducible with a real network.
+    #[must_use]
+    pub fn with_downloader_factory(mut self, factory: Arc<dyn DownloaderFactory>) -> Self {
+        self.downloader_factory = Some(factory);
         self
     }
 
@@ -211,7 +279,11 @@ impl BatchProcessor {
         // the whole run, so `--delay-ms` paces across URLs instead of
         // granting each URL a fresh burst. `None` at `delay_ms == 0`
         // keeps unthrottled runs on the historical per-engine limiters.
-        let mut base_options = build_batch_engine_options(&base_config, self.content_sink.clone());
+        let mut base_options = build_batch_engine_options(
+            &base_config,
+            self.content_sink.clone(),
+            self.downloader_factory.clone(),
+        );
         base_options.rate_limiter = build_batch_rate_limiter(&base_config);
         // #1439: exactly ONE run-root per job. The production caller's root
         // arrives through `with_correlation`; a standalone library job mints
@@ -223,8 +295,10 @@ impl BatchProcessor {
 
         let mut join_set = JoinSet::new();
         let mut errors: Vec<(String, ScraperError)> = Vec::new();
+        let mut tally = BatchTally::default();
 
         let mut cancelled = false;
+        let mut aborted_on_resolution = false;
         for url_str in &job.urls {
             if cancel.is_cancelled() {
                 cancelled = true;
@@ -234,6 +308,17 @@ impl BatchProcessor {
                 );
                 break;
             }
+
+            // Harvest what ALREADY finished before waiting for the next
+            // permit: the outcome of a task that just completed is what can
+            // abort the run, and the permit it freed is exactly what let us
+            // get here. Without this the loop would dispatch the whole list
+            // before reading a single outcome (#2823).
+            if drain_finished(&mut join_set, &mut tally, &progress, &mut errors, &run_root) {
+                aborted_on_resolution = true;
+                break;
+            }
+
             let url = url_str.clone();
             let config = base_config.clone();
             let options = base_options.clone();
@@ -246,49 +331,38 @@ impl BatchProcessor {
                 // LCOV_EXCL_LINE defensive: semaphore-closed — acquire_owned fails only when the batch governor is shut down
                 .map_err(|_| BatchError::SemaphoreClosed)?;
 
+            // The permit we just got was freed by a completion. Read that
+            // outcome BEFORE dispatching another URL, so the abort fires on
+            // the result itself instead of one URL later (#2823).
+            if drain_finished(&mut join_set, &mut tally, &progress, &mut errors, &run_root) {
+                aborted_on_resolution = true;
+                break;
+            }
+
             progress.start_one();
 
             join_set.spawn(
                 async move {
                     let _permit = permit; // Hold permit for duration of task
-                    let result = process_single_url(&url, config, options, &correlation).await;
+                    let result = process_single_url(&url, config, options, &correlation)
+                        .await
+                        .map(|_| ());
                     (url, result)
                 }
                 .in_current_span(),
             );
         }
 
-        // Collect results as tasks complete
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok((url, Ok(_))) => {
-                    progress.complete_one();
-                    info!("Completed crawl for {url}");
-                },
-                Ok((url, Err(e))) => {
-                    progress.fail_one();
-                    // Preserve the full variant through the CrawlError ->
-                    // ScraperError conversion (#537): severity routing needs
-                    // classify(), which a flattened string cannot provide.
-                    let scraper_err = ScraperError::from(e);
-                    crate::infrastructure::observability::log_scrape_error_with_cause(
-                        &scraper_err,
-                        &url,
-                        "batch_crawl",
-                        Some(&run_root),
-                        "batch URL crawl failed",
-                    );
-                    errors.push((url, scraper_err));
-                },
-                Err(e) => {
-                    progress.fail_one();
-                    error!(error = %e, "batch crawl task panicked");
-                    errors.push((
-                        "unknown".to_string(),
-                        ScraperError::Internal(format!("task-panic: {e}")),
-                    ));
-                },
+        // Drain whatever is still in flight. An abort does NOT cancel these:
+        // an abrupt drop would lose the pages already fetched (#653).
+        while let Some(joined) = join_set.join_next().await {
+            if record_batch_outcome(&mut tally, &progress, &mut errors, joined, &run_root) {
+                aborted_on_resolution = true;
             }
+        }
+
+        if aborted_on_resolution {
+            log_resolution_abort(&job.id, &tally);
         }
 
         let succeeded = progress.completed();
@@ -297,6 +371,8 @@ impl BatchProcessor {
 
         if cancelled {
             job.fail("cancelled by shutdown signal".to_string());
+        } else if aborted_on_resolution {
+            job.fail("aborted: the resolver is not answering".to_string());
         } else {
             job.complete();
         }
@@ -312,250 +388,135 @@ impl BatchProcessor {
             succeeded,
             failed,
             errors,
+            resolution_failures: tally.resolution_failures,
+            block_failures: tally.block_failures,
+            aborted_on_resolution,
         })
     }
 }
 
-/// Build the per-URL [`CrawlerConfig`] used by [`process_single_url`].
+/// How many CONSECUTIVE name-resolution failures abort a batch run (#2823).
 ///
-/// #1215 (F-38): batch SCRAPES each input URL — exactly one page per URL.
-/// The base config carries the CLI crawl budget (`max_depth`/`max_pages`),
-/// which must NOT expand batch seeds: feeding it through verbatim turned
-/// every seed into a BFS crawl and duplicated export records (F-02). Depth 0
-/// fetches the seed only (link extraction is skipped once
-/// `url_depth >= max_depth`); `max_pages 1` is the backstop so the seed
-/// itself can never be budget-starved. Every other knob (patterns, robots,
-/// TLS profile, timeouts, delay, budget overrides) still rides along.
-fn build_per_url_config(
-    url: &str,
-    base_config: &CrawlerConfig,
-) -> Result<CrawlerConfig, CrawlError> {
-    let parsed_url =
-        url::Url::parse(url).map_err(|e| CrawlError::InvalidUrl(format!("{url}: {e}")))?;
-    // Apply URL hardening policy (scheme allow-list + credential strip) to batch-file/stdin URLs.
-    // This closes audit finding F-R3-1 (batch entry parity with #1240/#1260).
-    let valid_url = ValidUrl::try_from_url(parsed_url)
-        .map_err(|e| CrawlError::InvalidUrl(format!("{url}: {e}")))?;
+/// Below this, dispatch is already amortized and aborting would punish an
+/// isolated failure. At this, the resolver is plainly down: every remaining
+/// URL would pay the same connect timeout, which is exactly the "50 URLs
+/// frenadas como si fuera un WAF" the issue describes.
+const RESOLUTION_ABORT_THRESHOLD: usize = 5;
 
-    Ok(CrawlerConfig::builder(valid_url.as_url().clone())
-        .max_depth(0)
-        .max_pages(1)
-        .concurrency(base_config.concurrency)
-        .delay_ms(base_config.delay_ms)
-        .jitter_ms(base_config.jitter_ms)
-        .timeout_secs(base_config.timeout_secs)
-        .ignore_robots(base_config.ignore_robots)
-        .tls_emulation(base_config.tls_emulation)
-        .exclude_patterns(base_config.exclude_patterns.clone())
-        .include_patterns(base_config.include_patterns.clone())
-        // Bug R2-1: operator budget overrides staged on the base config
-        // must survive the per-URL rebuild or the Engine re-derives auto
-        // tiers, silently ignoring --concurrency / --rate-limit-burst.
-        .budget_overrides(base_config.budget_overrides)
-        .build())
+/// Run-level tally of a batch: the two failure populations and the streak.
+///
+/// Kept as one value so the abort decision and the reported counters can
+/// never disagree — they are read from the same place (#2823).
+#[derive(Debug, Default)]
+struct BatchTally {
+    /// Failed URLs attributed to name resolution.
+    resolution_failures: usize,
+    /// Failed URLs the site refused (everything else).
+    block_failures: usize,
+    /// Unbroken run of resolution failures ending at the last finished URL.
+    consecutive_resolutions: usize,
 }
 
-/// Build the RUN-scoped token bucket shared by every URL of one batch run (#1428).
-///
-/// Each batch URL runs its own engine (`process_single_url` →
-/// `crawl_site_with_options`), and every engine mints a fresh limiter with
-/// a full burst — so without this shared bucket `--delay-ms` is inert on
-/// the batch path: each URL starts with a full burst and cross-URL spacing
-/// is structurally impossible. The bucket is built from the SAME two inputs
-/// `Engine::run` uses — `delay_ms` as the refill period and the budget
-/// model's independent burst tier — so batch pacing shares the crawl
-/// cadence policy (AGENTS.md fetch guard-chain stage 2: pacing happens
-/// BEFORE any network is touched).
-///
-/// `delay_ms == 0` AND `jitter_ms == 0` returns `None`: no bucket is
-/// allocated and each engine keeps its historical per-engine limiter, which
-/// keeps an unthrottled run identical to the pre-fix behavior (zero
-/// overhead, zero drift) — the same contract as
-/// `build_scrape_rate_limiter` (`scrape_flow.rs`). A jitter on its own IS a
-/// pacing request, so it wires the bucket even with a zero delay (#2610).
-///
-/// A construction failure degrades to `None` with a WARN, mirroring the
-/// scrape-path precedent. It is unreachable in practice:
-/// `SharedRateLimiter::new` rejects only a zero period (clamped to 1 ms)
-/// or a zero burst (the budget tier is non-zero by construction).
-fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<SharedRateLimiter> {
-    // A zero delay means "no pacing" — but only when the operator asked for
-    // no pacing. A jitter on its own IS a pacing request, so the run-scoped
-    // limiter is built even with a zero base delay (#2610): the gate then
-    // spaces the requests over the clamped 1 ms floor, exactly like the
-    // crawl path's `delay_ms.max(1)`.
-    if base_config.delay_ms == 0 && base_config.jitter_ms == 0 {
-        return None;
+impl BatchTally {
+    /// Whether the streak has reached the abort threshold.
+    fn resolver_is_down(&self) -> bool {
+        self.consecutive_resolutions >= RESOLUTION_ABORT_THRESHOLD
     }
-    let burst = BudgetModel::build(base_config.budget_overrides, &SystemDetector)
-        .burst()
-        .get();
-    match SharedRateLimiter::new(
-        &RateLimiterConfig::new(base_config.delay_ms, burst).with_jitter(base_config.jitter_ms),
-    ) {
-        Ok(limiter) => {
-            info!(
-                delay_ms = base_config.delay_ms,
-                jitter_ms = base_config.jitter_ms,
-                burst,
-                "batch rate limiter wired (run scope)"
+}
+
+/// Record one finished URL and report whether the run must stop dispatching.
+///
+/// The outcome is classified by CAUSE, never by message text: a resolution
+/// failure is OURS, and the streak it feeds is what tells a broken resolver
+/// apart from a site that is refusing us (#2823).
+///
+/// Returns `true` when the resolver streak reached
+/// [`RESOLUTION_ABORT_THRESHOLD`] and no further URL should be dispatched.
+fn record_batch_outcome(
+    tally: &mut BatchTally,
+    progress: &BatchProgress,
+    errors: &mut Vec<(String, ScraperError)>,
+    joined: Result<(String, Result<(), CrawlError>), tokio::task::JoinError>,
+    run_root: &CorrelationId,
+) -> bool {
+    match joined {
+        Ok((url, Ok(_))) => {
+            progress.complete_one();
+            // A URL that succeeded proves the resolver answered for it.
+            tally.consecutive_resolutions = 0;
+            info!("Completed crawl for {url}");
+            false
+        },
+        Ok((url, Err(e))) => {
+            progress.fail_one();
+            // Preserve the full variant through the CrawlError ->
+            // ScraperError conversion (#537): severity routing needs
+            // classify(), which a flattened string cannot provide.
+            let scraper_err = ScraperError::from(e);
+            if crate::domain::error::mapping::is_resolution_failure(&scraper_err) {
+                tally.resolution_failures += 1;
+                tally.consecutive_resolutions += 1;
+            } else {
+                tally.block_failures += 1;
+                tally.consecutive_resolutions = 0;
+            }
+            crate::infrastructure::observability::log_scrape_error_with_cause(
+                &scraper_err,
+                &url,
+                "batch_crawl",
+                Some(run_root),
+                "batch URL crawl failed",
             );
-            Some(limiter)
+            errors.push((url, scraper_err));
+            tally.resolver_is_down()
         },
         Err(e) => {
-            warn!(
-            error = %e,
-            delay_ms = base_config.delay_ms,
-            "batch rate limiter unavailable — continuing with per-engine limiters"
-            );
-            None
+            progress.fail_one();
+            // A panic is neither population: it says nothing about the
+            // resolver, so it breaks the streak without joining either
+            // counter.
+            tally.consecutive_resolutions = 0;
+            error!(error = %e, "batch crawl task panicked");
+            errors.push((
+                "unknown".to_string(),
+                ScraperError::Internal(format!("task-panic: {e}")),
+            ));
+            false
         },
     }
 }
 
-/// Build the run-wide [`EngineOptions`] shared by every URL of one batch run.
-///
-/// #1369: the batch entry used to route through the knobless `crawl_site` /
-/// `crawl_site_capturing` shims, which hard-wired the engine transport policy
-/// inside the engine. The explicit seam makes each knob's source visible:
-///
-/// - `ignore_robots`: the batch's only robots source is the base
-///   [`CrawlerConfig`] — `build_per_url_config` copies the same value into
-///   every per-URL config — so the run-wide option mirrors it. Identical to
-///   what `crawl_site_inner` derived per call before.
-/// - `content_sink`: the shared sink attached via
-///   [`BatchProcessor::with_content_sink`] (#631); `None` keeps the batch
-///   metadata-only (bodies discarded — the historical zero-files gotcha).
-/// - `checkpoint_path` / `session_pool_enabled` / `js_strategy` /
-///   `downloader_factory`: the batch has no operator source for these, so
-///   they are set **explicitly** to the values the old entry hardcoded
-///   (off / off / static / `None`) — never silently via a drifted default.
-///   The remaining transport scalars ride `EngineOptions::default()`, which
-///   is field-for-field the old `crawl_site_inner` policy (Chrome145, 3
-///   retries, 1s/10s backoff, 100-page checkpoint interval).
-///
-/// Built once per run and cloned per URL task.
-///
-/// NOTE: the run-scoped pacer lives OUTSIDE this bag — see
-/// [`build_batch_rate_limiter`], wired onto the built options by
-/// `process_batch_cancellable`. The split keeps this constructor a pure
-/// DTO build (its seam test pins every knob source) while the limiter
-/// documents its own budget-derived source separately.
-fn build_batch_engine_options(
-    base_config: &CrawlerConfig,
-    content_sink: Option<Arc<dyn CrawlContentSink>>,
-) -> EngineOptions {
-    EngineOptions {
-        checkpoint_path: None,
-        session_pool_enabled: false,
-        ignore_robots: base_config.ignore_robots,
-        js_strategy: JsStrategy::Static,
-        downloader_factory: None,
-        content_sink,
-        ..Default::default()
-    }
+/// The run-level trace for a resolver abort: ONE event, not one per URL.
+fn log_resolution_abort(job_id: &str, tally: &BatchTally) {
+    warn!(
+        job_id,
+        resolution_failures = tally.resolution_failures,
+        block_failures = tally.block_failures,
+        threshold = RESOLUTION_ABORT_THRESHOLD,
+        "batch aborted — the resolver is not answering"
+    );
 }
 
-/// Process a single URL by creating a CrawlerConfig and running the explicit
-/// engine entry with the run-wide options and the job's run-root
+/// Drain every task that has ALREADY finished, returning whether the
+/// resolver streak reached the abort threshold (#2823).
 ///
-/// Creates a new seed-only `CrawlerConfig` for the given URL (#1215: one
-/// page per URL, never a BFS expansion) and captures the fetched body into
-/// the shared sink when one is attached (carried on `options.content_sink`,
-/// #1369). `correlation` (#1439) is the job's ONE run-root, adopted by the
-/// crawl engine so every URL of the batch shares the operation's identity.
-///
-/// Returns `Err(CrawlError)` if the crawl result has any errors (e.g., timeouts),
-/// ensuring the batch processor correctly counts failed URLs.
-async fn process_single_url(
-    url: &str,
-    base_config: CrawlerConfig,
-    options: EngineOptions,
-    correlation: &CorrelationId,
-) -> Result<crate::domain::CrawlResult, CrawlError> {
-    let config = build_per_url_config(url, &base_config)?;
-
-    let result =
-        crate::application::crawler::engine::crawl_site_with_options(config, options, correlation)
-            .await?;
-
-    // Treat any crawl errors (timeouts, etc.) as failures for batch processing,
-    // but preserve severity (#537): the engine already partitioned them into
-    // `error_breakdown` (issue #374). A genuinely-internal category (storage,
-    // checkpoint, parse, panic) is a real bug and must stay `Internal` so the
-    // run exits 3 (issue #537, phase 1). A purely transient/external failure
-    // set (timeout, network, http, rate-limit, waf) must surface as a transient
-    // `CrawlError` so it classifies `TransientRetriable`/`Backoff`/`Permanent`
-    // and exits 69 — NOT as a bug (exit 3).
-    if result.errors > 0 {
-        let breakdown = &result.error_breakdown;
-
-        // Defensive: errors reported without a category breakdown are treated
-        // as internal failures (fail-safe → exit 3), matching the classify()
-        // safety net for genuinely unknown errors.
-        if breakdown.is_empty() {
-            return Err(CrawlError::Internal(format!(
-                "crawl completed with {} error(s)",
-                result.errors
-            )));
+/// Non-blocking by construction: `try_join_next` never waits, so the dispatch
+/// loop reads the outcomes it needs before spending another permit.
+fn drain_finished(
+    join_set: &mut JoinSet<(String, Result<(), CrawlError>)>,
+    tally: &mut BatchTally,
+    progress: &BatchProgress,
+    errors: &mut Vec<(String, ScraperError)>,
+    run_root: &CorrelationId,
+) -> bool {
+    let mut aborted = false;
+    while let Some(joined) = join_set.try_join_next() {
+        if record_batch_outcome(tally, progress, errors, joined, run_root) {
+            aborted = true;
+            break;
         }
-
-        // A genuinely-internal category means a real bug. Mixed batches are
-        // dominated by the worst severity, so any such category escalates to
-        // exit 3 (matches `scraper_failure_for_internal_fatal` in the CLI).
-        let has_internal_bug = [
-            CrawlErrorCategory::Internal,
-            CrawlErrorCategory::Extraction,
-            CrawlErrorCategory::Panic,
-        ]
-        .iter()
-        .any(|c| breakdown.get(c).copied().unwrap_or(0) > 0);
-        if has_internal_bug {
-            return Err(CrawlError::Internal(format!(
-                "crawl completed with {} error(s)",
-                result.errors
-            )));
-        }
-
-        // Purely transient/external: surface as a transient error → exit 69.
-        // A timeout is the most common batch failure here.
-        if breakdown
-            .get(&CrawlErrorCategory::Timeout)
-            .copied()
-            .unwrap_or(0)
-            > 0
-        {
-            return Err(CrawlError::Timeout);
-        }
-        return Err(super::aggregate::aggregate_transient_failure(&result));
     }
-
-    Ok(result)
-}
-
-/// Errors that can occur during batch processing
-#[derive(Debug, thiserror::Error)]
-pub enum BatchError {
-    /// Batch contains no URLs
-    #[error("batch contains no URLs")]
-    EmptyBatch,
-
-    /// Concurrency limit must be greater than zero
-    #[error("max_concurrent must be > 0")]
-    InvalidConcurrency,
-
-    /// Semaphore was closed unexpectedly
-    #[error("concurrency semaphore was closed")]
-    SemaphoreClosed,
-
-    /// Crawl operation failed
-    #[error("crawl failed for {url}: {error}")]
-    CrawlFailed {
-        /// URL that failed to crawl
-        url: String,
-        /// The underlying crawl error
-        error: CrawlError,
-    },
+    aborted
 }
 
 #[cfg(test)]
@@ -682,6 +643,9 @@ mod tests {
                     ))),
                 ),
             ],
+            resolution_failures: 1,
+            block_failures: 1,
+            aborted_on_resolution: false,
         };
 
         assert_eq!(result.total, 10);
@@ -713,6 +677,9 @@ mod tests {
             succeeded: 3,
             failed: 0,
             errors: vec![],
+            resolution_failures: 0,
+            block_failures: 0,
+            aborted_on_resolution: false,
         };
         assert_eq!(result.total, result.succeeded);
         assert_eq!(result.failed, 0);
@@ -736,6 +703,9 @@ mod tests {
                     ScraperError::Internal("error b".to_string()),
                 ),
             ],
+            resolution_failures: 0,
+            block_failures: 2,
+            aborted_on_resolution: false,
         };
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed, result.total);
@@ -758,6 +728,9 @@ mod tests {
             succeeded: 5,
             failed: 5,
             errors,
+            resolution_failures: 0,
+            block_failures: 5,
+            aborted_on_resolution: false,
         };
         assert_eq!(result.succeeded + result.failed, result.total);
         assert_eq!(result.errors.len(), result.failed);
@@ -1036,7 +1009,7 @@ mod tests {
         let base = CrawlerConfig::builder(Url::parse("https://example.com").unwrap())
             .ignore_robots(true)
             .build();
-        let options = build_batch_engine_options(&base, None);
+        let options = build_batch_engine_options(&base, None, None);
         assert!(
             options.ignore_robots,
             "the batch's robots source is the base config"
@@ -1070,7 +1043,7 @@ mod tests {
             );
 
         let sink = Arc::new(crate::application::crawler::content_sink::InMemoryContentSink::new());
-        let options = build_batch_engine_options(&base, Some(sink));
+        let options = build_batch_engine_options(&base, Some(sink), None);
         assert!(
             options.content_sink.is_some(),
             "the processor's shared sink must ride on the options"
@@ -1078,7 +1051,7 @@ mod tests {
 
         let enforcing = CrawlerConfig::new(Url::parse("https://example.com").unwrap());
         assert!(
-            !build_batch_engine_options(&enforcing, None).ignore_robots,
+            !build_batch_engine_options(&enforcing, None, None).ignore_robots,
             "the default config's respect-robots must flow through both ways"
         );
     }
@@ -1098,7 +1071,7 @@ mod tests {
     #[test]
     fn batch_engine_options_transport_scalars_pin_the_audited_policy() {
         let base = CrawlerConfig::new(Url::parse("https://example.com").unwrap());
-        let options = build_batch_engine_options(&base, None);
+        let options = build_batch_engine_options(&base, None, None);
 
         // Expected values are literals copied from the audited
         // `crawl_site_inner` TransportPolicy (engine.rs #1369 migration),

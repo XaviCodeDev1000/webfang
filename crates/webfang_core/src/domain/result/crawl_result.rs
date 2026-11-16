@@ -29,6 +29,16 @@ pub struct CrawlResult {
     /// application boundary needs to name the failure it reports. `None` when
     /// no task failed with a classified transport failure.
     pub transport_cause: Option<NetworkCause>,
+    /// Fetch failures attributed to NAME RESOLUTION — our resolver, not the
+    /// site refusing us (#2823).
+    ///
+    /// Deliberately OUTSIDE `error_breakdown`: the category taxonomy folds
+    /// every transport cause into [`CrawlErrorCategory::Network`] (the sibling
+    /// taxonomy issue owns that split), while a batch run needs to tell "the
+    /// site refused us" from "the resolver is down" to decide whether to keep
+    /// dispatching. A separate count is what lets it do that without moving a
+    /// category.
+    pub resolution_failures: usize,
 }
 
 impl CrawlResult {
@@ -45,6 +55,7 @@ impl CrawlResult {
             errors,
             error_breakdown,
             transport_cause: None,
+            resolution_failures: 0,
         }
     }
 

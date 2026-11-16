@@ -150,7 +150,7 @@ fn test_scraper_error_from_semantic() {
 fn test_scraper_error_from_crawl_partial_run_preserves_message() {
     let err = CrawlError::PartialRun {
         message: "crawl stalled: test".to_string(),
-        partial: crate::domain::CrawlResult::empty(),
+        partial: Box::new(crate::domain::CrawlResult::empty()),
     };
     let scraper_err: ScraperError = err.into();
     assert!(matches!(scraper_err, ScraperError::Internal(ref m) if m == "crawl stalled: test"));

@@ -55,6 +55,7 @@ pub use pause::{PauseTracker, PauseVerdict, PauseWatchdog, WaitOutcome};
 mod checkpoint;
 
 mod lifecycle;
+mod summary;
 
 mod crawl_loop;
 
@@ -192,6 +193,12 @@ pub struct Engine {
     /// The task failures are counted, not kept: this is the one cause the
     /// application boundary needs to name the failure it reports.
     transport_cause: Arc<OnceLock<NetworkCause>>,
+    /// Fetch failures attributed to NAME RESOLUTION (#2823).
+    ///
+    /// Counted apart from the category breakdown, which folds every transport
+    /// cause into `Network`, so a batch run can tell "the site refused us"
+    /// from "the resolver is down".
+    resolution_failures: Arc<AtomicUsize>,
     /// Checkpoint store for persistence (stateless — always available).
     checkpoint_store: BincodeCheckpoint,
     /// Loaded checkpoint state for crash recovery (`None` = fresh start).

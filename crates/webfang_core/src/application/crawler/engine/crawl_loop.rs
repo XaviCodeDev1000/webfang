@@ -232,6 +232,7 @@ impl Engine {
                 result,
                 &self.error_count,
                 &self.error_breakdown,
+                &self.resolution_failures,
                 &self.transport_cause,
             );
         }
@@ -304,6 +305,7 @@ impl Engine {
                     result,
                     &self.error_count,
                     &self.error_breakdown,
+                    &self.resolution_failures,
                     &self.transport_cause,
                 );
                 WaitOutcome::Progress
