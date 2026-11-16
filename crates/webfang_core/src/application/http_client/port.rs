@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 
-use crate::domain::http_error::{HttpError, HttpResult};
+use crate::domain::http_error::HttpResult;
 
 // Re-export so `crate::application::http_client::port::{HttpClientPort,
 // HttpResponse}` keeps resolving for existing importers (e.g.
@@ -33,7 +33,12 @@ impl HttpClientPort for wreq::Client {
                 // #2841: the ONE classification seam — the same call
                 // `http_failure` makes, so the inline tri-branch can no longer
                 // drift from the one `HttpClient` uses.
-                crate::domain::error::mapping::http_failure(e, None, request_started)
+                crate::domain::error::mapping::http_failure(
+                    e,
+                    crate::domain::error::cause::FetchPhase::Connect,
+                    None,
+                    request_started,
+                )
             })?;
 
             let status = response.status().as_u16();
@@ -45,10 +50,17 @@ impl HttpClientPort for wreq::Client {
                 }
             }
 
-            let body = response
-                .text()
-                .await
-                .map_err(|e| HttpError::Request(e.to_string()))?;
+            let body = response.text().await.map_err(|e| {
+                // #2841 (L3 finding): a body-read failure is TRANSPORT, not
+                // request construction — classified through the one seam with
+                // the phase that actually failed.
+                crate::domain::error::mapping::http_failure(
+                    e,
+                    crate::domain::error::cause::FetchPhase::Body,
+                    None,
+                    request_started,
+                )
+            })?;
 
             Ok(HttpResponse {
                 status,

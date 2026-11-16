@@ -5,6 +5,7 @@
 use super::factory::build_wreq_client;
 use super::retry::{compute_backoff_delay, retry_with_backoff, RetryPolicy};
 use crate::domain::body_cap;
+use crate::domain::error::cause::FetchPhase;
 use crate::domain::error::mapping::{http_failure, url_host_of};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
@@ -291,11 +292,23 @@ impl HttpClient {
             match request.send().await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    if !e.is_timeout() {
-                        return Err(http_failure(e, url_host.as_deref(), request_started));
+                    // #2841: every transport failure is classified through the
+                    // ONE seam with this attempt's timing. Non-timeouts stay
+                    // terminal on the spot (F-09); the timeout that exhausts
+                    // the budget keeps its classified cause (S3) instead of
+                    // the old bare `HttpError::timeout()`.
+                    let timeout_err = e.is_timeout();
+                    let mapped = http_failure(
+                        e,
+                        FetchPhase::Connect,
+                        url_host.as_deref(),
+                        request_started,
+                    );
+                    if !timeout_err {
+                        return Err(mapped);
                     }
                     if attempt >= self.config.max_retries {
-                        return Err(HttpError::timeout());
+                        return Err(mapped);
                     }
                     attempt += 1;
                     let delay = compute_backoff_delay(
@@ -564,6 +577,7 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
                 // — no second tri-branch to drift.
                 crate::domain::error::mapping::http_failure(
                     e,
+                    FetchPhase::Connect,
                     url_host_of(&url).as_deref(),
                     request_started,
                 )

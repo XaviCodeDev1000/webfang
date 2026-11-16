@@ -156,14 +156,16 @@ pub fn build_http_failure(
 /// The verdict does not move: a timeout is still a `Timeout`, a connect
 /// failure is still a `Connection`, a construction failure is still a
 /// `Request`. The cause now travels with all three, through the ONE seam the
-/// other call sites share.
+/// other call sites share. The `phase` is the caller's stage of the fetch —
+/// `Connect` for a send, `Body` for a response-body read — so a timeout is
+/// named by the stage that actually hit its deadline.
 #[must_use]
 pub fn http_failure(
     error: wreq::Error,
+    phase: FetchPhase,
     host: Option<&str>,
     request_started: std::time::Instant,
 ) -> crate::domain::http_error::HttpError {
-    let phase = FetchPhase::Connect;
     build_http_failure(
         classify_transport_failure(&error, TransportHints::of_wreq(&error), phase),
         Box::new(error),
