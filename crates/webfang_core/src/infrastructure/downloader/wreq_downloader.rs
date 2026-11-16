@@ -24,6 +24,8 @@ use crate::domain::waf::{is_t2_blocking_status, waf_inspector, InspectionContext
 use crate::error::ErrorClass;
 use crate::infrastructure::user_agent::UserAgentCache;
 
+pub(crate) mod dns_budget;
+mod retry;
 mod wreq_body;
 
 /// Estimated memory cost of a wreq client instance in bytes.
@@ -422,22 +424,6 @@ impl WreqDownloader {
         })
     }
 
-    /// Calculate the exponential backoff delay for a given attempt, capped at
-    /// `backoff_max_ms`.
-    fn backoff_delay_ms(&self, attempt: u32) -> u64 {
-        self.backoff_base_ms
-            .saturating_mul(2_u64.saturating_pow(attempt))
-            .min(self.backoff_max_ms)
-    }
-
-    /// Sleep before the next attempt — skipped on the final one, where the
-    /// loop is about to exit and the delay would only add dead latency.
-    async fn sleep_before_retry(&self, attempt: u32, delay_ms: u64) {
-        if attempt < self.max_retries {
-            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-        }
-    }
-
     /// Consume a successful response into a [`FetchedPage`].
     async fn build_page(
         &self,
@@ -555,6 +541,10 @@ impl WreqDownloader {
             client_id = %format!("{:p}", Arc::as_ptr(&self.client))
         )
     )]
+    // The attempt loop carries the ladder, the 403 rotation and the body read
+    // in the order they must run. #2823 added the resolver branch to an
+    // already ~90-line flow; splitting it would hide that order.
+    #[allow(clippy::too_many_lines)]
     async fn fetch_inner(&self, url: &Url) -> Result<FetchedPage, DownloadError> {
         debug!("Fetching URL: {}", url);
 
@@ -562,7 +552,7 @@ impl WreqDownloader {
         let mut last_error: Option<DownloadError> = None;
 
         for attempt in 0..=self.max_retries {
-            let response = match self.send_request(url, None).await {
+            let response = match self.send_request_on_dns_budget(url).await {
                 Ok(res) => res,
                 Err(dl_err) => {
                     // Single classification rule (FIX-1, #1236): retry
@@ -579,6 +569,14 @@ impl WreqDownloader {
                     // UnexpectedEof) stay retriable (#649 mid-body transient
                     // fix).
                     if matches!(dl_err.classify(), ErrorClass::PermanentFatal) {
+                        return Err(dl_err);
+                    }
+                    // #2823: a resolution failure that reaches here has already
+                    // spent its OWN budget. It is our resolver, never the site
+                    // refusing us, so it is returned instead of consuming the
+                    // site-rejection ladder — that is the whole point of the
+                    // separate budget.
+                    if crate::domain::error::mapping::is_resolution_failure(&dl_err) {
                         return Err(dl_err);
                     }
                     // The "retrying" event only fires when a retry will

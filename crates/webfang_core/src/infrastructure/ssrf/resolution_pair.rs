@@ -109,6 +109,71 @@ mod pair {
         );
     }
 
+    /// A name source that never answers, counting how many times it was asked.
+    ///
+    /// The count is the observable the retry accounting needs: one lookup per
+    /// connection attempt, so it says how many attempts the downloader made
+    /// without a clock and without a network (#2823).
+    #[derive(Debug)]
+    struct CountingHangingNameSource {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl NameSource for CountingHangingNameSource {
+        fn lookup(&self, _host: String) -> LookupFuture {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(std::future::pending())
+        }
+    }
+
+    /// A broken resolver spends its OWN budget, not the site-rejection ladder.
+    ///
+    /// This is #2823 in one number: a name that never comes back costs
+    /// `1 + DNS_RETRY_BUDGET` lookups, whatever `max_retries` says. The
+    /// exponential ladder is what turned a broken DNS into a WAF-looking
+    /// slowdown of a whole 50-URL run.
+    ///
+    /// The client is injected through the `NameSource` seam, so the failure is
+    /// deterministic and no network is involved.
+    #[cfg_attr(miri, ignore = "btls-sys FFI (wreq Client) not supported by Miri")]
+    #[tokio::test]
+    async fn a_hung_resolver_spends_its_own_budget_not_the_site_ladder() {
+        use crate::domain::downloader_port::Downloader;
+        use crate::domain::error::mapping::is_resolution_failure;
+        use crate::infrastructure::downloader::wreq_downloader::dns_budget::DNS_RETRY_BUDGET;
+        use crate::infrastructure::downloader::wreq_downloader::WreqDownloader;
+        use std::sync::atomic::Ordering;
+
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let client = wreq::Client::builder()
+            .connect_timeout(std::time::Duration::from_millis(300))
+            .dns_resolver(resolver_over(Arc::new(CountingHangingNameSource {
+                calls: Arc::clone(&calls),
+            })))
+            .build()
+            .expect("the test client must build");
+
+        // Three site retries at 1 ms: if the ladder were charged for the
+        // resolution, this would fire four lookups. The DNS budget must win.
+        let downloader = WreqDownloader::from_client_with_retry(client, 5, 3, 1, 1);
+        let url = url::Url::parse("http://webfang-dns-budget.test/").expect("the test URL parses");
+
+        let err = downloader
+            .fetch(&url)
+            .await
+            .expect_err("a name that never comes back must fail the fetch");
+
+        assert!(
+            is_resolution_failure(&err),
+            "the failure must be attributed to the resolution: {err}"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1 + DNS_RETRY_BUDGET as usize,
+            "a resolution failure spends its own budget, never the site-rejection ladder"
+        );
+    }
+
     /// THE SECOND SIDE: the accept queue is full, so the SYN is dropped.
     ///
     /// The name came BACK (the resolution completed) and the handshake never

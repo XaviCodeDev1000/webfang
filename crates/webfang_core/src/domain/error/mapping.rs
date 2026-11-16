@@ -66,6 +66,21 @@ pub fn download_failure(
     attach_cause(original, cause)
 }
 
+/// Whether a transport failure is a NAME RESOLUTION failure.
+///
+/// The cause travels in the error's chain (#2784), so this is the one
+/// predicate a retry policy reads to tell OUR broken resolver from a site
+/// refusing us: a `dns_resolution` never reached the peer, so the
+/// site-rejection ladder must not be spent on it (#2823).
+///
+/// A failure with NO classified cause is NOT a resolution failure: the
+/// predicate fails open towards the historical behavior, never the other way
+/// around — an unclassified error keeps the ladder it has today.
+#[must_use]
+pub fn is_resolution_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    cause_in_chain(error).is_some_and(NetworkCause::is_resolution)
+}
+
 /// Attach the classified cause to a transport failure, keeping every other
 /// variant untouched.
 ///
