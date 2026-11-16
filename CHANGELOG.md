@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.0.0] - 2026-11-16
+
+
+### ⚠️ Breaking Changes
+
+- Keep the classified transport cause on the scraper route ([#2860](https://github.com/XaviCodeDev1000/webfang/pull/2860))
+
+### 🏗️ Architecture Improvements
+
+- Split processor.rs and crawl_task.rs below their ratchet baselines ([#2827](https://github.com/XaviCodeDev1000/webfang/pull/2827)) ([#2856](https://github.com/XaviCodeDev1000/webfang/pull/2856))
+
+### 📖 Documentation
+
+- Remove retired SDD references from living docs and code comments ([#2855](https://github.com/XaviCodeDev1000/webfang/pull/2855))
+
+### 🧪 Testing
+
+- Pin the jitter ceiling, its mean rate, and the floor above concurrency one ([#2862](https://github.com/XaviCodeDev1000/webfang/pull/2862))
+- Measure the jitter's pacing shape against five model limiters (lab T6) ([#2871](https://github.com/XaviCodeDev1000/webfang/pull/2871))
 ## [8.0.2] - 2026-11-16
 
 
