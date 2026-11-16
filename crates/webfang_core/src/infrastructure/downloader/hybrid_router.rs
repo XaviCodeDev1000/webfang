@@ -4,7 +4,8 @@
 //!
 //! 1. **Layer 1 — wreq**: fast static HTTP fetch
 //! 2. **SPA detection**: analyse the HTML for SPA mount points / WAF markers
-//! 3. **Layer 2 — Obscura**: subprocess markdown extraction (if SPA detected)
+//! 3. **Layer 2 — Obscura**: subprocess HTML render, its output re-classified
+//!    by the same SPA/WAF verdict (if SPA detected)
 //! 4. **Layer 3 — Chromiumoxide**: full CDP rendering (if Obscura insufficient)
 //!
 //! WAF detection at **any** layer short-circuits with an error — escalation is
@@ -134,8 +135,27 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
 
         match self.layer2.fetch(url).await {
             Ok(page) if !page.html.is_empty() => {
-                debug!("Layer 2 returned {} bytes", page.html.len());
-                return Ok(page);
+                // S5 (#2722 H3): the L2 body is classified exactly like L1's —
+                // a challenge rendered through obscura aborts the escalation
+                // (REQ-WAF-07), a still-SPA body escalates to L3, and static
+                // content is accepted. Previously any non-empty body was
+                // accepted unclassified.
+                match self.evaluate_fetch(page)? {
+                    Some(classified) => {
+                        debug!(
+                            url = %url,
+                            layer = 2,
+                            final_url = %classified.url,
+                            status = classified.status,
+                            "Layer 2 returned {} bytes",
+                            classified.html.len()
+                        );
+                        return Ok(classified);
+                    },
+                    None => {
+                        debug!("Layer 2 body still looks like a SPA — will try Layer 3");
+                    },
+                }
             },
             Ok(_) => {
                 debug!("Layer 2 returned empty content — will try Layer 3");
@@ -484,6 +504,43 @@ mod tests {
             CancellationToken::new(),
         );
         assert_escalates_to_layer3(&router, "https://spa.example.com").await;
+    }
+
+    /// S5 (#2722 H3): a WAF challenge that obscura RENDERS (its response body
+    /// carries the challenge markup) must abort the escalation exactly like an
+    /// explicit L2 error — the router must classify the L2 body, not accept
+    /// any non-empty page. Layer 3 fails loudly if reached, so the abort can
+    /// only have come from the L2 verdict.
+    #[tokio::test]
+    async fn test_waf_body_rendered_by_layer2_aborts() {
+        let router = HybridRouter::new(
+            StubDownloader::spa_page(),
+            StubDownloader::waf_page(),
+            StubDownloader::static_page()
+                .with_interactions(true)
+                .fails_with(DownloadError::Network(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    "L3 must never be reached",
+                )))),
+            false,
+            CancellationToken::new(),
+        );
+        assert_waf_aborts(&router, "https://obscura-rendered-waf.example.com").await;
+    }
+
+    /// S5 (#2722 H3): an L2 body that STILL looks like a SPA (the mount point
+    /// survived obscura's render) must escalate to Layer 3 instead of being
+    /// accepted for its non-emptiness.
+    #[tokio::test]
+    async fn test_layer2_spa_body_escalates_to_layer3() {
+        let router = HybridRouter::new(
+            StubDownloader::spa_page(),
+            StubDownloader::spa_page(),
+            StubDownloader::static_page().with_interactions(true),
+            false,
+            CancellationToken::new(),
+        );
+        assert_escalates_to_layer3(&router, "https://spa-twice.example.com").await;
     }
 
     #[tokio::test]
