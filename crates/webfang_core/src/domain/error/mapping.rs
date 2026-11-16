@@ -11,21 +11,32 @@ use crate::domain::error::cause::{
 };
 use crate::domain::error::resolution::refine_connect_cause;
 
-/// Map a transport error to the HTTP failure it is.
+mod transport_seam;
+
+use transport_seam::{build_http_failure, classify_transport_failure, TransportHints};
+
+/// Map a transport error to the HTTP failure it is (#2841).
+///
+/// The verdict does not move: a timeout is still a `Timeout`, a connect
+/// failure is still a `Connection`, a construction failure is still a
+/// `Request`. The cause now travels with all three, through the ONE seam the
+/// other call sites share. The `phase` is the caller's stage of the fetch —
+/// `Connect` for a send, `Body` for a response-body read — so a timeout is
+/// named by the stage that actually hit its deadline.
 #[must_use]
 pub fn http_failure(
     error: wreq::Error,
+    phase: FetchPhase,
     host: Option<&str>,
     request_started: std::time::Instant,
 ) -> crate::domain::http_error::HttpError {
-    use crate::domain::http_error::HttpError;
-    if error.is_timeout() {
-        HttpError::Timeout
-    } else if error.is_connect() {
-        http_connection_failure(error, FetchPhase::Connect, host, request_started)
-    } else {
-        HttpError::Request(error.to_string())
-    }
+    build_http_failure(
+        classify_transport_failure(&error, TransportHints::of_wreq(&error), phase),
+        Box::new(error),
+        host,
+        request_started,
+        phase,
+    )
 }
 
 /// Map a transport error to the download failure it is.
@@ -231,30 +242,6 @@ pub fn url_host_of(url: &str) -> Option<String> {
     url::Url::parse(url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(str::to_owned))
-}
-
-pub fn http_connection_failure(
-    error: wreq::Error,
-    phase: FetchPhase,
-    host: Option<&str>,
-    request_started: std::time::Instant,
-) -> crate::domain::http_error::HttpError {
-    use crate::domain::http_error::HttpError;
-    let message = error.to_string();
-    let cause = classify(&error, phase);
-    let cause = match host {
-        Some(host) => {
-            refine_connect_cause(cause, host, request_started, phase == FetchPhase::Connect)
-        },
-        None => cause,
-    };
-    HttpError::Connection {
-        message: compose(cause, &message),
-        source: Some(Box::new(ClassifiedNetworkError::new(
-            cause,
-            Box::new(error),
-        ))),
-    }
 }
 
 /// Wrap a failed name lookup as a typed RESOLUTION failure.

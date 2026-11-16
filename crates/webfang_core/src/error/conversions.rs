@@ -166,10 +166,22 @@ impl From<crate::domain::error::CrawlError> for ScraperError {
             // Timeout/Connection carry a synthetic io::Error source so
             // is_transient_network's downcast recognizes them as transient
             // (a bare message would fall through to InternalFatal).
-            CrawlError::Timeout => ScraperError::Network(Box::new(std::io::Error::new(
+            CrawlError::Timeout { source } => ScraperError::Network(Box::new(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                "request timeout",
+                // #2841: the kind and the message do not move; the cause rides
+                // INSIDE the io::Error as its payload, so `cause_in_chain` can
+                // read it out of the chain (the same seam `Connection` uses).
+                ConnectionFailure::new("request timeout".to_string(), source),
             ))),
+            CrawlError::Transport { message, source } => {
+                // #2841: an unclassified transport failure is a transport
+                // failure, never an internal bug (#1824). The message does not
+                // move; the cause now travels with it.
+                ScraperError::Network(Box::new(std::io::Error::new(
+                    io_kind_for_network_message(&message),
+                    ConnectionFailure::new(message, source),
+                )))
+            },
             CrawlError::Connection { message, source } => {
                 // The synthetic `ConnectionReset` is what keeps this class
                 // transient (row 1), so it stays. When the producer preserved

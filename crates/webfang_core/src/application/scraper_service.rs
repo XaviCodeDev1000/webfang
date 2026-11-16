@@ -22,7 +22,7 @@ use crate::domain::http_port::HttpResponse;
 use crate::domain::waf::{waf_inspector, InspectionContext};
 use crate::domain::{CorrelationId, DomInspectorPort, ExtractResult, ScrapedContent, ValidUrl};
 use crate::error::{Result, ScraperError};
-use crate::infrastructure::observability::log_scrape_error;
+use crate::infrastructure::observability::{log_scrape_error, log_scrape_error_with_cause};
 use futures::stream::{self, StreamExt};
 use tracing::{debug, info, instrument, warn};
 
@@ -417,7 +417,7 @@ async fn fetch_html(
     let response = match client.get(url.as_str()).await {
         Ok(resp) => resp,
         Err(e) => {
-            log_scrape_error(
+            log_scrape_error_with_cause(
                 &e,
                 url.as_str(),
                 "fetch",

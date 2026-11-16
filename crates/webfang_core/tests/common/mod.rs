@@ -17,6 +17,7 @@ pub mod fixture_server;
 pub mod fixtures;
 pub mod mock_http;
 pub mod sitemap_arrange;
+pub mod trace_capture;
 
 pub use fixtures::*;
 

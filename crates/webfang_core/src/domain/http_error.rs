@@ -30,7 +30,14 @@ pub enum HttpError {
     /// 5xx server errors - contains status code
     ServerError(u16),
     /// Request timeout
-    Timeout,
+    ///
+    /// The classified cause travels as the `source` when the producer still holds
+    /// the transport error (#2841): the verdict and the `Display` text do not
+    /// move, the cause is ADDED.
+    Timeout {
+        /// The classified transport failure, when one is available.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
     /// Connection error - contains error message
     ///
     /// The message is its own field so the [`Display`](std::fmt::Display) text
@@ -45,7 +52,22 @@ pub enum HttpError {
         source: Option<crate::domain::error::cause::ErrorSource>,
     },
     /// Request building/error - contains error message
+    ///
+    /// Reserved for request CONSTRUCTION failures (unsupported scheme,
+    /// malformed URL, a builder error raised at `send`). A transport failure is
+    /// NOT a request error: it belongs to [`Self::Transport`] (#2841).
     Request(String),
+    /// Transport failure that is neither a timeout nor a connection failure.
+    ///
+    /// The home of the failures the used-to-be `else` branch flattened into
+    /// [`Self::Request`]: the transport error keeps its own text and, when the
+    /// producer classified it, the typed cause travels as `source` (#2841).
+    Transport {
+        /// Human-readable message (the transport error's own text).
+        message: String,
+        /// The original transport error, when one is available.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
     /// WAF/CAPTCHA challenge detected in HTTP 200 (false positive)
     WafChallenge(String),
     /// Domain banned — no sessions available in the pool
@@ -66,9 +88,12 @@ impl std::fmt::Display for HttpError {
             },
             HttpError::ClientError(code) => write!(f, "Client Error {code}"),
             HttpError::ServerError(code) => write!(f, "Server Error {code}"),
-            HttpError::Timeout => write!(f, "Request Timeout"),
+            HttpError::Timeout { .. } => write!(f, "Request Timeout"),
             HttpError::Connection { message, .. } => write!(f, "Connection Error: {message}"),
             HttpError::Request(msg) => write!(f, "Request Error: {msg}"),
+            HttpError::Transport { message, .. } => {
+                write!(f, "Transport Error: {message}")
+            },
             HttpError::WafChallenge(provider) => {
                 write!(f, "WAF/CAPTCHA challenge detected ({provider})")
             },
@@ -88,6 +113,14 @@ impl std::error::Error for HttpError {
             // The preserved transport error is the cause, so a consumer that
             // walks `source()` reaches the same typed chain the producer saw.
             Self::Connection {
+                source: Some(source),
+                ..
+            }
+            | Self::Timeout {
+                source: Some(source),
+                ..
+            }
+            | Self::Transport {
                 source: Some(source),
                 ..
             } => Some(source.as_ref()),
@@ -118,9 +151,10 @@ impl HttpError {
             Self::RateLimited(seconds) => Self::RateLimited(*seconds),
             Self::ClientError(code) => Self::ClientError(*code),
             Self::ServerError(code) => Self::ServerError(*code),
-            Self::Timeout => Self::Timeout,
+            Self::Timeout { .. } => Self::timeout(),
             Self::Connection { message, .. } => Self::connection(message.clone()),
             Self::Request(message) => Self::Request(message.clone()),
+            Self::Transport { message, .. } => Self::transport(message.clone(), None),
             Self::WafChallenge(provider) => Self::WafChallenge(provider.clone()),
             Self::DomainBanned(domain) => Self::DomainBanned(domain.clone()),
             Self::BodyTooLarge { limit } => Self::BodyTooLarge { limit: *limit },
@@ -137,6 +171,33 @@ impl HttpError {
         Self::Connection {
             message: message.into(),
             source: Some(source),
+        }
+    }
+
+    /// A timeout whose classified cause is not available.
+    #[must_use]
+    pub const fn timeout() -> Self {
+        Self::Timeout { source: None }
+    }
+
+    /// A timeout that keeps the classified cause (#2841): the `Display` text
+    /// stays `"Request Timeout"`, the chain gains the cause.
+    #[must_use]
+    pub fn timeout_with_cause(source: crate::domain::error::cause::ErrorSource) -> Self {
+        Self::Timeout {
+            source: Some(source),
+        }
+    }
+
+    /// A transport failure, with its cause when the producer classified one.
+    #[must_use]
+    pub fn transport(
+        message: impl Into<String>,
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    ) -> Self {
+        Self::Transport {
+            message: message.into(),
+            source,
         }
     }
 }
@@ -174,8 +235,21 @@ mod tests {
 
     #[test]
     fn test_http_error_timeout() {
-        let err = HttpError::Timeout;
-        assert!(matches!(err, HttpError::Timeout));
+        let err = HttpError::timeout();
+        assert!(matches!(err, HttpError::Timeout { .. }));
+    }
+
+    /// #2841: the `Display` text does not move when the cause is added.
+    #[test]
+    fn test_http_error_timeout_display_is_unchanged_with_a_cause() {
+        let cause = std::io::Error::new(std::io::ErrorKind::TimedOut, "read timeout");
+        let bare = HttpError::timeout();
+        let with_cause = HttpError::timeout_with_cause(Box::new(cause));
+        assert_eq!(bare.to_string(), "Request Timeout");
+        assert_eq!(with_cause.to_string(), bare.to_string());
+        // ...and the cause is reachable through `Error::source`.
+        let source = std::error::Error::source(&with_cause).expect("the cause must be preserved");
+        assert_eq!(source.to_string(), "read timeout");
     }
 
     #[test]
@@ -227,7 +301,7 @@ mod tests {
             format!("{}", HttpError::ServerError(500)),
             "Server Error 500"
         );
-        assert_eq!(format!("{}", HttpError::Timeout), "Request Timeout");
+        assert_eq!(format!("{}", HttpError::timeout()), "Request Timeout");
     }
 
     #[test]

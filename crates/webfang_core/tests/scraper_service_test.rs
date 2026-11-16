@@ -555,7 +555,7 @@ fn mock_failure_cases() -> Vec<MockFailureCase> {
         MockFailureCase {
             name: "timeout",
             url: "https://slow.example.com",
-            error: HttpError::Timeout,
+            error: HttpError::timeout(),
             expect: MockFailureExpectation::MessageContains("timeout"),
         },
         MockFailureCase {

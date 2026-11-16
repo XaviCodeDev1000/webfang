@@ -24,14 +24,18 @@
 //! a request timeout is a transient (Stack A classifies it `TransientBackoff`,
 //! `downloader_port.rs`), so it consumes the current attempt and the loop
 //! continues — it is NOT a terminal error. If the retry budget exhausts with
-//! the last failure being a timeout, `HttpError::Timeout` still surfaces, so
-//! the terminal error surface is unchanged; it is just delayed until the
-//! operator-configured retry budget is actually spent.
+//! the last attempt failing on TRANSPORT, that failure's classified error
+//! (`Timeout` with its cause, #2841) still surfaces, so the terminal error
+//! surface is unchanged; it is just delayed until the operator-configured
+//! retry budget is actually spent. When the last attempt failed with a status,
+//! the policy's bare exhaustion error surfaces with no cause.
 //!
 //! [`HttpClient`]: crate::application::http_client::HttpClient
 //! [`HttpError::RateLimited`]: crate::domain::http_error::HttpError::RateLimited
 //! [`HttpError::ServerError`]: crate::domain::http_error::HttpError::ServerError
 
+use crate::domain::error::cause::FetchPhase;
+use crate::domain::error::mapping::{http_failure, url_host_of};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
 use std::time::Duration;
@@ -86,10 +90,10 @@ pub(super) struct RetryPolicy {
 /// # Errors
 ///
 /// Returns the body on success, or the first terminal [`HttpError`] (a client
-/// error, a timeout, or `policy.exhausted` once retries run out).
+/// error, the LAST attempt's classified transport failure once the budget runs
+/// out, or `policy.exhausted` when the last attempt failed with a status).
 ///
 /// [`HttpError::ClientError`]: crate::domain::http_error::HttpError::ClientError
-/// [`HttpError::Timeout`]: crate::domain::http_error::HttpError::Timeout
 /// [`HttpError::RateLimited`]: crate::domain::http_error::HttpError::RateLimited
 /// [`HttpError::ServerError`]: crate::domain::http_error::HttpError::ServerError
 pub(super) async fn retry_with_backoff(
@@ -100,7 +104,11 @@ pub(super) async fn retry_with_backoff(
     policy: RetryPolicy,
 ) -> HttpResult<String> {
     let mut attempt = 0;
-    let mut last_failure_was_timeout = false;
+    let url_host = url_host_of(url);
+    // #2841 (S3/S4): the LAST attempt's failure, already mapped through the one
+    // classification seam with that attempt's timing. An attempt that failed
+    // with a STATUS resets it — a status carries no transport cause.
+    let mut last_transport_failure: Option<HttpError> = None;
     while attempt < config.max_retries {
         attempt += 1;
 
@@ -131,32 +139,46 @@ pub(super) async fn retry_with_backoff(
             request = request.header(name, value);
         }
 
+        let request_started = std::time::Instant::now();
         match request.send().await {
             Ok(resp) => {
                 if resp.status().is_success() {
-                    return resp
-                        .text()
-                        .await
-                        .map_err(|e| HttpError::Request(e.to_string()));
+                    // #2841 (L3 finding): a body-read failure is TRANSPORT, not
+                    // request construction — classified through the one seam
+                    // with the phase that actually failed.
+                    return resp.text().await.map_err(|e| {
+                        http_failure(e, FetchPhase::Body, url_host.as_deref(), request_started)
+                    });
                 } else if (policy.retryable)(resp.status().as_u16()) {
+                    last_transport_failure = None;
                     continue;
                 } else {
                     return Err(HttpError::ClientError(resp.status().as_u16()));
                 }
             },
             Err(e) => {
-                // F-08 (RC-1 slice 5): a timeout is transient — it consumes
-                // this attempt and the loop continues, exactly like any
-                // other transport failure. The terminal surface is kept:
-                // if the budget exhausts on timeouts, `Timeout` is what
-                // the caller sees (tracked below).
-                last_failure_was_timeout = e.is_timeout();
+                // F-08 (RC-1 slice 5): a transport failure is transient — it
+                // consumes this attempt and the loop continues, exactly like a
+                // timeout. Mapped NOW, with this attempt's timing: if the
+                // budget exhausts on transport failures, the LAST one is what
+                // the caller sees, cause included (S3).
+                last_transport_failure = Some(http_failure(
+                    e,
+                    FetchPhase::Connect,
+                    url_host.as_deref(),
+                    request_started,
+                ));
                 continue;
             },
         }
     }
-    if last_failure_was_timeout {
-        return Err(HttpError::Timeout);
+    // #2841 (S3): exhaustion delivers the LAST transport failure, classified —
+    // a timeout is a `Timeout` with its `ConnectTimeout`/`ReadTimeout` cause,
+    // exactly the surface the old bare `HttpError::timeout()` kept. S4: when
+    // the last attempt failed with a status, nothing is attached and the
+    // policy's bare exhaustion error (`RateLimited`/`ServerError`) surfaces.
+    if let Some(failure) = last_transport_failure {
+        return Err(failure);
     }
     Err(policy.exhausted)
 }
@@ -253,5 +275,85 @@ mod tests {
         // Retry-After: 1 → 1000ms, exponential attempt 3 → 4000ms → max = 4000ms
         let delay = std::cmp::max(1000, compute_backoff_delay(3, None, 1000, 10_000));
         assert_eq!(delay, 4000);
+    }
+
+    // =====================================================================
+    // #2841 — the retry budget's exhaustion carries the last failure's cause
+    // =====================================================================
+
+    /// S3: exhaustion after transport failures delivers the LAST transport
+    /// failure, classified through the one seam — `127.0.0.1:9` refuses every
+    /// dial with no network and no status, so the refusal itself is the only
+    /// evidence the exhaustion error may carry.
+    #[tokio::test]
+    async fn exhaustion_after_transport_failures_delivers_the_classified_cause() {
+        let client = Client::builder().build().expect("the client builds");
+        let config = HttpClientConfig {
+            max_retries: 1,
+            backoff_base_ms: 0,
+            backoff_max_ms: 0,
+            ..HttpClientConfig::default()
+        };
+        let policy = RetryPolicy {
+            retry_after_secs: None,
+            retryable: |status| status >= 500,
+            exhausted: HttpError::ServerError(500),
+            label: "5xx",
+        };
+        let err = retry_with_backoff(
+            &client,
+            "http://127.0.0.1:9/",
+            &config,
+            "webfang-test/1.0",
+            policy,
+        )
+        .await
+        .expect_err("the refused dial must exhaust the retry budget");
+        assert_eq!(
+            crate::domain::error::cause::cause_in_chain(&err),
+            Some(crate::domain::error::cause::NetworkCause::ConnectRefused),
+            "exhaustion must deliver the last transport failure's cause, got: {err}"
+        );
+    }
+
+    /// S4: when the last attempt failed with a STATUS, exhaustion stays bare —
+    /// `RateLimited`/`ServerError` carry no transport cause. Covers both
+    /// policies' exhaustion (S9), wiremock for the HTTP side.
+    #[tokio::test]
+    async fn exhaustion_after_status_failures_stays_bare() {
+        for (status, exhausted, label) in [
+            (429u16, HttpError::RateLimited(3), "429"),
+            (500u16, HttpError::ServerError(500), "5xx"),
+        ] {
+            let expected = exhausted.to_string();
+            let server = wiremock::MockServer::start().await;
+            wiremock::Mock::given(wiremock::matchers::any())
+                .respond_with(wiremock::ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+            let client = Client::builder().build().expect("the client builds");
+            let config = HttpClientConfig {
+                max_retries: 1,
+                backoff_base_ms: 0,
+                backoff_max_ms: 0,
+                ..HttpClientConfig::default()
+            };
+            let policy = RetryPolicy {
+                retry_after_secs: None,
+                retryable: |code| code == 429 || code >= 500,
+                exhausted,
+                label,
+            };
+            let err =
+                retry_with_backoff(&client, &server.uri(), &config, "webfang-test/1.0", policy)
+                    .await
+                    .expect_err("the status-only budget must exhaust");
+            assert_eq!(
+                crate::domain::error::cause::cause_in_chain(&err),
+                None,
+                "a status-exhausted error carries no cause, got: {err}"
+            );
+            assert_eq!(err.to_string(), expected);
+        }
     }
 }

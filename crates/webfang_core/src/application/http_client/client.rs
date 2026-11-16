@@ -5,6 +5,7 @@
 use super::factory::build_wreq_client;
 use super::retry::{compute_backoff_delay, retry_with_backoff, RetryPolicy};
 use crate::domain::body_cap;
+use crate::domain::error::cause::FetchPhase;
 use crate::domain::error::mapping::{http_failure, url_host_of};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
@@ -199,8 +200,12 @@ impl HttpClient {
                 let status = match e {
                     HttpError::WafChallenge(_) | HttpError::Forbidden => 403,
                     HttpError::RateLimited(_) => 429,
-                    HttpError::Timeout => 504,
+                    HttpError::Timeout { .. } => 504,
                     HttpError::Connection { .. } => 503,
+                    // #2841: an unclassified transport failure is the same
+                    // signal to the pool as a connection failure — the remote
+                    // was unavailable — NOT a 404-style "don't report".
+                    HttpError::Transport { .. } => 503,
                     HttpError::ClientError(404) => return, // don't report 404
                     HttpError::ClientError(code) => *code,
                     HttpError::ServerError(code) => *code,
@@ -287,11 +292,14 @@ impl HttpClient {
             match request.send().await {
                 Ok(response) => return Ok(response),
                 Err(e) => {
-                    if !e.is_timeout() {
-                        return Err(http_failure(e, url_host.as_deref(), request_started));
-                    }
-                    if attempt >= self.config.max_retries {
-                        return Err(HttpError::Timeout);
+                    // #2841: classified through the ONE seam with this attempt's timing;
+                    // non-timeouts stay terminal (F-09); the timeout that exhausts
+                    // the budget keeps its classified cause (S3).
+                    let timeout_err = e.is_timeout();
+                    let mapped =
+                        http_failure(e, FetchPhase::Connect, url_host.as_deref(), request_started);
+                    if !timeout_err || attempt >= self.config.max_retries {
+                        return Err(mapped);
                     }
                     attempt += 1;
                     let delay = compute_backoff_delay(
@@ -556,18 +564,14 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
             // a full HttpResponse (status + body + headers).
             let request_started = std::time::Instant::now();
             let resp = self.client.get(url.as_str()).send().await.map_err(|e| {
-                if e.is_timeout() {
-                    crate::domain::http_error::HttpError::Timeout
-                } else if e.is_connect() {
-                    crate::domain::error::mapping::http_connection_failure(
-                        e,
-                        crate::domain::error::cause::FetchPhase::Connect,
-                        url_host_of(&url).as_deref(),
-                        request_started,
-                    )
-                } else {
-                    crate::domain::http_error::HttpError::Request(e.to_string())
-                }
+                // #2841: the ONE classification seam, shared with `http_failure`
+                // — no second tri-branch to drift.
+                crate::domain::error::mapping::http_failure(
+                    e,
+                    FetchPhase::Connect,
+                    url_host_of(&url).as_deref(),
+                    request_started,
+                )
             })?;
 
             let status = resp.status().as_u16();
@@ -1310,142 +1314,4 @@ mod session_pool_tests {
 
 #[cfg(test)]
 #[cfg(not(miri))]
-mod timeout_retry_tests {
-    //! F-08/F-09 retry-parity contract tests for the hardened Stack B client
-    //! (RC-1 slice 5): request timeouts are RETRIED within the retry budget and
-    //! recovery is served — mirroring Stack A's `fetch_inner` tests
-    //! (`wreq_downloader.rs`: `timeout_is_retried_and_recovery_is_served`).
-    //! Builder/scheme errors were already terminal pre-dial (`get` validates
-    //! the scheme before any request), so no test can dial them.
-
-    use super::arrange::*;
-    use super::*;
-    use std::time::Duration;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    /// Timeout that a 1500 ms delayed wiremock response reliably trips.
-    const TIMEOUT_SECS: u64 = 1;
-    /// First hit trips the timeout, later hits answer instantly.
-    const TRIP_DELAY_MS: u64 = 1500;
-
-    fn parity_config(max_retries: u32) -> HttpClientConfig {
-        HttpClientConfig {
-            timeout_secs: TIMEOUT_SECS,
-            // Short backoff keeps the retry path exercised but the test fast.
-            ..retry_config(max_retries)
-        }
-    }
-
-    async fn count_requests(server: &MockServer) -> usize {
-        server
-            .received_requests()
-            .await
-            .expect("received requests are recorded")
-            .len()
-    }
-
-    /// F-08 (initial send): a request that times out is RETRIED and recovery
-    /// is served. Exactly one re-request after the timeout — the parity twin
-    /// of Stack A's `timeout_is_retried_and_recovery_is_served`.
-    #[tokio::test]
-    async fn timeout_is_retried_and_recovery_is_served() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/slow"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string("late")
-                    .set_delay(Duration::from_millis(TRIP_DELAY_MS)),
-            )
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/slow"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("fast"))
-            .mount(&server)
-            .await;
-
-        let client = HttpClient::new(parity_config(1)).expect("client builds");
-        let body = client
-            .get(&format!("{}/slow", server.uri()))
-            .await
-            .expect("retry after initial-send timeout must recover");
-        assert_eq!(body, "fast");
-        assert_eq!(
-            count_requests(&server).await,
-            2,
-            "initial-send timeout retry must produce exactly one re-request"
-        );
-    }
-
-    /// F-08 (inside the 429 retry loop): a timeout during `retry_with_backoff`
-    /// consumes the attempt and the loop continues — it does not surface
-    /// early. 429 → timeout → fast recovery: exactly 3 outbound requests.
-    #[tokio::test]
-    async fn timeout_inside_429_retry_loop_is_retried() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/slow"))
-            .respond_with(ResponseTemplate::new(429))
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/slow"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string("late")
-                    .set_delay(Duration::from_millis(TRIP_DELAY_MS)),
-            )
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/slow"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("fast"))
-            .mount(&server)
-            .await;
-
-        let client = HttpClient::new(parity_config(2)).expect("client builds");
-        let body = client
-            .get(&format!("{}/slow", server.uri()))
-            .await
-            .expect("timeout inside the 429 retry loop must not abort the budget");
-        assert_eq!(body, "fast");
-        assert_eq!(
-            count_requests(&server).await,
-            3,
-            "429 + timeout + recovery = exactly three outbound requests"
-        );
-    }
-
-    /// F-08 (exhaustion): when every attempt times out, `HttpError::Timeout`
-    /// still surfaces — after the FULL retry budget, not after the first hit.
-    #[tokio::test]
-    async fn timeout_exhaustion_returns_timeout_after_full_budget() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/slow"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string("late")
-                    .set_delay(Duration::from_millis(TRIP_DELAY_MS)),
-            )
-            .mount(&server)
-            .await;
-
-        let client = HttpClient::new(parity_config(1)).expect("client builds");
-        let result = client.get(&format!("{}/slow", server.uri())).await;
-        assert!(
-            matches!(result, Err(HttpError::Timeout)),
-            "exhausted timeouts must surface as Timeout, got: {result:?}"
-        );
-        assert_eq!(
-            count_requests(&server).await,
-            2,
-            "initial attempt + max_retries(1) = exactly two attempts"
-        );
-    }
-}
+mod timeout_retry_tests;
