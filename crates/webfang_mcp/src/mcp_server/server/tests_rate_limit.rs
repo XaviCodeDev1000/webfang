@@ -1,10 +1,10 @@
 //! Tests extraídos del hub `server.rs` por tema (PR 1 de #2584, movimiento puro).
 //! Los cuerpos son verbatim del módulo de tests inline original.
 
-use super::{
-    build_rate_limiter, rate_key, retry_after_secs, AuthState, KeyedRateLimiter, ServerOptions,
-    ANONYMOUS_RATE_KEY,
+use super::rate_limit::{
+    build_rate_limiter, rate_key, retry_after_secs, KeyedRateLimiter, ANONYMOUS_RATE_KEY,
 };
+use super::{AuthState, ServerOptions};
 use std::sync::Arc;
 use std::time::Duration;
 #[test]

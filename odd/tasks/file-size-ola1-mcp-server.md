@@ -148,6 +148,22 @@ session_cap 4/4, panic_containment 8/8, auth_fail_closed 9/9, scraping_coverage 
 ratchet/inventario/dead-tests/direcciones/intra-crate OK · golden refrescado (sin diff).
 Siguientes slices: rate_limit (~215) y session_cap (~315) ⇒ hub ≤500 ⇒ `--remove`.
 
+L4 — PR 2 slice 2 ejecutado (2026-11-15, sin commit): bloque rate limiting
+(doc de `build_rate_limiter` 241 hasta el `}` de `rate_limit_middleware` 400, 160 líneas)
+→ `server/rate_limit.rs` (183 con header). Items que consumen hub/tests marcados
+`pub(super)` (sin ensanchar fuera de `server`): build_rate_limiter, KeyedRateLimiter
+(+ sus métodos), rate_key, retry_after_secs, rate_limit_middleware, ANONYMOUS_RATE_KEY,
+RateKey/RateLimiter/RATE_LIMIT_OPERATION. Hub: `mod rate_limit; use rate_limit::{build_rate_limiter, rate_limit_middleware, retry_after_secs};` ⇒ **server.rs 880→718**,
+baseline `--update` 880→718. `tests_rate_limit.rs` re-apuntado a `super::rate_limit::{…}`
+(cuerpos de test sin tocar). Primer intento del script cortó mal (span 0..400 por
+sentinela ambiguo) — se restauró con `git checkout` y se re-hizo con sentinelas de
+texto exacto; lección: buscar el banner por texto, no por posición relativa a otro banner.
+Verbatim: bloque idéntico token a token salvo `pub(super)` añadidos y UNA coma de más
+que metió `cargo fmt` en la firma de `build_rate_limiter` (reformateo, no contenido).
+Gates: check/clippy(-D warnings)/fmt/doc 0 · lib 369=369 · --list 369=369 · ratchet
+880→718 verde · inventario/dead-tests/direcciones/intra-crate OK · golden refrescado.
+Siguiente slice: session_cap (~315) ⇒ hub ~400 ≤500 ⇒ `--remove`.
+
 L1 — Pedido (2026-11-15): el usuario arranca la misión del último monstruo >2000 de la
 Ola 1 (`server.rs` 2012). Worktree creado (`ola1-mcp-server`, rama
 `refactor/ola1-mcp-server` desde `origin/main` acd48b04). Medición: 2012 = 1068
