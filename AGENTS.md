@@ -24,6 +24,7 @@ Everything that is not here is searched in Engram: `mem_search` (MCP) or
 | Support lines, hotfix routing, versioning, governance | `support line routing hotfix branch taxonomy versioning` | project | #2308 |
 | PR gates, pre-commit, merge, batch, CHANGELOG | `merge-when-green batch merge pre-commit changelog` | project | #2309 |
 | Delivery gates: hooks, push to main, cloud verification | `delivery gates hooksPath main-push verify cloud timeout` | project | #2316 |
+| Local gate coverage report (lane ↔ `gate.needs`) | `ci_fast_gate coverage report gate.needs lane partial` | project | #2980 |
 | SSH :22 → :443 contingency | `ssh port 22 443 identity` | personal | #2311 |
 | Contamination, immutable history, hard-deny | `contamination history immutable hard-deny governance` | project | #2312 |
 | Native review (RDD): full cycle | `gentle-ai review assess start consent capture acknowledge` | project | #2213 + skill `rdd-defect-workflow` |
@@ -75,21 +76,17 @@ What the compiler **cannot** catch. Everything else comes from the harness or th
 above.
 
 - **Never `.unwrap()` in production** — use `?`, `match` or `.context()`.
-- **`cfg(windows)` arms are invisible to every Linux gate.** `scripts/check_windows_platform.sh`
-  type-checks the platform modules for `x86_64-pc-windows-msvc` in a throwaway crate that
-  mirrors the workspace lint table; the fast gate runs it when `infrastructure/platform/`
-  changes, and any hand-touched `cfg(windows)` arm should run it too — the two #1810 defects
-  (a missing `use tracing::warn;` and bare `unsafe` under `unsafe_code = "deny"`) were exactly
-  this class. It needs only the target's std (no MSVC toolchain, no linking) and fails loudly
-  naming the `rustup target add` command when it is missing.
-- **A poisoned `std::sync::Mutex` is never fatal and never silent.** Recover the guard with
-  `PoisonError::into_inner()` — it still grants exclusive access — and keep going. Where the
-  function already returns `Result` and a recovered write could corrupt an output stream,
-  propagate it as a typed error instead (`infrastructure::stream` does this for the vector
-  sink). Two shapes are banned in production: `.lock().expect(..)`/`.unwrap()`, because one
-  panic turns into a process-wide outage, and `if let Ok(..) = mutex.lock()`, because it
-  silently drops the work. `MockClock` keeps its `expect`: a poisoned test clock is a test
-  bug, not runtime state.
+- **`cfg(windows)` arms are invisible to every Linux gate.** Run `scripts/check_windows_platform.sh`
+  on any hand-touched `cfg(windows)` arm (the fast gate runs it when `infrastructure/platform/`
+  changes): it type-checks for `x86_64-pc-windows-msvc` in a throwaway crate mirroring the
+  workspace lint table, needs only the target's std (no MSVC, no linking), and fails loudly
+  naming the `rustup target add` command when missing.
+- **A poisoned `std::sync::Mutex` is never fatal and never silent.** Recover with
+  `PoisonError::into_inner()` (still grants exclusive access) and keep going; where a recovered
+  write could corrupt an output stream and the function returns `Result`, propagate a typed
+  error instead (`infrastructure::stream`). Banned in production: `.lock().expect(..)`/`.unwrap()`
+  (one panic → process-wide outage) and `if let Ok(..) = mutex.lock()` (silently drops work).
+  `MockClock` keeps its `expect`: a poisoned test clock is a test bug, not runtime state.
 - **User-facing errors in Spanish; tracing fields and logs in English.**
 - **HTTP: always `wreq`, never `reqwest`** — TLS fingerprint impersonation for WAF evasion.
   An agent that suggests `reqwest` is wrong.
@@ -102,36 +99,15 @@ above.
 - **Do not touch `CHANGELOG.md`** in a work PR — there is a single writer (the Release PR).
 - **Do not touch `docs/`** unless explicitly asked.
 
-### The local gate mirrors `gate.needs`, and now it says so
+### The local gate mirrors `gate.needs`
 
-`scripts/ci_fast_gate.sh` is the local equivalent of the PR fast gate, not of the whole
-workflow. Every run ends with a coverage report naming, for the lane that just ran, which
-`gate.needs` jobs it covers, which it covers only in part, and which it never touches. The
-declaration is `scripts/ci_fast_gate_coverage.tsv`, and `scripts/test_ci_gate_structure.sh`
-fails when it drifts from `gate.needs` in either direction — so a new required producer
-cannot go missing from the report in silence. **Read that report before pushing:** when it
-names a job you touched, run that job's check by hand.
-
-The two checks that used to be missing entirely now run in the code lane (#2559): the
-duplication ratchet (`scripts/check_duplication.sh`, merge-blocking in `code-quality`) and
-the `docs/test-inventory.json` drift check (`scripts/check_test_inventory.sh`, merge-blocking
-in `repo-guards`). Measured on #2548, the gate printed 37 pass / 0 fail — GREEN — while both
-were red in CI: a whole local cycle spent on a gate that exists to save them.
-
-What stays a deliberate local exception, by class:
-
-- **`toolchain`, `artifact-guards`** — nothing runs locally. They answer with a *pinned*
-  toolchain or with producers that a pre-push run may not download, so a verdict from
-  unpinned local tools would be worse than none.
-- **`security`** — only the *cached* zizmor audit runs (`.github/zizmor.yml`, unchanged,
-  `--min-severity high`). `cargo deny` and `cargo audit` never do, so the report lists the
-  job as partial and never as covered.
-- **The code lane's test depth, and the full step set of `repo-guards`** — cost. The code lane
-  runs nextest for the crates the classifier selected, not the workspace, so `test-core` is
-  *partial* there; `test-full` runs only in the `full` lane, which is where an `--all-features`
-  workspace run belongs.
-- **`merge-metrics-guards`** — its harnesses run locally only when their own files change,
-  because a change elsewhere cannot break them.
+`scripts/ci_fast_gate.sh` is the local equivalent of the PR fast gate, **not** of the whole
+workflow. Every run ends with a coverage report naming which `gate.needs` jobs the lane
+covers, covers only in part, or never touches. **Read it before pushing:** when it names a job
+you touched, run that job's check by hand — a green local gate is not evidence for what it
+does not cover. The declaration is `scripts/ci_fast_gate_coverage.tsv`, kept in sync with
+`gate.needs` by `scripts/test_ci_gate_structure.sh`. The deliberate local exceptions (by class)
+and the lane model: **obs #2980**.
 
 ## 🏗️ Architecture
 
@@ -141,7 +117,7 @@ What stays a deliberate local exception, by class:
 webfang/                          # virtual workspace root (no [package])
 ├── crates/
 │   ├── webfang_core/             # domain + application + infrastructure + cli
-│   ├── webfang_mcp/              # MCP server (36 tools, 9 categories)
+│   ├── webfang_mcp/              # MCP server (tool count pinned by stdio_handshake.rs)
 │   ├── webfang_cli/              # the `webfang` binary (main.rs)
 │   ├── webfang_test_utils/       # shared test harness (not published)
 │   └── webfang_benchmark/        # benchmark harness (leaf, tooling)
@@ -175,47 +151,35 @@ webfang/                          # virtual workspace root (no [package])
 infrastructure → adapters → application → domain   (inward only)
 ```
 
-Domain defines ports (traits) → Infrastructure implements them → Application orchestrates.
-When writing new code, copy the pattern of the closest equivalent module: trait in
-`application/crawler/engine.rs`, domain entity in `domain/entities.rs` with constructor +
-`TryFrom` + `Display`/`Debug`/`PartialEq`, adapter in `infrastructure/`, new error in the
-layer's error file.
+Domain defines ports (traits) → Infrastructure implements them → Application orchestrates. Copy
+the closest equivalent module: trait in `application/crawler/engine.rs`, domain entity in
+`domain/entities.rs` (constructor + `TryFrom` + `Display`/`Debug`/`PartialEq`), adapter in
+`infrastructure/`, new error in the layer's error file.
 
-**Avoid:** giant components. No new file should exceed ~500 lines, and if you touch one that
-already does, split it. To see the current largest files in the repo:
-`find crates -name '*.rs' -not -path '*/tests/*' | xargs wc -l | sort -rn | head`.
+**Avoid giant components:** no new file over ~500 lines; if you touch one that already exceeds
+it, split it. Largest files: `find crates -name '*.rs' -not -path '*/tests/*' | xargs wc -l | sort -rn | head`.
 
 ### Error stratification
 
-The application error is `ScraperError` (`crates/webfang_core/src/error.rs`) and **everything
-converges towards it**: it is not a chain of wrappers, it is a funnel.
+The application error is `ScraperError` (`crates/webfang_core/src/error.rs`) — a **funnel**, not
+a chain of wrappers: `DomainError`, `InfraError`, `CrawlError` and `DownloadError` each implement
+`From<…> for ScraperError` (they are **inputs**; `domain/error/domain_error.rs` defines no
+`impl From` itself).
 
-```text
-DomainError    (domain/error/domain_error.rs,  7 variants)   ─┐
-InfraError     (infrastructure/error.rs,        15 variants) ─┤
-CrawlError     (domain/error/crawl_error.rs)                 ─┼─ From ─→ ScraperError
-DownloadError  (domain/downloader_port.rs)                   ─┘
-```
-
-- `DomainError` and `InfraError` implement `From<…> for ScraperError`: they are **inputs** to
-  the application error, not a chain of wrappers. `domain/error/domain_error.rs` defines no
-  `impl From` at all.
-- `CliError` (`crates/webfang_core/src/cli/error.rs`) is **independent**: it has no relation to
-  `ScraperError`; it maps to exit codes (`EXIT_CONFIG = 78` for a configuration error).
+- `CliError` (`cli/error.rs`) is **independent** of `ScraperError`; it maps to exit codes
+  (`EXIT_CONFIG = 78` for a configuration error).
 - `HttpError` is a **domain** enum (`domain/http_error.rs`), not an `InfraError` variant.
-  `WafError` **is not an error type**: it is a `FetchBehavior` variant
-  (`application/crawler/crawl_task.rs`). `ParseError` does not exist in this repo.
-- Full matrix and exit-code rules: `docs/error-classification-matrix.md`.
-- A new error variant enters through `From` towards `ScraperError`, and its user-facing
-  message goes in Spanish.
+  `WafError` is **not an error type** — it is a `FetchBehavior` variant
+  (`application/crawler/crawl_task.rs`). `ParseError` does not exist here.
+- A new variant enters through `From` towards `ScraperError`; its user-facing message is Spanish.
+  Full matrix and exit-code rules: `docs/error-classification-matrix.md`.
 
 ### Fetch guard chain (MANDATORY ORDER)
 
-Every fetch path — CLI, engine, MCP tool, benchmark, future adapter — must wire the
-protections **in this order**. Each stage assumes the previous one filtered: deviating from
-the order is a **bug**, not a style choice (pacing *after* a doomed request burns rate budget
-on something the SSRF guard would have rejected; classifying retries *after* reading the body
-wastes a full read of a response that will never be accepted).
+Every fetch path — CLI, engine, MCP tool, benchmark, future adapter — must wire the protections
+**in this order**; each stage assumes the previous one filtered. Deviating is a **bug**, not a
+style choice (pacing after a doomed request burns rate budget; classifying retries after reading
+the body wastes a full read of a response that will never be accepted).
 
 ```text
 ValidUrl (entry) → rate limit (pacing) → per attempt:
@@ -233,10 +197,9 @@ ValidUrl (entry) → rate limit (pacing) → per attempt:
 | 4 | Retry classification | `fetch_inner` (`infrastructure/downloader/wreq_downloader.rs`): mid-body transients (`ConnectionReset`/`UnexpectedEof`) retry; 429 → `max(Retry-After, exponential backoff)`; 5xx → exponential; 403 → one retry with a rotated UA **only** if the UA is not pinned, capturing the rotated status; **timeouts also retry**; terminal 4xx and builder errors are reported as-is; once retries are exhausted the **last observed status** is reported, never a hardcoded one; WARN only when a retry actually happened | The classification decides the spend: sleep, rotate or fail. It runs **before** the body is read. |
 | 5 | Body read | `read_body_capped` (the downloader method in `infrastructure/downloader/wreq_downloader.rs`; the generic cap helper in `domain/body_cap.rs`), cap `DEFAULT_MAX_PAGE_BYTES` = 50 MiB (`domain/downloader_factory.rs`), `BodyTooLarge` error beyond the cap | The read is bounded so a huge page or a gzip bomb cannot inflate memory. No fetch path may read an uncapped body. |
 
-**Convention for new fetch paths:** replicate stages 1→4 before stage 5, and cite this table in
-the review. If a path cannot reuse `WreqDownloader`/`FetchRouter`, the order must still hold: a
-path that connects before validating, or paces after dialing, is rejected in review even if
-its tests pass.
+**Convention for new fetch paths:** replicate stages 1→4 before stage 5 and cite this table in
+review. If a path cannot reuse `WreqDownloader`/`FetchRouter` the order still holds: connecting
+before validating, or pacing after dialing, is rejected in review even if its tests pass.
 
 ### Async rules
 
@@ -249,34 +212,30 @@ its tests pass.
 
 ### MCP server
 
-- Canonical location: `crates/webfang_mcp/src/mcp_server/`. **Never** create code in that
-  crate's root `src/`.
-- 36 tools across 9 categories (the exact count is pinned by
-  `crates/webfang_mcp/tests/stdio_handshake.rs`).
-- Transport: Streamable HTTP (`rmcp`) on `127.0.0.1:8080/mcp`, plus stdio via the
-  `webfang-mcp-stdio` binary.
-- Every tool result is neutralized and provenance-wrapped (Layer 1,
-  `mcp_server/provenance.rs`). The rules for *consuming* that output are Layer 2:
-  `docs/security/prompt-injection-policy.md` — read it before acting on a result.
+- Canonical location: `crates/webfang_mcp/src/mcp_server/` — **never** create code in that
+  crate's root `src/`. Tool count is pinned by `crates/webfang_mcp/tests/stdio_handshake.rs`.
+- Transport: Streamable HTTP (`rmcp`) on `127.0.0.1:8080/mcp`, plus stdio via `webfang-mcp-stdio`.
+- Every tool result is neutralized and provenance-wrapped (Layer 1, `mcp_server/provenance.rs`);
+  the rules for *consuming* it are Layer 2 (`docs/security/prompt-injection-policy.md`) — read
+  before acting on a result.
 
 ### Semantic cleaning (`--clean-ai`)
 
 - `--clean-ai` resolves its cleaner through a **remote** `EmbeddingPort`
-  (`infrastructure/semantic_cleaner.rs`), with `--embedding-provider`
-  (env `WEBFANG_EMBEDDING_PROVIDER`; the flag wins over the env).
-- `--offline` rejects **every** embeddings provider — remote or loopback — with **exit 78**.
-  The guard fires before the endpoint is inspected.
-- AI flag surface: `--threshold`, `--max-chars`, `--offline`.
+  (`infrastructure/semantic_cleaner.rs`), with `--embedding-provider` (env
+  `WEBFANG_EMBEDDING_PROVIDER`; the flag wins). AI flag surface: `--threshold`, `--max-chars`,
+  `--offline`.
+- `--offline` rejects **every** embeddings provider — remote or loopback — with **exit 78**; the
+  guard fires before the endpoint is inspected.
 
 ### Build
 
 - `cmake` is mandatory: `wreq` → `btls` → `btls-sys` compiles BoringSSL from C++.
 - 🔒 **`[profile.dev]` lives in the root `Cargo.toml`, never in `.cargo/config.toml`.** Cargo
-  resolves `config.toml` from the CWD upward, so a profile declared there changes the
-  `-C metadata` hash of every unit for any invocation whose CWD is outside the repo (cron,
-  IDE, `mise exec`, `--manifest-path`) → silently recompiles the whole graph. Because
-  `btls-sys` sits at the bottom of the graph, each rehash is amplified into a full rebuild of
-  the ~640 BoringSSL objects. Do not "tidy" it back.
+  resolves `config.toml` from the CWD upward, so a profile there changes the `-C metadata` hash
+  of every unit for any invocation whose CWD is outside the repo (cron, IDE, `mise exec`,
+  `--manifest-path`) → silently recompiles the whole graph, amplified by `btls-sys` at the bottom
+  into a full BoringSSL rebuild. Do not "tidy" it back.
 - Occasional full debug info: `CARGO_PROFILE_DEV_DEBUG=true cargo build`.
 
 ## 🧪 Testing
@@ -320,10 +279,10 @@ Command::cargo_bin("webfang")   // ❌
 
 ## 🌭 Observability
 
-**Iron rule:** every feature, hot path or behavior change ships with observability. Code that
-cannot be traced in production is not finished. The stack is the `tracing` crate + the always
-available **FileTraceLayer** (`--trace-file out.jsonl`) + native correlation IDs. No external
-metrics backend: neither OpenTelemetry nor any other collector is introduced.
+**Iron rule:** every feature, hot path or behavior change ships with observability — code that
+cannot be traced in production is not finished. Stack: `tracing` + **FileTraceLayer**
+(`--trace-file out.jsonl`) + native correlation IDs. **No external metrics backend**: emit a
+structured `tracing` event, query the JSONL (`docs/src/debugging.md`, `scripts/analyze-trace.sh`).
 
 | Situation | Requirement |
 |---|---|
@@ -334,24 +293,17 @@ metrics backend: neither OpenTelemetry nor any other collector is introduced.
 | Async spans | `.instrument(span)` on futures; never a `span.enter()` guard across an `.await` |
 
 - **Structured fields, not string soup:** `tracing::info!(pages = n, url = %url, "msg")`.
-- **Correlation:** every event carries a 16-hex `trace_id` that is **ephemeral, an identity
-  within the run** (do not persist it or join across runs; the durable cross-run identity is
-  the `CorrelationId` UUID). To reconstruct a run: `ROOT=<16-hex root>; jq -c
-  'select(.trace_id == "$ROOT")' <file>` — the `trace_id` is at **top level**, not
-  `.fields.trace_id` (that inner one is only populated on the error path). `span_close` records
-  share the `.span` name, so per-stage counts must exclude `.record == "span_close"`.
-- **User-facing errors in Spanish; tracing fields and logs in English.**
-- **No new metrics backends:** emit a structured `tracing` event and query it from the JSONL.
-  `docs/src/debugging.md` and `scripts/analyze-trace.sh` hold the query cookbook.
-- **Deterministic snapshots:** `correlation_id`/`trace_id` are internal and carry
-  `#[serde(skip)]`.
+- **Correlation:** every event carries a 16-hex `trace_id`, **ephemeral within the run** (never
+  persist or join across runs; the durable cross-run identity is the `CorrelationId` UUID). It
+  sits at **top level**, not `.fields.trace_id` (populated only on the error path); `span_close`
+  records share the `.span` name, so per-stage counts exclude `.record == "span_close"`.
+- **Deterministic snapshots:** `correlation_id`/`trace_id` are internal, `#[serde(skip)]`.
 
 ## 🔬 Intelligence Stack
 
-Two complementary tools that are **mandatory** for all source-level work — pick the right one by
-mission, but never reach for classical tools first. They replace `grep`/`rg`, `find`/`fd`,
-`cat`/`head`/`tail`, and `Read` for source code. **They are not skills: they are CLIs**
-(`codedb 0.2.5849`, `codegraph 1.6.2`) — invoke them as commands, not by loading a skill.
+Two complementary tools **mandatory** for all source-level work — pick by mission, never reach
+for classical tools first. They replace `grep`/`rg`, `find`/`fd`, `cat`/`head`/`tail` and `Read`
+for source code. **They are CLIs, not skills** — invoke them as commands, not by loading a skill.
 
 | Moment | Tool | Why |
 |---|---|---|
@@ -368,34 +320,23 @@ understand* (returns source, call paths and blast radius).
 
 ### Non-negotiable gates
 
-- **Mandatory instead of classical tools:** agents **MUST** query `codedb` (`word`,
-  `symbol`, `callers`, `find`, `glob`) or `codegraph explore` for any source definition,
-  usage, or flow. `grep`/`rg`, `find`/`fd`, `cat`/`head`/`tail`, and `Read` are **prohibited**
-  on source code.
-- Before editing a symbol → `CodeGraph explore` (callers + impact). **Never** edit blind.
-- Before renaming → check **all** usages (`codedb callers` / `CodeGraph explore`).
-- Before committing → `cargo check` + `cargo clippy` + `cargo fmt --all -- --check`, and
-  re-read the diff.
-- **Legitimate exceptions to `grep`/`rg`:** logs, CI output, `.env`/config text, and files
-  outside the index — never source code.
+- **Mandatory instead of classical tools:** query `codedb` (`word`, `symbol`, `callers`, `find`,
+  `glob`) or `codegraph explore` for any source definition, usage or flow. `grep`/`rg`,
+  `find`/`fd`, `cat`/`head`/`tail` and `Read` are **prohibited** on source code.
+- Before editing a symbol → `CodeGraph explore` (callers + impact); **never** edit blind. Before
+  renaming → check **all** usages (`codedb callers` / `CodeGraph explore`).
+- Before committing → `cargo check` + `cargo clippy` + `cargo fmt --all -- --check`, re-read the diff.
+- **Legitimate exceptions to `grep`/`rg`:** logs, CI output, `.env`/config text, files outside the
+  index — never source code.
 
 ### Absolute paths in worktrees (CRITICAL)
 
-In a worktree, **both** tools need the **absolute path** of the worktree. With the bare name
-they silently resolve to the main checkout:
-
-| Tool | Parameter |
-|---|---|
-| CodeDB MCP | `project="/home/xavi/Projects/Rust/webfang-worktrees/<dir>"` |
-| CodeGraph MCP | `projectPath="/home/xavi/Projects/Rust/webfang-worktrees/<dir>"` |
-
-Never use the bare repo name in a worktree: it is ambiguous between main and every worktree.
-
-**CodeDB CLI — the root is POSITIONAL-FIRST:** `codedb <abs-root> <cmd>` (`usage: codedb
-[root] <command> [args...]`). Only `mcp` accepts the reversed order (`codedb mcp <path>`).
-`codedb status <path>` and `codedb reindex <path>` **ignore the trailing path** and operate
-on the cwd project with exit 0 — always verify with `codedb <abs-root> status`: `root` must be
-the worktree path and `head` must match `git -C <abs-root> rev-parse --short HEAD`.
+In a worktree **both** tools need its **absolute path** (`project=` for CodeDB MCP,
+`projectPath=` for CodeGraph MCP) — the bare repo name silently resolves to main and is
+ambiguous across worktrees. **CodeDB CLI is POSITIONAL-FIRST:** `codedb <abs-root> <cmd>`; only
+`mcp` reverses (`codedb mcp <path>`). `status`/`reindex` **ignore a trailing path** and act on
+the cwd project (exit 0), so verify with `codedb <abs-root> status`: `root` must be the worktree
+and `head` must match `git -C <abs-root> rev-parse --short HEAD`.
 
 ## 🌳 Worktree policy
 
@@ -415,41 +356,27 @@ is shared; working tree, index and HEAD are isolated.
 - **`.git/worktrees/` is Git's internal state.** Never edit it by hand: use
   `git worktree add` / `remove` / `prune` / `repair`.
 - **Forbidden commands:**
-  - `git checkout`, `git switch` — they change the branch inside the current worktree. Use
-    `git worktree add`. Since git 2.44 upstream enforces this: `git checkout -B <branch>`
-    refuses (exit 128) if the branch is in use in another worktree. The hatch is
-    `git checkout --ignore-other-worktrees -B <branch>` (the flag goes **before** `-B`; after
-    it, the flag is parsed as a refspec and the command still fails). It is the same class of
-    escape as `--force`: explicit human authorization only.
-  - `git stash` / `stash pop` / `stash apply` / `stash drop` — the storage (`refs/stash`) is
-    **shared by ALL worktrees**: a `pop` in one worktree can apply another session's stash. If
-    you need to set something aside, commit it on a throwaway branch.
-  - `git worktree move`, `git worktree lock` — use `remove` + `add`.
-  - `git worktree add --force` — it bypasses Git's native guard that refuses a branch already
-    checked out in another worktree. Two agents on the same branch are exactly the failure that
-    guard prevents.
+  - `git checkout` / `git switch` — they change the branch inside the current worktree; use
+    `git worktree add`. The hatch `git checkout --ignore-other-worktrees -B <branch>` (flag
+    **before** `-B`) is the same class of escape as `--force`: explicit human authorization only.
+  - `git stash` (any form) — `refs/stash` is **shared by ALL worktrees**: a `pop` can apply
+    another session's stash. To set something aside, commit it on a throwaway branch.
+  - `git worktree move` / `lock` — use `remove` + `add`.
+  - `git worktree add --force` — bypasses Git's guard against a branch already checked out in
+    another worktree (two agents on one branch is exactly the failure it prevents).
 
 ### Placement, naming and the identity proxy
 
-```text
-~/Projects/Rust/
-├── webfang/                     # main repo (always on main)
-└── webfang-worktrees/           # repo siblings (globally gitignored)
-    ├── feat-auth/               # branch: feat/auth
-    └── fix-crawler-timeout/     # branch: fix/crawler-timeout
-```
+Layout: `~/Projects/Rust/webfang/` (main, always on `main`) and sibling
+`~/Projects/Rust/webfang-worktrees/<dir>/` (globally gitignored), e.g. `feat-auth/` ↔ `feat/auth`.
 
-**Never put a worktree under `/tmp`.** On this machine `/tmp` is a 16 GB tmpfs, and a
-from-scratch `target/` for this workspace does not fit: the build dies with
-`Disk quota exceeded`. Worse, a backgrounded build that dies that way returns an
-**empty log** — it looks like the command never ran, and the failure is easy to misread as
-a tooling problem. For a throwaway tree (a merge probe, a bisect), create it elsewhere and
-point `CARGO_TARGET_DIR` at an existing worktree's `target/` instead of building a second
-one.
+**Never put a worktree under `/tmp`** — it is a 16 GB tmpfs here and a from-scratch `target/`
+does not fit: the build dies with `Disk quota exceeded`, and a backgrounded build that dies
+that way returns an **empty log** (looks like it never ran). For a throwaway tree, point
+`CARGO_TARGET_DIR` at an existing worktree's `target/` instead of building a second one.
 
-The convention is `/ → -`: `feat/auth` → `feat-auth`. **The invariant that matters is that the
-commit lands on the branch intended for the task or the PR.** The name proxy is the default
-verification — run this before every commit in a worktree:
+The convention is `/ → -` (`feat/auth` → `feat-auth`). **The invariant is that the commit lands
+on the branch intended for the task/PR.** Run the name proxy before every commit in a worktree:
 
 ```bash
 [ "$(basename "$PWD")" = "$(git branch --show-current | tr '/' '-')" ] || echo "MISMATCH"
@@ -457,22 +384,20 @@ verification — run this before every commit in a worktree:
 
 ### Identity-exception protocol
 
-A failed proxy does **not** prove you are in the wrong worktree — but the local branch name
-also does not prove you are in the right one. Committing under a directory/name mismatch is
-allowed only when **all three** hold:
+A failed proxy does not prove you are in the wrong worktree, nor does the branch name prove you
+are in the right one. Committing under a directory/name mismatch is allowed only when **all
+three** hold:
 
-1. **Externally anchored expectation.** The intended branch is known from a source fixed outside
-   this worktree *before* committing: PR metadata
-   (`gh pr view --json headRefOid,headRefName`), task metadata, an upstream ref, or an explicit
-   human instruction. A branch that only exists inside the worktree proves nothing.
-2. **Verifiable binding.** The worktree is observably attached to that branch:
-   `git symbolic-ref --short HEAD` and `git worktree list` agree (path → branch). With an
-   upstream, `git rev-parse @{u}` is an extra signal.
-3. **Ancestry, not equality.** The pre-commit HEAD must be at or a descendant of the expected
-   tip/base — a strict `HEAD == tip` check breaks after the first commit of a sequence, so
-   ancestry is the correct test.
+1. **Externally anchored expectation** — the intended branch is known from a source fixed
+   outside this worktree *before* committing (PR metadata `gh pr view --json
+   headRefOid,headRefName`, task metadata, an upstream ref, or an explicit human instruction). A
+   branch that only exists inside the worktree proves nothing.
+2. **Verifiable binding** — `git symbolic-ref --short HEAD` and `git worktree list` agree
+   (path → branch); `git rev-parse @{u}` is an extra signal with an upstream.
+3. **Ancestry, not equality** — pre-commit HEAD is at or a descendant of the expected tip/base
+   (a strict `HEAD == tip` check breaks after the first commit of a sequence).
 
-Every exception commit records the evidence in its body (compact trailer):
+Every exception commit records the evidence in its body:
 
 ```text
 Worktree-Identity-Exception: directory-name mismatch
@@ -485,35 +410,15 @@ If any condition fails, MISMATCH is a hard stop.
 
 ### Per-worktree bootstrap
 
-The `.envrc` is **per worktree**, never shared, and it is written **from the tree's own
-name** (never derived from main's: a `sed` over main's left a perfectly valid
-`CARGO_TARGET_DIR` pointing at MAIN's target, silently). It is **exactly 5 lines**:
-
-```bash
-TREE="$(basename "$PWD")"
-cat > .envrc <<EOF
-export CARGO_TARGET_DIR=\$HOME/.cache/cargo-target/$TREE
-export CARGO_INCREMENTAL=0
-unset RUSTC_WRAPPER
-export CARGO_LLVM_COV_TARGET_DIR=\$HOME/.cache/cargo-target/$TREE-llvm-cov
-PATH_add \$HOME/.local/share/mbx/bin
-EOF
-direnv allow
-cp ~/Projects/Rust/webfang/.env .        # .env is gitignored
-```
-
-`$TREE` is substituted when the file is written; only `$HOME` stays literal. A literal
-`$TREE` left in the file makes the isolation guard reject the build with
-`reason=unregistered-target`.
-
-Then: index the worktree (`codegraph init`; `codedb "$PWD" reindex && codedb "$PWD" status`)
-and, optionally, `bash scripts/seed_target.sh` (seeds an already-compiled target; `cold` is a
-normal result, `refused` is the only one that is not a build). The operational detail, the
-mistakes already paid for and the seed contract: **obs #2307**.
-
-**Without both indexes the agent is blind in the worktree**: the tools resolve to the main
-checkout or return nothing. Restart the MCP connection after indexing (the server caches the
-registry at startup).
+The `.envrc` is **per worktree**, never shared, written **from the tree's own name** (never
+derived from main's — a `sed` over main's silently points `CARGO_TARGET_DIR` at MAIN's target).
+It is **exactly 5 lines**; `$TREE` is substituted when written, only `$HOME` stays literal — a
+literal `$TREE` left in the file makes the isolation guard reject the build
+(`reason=unregistered-target`). Then `direnv allow`, `cp` main's `.env`, and index the tree
+(`codegraph init`; `codedb "$PWD" reindex && codedb "$PWD" status`). **Without both indexes the
+agent is blind**: the tools resolve to main or return nothing; restart the MCP connection after
+indexing. The heredoc, the seed contract (`seed_target.sh`: `cold` normal, `refused` not a
+build) and the paid-for mistakes: **obs #2307**.
 
 ### Frequent commits (mandatory in worktrees)
 
@@ -524,86 +429,53 @@ checkout happens. The full pattern (what goes into a commit and what does not) i
 
 ### Post-merge cleanup (the merge is not done until the repo is ready)
 
-From the **main** repo:
-
-1. **Verify the merge landed** — `gh pr view <N> --json state,mergedAt,mergeCommit`; `state`
-   must be `MERGED`.
-2. **Sync main (ff-only)** — `git fetch origin && git merge --ff-only origin/main`. If
-   `--ff-only` fails, main diverged: **STOP** and investigate, do not paper over it.
-3. **Remove the mission's worktree** — `git worktree remove ~/Projects/Rust/webfang-worktrees/<dir>`.
-4. **Delete the local branch** — `git branch -D <type>/<desc>` (squash rewrites history, so the
-   safe `-d` refuses; the step-1 check is your safety net). Never touch `main`, `gh-pages`,
-   `backup/*` or the current branch.
-5. **Prune orphaned metadata** — `git worktree prune`.
-6. **Delete the mission's target dir** — by **ownership**: the directory you named (its exact
-   basename, or the custom name you exported). **Never** enumerate the parent hunting for
-   extra candidates: agents name their targets freely and git never sees those names.
-   Re-check with a **moving window** (file count sampled twice 60 s apart with delta 0, plus
-   zero live `cargo`/`rustc`/`cargo-nextest`: `pgrep -x`, one name per call).
-   The removal is a **standalone** command, with the literal absolute path
-   (`/home/xavi/.cache/cargo-target/<name>`), never with `$HOME`/`~` and never chained: `rm -rf ~`
-   is hard-deny and blocks the whole chain. That is why steps 3-5 (git) run FIRST and complete;
-   the `rm` goes after, on its own line.
-7. **Verify the handoff** — `git worktree list` and `git branch -vv` with no leftovers **of the
-   mission you merged**, and `git status --short` empty. Other worktrees and branches belong to
-   other missions: their presence is neither a failed handoff nor your business.
+From the **main** repo, after verifying `state: MERGED`: sync main **ff-only** (if it fails,
+main diverged — **STOP**, do not paper over it), remove the mission's worktree, delete its
+local branch with `-D` (squash rewrites history; never touch `main`, `gh-pages`, `backup/*` or
+the current branch), `git worktree prune`, then delete the mission's target dir **by
+ownership** (the exact name you exported — never enumerate the parent). Re-check with a moving
+window (file count stable across 60 s + zero live `cargo`/`rustc`/`cargo-nextest`) and remove it
+as a **standalone** command with the literal absolute path, never `$HOME`/`~` and never chained
+(`rm -rf ~` is hard-deny and blocks the chain). Verify the handoff: no leftovers **of the
+mission you merged**. The 7-step runbook: **obs #2307**.
 
 ### Shared vs per-worktree resources
 
-| Resource | Shared? | Action |
-|---|---|---|
-| `.git/` object store | ✅ | automatic |
-| Git config, hooks | ✅ | automatic |
-| `Cargo.lock` | ✅ | via Git |
-| `target/` | ❌ | `.envrc` + `direnv allow` per worktree; required by `scripts/ci_fast_gate.sh` |
-| `.envrc` | ❌ | written per worktree; gitignored |
-| `.env` | ❌ | `cp` from main |
-| `.codegraph/` and `codedb.snapshot` indexes | ❌ | index per worktree |
-| Seeds (`~/.cache/cargo-target/seeds/`) | ✅ read-only | consumed by `seed_target.sh`; never written by a worktree |
-| Quarantine (`~/.cache/cargo-target/quarantine/`) | ⚠️ | explicitly retired objects: **never** a build target, never consumed nor cleaned during a normal bootstrap |
-| `refs/stash` | ⚠️ **DANGER** | **NEVER** `git stash` |
+`.git/`, config/hooks and `Cargo.lock` are shared; `target/`, `.envrc`, `.env` and the indexes
+are per worktree; `seeds/` read-only, `quarantine/` never a target, `refs/stash` shared
+(**never** `git stash`). Full table: **obs #2307**.
 
 ### Reserved `~/.cache/cargo-target/` namespace
 
-```text
-~/.cache/cargo-target/
-├── <worktree-target>/   ← build state owned by one agent
-├── seeds/               ← RESERVED: published seed store
-└── quarantine/          ← RESERVED: retired objects, never a build target
-```
-
-`seeds/` and `quarantine/` are reserved namespaces and can never be a worktree's
+`<worktree-target>/` is build state owned by one agent; `seeds/` (published store) and
+`quarantine/` (retired objects) are **reserved** and can never be a worktree's
 `CARGO_TARGET_DIR`. Do not invent new categories (`scratch/`, `shared/`, `cache/`, `tmp/`): the
 guard rejects three known identities and accepts anything else, so a name nobody thought of
-gets in through the back door. A denylist does not stop invention; the explicit namespace does.
+gets in through the back door — a denylist does not stop invention, the explicit namespace
+does. Detail: **obs #2307**.
 
 ### Contamination
 
-If you detect that you operated outside your worktree, or that a `git stash pop` applied
-unexpected changes:
-
-1. **STOP** every operation immediately.
-2. Do **NOT** try to clean up: no `git reset`, no force-push, no manual patching.
-3. Report exactly: *"Contamination detected. Worktree: `<path>`. Intruder commit:
-   `<hash>` or unexpected stash applied. Awaiting human instructions."*
-4. Wait for explicit human authorization before any corrective action.
+If you operated outside your worktree, or a `git stash pop` applied unexpected changes:
+**STOP** immediately; do **NOT** clean up (no `git reset`, force-push or manual patching); report
+exactly *"Contamination detected. Worktree: `<path>`. Intruder commit: `<hash>` or unexpected
+stash applied. Awaiting human instructions."*; wait for explicit human authorization before any
+corrective action.
 
 ### Pushed history is immutable
 
-Once a commit exists on `origin/<branch>`, its SHA is public and any other worktree or CI run
-may hold it. Rewriting it (`git reset HEAD~N` + recommit) desynchronizes local from remote, and
-the only way back is a force-push — which the harness **hard-denies** with no approval path.
-The correction lands **on top**, as a new commit.
+Once a commit exists on `origin/<branch>` its SHA is public; rewriting it (`git reset HEAD~N` +
+recommit) desynchronizes local from remote and the only way back is a force-push, which the
+harness **hard-denies**. The correction lands **on top**, as a new commit.
 
 | Situation | ❌ | ✅ |
 |---|---|---|
 | Pushed commit is defective | `git reset HEAD~N` + recommit | a new commit that describes the fix |
-| Pushed commit needs a better message | `git commit --amend` over pushed history | a new commit (or `--amend` only if it is not pushed) |
+| Pushed commit needs a better message | `git commit --amend` over pushed history | a new commit (or `--amend` only if not pushed) |
 | Commit **not** pushed | — | `git commit --amend` |
 
-⚠️ The gate is asymmetric: `git reset --hard` is hard-denied, but a bare `git reset HEAD~N` is
-not gated at all. You can walk into a rewrite freely and only discover at the end that the push
-is blocked.
+⚠️ The gate is asymmetric: `git reset --hard` is hard-denied but a bare `git reset HEAD~N` is not
+gated — you can walk into a rewrite and only discover at the end that the push is blocked.
 
 ## 🏷️ Branching, releases and support lines
 
@@ -663,20 +535,19 @@ is blocked.
 
 ### Hard-deny: there is no approval path
 
-Some command classes open a dialog the human approves. Others are **hard-deny** and never show
-a dialog. Conversational authorization **cannot** change a hard-deny decision, because there is
-no dialog to press.
+Some command classes open a dialog the human approves; others are **hard-deny** and never show
+one. Conversational authorization **cannot** change a hard-deny decision — there is no dialog to
+press.
 
 | Class | Examples |
 |---|---|
 | **Confirm** (dialog → approve → runs) | `git push`, `git rebase`, forced `git branch -D`, `npm publish`, `pi remove` |
 | **Hard-deny** (nothing is approvable) | force-push (`--force`, `--force-with-lease`, `-f`), `git reset --hard`, `git clean -f -d`, `rm -rf /` or `~`, `chmod -R 777`, `chown -R` |
 
-When a hard-deny blocks: **do not re-ask for permission in conversation** (it is structurally
-useless and burns a turn); **do not route around the pattern** by splitting the command,
-reordering flags or wrapping it in a script (the list is deliberately non-configurable);
-**report the block once**, with the exact command for the human and a non-destructive
-equivalent you can execute yourself.
+When a hard-deny blocks: **do not re-ask in conversation** (structurally useless) and **do not
+route around the pattern** (splitting, reordering flags, wrapping in a script — the list is
+deliberately non-configurable). **Report the block once**, with the exact command for the human
+and a non-destructive equivalent you can run yourself.
 
 ## 📝 Commits, PRs and CI
 
@@ -686,30 +557,22 @@ equivalent you can execute yourself.
 
 **The 5 PR gates** (job `Validate PR metadata`, required, no `continue-on-error`):
 
-1. **Linked issue** — the body must carry `Closes #N` / `Fixes #N` / `Resolves #N`. For a
-   partial slice of an umbrella: `Closes part of #N` (it passes validation and **does not**
-   close the umbrella). A bare `Closes #N` against an umbrella with remaining scope auto-closes
-   it mid-plan.
-2. **The linked issue carries `status:approved`** before the PR is opened. The label is
-   protected: **never** self-approve — request the maintainer's approval. If the PR was opened
-   before the label landed, validation does not re-evaluate on its own: `gh run rerun <id>
-   --failed`.
-3. **Exactly one `type:*` label.** The label vocabulary is **not** the commit-type vocabulary,
-   and it is not written here: the map lives in `scripts/auto_label_type.sh` (the single
-   source of truth — `bash scripts/auto_label_type.sh --map` prints it), which is also what
-   the auto-label job of `pr-validation.yml` applies from the PR title.
-4. **Conventional branch name** — the regex lives in `pr-validation.yml`; do not restate it
-   here (a regex citation rots: the workflow is the source of truth).
+1. **Linked issue** — body carries `Closes #N` / `Fixes #N` / `Resolves #N`. For a partial slice
+   of an umbrella use `Closes part of #N` (passes validation, does **not** close the umbrella; a
+   bare `Closes #N` auto-closes it mid-plan).
+2. **The linked issue carries `status:approved`** before the PR is opened. Protected label:
+   **never** self-approve. If the PR opened before the label landed, validation does not
+   re-evaluate on its own: `gh run rerun <id> --failed`.
+3. **Exactly one `type:*` label** — vocabulary distinct from commit types; the map lives in
+   `scripts/auto_label_type.sh` (`--map` prints it), applied from the PR title by the auto-label
+   job of `pr-validation.yml`.
+4. **Conventional branch name** — the regex lives in `pr-validation.yml` (do not restate it).
 5. **No AI attribution** in the PR's commits.
 
-**The changelog line is the squash subject, and that is not always the PR title.** The merge
-queue squashes: with **two or more** commits it uses the PR title, with **exactly one** it uses
-that commit's subject and the title is ignored. `cliff.toml` keeps only the first line, so on a
-one-commit branch the changelog entry is whatever the commit says — renaming the PR changes
-nothing. Measured 2026-11-01: #2548 (6 commits) landed as its retitled PR title, #2543
-(1 commit) landed as `chore(deps): bump legible to 0.5` despite a `fix(deps)` title, and its
-changelog entry had to be rewritten by hand in the release PR. **Set the commit subject of a
-one-commit branch to the line you want in the changelog.**
+**The changelog line is the squash subject, and that is not always the PR title.** The queue
+squashes: **two or more** commits → the PR title; **exactly one** → that commit's subject (the
+title is ignored). `cliff.toml` keeps only the first line. **Set the commit subject of a
+one-commit branch to the line you want in the changelog** — renaming the PR changes nothing.
 
 **Pre-commit (must replicate CI exactly):**
 
@@ -720,143 +583,105 @@ cargo check && cargo clippy --all-targets --all-features -- -D warnings \
   && env "RUSTDOCFLAGS=-D warnings" cargo doc --workspace --all-features --no-deps
 ```
 
-- `--all-features` is a **safety flag**: there is `chromium`-gated code whose only consumers sit
-  behind `#[cfg(feature = "chromium")]`, and running clippy without it makes those imports
-  look dead — `clippy --fix` would **delete** them, and `cargo check` with default features
-  still passes. Never run `clippy --fix` against a narrower feature set.
-- A bare `cargo fmt` is a **fixer** (it rewrites the tree and exits 0 whether it changed
-  anything or not): green from it is not evidence. Verify with `--check` and commit the result.
-- The fourth command replicates CI's `doc-quality` job (it denies rustdoc lints). `check`,
-  `clippy` and `fmt` never document an item.
+- `--all-features` is a **safety flag**: `chromium`-gated code has its only consumers behind
+  `#[cfg(feature = "chromium")]`, so clippy without it sees those imports as dead and
+  `clippy --fix` would **delete** them. Never auto-fix against a narrower feature set.
+- A bare `cargo fmt` is a **fixer** (rewrites the tree, exits 0 regardless): green from it is not
+  evidence. Verify with `--check` and commit the result.
+- The fourth command replicates CI's `doc-quality` job (denies rustdoc lints);
+  `check`/`clippy`/`fmt` never document an item.
 
 **Checklist before opening the PR:**
 
-- [ ] `bash scripts/ci_fast_gate.sh` GREEN
-- [ ] its coverage report read: every `NOT covered` job you touched was run by hand
-- [ ] `cargo check` + `cargo clippy --all-targets --all-features` (full command above) + `cargo fmt --all -- --check`
-- [ ] `cargo doc` with `RUSTDOCFLAGS=-D warnings` if library code changed
-- [ ] `cargo nextest run` (at least the affected module)
-- [ ] `git diff --stat main...HEAD` reviewed: only the expected symbols/files changed
-- [ ] User-facing errors in Spanish; new public items carry doc comments
-- [ ] Exactly one `type:*` label + linked issue **with** `status:approved` + conventional branch
-- [ ] `CHANGELOG.md` **not** touched by this PR
-- [ ] Worktree verified: `git branch --show-current` matches the directory
-- [ ] No `git checkout`/`switch`/`stash` during the session
+- [ ] `bash scripts/ci_fast_gate.sh` GREEN; coverage report read (every `NOT covered` job you touched run by hand)
+- [ ] Full pre-commit gate above; `cargo nextest run` (at least the affected module)
+- [ ] `git diff --stat main...HEAD` reviewed: only expected files changed
+- [ ] Spanish user-facing errors; new public items documented; `CHANGELOG.md` untouched
+- [ ] One `type:*` label + linked issue **with** `status:approved` + conventional branch
+- [ ] Worktree branch matches the directory; no `checkout`/`switch`/`stash` this session
 
-**Merge:** `scripts/merge-when-green.sh <PR> --queue` — waits for the required checks,
-enqueues, and waits for `MERGED`. The queue is the normal path to `main`; no direct merge.
-Never `--auto` or `--admin`; no strategy flag — the queue owns the merge method. `BEHIND` is
-not fatal. Batches are queue groups: same base, disjoint files
-(`scripts/ci_pr_overlap.sh`); the queue groups them and does not resolve content conflicts.
+**Merge:** `scripts/merge-when-green.sh <PR> --queue` — waits for required checks, enqueues,
+waits for `MERGED`. The queue is the normal path to `main` (no direct merge); never `--auto` or
+`--admin`, no strategy flag (the queue owns the method). `BEHIND` is not fatal. Batches are queue
+groups: same base, disjoint files (`scripts/ci_pr_overlap.sh`); the queue does not resolve conflicts.
 
-**Watcher fallback:** if the script exits 4 (deadline, or an unreadable required-context
-source) while the PR is verifiably ready — `gh pr view <N> --json mergeStateStatus` reads
-`CLEAN` and every required context is reported green in the status-check rollup — verify the
-rollup, enqueue manually with a bare `gh pr merge <N>` (no strategy flag: it is the same
-enqueue the script runs) and poll `gh pr view <N> --json state` until `MERGED`. It replaces
-the waiting, never the verification: a required context that has not *reported* green is the
-#1011 false-green failure mode and is not a candidate for this fallback. Incident and
-diagnosis: query `merge-when-green context read fallback manual enqueue` in Engram. On merge
-the queue itself deletes the PR's remote branch: a fetch afterwards showing a vanished
-`origin/<branch>` is expected queue behavior; the local side is the post-merge runbook below.
+**Watcher fallback:** if the script exits 4 while the PR is verifiably ready (`mergeStateStatus`
+`CLEAN` **and** every required context reported green in the rollup), enqueue manually with a
+bare `gh pr merge <N>` (no strategy flag) and poll `state` until `MERGED`. It replaces the
+waiting, never the verification: a context that has not *reported* green is the #1011
+false-green mode, not a candidate. The queue deletes the remote branch on merge (a vanished
+`origin/<branch>` afterwards is expected). Diagnosis: `merge-when-green context read fallback
+manual enqueue` in Engram.
 
-**Breaking change (maintainer decision):** the marker must sit on the surface the lander keeps.
-`scripts/merge-when-green.sh` reads the queue's merge method and applies this matrix: with SQUASH
-and **one commit** the squash subject is the commit subject — put the canonical `!` there (`type!:`,
-`type(scope)!:`); with SQUASH and **two or more commits** the squash subject is the PR title — put
-it there; with MERGE the branch commits survive and the title is discarded. `type!(scope):` is
-malformed (release-plz does not parse it) and a `BREAKING CHANGE:` footer alone does not satisfy
-the gate; the script refuses both with exit 5. A merge commit (`--merge`, outside the queue)
-preserves commit markers but discards the title; it is an option, never a mandatory recipe. Never
-leave the `!` only in a surface the chosen strategy drops.
+**Breaking change (maintainer decision):** the `!` marker must sit on the surface the lander
+keeps. SQUASH + **one commit** → the commit subject (`type!:`, `type(scope)!:`); SQUASH + **two
+or more** → the PR title; MERGE → the branch commits survive, the title is discarded.
+`type!(scope):` is malformed and a `BREAKING CHANGE:` footer alone does not satisfy the gate;
+`merge-when-green.sh` refuses both (exit 5). Never leave the `!` only on a surface the chosen
+strategy drops.
 
-**The same invariant is a required CI check (`breaking-surface`, #2328).** The job in
-`pr-validation.yml` runs on `pull_request` (PR head) and `merge_group` (queue entry), reads the
-merge method from the tracked mirror `.github/merge-queue.json` (GITHUB_TOKEN cannot read the live
-queue configuration: GraphQL answers FORBIDDEN for integrations, #2412) and pages every commit via
-REST — a marker on commit 101 counts. The decision matrix lives in `scripts/breaking_surface_lib.sh`,
-consumed by both the check and the local guard, so they cannot drift. Fail closed: unreadable
-metadata, zero commits, or a method absent/unknown in the mirror is a red check. The local guard
-stays as defense in depth: CI closes the TOCTOU window and covers merges that bypass the script;
-the script keeps its refusal at the merge boundary and cross-checks the mirror against the LIVE
-configuration, refusing on divergence (reconcile the mirror then).
+**The same invariant is a required CI check (`breaking-surface`).** The decision matrix lives in
+`scripts/breaking_surface_lib.sh` (shared by the CI check and the local guard, so they cannot
+drift); the merge method is read from the tracked mirror `.github/merge-queue.json`. Fail
+closed. The local guard is defense in depth at the merge boundary. Operational detail: **obs
+#2309**.
 
-**Hooks and verification:** the `pre-commit` and `pre-push` consult the review gate; on a fresh
-clone you must enable the wiring with `git config core.hooksPath scripts/githooks`. To wait
-for CI prefer the non-blocking pattern (`gh run list --workflow=ci.yml …`) and never
-`gh run watch` under a short timeout; a `git push` that timed out did not necessarily fail
-(verify with `git ls-remote`). Detail: **obs #2316**.
+**Hooks and verification:** `pre-commit`/`pre-push` consult the review gate; enable the wiring on
+a fresh clone with `git config core.hooksPath scripts/githooks`. Wait for CI with the non-blocking
+pattern (`gh run list --workflow=ci.yml …`), never `gh run watch` under a short timeout; a push
+that timed out did not necessarily fail (verify with `git ls-remote`). Detail: **obs #2316**.
 
-**There are no stacked PRs in this repo.** `scripts/check-topology.sh` only admits the
-head-prefix → base pairs of its table, and **no feature head prefix may target another
-working branch** (`fix/*` → `release/X.Y` and `hotfix/*` → `support/X.Y` are admitted, because
-those are versioned lines, not working branches). The path that works is **sequential
-delivery**: slice 1 as a normal PR on top of `main` → merge → slice 2 from the new `main` →
-normal PR → repeat. Never retarget an open PR onto a working branch to "shrink the diff": that
-move made a healthy PR unmergeable once, and rebuilding on `main` is always available and always
-legal.
+**There are no stacked PRs in this repo.** `scripts/check-topology.sh` admits only the
+head-prefix → base pairs of its table; **no feature head prefix may target another working
+branch** (`fix/*` → `release/X.Y` and `hotfix/*` → `support/X.Y` are admitted — versioned lines,
+not working branches). Use **sequential delivery**: slice 1 as a normal PR on `main` → merge →
+slice 2 from the new `main` → repeat. Never retarget an open PR onto a working branch to "shrink
+the diff"; rebuilding on `main` is always available and legal.
 
 ## 🧾 Native review (RDD)
 
 The native review is an **outside view**, never a delivery authorization: after the
 acknowledgement, commit / push / PR / release stay under ordinary repository policy.
 
-- The **candidate** is one reviewable slice — a work-unit commit or a PR slice. Never a TODO,
-  never the accumulated branch.
-- The full cycle (assess → status → start → consent → collect → capture → acknowledge), the
-  4 lenses, the failure envelopes and the recovery paths: **obs #2213** and the
+- The **candidate** is one reviewable slice (a work-unit commit or PR slice) — never a TODO,
+  never the accumulated branch. **Consent is per candidate**, not the global switch's kill
+  switch: never fabricate an approval or re-enable the switch for the user.
+- The full cycle, the 4 lenses, failure envelopes and recovery paths: **obs #2213** + the
   `rdd-defect-workflow` skill.
-- **Consent is per candidate**, it is not the global switch's kill switch. Never fabricate an
-  approval and never re-enable the switch for the user.
 
 ## 🗺️ Skills and CLIs
 
-- **Skill index:** `.atl/skill-registry.md` — generated **per tree** and gitignored: it does not
-  exist in a fresh clone until you run `gentle-ai skill-registry refresh` in that tree. It is
-  an **index** for delegators: the `SKILL.md` is the source of truth and you must **inject
-  exact paths**, not summaries. The registry skips `sdd-*`, `_shared` and `skill-registry` by
-  contract.
-- **CodeDB and CodeGraph are CLIs, not skills** — see § Intelligence Stack.
-- Relevant skills (the registry defines the scope, not this file): `rust-skills` (265 rules /
-  26 categories; category prefixes: `own-`, `err-`, `async-`, `api-`, `test-`, …),
-  `branch-pr`, `work-unit-commits`, `chained-pr`, `rdd-defect-workflow`,
-  `cognitive-doc-design` (user scope) and `codebase-refactoring`, `dry-refactoring`, `jscpd`,
-  `webfang-architecture` (repo scope).
-- **Loading the right rules is mandatory:** before any Rust code change, resolve the applicable
-  Rust skill by the task's code context (file extensions and what the task asks for) via the
-  skill registry: `rust-skills` (265 rules across 26 categories, granular coverage for
-  writing/refactoring) and `rust-best-practices` (the distilled 5-source checklist) cover the
-  same ground at different granularity; `rust-review` for a cited, prioritized review report;
-  load the matching `SKILL.md`
-  (or its installed `<id>` via the skill tool) **before** editing, forwarding the exact rule
-  set into any delegated writer.
+- **Skill index:** `.atl/skill-registry.md` — generated **per tree** and gitignored (run
+  `gentle-ai skill-registry refresh` in a fresh clone). It is an **index** for delegators: the
+  `SKILL.md` is the source of truth — **inject exact paths**, not summaries. The registry skips
+  `sdd-*`, `_shared` and `skill-registry` by contract. **CodeDB and CodeGraph are CLIs, not
+  skills** (§ Intelligence Stack).
+- **Loading the right rules is mandatory:** before any Rust change, resolve the applicable skill
+  by code context via the registry and load its `SKILL.md` (or installed `<id>`) **before**
+  editing, forwarding the exact rule set to any delegated writer. `rust-skills` (265 rules / 26
+  categories) and `rust-best-practices` (distilled checklist) cover the same ground at different
+  granularity; `rust-review` for a cited review report. Other relevant skills: `branch-pr`,
+  `work-unit-commits`, `chained-pr`, `rdd-defect-workflow`, `cognitive-doc-design`,
+  `codebase-refactoring`, `dry-refactoring`, `jscpd`, `webfang-architecture`.
 - **Every delegation to a subagent must include:** the skill paths to read, the intelligence
-  mandate (explore impact before editing; `cargo check` before returning), the exact
-  verification commands, and the absolute worktree path.
+  mandate (explore impact before editing; `cargo check` before returning), the exact verification
+  commands, and the absolute worktree path.
 
 ## 💾 Engram (correct usage)
 
-The Engram server resolves the active session from the working directory. With several
-concurrent agent sessions in this repo, `mem_save` / `mem_judge` can fail with `multiple
-active runtime sessions match the current project and directory`.
+The server resolves the active session from the working directory; concurrent sessions can
+make `mem_save` / `mem_judge` fail with `multiple active runtime sessions match…`.
 
-- **Never invent a `session_id`.** Register one with `mem_session_start` (explicit unique ID)
-  and pass that same `session_id` to every `mem_save` / `mem_judge` of the session.
-- **Close the session when you are done** (`mem_session_end(id, summary)`). Since engram v2.1.0
-  every registration writes a 30-minute runtime lease, and an expired lease is excluded from
-  candidate resolution: a session whose runtime never renews stops being a candidate **by
-  itself**, 30 minutes after its last renewal. Closing earlier only matters while the runtime
-  is still alive.
+- **Never invent a `session_id`.** Register one with `mem_session_start` and pass that same ID
+  to every `mem_save` / `mem_judge` of the session. **Close it when done**
+  (`mem_session_end(id, summary)`): each registration writes a 30-minute runtime lease, and an
+  expired lease drops out of candidate resolution by itself.
 - If `mem_save` returns `judgment_required: true`, judge **each** candidate with **its own**
-  `judgment_id` (the one in `candidates[]`), never with the top-level one.
-- On **any** engram error, run `engram --help` first (then `engram <cmd> --help` for the command
-  that failed) before retrying or inventing flags. The CLI is the fallback when the MCP fails:
-  `engram save`, `engram search`, `engram context`.
-- Diagnosing the session collision:
-  `engram doctor --check ambiguous_active_runtime_sessions --project webfang` (diagnostic
-  only; `doctor repair` does not cover that check). If the collision is between two
-  **genuinely alive** sessions, that is by design: end the one that finished, or pass
-  `session_id`.
-- **Project knowledge lives here**, not in the repo: decisions, direction, audit findings and
-  reasoning. The repo holds the **rules** and their sources of truth.
-  (Owner decision: obs #370.)
+  `judgment_id` (from `candidates[]`), never the top-level one.
+- On **any** engram error run `engram --help` first (then `engram <cmd> --help`) before retrying
+  or inventing flags; the CLI (`engram save|search|context`) is the MCP fallback. Diagnose the
+  collision with `engram doctor --check ambiguous_active_runtime_sessions --project webfang`
+  (diagnostic only): two genuinely-alive sessions colliding is by design — end the finished one
+  or pass `session_id`.
+- **Project knowledge lives here**, not in the repo: decisions, direction, audit findings,
+  reasoning. The repo holds the **rules** and their sources of truth (owner decision: obs #370).
