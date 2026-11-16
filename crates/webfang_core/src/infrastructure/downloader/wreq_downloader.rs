@@ -24,6 +24,8 @@ use crate::domain::waf::{is_t2_blocking_status, waf_inspector, InspectionContext
 use crate::error::ErrorClass;
 use crate::infrastructure::user_agent::UserAgentCache;
 
+pub(crate) mod dns_budget;
+mod retry;
 mod wreq_body;
 
 /// Estimated memory cost of a wreq client instance in bytes.
@@ -42,20 +44,6 @@ const WREQ_MEMORY_COST: usize = 1_024 * 1_024; // ~1 MB
 /// while a pathological error page cannot be buffered per attempt. Deliberately far
 /// below `max_page_bytes`: this is evidence, not content.
 const WAF_SNIFF_MAX_BYTES: u64 = 8 * 1024;
-
-/// Extra attempts a NAME RESOLUTION failure gets, on top of the first one.
-///
-/// It does NOT consume `max_retries`: a broken resolver is OUR problem, not the
-/// site's, and the site-rejection ladder must stay intact for the URLs that
-/// actually reach a peer (#2823).
-pub(crate) const DNS_RETRY_BUDGET: u32 = 2;
-
-/// The fixed delay between resolution attempts, in milliseconds.
-///
-/// Deliberately short and CONSTANT: waiting longer does not make a resolver
-/// answer, and an exponential ladder here is what turned a broken DNS into a
-/// WAF-looking slowdown of a whole 50-URL run (#2823).
-pub(crate) const DNS_RETRY_DELAY_MS: u64 = 250;
 
 /// What to do when a bounded body read reaches its ceiling.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -307,33 +295,6 @@ impl WreqDownloader {
         }
     }
 
-    /// Test-only constructor: an injected client with an explicit retry policy.
-    ///
-    /// The production constructors derive the policy from the operator's knobs
-    /// (seconds and milliseconds that are right for a real run). A test that
-    /// drives a resolver failure needs the policy pinned to milliseconds so the
-    /// retry ACCOUNTING is observable without a real network or a real clock
-    /// (#2823).
-    #[cfg(test)]
-    pub(crate) fn from_client_with_retry(
-        client: Client,
-        timeout_secs: u64,
-        max_retries: u32,
-        backoff_base_ms: u64,
-        backoff_max_ms: u64,
-    ) -> Self {
-        Self {
-            client: Arc::new(client),
-            timeout_secs,
-            pinned_ua: None,
-            max_page_bytes: crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
-            max_retries,
-            backoff_base_ms,
-            backoff_max_ms,
-            ignore_waf: false,
-        }
-    }
-
     /// Extract cookies from a wreq response.
     fn extract_cookies(url: &Url, response: &wreq::Response) -> Vec<Cookie> {
         let mut cookies = Vec::new();
@@ -461,60 +422,6 @@ impl WreqDownloader {
                 request_started,
             )
         })
-    }
-
-    /// Send one request, retrying a NAME RESOLUTION failure on its OWN budget.
-    ///
-    /// A resolver that never answers is not the site refusing us: the request
-    /// never reached a peer, so waiting longer cannot change the outcome. It
-    /// gets a small fixed budget and a fixed short delay, and the
-    /// site-rejection ladder (`max_retries` with exponential backoff) is never
-    /// charged for it — that ladder is what turned a broken DNS into a
-    /// WAF-looking slowdown of a whole 50-URL run (#2823).
-    ///
-    /// Every OTHER failure is returned at once: the caller's ladder decides
-    /// whether it earns a retry.
-    async fn send_request_on_dns_budget(&self, url: &Url) -> Result<wreq::Response, DownloadError> {
-        let mut dns_attempts = 0u32;
-        loop {
-            match self.send_request(url, None).await {
-                Ok(response) => return Ok(response),
-                Err(err) => {
-                    if !crate::domain::error::mapping::is_resolution_failure(&err) {
-                        return Err(err);
-                    }
-                    if dns_attempts >= DNS_RETRY_BUDGET {
-                        return Err(err);
-                    }
-                    dns_attempts += 1;
-                    warn!(
-                        url = %url,
-                        attempt = dns_attempts,
-                        max_dns_retries = DNS_RETRY_BUDGET,
-                        delay_ms = DNS_RETRY_DELAY_MS,
-                        error = %err,
-                        "name resolution failed — retrying on the resolver budget"
-                    );
-                    tokio::time::sleep(Duration::from_millis(DNS_RETRY_DELAY_MS)).await;
-                },
-            }
-        }
-    }
-
-    /// Calculate the exponential backoff delay for a given attempt, capped at
-    /// `backoff_max_ms`.
-    fn backoff_delay_ms(&self, attempt: u32) -> u64 {
-        self.backoff_base_ms
-            .saturating_mul(2_u64.saturating_pow(attempt))
-            .min(self.backoff_max_ms)
-    }
-
-    /// Sleep before the next attempt — skipped on the final one, where the
-    /// loop is about to exit and the delay would only add dead latency.
-    async fn sleep_before_retry(&self, attempt: u32, delay_ms: u64) {
-        if attempt < self.max_retries {
-            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-        }
     }
 
     /// Consume a successful response into a [`FetchedPage`].

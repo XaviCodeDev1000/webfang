@@ -140,9 +140,8 @@ mod pair {
     async fn a_hung_resolver_spends_its_own_budget_not_the_site_ladder() {
         use crate::domain::downloader_port::Downloader;
         use crate::domain::error::mapping::is_resolution_failure;
-        use crate::infrastructure::downloader::wreq_downloader::{
-            WreqDownloader, DNS_RETRY_BUDGET,
-        };
+        use crate::infrastructure::downloader::wreq_downloader::dns_budget::DNS_RETRY_BUDGET;
+        use crate::infrastructure::downloader::wreq_downloader::WreqDownloader;
         use std::sync::atomic::Ordering;
 
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
