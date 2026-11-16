@@ -45,7 +45,7 @@ fn success_leaves_counters_unchanged() {
 fn crawl_error_increments_count_and_own_category() {
     let (error_count, breakdown, resolution_failures, transport_cause) = counters();
     handle_crawl_result(
-        Ok(Err(CrawlError::Timeout)),
+        Ok(Err(CrawlError::timeout())),
         &error_count,
         &breakdown,
         &resolution_failures,
