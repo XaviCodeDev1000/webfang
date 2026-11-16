@@ -97,6 +97,23 @@ renombres declarados); los tests de integración externos (`tests/mcp_*.rs`,
 `tests/common/mod.rs`) NO se tocan: compilan contra `mcp_server::server::` vía
 re-exports y deben seguir haciéndolo sin edición.
 
+## Estado de la misión (cierre, 2026-11-15)
+
+**server.rs 2012 → 360 ≤ 500 ⇒ entrada FUERA del baseline (`--remove`)**. Layout final,
+todas las partes ≤500:
+
+| Archivo | Líneas | Contenido |
+|---|---|---|
+| `server.rs` (hub) | 360 | composición del router (orden #1611 intacto), panic backstop, start/shutdown, re-exports |
+| `server/options.rs` | 219 | ServerOptions + Debug redactado + auth/bind |
+| `server/rate_limit.rs` | 183 | keyed limiter + middleware |
+| `server/session_cap.rs` | 377 | SessionCap + middleware + predicados + consts pub |
+| `server/tests_*.rs` (6) | 16–280 | tests por tema (PR 1) |
+
+Commits en `refactor/ola1-mcp-server`: b1e184ee (tests) · 7cfcea63 (options) · 00918a81
+(rate_limit) · (este, session_cap + --remove). Verbatim: cada bloque probado token a
+token contra su span en HEAD (solo `pub(super)` añadidos y reformateo de fmt).
+
 ## Tasks
 
 | ID | Tarea | Specs | Ruta | Estado | Commit |
@@ -163,6 +180,19 @@ que metió `cargo fmt` en la firma de `build_rate_limiter` (reformateo, no conte
 Gates: check/clippy(-D warnings)/fmt/doc 0 · lib 369=369 · --list 369=369 · ratchet
 880→718 verde · inventario/dead-tests/direcciones/intra-crate OK · golden refrescado.
 Siguiente slice: session_cap (~315) ⇒ hub ~400 ≤500 ⇒ `--remove`.
+
+L5 — PR 2 slice 3 (CIERRE) ejecutado y commiteado: bloque session cap (banner 240 al
+`}` de `shed_response`, 360 líneas) → `server/session_cap.rs` (377 con header). Consts
+`pub` (MCP_ENDPOINT_PATH, DEFAULT_*, MAX_ALLOWED_SESSIONS_CAP) re-exportadas con
+`pub use` en el hub ⇒ rutas externas `mcp_server::server::…` intactas; el resto
+`pub(super)`. `tests_session_cap.rs` re-apuntado a `super::session_cap::{…}`.
+**server.rs 718→360 ≤500 ⇒ `--remove` del baseline** (entrada eliminada, ratchet verde
+sin ella, 95→94 grandfathered). Verbatim: token a token idéntico (solo pub(super)).
+Gates: check workspace 0 · clippy -D warnings 0 · fmt 0 · doc -D warnings 0 · lib
+369=369 · --list 369=369 · integración session_cap 4/4, panic 8/8, auth 9/9 ·
+inventario/dead-tests/direcciones×2/intra-crate OK · golden refrescado sin drift ·
+jscpd 9081→8158 (795→785 clones). Pendiente: confirmación explícita para push + PR
+(`Closes part of #2584`, type:refactor) + ciclo RDD sobre los slices.
 
 L1 — Pedido (2026-11-15): el usuario arranca la misión del último monstruo >2000 de la
 Ola 1 (`server.rs` 2012). Worktree creado (`ola1-mcp-server`, rama

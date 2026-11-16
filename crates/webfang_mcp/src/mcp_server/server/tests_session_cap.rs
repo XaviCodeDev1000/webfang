@@ -1,10 +1,12 @@
 //! Tests extraídos del hub `server.rs` por tema (PR 1 de #2584, movimiento puro).
 //! Los cuerpos son verbatim del módulo de tests inline original.
 
+use super::session_cap::{
+    creates_session, SessionCap, MCP_SESSION_ID_HEADER, SESSION_CAP_USER_MESSAGE,
+};
 use super::{
-    build_mcp_router_with_service, creates_session, ServerOptions, SessionCap,
-    DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_CAP_WINDOW_SECS, MCP_SESSION_ID_HEADER,
-    SESSION_CAP_USER_MESSAGE,
+    build_mcp_router_with_service, ServerOptions, DEFAULT_MAX_SESSIONS,
+    DEFAULT_SESSION_CAP_WINDOW_SECS,
 };
 use axum::http::{header, StatusCode};
 use std::num::NonZeroUsize;
