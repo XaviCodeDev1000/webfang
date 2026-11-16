@@ -614,7 +614,7 @@ acknowledgement, commit / push / PR / release stay under ordinary repository pol
 
 - **Skill index:** `.atl/skill-registry.md` — generated **per tree**, gitignored (run
   `gentle-ai skill-registry refresh` in a fresh clone); an **index** for delegators: the
-  `SKILL.md` is the source of truth — **inject exact paths**, not summaries. Skips `sdd-*`,
+  `SKILL.md` is the source of truth — **inject exact paths**, not summaries. Skips
   `_shared` and `skill-registry` by contract. **CodeDB/CodeGraph are CLIs, not skills** (§ Intelligence Stack).
 - **Loading the right rules is mandatory:** before any Rust change, resolve the applicable skill
   by code context via the registry and load its `SKILL.md` (or installed `<id>`) **before**

@@ -27,7 +27,7 @@
 //!
 //! **Sessionless contract (REQ-OBS-03):** Layer 2 injects no cookies and keeps
 //! no storage directory (`--storage-dir` is deliberately not wired — see
-//! sdd/793-obscura-l2-contract/design.md §4). Pages behind a session are
+//! Engram obs #2358). Pages behind a session are
 //! expected to render empty here and escalate to Layer 3 (Chromiumoxide),
 //! which injects [`CookieBridge`](crate::domain::cookie_bridge::CookieBridge)
 //! cookies by domain.

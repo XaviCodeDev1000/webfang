@@ -13,7 +13,7 @@
 //! gates `with_checkpoint` when the resolved mode is `Checkpoint` or `Full`.
 //! The export resume path (`StateStore` → `RecordStore v2`) and the engine
 //! checkpoint path remain separate files/formats (no combined envelope).
-//! See `sdd/persistencemode-5c` and `COMPATIBILITY-MATRIX`.
+//! See `COMPATIBILITY-MATRIX` and Engram obs #511 (design archive).
 //!
 //! # Design Decisions
 //!
