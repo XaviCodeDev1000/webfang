@@ -6,7 +6,7 @@
 //! nothing here is part of the crate's public surface.
 
 use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -22,7 +22,8 @@ use crate::application::crawler::ports::TerminationSource;
 use crate::application::crawler::session::{CheckpointAction, CrawlExec};
 use crate::application::rate_limiter::SharedRateLimiter;
 use crate::domain::crawler_port::UrlSource;
-use crate::domain::{CrawlError, CrawlErrorCategory, CrawlResult, CrawlerConfig};
+use crate::domain::error::cause::NetworkCause;
+use crate::domain::{CrawlError, CrawlResult, CrawlerConfig};
 
 impl Engine {
     /// Spawn a signal handler that sets the shutdown flag on SIGINT/SIGTERM
@@ -219,6 +220,7 @@ impl Engine {
             &mut tasks,
             &self.error_count,
             &self.error_breakdown,
+            &self.transport_cause,
             &self.resolution_failures,
             drain_bound,
         )
@@ -283,27 +285,6 @@ impl Engine {
         Ok(summary)
     }
 
-    /// Snapshot the collector and the error counters into a [`CrawlResult`].
-    ///
-    /// Shared by the success tail of [`Self::run`] and
-    /// [`Self::fail_run_with_partials`]: the summary a caller sees must be
-    /// identical on both paths (#2338) — one extraction, one place.
-    ///
-    /// Callers must have released the task context first, so every collector
-    /// sender is gone and the mpsc drain terminates.
-    async fn collect_result_summary(&mut self) -> CrawlResult {
-        let collected_urls = std::mem::take(&mut self.collector).collect().await;
-        let total_pages = collected_urls.len();
-        let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
-        let breakdown = self.collect_error_breakdown();
-        let resolution_failures = self
-            .resolution_failures
-            .load(std::sync::atomic::Ordering::SeqCst);
-        let mut summary = CrawlResult::new(collected_urls, total_pages, errors, breakdown);
-        summary.resolution_failures = resolution_failures;
-        summary
-    }
-
     /// Collect what the run completed and wrap `err` so the partial results
     /// travel with the failure (#2338).
     ///
@@ -325,7 +306,7 @@ impl Engine {
         );
         CrawlError::PartialRun {
             message: err.to_string(),
-            partial,
+            partial: Box::new(partial),
         }
     }
 
@@ -377,60 +358,6 @@ impl Engine {
         tracing::Span::current().record("outcome", outcome);
     }
 
-    /// Build the per-category error breakdown map (issue #374).
-    fn collect_error_breakdown(&self) -> std::collections::BTreeMap<CrawlErrorCategory, usize> {
-        CrawlErrorCategory::ALL
-            .iter()
-            .filter_map(|cat| {
-                let count =
-                    self.error_breakdown[cat.index()].load(std::sync::atomic::Ordering::SeqCst);
-                (count > 0).then_some((*cat, count))
-            })
-            .collect()
-    }
-
-    /// Emit the structured crawl summary (issue #356 Fase 4, error breakdown #374).
-    fn log_crawl_summary(&self, total_pages: usize, errors: usize, start: std::time::Instant) {
-        let duration = start.elapsed();
-        let succeeded = total_pages.saturating_sub(errors);
-        let summary_rate = if duration.as_secs_f64() > 0.0 {
-            total_pages as f64 / duration.as_secs_f64()
-        } else {
-            0.0
-        };
-        info!(
-            total_pages = total_pages,
-            succeeded = succeeded,
-            errors = errors,
-            errors_waf = self.error_breakdown[CrawlErrorCategory::Waf.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            errors_http = self.error_breakdown[CrawlErrorCategory::Http.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            errors_timeout = self.error_breakdown[CrawlErrorCategory::Timeout.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            errors_network = self.error_breakdown[CrawlErrorCategory::Network.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            errors_rate_limit = self.error_breakdown[CrawlErrorCategory::RateLimit.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            errors_extraction = self.error_breakdown[CrawlErrorCategory::Extraction.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            errors_internal = self.error_breakdown[CrawlErrorCategory::Internal.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            errors_panic = self.error_breakdown[CrawlErrorCategory::Panic.index()]
-                .load(std::sync::atomic::Ordering::SeqCst),
-            duration_secs = duration.as_secs(),
-            // #1610 (OBS-H7): `duration_secs` is whole seconds, so every run
-            // under one second reported 0 and the crawl cost was only
-            // recoverable from the span_close. The millisecond figure makes
-            // the event queryable on its own; `duration_secs` is kept
-            // untouched because existing tooling reads it.
-            duration_ms = duration.as_millis() as u64,
-            pages_per_sec = summary_rate,
-            trace_id = %self.correlation_id.trace_id(),
-            "crawl completed"
-        );
-    }
-
     /// Drain spawned tasks with a bounded wait, aborting any stragglers so a
     /// shutdown can never hang on a blocked worker (#509).
     ///
@@ -442,12 +369,19 @@ impl Engine {
         tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
         error_count: &Arc<AtomicUsize>,
         error_breakdown: &Arc<[AtomicUsize; 8]>,
+        transport_cause: &Arc<OnceLock<NetworkCause>>,
         resolution_failures: &Arc<AtomicUsize>,
         bound: Duration,
     ) {
         let drained = tokio::time::timeout(bound, async {
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(result, error_count, error_breakdown, resolution_failures);
+                handle_crawl_result(
+                    result,
+                    error_count,
+                    error_breakdown,
+                    resolution_failures,
+                    transport_cause,
+                );
             }
         })
         .await
@@ -462,7 +396,13 @@ impl Engine {
             );
             tasks.abort_all();
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(result, error_count, error_breakdown, resolution_failures);
+                handle_crawl_result(
+                    result,
+                    error_count,
+                    error_breakdown,
+                    resolution_failures,
+                    transport_cause,
+                );
             }
         }
     }

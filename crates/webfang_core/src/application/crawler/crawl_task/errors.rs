@@ -8,10 +8,11 @@
 //! a pure move, no behaviour change.
 
 use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use tracing::{debug, warn};
 
+use crate::domain::error::cause::{cause_in_chain, NetworkCause};
 use crate::domain::{CrawlError, CrawlErrorCategory};
 
 /// Handle result from a completed crawl task
@@ -20,12 +21,19 @@ pub(crate) fn handle_crawl_result(
     error_count: &Arc<AtomicUsize>,
     error_breakdown: &Arc<[AtomicUsize; 8]>,
     resolution_failures: &Arc<AtomicUsize>,
+    transport_cause: &Arc<OnceLock<NetworkCause>>,
 ) {
     match result {
         Ok(Ok(())) => {
             // Task completed successfully
         },
-        Ok(Err(e)) => handle_task_error(e, error_count, error_breakdown, resolution_failures),
+        Ok(Err(e)) => handle_task_error(
+            e,
+            error_count,
+            error_breakdown,
+            resolution_failures,
+            transport_cause,
+        ),
         Err(e) => handle_join_error(e, error_count, error_breakdown),
     }
 }
@@ -39,6 +47,7 @@ fn handle_task_error(
     error_count: &Arc<AtomicUsize>,
     error_breakdown: &Arc<[AtomicUsize; 8]>,
     resolution_failures: &Arc<AtomicUsize>,
+    transport_cause: &Arc<OnceLock<NetworkCause>>,
 ) {
     if matches!(e, CrawlError::Cancelled) {
         debug!("Task cancelled by engine shutdown");
@@ -50,6 +59,12 @@ fn handle_task_error(
     // down".
     if crate::domain::error::mapping::is_resolution_failure(&e) {
         resolution_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    // #2824: the FIRST classified transport cause of the run. The failures are
+    // counted, not kept, and the application boundary needs one cause to name
+    // the failure it reports.
+    if let Some(cause) = cause_in_chain(&e) {
+        let _ = transport_cause.set(cause);
     }
     let category = CrawlErrorCategory::from(&e);
     warn!(error = %e, category = ?category, "crawl task failed");

@@ -24,6 +24,7 @@
 use std::error::Error;
 use std::fmt;
 use std::io;
+use std::sync::Arc;
 
 /// A preserved transport error — the original failure, carried opaquely.
 ///
@@ -160,17 +161,26 @@ impl fmt::Display for NetworkCause {
 /// classifier walked stays walkable by everything downstream (the transient
 /// classification, the logs, the exit code) — the cause is ADDED to the
 /// chain, never substituted for it.
-#[derive(Debug)]
+///
+/// The carrier is **clonable** (#2824): the original error is shared behind an
+/// `Arc`, so a copy keeps the cause AND the chain behind it. It could not be
+/// cloned before (the error was boxed), and the copy was rebuilt from the
+/// rendered message — which silently dropped the cause the transport had
+/// already classified.
+#[derive(Clone, Debug)]
 pub struct ClassifiedNetworkError {
     cause: NetworkCause,
-    source: Box<dyn Error + Send + Sync>,
+    source: Arc<dyn Error + Send + Sync>,
 }
 
 impl ClassifiedNetworkError {
     /// Classify `source` as `cause`.
     #[must_use]
     pub fn new(cause: NetworkCause, source: Box<dyn Error + Send + Sync>) -> Self {
-        Self { cause, source }
+        Self {
+            cause,
+            source: Arc::from(source),
+        }
     }
 
     /// The classified cause.
@@ -188,7 +198,51 @@ impl fmt::Display for ClassifiedNetworkError {
 
 impl Error for ClassifiedNetworkError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(self.source.as_ref())
+        let inner: &(dyn Error + 'static) = self.source.as_ref();
+        Some(inner)
+    }
+}
+
+/// The carrier an `io::Error` carries in its payload (#2824).
+///
+/// `std::io::Error` does NOT publish its payload as a source: `source()`
+/// returns the payload's OWN source. A classified cause travelling in the
+/// payload is therefore invisible to a plain `source()` walk — reaching it
+/// needs the `get_ref()` special case, and a consumer outside this crate
+/// (the trace, `CrawlErrorCategory`, an external reader) does not know that
+/// quirk: it only sees the cause rendered in the `Display`.
+///
+/// This type closes the gap. The payload's `source()` IS the classified
+/// error, so the plain walk reaches the typed cause. It is clonable, so the
+/// copy of an `Io` failure keeps it — the kind stays untouched either way.
+#[derive(Clone, Debug)]
+pub struct CauseCarrier {
+    classified: ClassifiedNetworkError,
+}
+
+impl CauseCarrier {
+    /// Carry `classified` as the payload of an `io::Error`.
+    #[must_use]
+    pub fn new(classified: ClassifiedNetworkError) -> Self {
+        Self { classified }
+    }
+
+    /// The classified cause.
+    #[must_use]
+    pub fn cause(&self) -> NetworkCause {
+        self.classified.cause()
+    }
+}
+
+impl fmt::Display for CauseCarrier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.classified)
+    }
+}
+
+impl Error for CauseCarrier {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.classified)
     }
 }
 
@@ -236,16 +290,14 @@ pub fn cause_in_chain(error: &(dyn Error + 'static)) -> Option<NetworkCause> {
             return Some(classified.cause());
         }
         // An I/O error does NOT expose its payload as a source: `source()`
-        // returns the payload's OWN source, so a carrier travelling in the
-        // payload is invisible to this walk. `get_ref()` is where the payload
-        // actually lives (#2784). The carrier's own source stays reachable
-        // through the normal walk, so the chain loses nothing.
+        // returns the payload's OWN source, so the cause living in the payload
+        // is invisible to this walk. `get_ref()` is where the payload actually
+        // lives (#2784). The plain walk reaches the cause through the
+        // `CauseCarrier` (#2824); this hop covers a payload that carries the
+        // carrier directly.
         if let Some(io_err) = err.downcast_ref::<io::Error>() {
-            if let Some(classified) = io_err
-                .get_ref()
-                .and_then(|payload| payload.downcast_ref::<ClassifiedNetworkError>())
-            {
-                return Some(classified.cause());
+            if let Some(cause) = io_err.get_ref().and_then(classified_cause) {
+                return Some(cause);
             }
         }
         current = err.source();
@@ -253,109 +305,14 @@ pub fn cause_in_chain(error: &(dyn Error + 'static)) -> Option<NetworkCause> {
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_value_has_a_stable_wire_name() {
-        for cause in NetworkCause::ALL {
-            assert_eq!(
-                NetworkCause::from_value(cause.as_str()),
-                Some(cause),
-                "the wire name of {cause:?} must round-trip"
-            );
-        }
+/// The cause a carrier payload carries, if it carries one.
+fn classified_cause(payload: &(dyn Error + Send + Sync + 'static)) -> Option<NetworkCause> {
+    if let Some(classified) = payload.downcast_ref::<ClassifiedNetworkError>() {
+        return Some(classified.cause());
     }
-
-    #[test]
-    fn the_wire_names_are_the_documented_ones() {
-        let names: Vec<&str> = NetworkCause::ALL.iter().map(|c| c.as_str()).collect();
-        assert_eq!(
-            names,
-            vec![
-                "dns_resolution",
-                "connect_refused",
-                "connect_timeout",
-                "read_timeout",
-                "connection_closed",
-                "tls_handshake",
-                "unknown",
-            ],
-            "the taxonomy's wire names are a public contract"
-        );
-    }
-
-    #[test]
-    fn the_user_facing_messages_are_spanish() {
-        let messages: Vec<&str> = NetworkCause::ALL
-            .iter()
-            .map(|cause| cause.message())
-            .collect();
-        assert!(messages.iter().all(|message| !message.is_empty()));
-        // The issue's first acceptance criterion, pinned here: two causes must
-        // never produce the same sentence, or the message stops being evidence.
-        let unique: std::collections::BTreeSet<&str> = messages.iter().copied().collect();
-        assert_eq!(
-            unique.len(),
-            messages.len(),
-            "two causes must never share a message: {messages:?}"
-        );
-        assert_eq!(
-            NetworkCause::ConnectRefused.message(),
-            "el servidor rechazó la conexión"
-        );
-    }
-
-    /// #2784: a carrier travelling in an I/O error's PAYLOAD is still found.
-    ///
-    /// An `io::Error` does not expose its payload as a source: `source()`
-    /// returns the payload's own source. The carrier is therefore invisible to
-    /// a plain chain walk, and the walk has to look into `get_ref()`. The
-    /// `Io` variant relies on this to keep the error's `kind` — the retry
-    /// rule's input — so the mechanism is pinned here.
-    #[test]
-    fn a_carrier_in_an_io_errors_payload_is_still_found() {
-        let carrier = ClassifiedNetworkError::new(
-            NetworkCause::ConnectRefused,
-            Box::new(io::Error::other("connection refused")),
-        );
-        let error = crate::domain::downloader_port::DownloadError::Io(io::Error::new(
-            io::ErrorKind::ConnectionRefused,
-            carrier,
-        ));
-
-        assert_eq!(
-            cause_in_chain(&error),
-            Some(NetworkCause::ConnectRefused),
-            "the carrier travels in the I/O error's payload"
-        );
-        assert!(
-            error
-                .to_string()
-                .contains("el servidor rechazó la conexión"),
-            "the message must name the cause: {error}"
-        );
-        assert_eq!(
-            error.classify(),
-            crate::domain::error::ErrorClass::InternalFatal,
-            "the kind survives the carrier: a refused connection is not retried"
-        );
-    }
-
-    #[test]
-    fn the_classifier_reads_the_cause_out_of_the_chain() {
-        let cause = NetworkCause::DnsResolution;
-        let source = std::io::Error::other("name resolution failed");
-        let classified = ClassifiedNetworkError::new(cause, Box::new(source));
-        assert_eq!(cause_in_chain(&classified), Some(cause));
-    }
-
-    #[test]
-    fn an_unclassified_chain_has_no_cause() {
-        let plain = std::io::Error::other("something else");
-        assert_eq!(cause_in_chain(&plain), None);
-    }
+    payload
+        .downcast_ref::<CauseCarrier>()
+        .map(CauseCarrier::cause)
 }
 
 /// Which phase of a fetch a failure happened in.
@@ -431,70 +388,6 @@ fn has_in_chain<T: Error + 'static>(error: &(dyn Error + 'static)) -> bool {
 }
 
 #[cfg(test)]
-mod classify_tests {
-    use super::*;
-
-    #[test]
-    fn a_refused_connection_is_classified_by_its_io_kind() {
-        let err = std::io::Error::new(io::ErrorKind::ConnectionRefused, "refused");
-        assert_eq!(
-            classify(&err, FetchPhase::Connect),
-            NetworkCause::ConnectRefused
-        );
-    }
-
-    #[test]
-    fn a_reset_or_an_eof_is_a_closed_connection() {
-        for kind in [
-            io::ErrorKind::ConnectionReset,
-            io::ErrorKind::UnexpectedEof,
-            io::ErrorKind::BrokenPipe,
-        ] {
-            let err = std::io::Error::new(kind, "closed");
-            assert_eq!(
-                classify(&err, FetchPhase::Connect),
-                NetworkCause::ConnectionClosed,
-                "kind {kind:?} must classify as a closed connection"
-            );
-        }
-    }
-
-    #[test]
-    fn the_phase_decides_a_timeout() {
-        let err = std::io::Error::new(io::ErrorKind::TimedOut, "timed out");
-        assert_eq!(
-            classify(&err, FetchPhase::Connect),
-            NetworkCause::ConnectTimeout
-        );
-        assert_eq!(classify(&err, FetchPhase::Body), NetworkCause::ReadTimeout);
-    }
-
-    #[test]
-    fn the_resolvers_own_failure_decides_the_dns_class() {
-        let err = DnsResolutionError::new(Box::new(std::io::Error::other("no such host")));
-        assert_eq!(
-            classify(&err, FetchPhase::Connect),
-            NetworkCause::DnsResolution
-        );
-    }
-
-    #[test]
-    fn an_unreadable_chain_is_unknown() {
-        let err = std::io::Error::other("something else entirely");
-        assert_eq!(classify(&err, FetchPhase::Connect), NetworkCause::Unknown);
-    }
-
-    #[test]
-    fn a_plain_error_without_io_is_unknown() {
-        #[derive(Debug)]
-        struct Plain;
-        impl fmt::Display for Plain {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("plain")
-            }
-        }
-        impl Error for Plain {}
-
-        assert_eq!(classify(&Plain, FetchPhase::Connect), NetworkCause::Unknown);
-    }
-}
+mod classify_tests;
+#[cfg(test)]
+mod tests;

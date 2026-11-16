@@ -20,7 +20,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
 use tokio::sync::RwLock as AsyncRwLock;
@@ -42,6 +42,7 @@ use crate::domain::cookie_bridge::CookieBridge;
 use crate::domain::crawler_port::RobotsPort;
 use crate::domain::downloader_factory::{DownloaderFactory, DownloaderSpec};
 use crate::domain::downloader_port::{DownloadError, Downloader};
+use crate::domain::error::cause::NetworkCause;
 use crate::domain::ram_probe_port::RamProbePort;
 use crate::domain::{post_load_wait::PostLoadWait, CorrelationId, CrawlerConfig, JsStrategy};
 
@@ -54,6 +55,7 @@ pub use pause::{PauseTracker, PauseVerdict, PauseWatchdog, WaitOutcome};
 mod checkpoint;
 
 mod lifecycle;
+mod summary;
 
 mod crawl_loop;
 
@@ -186,6 +188,11 @@ pub struct Engine {
     error_count: Arc<AtomicUsize>,
     /// Per-category error counters indexed by `CrawlErrorCategory::index()` (issue #374).
     error_breakdown: Arc<[AtomicUsize; 8]>,
+    /// The FIRST classified transport cause of the run (#2824).
+    ///
+    /// The task failures are counted, not kept: this is the one cause the
+    /// application boundary needs to name the failure it reports.
+    transport_cause: Arc<OnceLock<NetworkCause>>,
     /// Fetch failures attributed to NAME RESOLUTION (#2823).
     ///
     /// Counted apart from the category breakdown, which folds every transport

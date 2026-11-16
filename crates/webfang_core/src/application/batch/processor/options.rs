@@ -256,10 +256,9 @@ pub(crate) async fn process_single_url(
         {
             return Err(CrawlError::Timeout);
         }
-        return Err(CrawlError::Connection {
-            message: format!("crawl completed with {} transient error(s)", result.errors),
-            source: None,
-        });
+        // #2824: the aggregate keeps the cause the run already classified,
+        // instead of rebuilding a `source: None` error that drops it.
+        return Err(super::aggregate::aggregate_transient_failure(&result));
     }
 
     Ok(result)

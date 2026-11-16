@@ -199,7 +199,7 @@ pub async fn discover_urls_unified(
                 reason = %message,
                 "crawl ended early — proceeding with partial results; the failure is reported after the export"
             );
-            (partial, Some(message))
+            (*partial, Some(message))
         },
         Err(e) => return Err(e.into()),
     };

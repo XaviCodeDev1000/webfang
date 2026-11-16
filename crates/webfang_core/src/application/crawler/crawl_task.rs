@@ -12,24 +12,21 @@ use std::time::Duration;
 use tracing::{debug, instrument, warn};
 use url::Url;
 
-use super::checkpoint::BannedDomain;
 use super::crawl_task_ctx::CrawlTaskCtx;
-use super::ports::{waf_challenge_message, FetchOutcome};
 use crate::application::pipeline::{ScrapedItem, StageOutcome};
 use crate::application::rate_limiter::PacingContext;
 use crate::application::url_filter::is_allowed;
 use crate::domain::crawler_port::UrlSource;
-use crate::domain::downloader_port::Cookie;
 use crate::domain::url_validation::is_internal_link;
 use crate::domain::{CorrelationId, CrawlError, CrawlErrorCategory, DiscoveredUrl};
-use crate::infrastructure::observability::{
-    log_classified_error, log_scrape_error, log_scrape_error_with_cause,
-};
+use crate::infrastructure::observability::{log_classified_error, log_scrape_error_with_cause};
 
 mod errors;
+mod fetch;
 mod sessions;
 
 pub(crate) use errors::handle_crawl_result;
+use fetch::{fetch_page, ingest_cookies};
 use sessions::{acquire_session, report_session_success};
 
 /// Execute a single crawl task using shared context.
@@ -187,77 +184,6 @@ fn record_page_outcome(
 
 /// Fetch the page, handling WAF challenges (banning the domain) and logging
 /// fetch failures before propagating the error.
-async fn fetch_page(
-    ctx: &CrawlTaskCtx,
-    parsed_url: &Url,
-    url_str: &str,
-    page_correlation: &CorrelationId,
-) -> Result<FetchOutcome, CrawlError> {
-    match ctx.fetcher.fetch_page(parsed_url, &ctx.config).await {
-        Ok(outcome) => Ok(outcome),
-        Err(e) => {
-            if let Some(waf_msg) = waf_challenge_message(&e) {
-                ban_waf_domain(ctx, parsed_url, &waf_msg);
-                log_scrape_error(
-                    &waf_msg,
-                    url_str,
-                    "fetch",
-                    Some(page_correlation),
-                    "WAF challenge detected",
-                );
-            } else {
-                log_scrape_error_with_cause(
-                    &e,
-                    url_str,
-                    "fetch",
-                    Some(page_correlation),
-                    "page fetch failed",
-                );
-            }
-            Err(e)
-        },
-    }
-}
-
-/// Ban a domain that triggered a WAF challenge, unless it is already banned.
-fn ban_waf_domain(ctx: &CrawlTaskCtx, parsed_url: &Url, waf_msg: &str) {
-    let Some(domain) = parsed_url.host_str() else {
-        return;
-    };
-    let banned = BannedDomain {
-        domain: domain.to_string(),
-        banned_until: None,
-        reason: waf_msg.to_string(),
-    };
-    if let Ok(mut domains) = ctx.banned_domains.write() {
-        if !domains.iter().any(|d| d.domain == domain) {
-            domains.push(banned);
-            warn!(domain = %domain, reason = %waf_msg, "domain banned due to WAF challenge");
-        }
-    }
-}
-
-/// Ingest any cookies returned by the fetch into the shared cookie bridge.
-///
-/// #1119: the bridge is a `tokio::sync::RwLock`, so the write lock is
-/// awaited — a contended lock yields the worker instead of parking an
-/// executor thread — and the guard is dropped at the end of the block,
-/// never held across an `.await`.
-async fn ingest_cookies(ctx: &CrawlTaskCtx, fetched_cookies: &[Cookie]) {
-    if fetched_cookies.is_empty() {
-        return;
-    }
-    let mut bridge = ctx.cookie_bridge.write().await;
-    for cookie in fetched_cookies {
-        bridge.add(cookie.clone());
-    }
-}
-
-/// Hand the fetched body to the content sink when one is configured (#631).
-///
-/// Capture happens right after a successful fetch and before pipeline gating,
-/// so a `Skip`/`Reject` outcome cannot silently drop the page from the export
-/// set. The sink is synchronous and must not block.
 fn capture_content(ctx: &CrawlTaskCtx, url_str: &str, response: &str) {
     let Some(ref sink) = ctx.content_sink else {
         return;
@@ -1208,218 +1134,6 @@ mod tests {
             .expect("crawl should succeed");
         let b = bridge.read().await;
         assert_eq!(b.len(), 0);
-    }
-
-    // --- handle_crawl_result unit tests (PR #476) ---
-
-    fn counters() -> (Arc<AtomicUsize>, Arc<[AtomicUsize; 8]>, Arc<AtomicUsize>) {
-        (
-            Arc::new(AtomicUsize::new(0)),
-            Arc::new(std::array::from_fn(|_| AtomicUsize::new(0))),
-            Arc::new(AtomicUsize::new(0)),
-        )
-    }
-
-    #[test]
-    fn success_leaves_counters_unchanged() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        handle_crawl_result(Ok(Ok(())), &error_count, &breakdown, &resolution_failures);
-        assert_eq!(error_count.load(Ordering::SeqCst), 0);
-        assert!(breakdown.iter().all(|c| c.load(Ordering::SeqCst) == 0));
-    }
-
-    #[test]
-    fn crawl_error_increments_count_and_own_category() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        handle_crawl_result(
-            Ok(Err(CrawlError::Timeout)),
-            &error_count,
-            &breakdown,
-            &resolution_failures,
-        );
-        assert_eq!(error_count.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            breakdown[CrawlErrorCategory::Timeout.index()].load(Ordering::SeqCst),
-            1
-        );
-        for cat in CrawlErrorCategory::ALL {
-            if cat != CrawlErrorCategory::Timeout {
-                assert_eq!(breakdown[cat.index()].load(Ordering::SeqCst), 0);
-            }
-        }
-    }
-
-    /// #2823: a name-resolution failure is counted APART from the category
-    /// breakdown, which folds every transport cause into `Network`. The batch
-    /// reads this counter to tell "the site refused us" from "the resolver is
-    /// down", so the two must never share a slot.
-    #[test]
-    fn resolution_failure_is_counted_apart_from_the_category() {
-        use crate::domain::error::cause::{ClassifiedNetworkError, NetworkCause};
-
-        let (error_count, breakdown, resolution_failures) = counters();
-        let err = CrawlError::Network {
-            message: NetworkCause::DnsResolution.message().to_string(),
-            status_code: None,
-            source: Some(Box::new(ClassifiedNetworkError::new(
-                NetworkCause::DnsResolution,
-                Box::new(std::io::Error::other("resolver down")),
-            ))),
-        };
-        handle_crawl_result(Ok(Err(err)), &error_count, &breakdown, &resolution_failures);
-
-        assert_eq!(
-            resolution_failures.load(Ordering::SeqCst),
-            1,
-            "a resolution failure must reach its own counter"
-        );
-        assert_eq!(error_count.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            breakdown[CrawlErrorCategory::Network.index()].load(Ordering::SeqCst),
-            1,
-            "it still belongs to the Network category — the two are not exclusive"
-        );
-    }
-
-    /// A site refusal must NOT touch the resolution counter: that is what
-    /// keeps a WAF block from looking like a broken resolver (#2823).
-    #[test]
-    fn site_refusal_leaves_the_resolution_counter_alone() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        handle_crawl_result(
-            Ok(Err(CrawlError::WafChallenge {
-                provider: "cloudflare".to_string(),
-                url: "https://example.com".to_string(),
-                kind: crate::domain::error::WafDetectionKind::BodySignature,
-            })),
-            &error_count,
-            &breakdown,
-            &resolution_failures,
-        );
-
-        assert_eq!(
-            resolution_failures.load(Ordering::SeqCst),
-            0,
-            "a WAF challenge is not a resolution failure"
-        );
-        assert_eq!(
-            breakdown[CrawlErrorCategory::Waf.index()].load(Ordering::SeqCst),
-            1
-        );
-    }
-
-    #[test]
-    fn http_403_increments_waf_category() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        handle_crawl_result(
-            Ok(Err(CrawlError::Http {
-                status: 403,
-                url: "https://example.com".into(),
-            })),
-            &error_count,
-            &breakdown,
-            &resolution_failures,
-        );
-        assert_eq!(error_count.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            breakdown[CrawlErrorCategory::Waf.index()].load(Ordering::SeqCst),
-            1
-        );
-        for cat in CrawlErrorCategory::ALL {
-            if cat != CrawlErrorCategory::Waf {
-                assert_eq!(
-                    breakdown[cat.index()].load(Ordering::SeqCst),
-                    0,
-                    "category {cat} must remain zero for a 403"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn crawl_error_category_is_derived_from_error() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        handle_crawl_result(
-            Ok(Err(CrawlError::Parse("bad html".into()))),
-            &error_count,
-            &breakdown,
-            &resolution_failures,
-        );
-        assert_eq!(error_count.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            breakdown[CrawlErrorCategory::Extraction.index()].load(Ordering::SeqCst),
-            1
-        );
-        assert_eq!(
-            breakdown[CrawlErrorCategory::Timeout.index()].load(Ordering::SeqCst),
-            0,
-            "category must follow the error, not a fixed index"
-        );
-    }
-
-    #[tokio::test]
-    async fn join_error_increments_panic_category() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        let join_err = tokio::spawn(async { panic!("boom") }).await.unwrap_err();
-        handle_crawl_result(
-            Err(join_err),
-            &error_count,
-            &breakdown,
-            &resolution_failures,
-        );
-        assert_eq!(error_count.load(Ordering::SeqCst), 1);
-        assert_eq!(
-            breakdown[CrawlErrorCategory::Panic.index()].load(Ordering::SeqCst),
-            1
-        );
-        for cat in CrawlErrorCategory::ALL {
-            if cat != CrawlErrorCategory::Panic {
-                assert_eq!(breakdown[cat.index()].load(Ordering::SeqCst), 0);
-            }
-        }
-    }
-
-    // ========================================================================
-    // Cancellation tests (#509)
-    // ========================================================================
-
-    #[test]
-    fn cancelled_result_is_not_counted_as_error() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        handle_crawl_result(
-            Ok(Err(CrawlError::Cancelled)),
-            &error_count,
-            &breakdown,
-            &resolution_failures,
-        );
-        assert_eq!(
-            error_count.load(Ordering::SeqCst),
-            0,
-            "shutdown cancellation must not inflate the error count"
-        );
-        assert!(breakdown.iter().all(|c| c.load(Ordering::SeqCst) == 0));
-    }
-
-    #[tokio::test]
-    async fn aborted_join_result_is_not_counted_as_panic() {
-        let (error_count, breakdown, resolution_failures) = counters();
-        let handle = tokio::spawn(std::future::pending::<Result<(), CrawlError>>());
-        handle.abort();
-        let join_err = handle.await.unwrap_err();
-        assert!(join_err.is_cancelled());
-
-        handle_crawl_result(
-            Err(join_err),
-            &error_count,
-            &breakdown,
-            &resolution_failures,
-        );
-        assert_eq!(
-            error_count.load(Ordering::SeqCst),
-            0,
-            "drain-time aborts are a control signal, not panics"
-        );
-        assert!(breakdown.iter().all(|c| c.load(Ordering::SeqCst) == 0));
     }
 
     #[tokio::test]

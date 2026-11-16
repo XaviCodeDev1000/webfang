@@ -42,6 +42,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn, Instrument};
 
+mod aggregate;
 mod options;
 
 #[cfg(test)]
@@ -517,10 +518,6 @@ fn drain_finished(
     }
     aborted
 }
-
-#[cfg(test)]
-#[path = "processor_resolution_tests.rs"]
-mod resolution_tests;
 
 #[cfg(test)]
 mod tests {
