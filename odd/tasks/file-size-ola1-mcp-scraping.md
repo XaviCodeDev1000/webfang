@@ -56,3 +56,18 @@ L6 — Entrega PR 1 (2026-11-15): el rango completo (20 paths, 5085 líneas) EXC
 L7 — Cortes 2 y 3 preparados como ramas apiladas (cherry-pick desde la serie original): `refactor/ola1-mcp-scraping-pr2` (3 commits: serialization, session_budget, safety → 1190) y `refactor/ola1-mcp-scraping-pr3` (6 commits: tools_* + session_capture + hub 85 + `--remove` del baseline + guards recursivos). Se abren tras el merge de su base.
 L8 — Hallazgos sin issue (decisión del humano): (a) seam rmcp `#[tool_router]` por impl + `ToolRouter::merge`, ya aplicado y documentado en este registro y en Engram; (b) `provenance_gate_test.rs`/`span_param_hygiene_test.rs` barrían `handlers/*.rs` plano y quedaban ciegos ante subdirectorios (28 vs 36 registrations) — corregido en `98a713a9` con `common::walk_dir`, va en el cuerpo del PR 3. No se abren issues: el trabajo ya está hecho.
 L9 — Limpieza operativa: `/tmp` (tmpfs 16G) estaba al 80% y el snapshot del reviewer fallaba con `disk quota exceeded`; se removieron 8 GiB de artefactos `webfang-test-bin-*` de tests anteriores (ninguno de hoy) → 26% de uso.
+
+L10 — Entrega completa (2026-11-15): **los 3 PRs mergeados** en secuencia.
+- **#2816** (PR 1 tests): `refactor/ola1-mcp-scraping-pr1` → main, `93f2e8ea` (squash), `Closes part of #2584`, ratchet 2513→1517.
+- **#2818** (PR 2 producción): `refactor/ola1-mcp-scraping-pr2` → main, `0a825a40` (squash), ratchet 1517→1190.
+- **#2820** (PR 3 tools + baseline `--remove`): `refactor/ola1-mcp-scraping-pr3` → main, `626a6e87` (squash), `scraping.rs` 1190→85, entrada **removida** del baseline file_size_rust.
+Gate local GREEN en cada corte (PASS=43 FAIL=0 SKIP=2); CI verde en cada PR (0 fallos).
+Post-merge: main ff-only, worktrees/rama/target dirs borrados, `git worktree prune` limpio.
+
+L11 — Hallazgos (sin issues, decisión del humano):
+(a) Seam rmcp `#[tool_router]` por impl + `ToolRouter::merge` — aplicado y documentado en registro + Engram + cuerpo del PR 3.
+(b) Guards planos → recursivos (`common::walk_dir`) — corregido en `98a713a9`, va en PR 3.
+(c) Revisión nativa PR 3: escalación `R3-RouterMergeSilentToolLoss` (falso positivo del seam, handshake 36 verificado, golden intacto). RDD desactivado para el repo tras merge de PR 2; push del PR 3 pasó sin review.
+(d) Limpieza operativa: `/tmp` tmpfs 16G al 80% → liberados 8 GiB artefactos `webfang-test-bin-*` viejos (ninguno de hoy).
+
+MISIÓN CERRADA: scraping.rs 2513→85, baseline `--remove`, 11 módulos ≤500, 3 PRs mergeados, 0 colisiones.
