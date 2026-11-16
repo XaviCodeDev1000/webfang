@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Semantics harness for scripts/check_migration_evidence.sh — issue #2056.
+#
+# Hermético: construye árboles mínimos en mktemp, no llama a cargo, rustc, red
+# ni git, y nunca toca el árbol real. Cada caso negativo lleva su `# NEGATION:`.
+# El caso límite (tren cerrado) es un CONTROL POSITIVO y por eso NO lo lleva:
+# el guard debe dejar pasar la deriva cuando TRAIN_OPEN no existe.
+#
+# El meta-guard reemplaza el guard por `exit 0` y vuelve a correr este harness:
+# todos los casos negativos pasan entonces, así que el harness VA A ROJO. Eso es
+# lo que prueba que el guard decide algo y no es decoración.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GUARD="${MIGRATION_GUARD:-$ROOT/scripts/check_migration_evidence.sh}"
+AUDITOR="$ROOT/scripts/audit_migration_baseline.py"
+SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+PASS=0
+FAIL=0
+ok()  { PASS=$((PASS + 1)); printf 'OK: %s\n' "$1"; }
+bad() { FAIL=$((FAIL + 1)); printf 'FAIL: %s\n' "$1"; }
+
+fixture() { # -> imprime la ruta de un árbol coherente con baseline.json
+  local d
+  d="$(mktemp -d "$WORK/tree.XXXXXX")"
+  mkdir -p "$d/.github/workflows" "$d/evidence/mig-2026-01" \
+           "$d/crates/webfang_test_utils" "$d/crates/webfang_core"
+  cat > "$d/Cargo.toml" <<'TOML'
+[workspace]
+resolver = "2"
+members = ["crates/webfang_test_utils", "crates/webfang_core"]
+
+[workspace.package]
+version = "8.0.2"
+edition = "2021"
+rust-version = "1.91"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+TOML
+  printf 'edition.workspace = true\n' > "$d/crates/webfang_test_utils/Cargo.toml"
+  printf 'edition.workspace = true\n' > "$d/crates/webfang_core/Cargo.toml"
+  cat > "$d/rust-toolchain.toml" <<'TOML'
+[toolchain]
+channel = "1.91.1"
+components = ["rustfmt", "clippy"]
+TOML
+  cat > "$d/.github/support.json" <<'JSON'
+{"schema_version":1,"lines":[
+ {"minor":"8.0","state":"STABLE","latest":"8.0.2","accepts":["bugfix","security"]},
+ {"minor":"7.7","state":"MAINTENANCE","latest":"7.7.1","accepts":["security"]},
+ {"minor":"7.6","state":"EOL","latest":"7.6.6","eol_reason":"auto: rotate-stable, third line back from STABLE"}
+]}
+JSON
+  cat > "$d/README.md" <<'MD'
+WebFang is a **binaries-only** distribution. Nothing is published to crates.io.
+**Miri status:** the Miri lanes are **advisory**: scheduled-only, continue-on-error, and never a merge gate.
+MD
+  cat > "$d/.github/workflows/ci.yml" <<'YML'
+jobs:
+  miri:
+    continue-on-error: true
+  miri-infra-fast: {}
+  miri-infra-slow: {}
+YML
+  cat > "$d/.github/workflows/release.yml" <<'YML'
+matrix:
+  include:
+    - target: x86_64-unknown-linux-gnu
+YML
+  python3 "$AUDITOR" --root "$d" --head-sha "$SHA" \
+    --write "$d/evidence/mig-2026-01/baseline.json" >/dev/null 2>&1 \
+    || { printf 'fixture: --write falló\n' >&2; return 1; }
+  cat > "$d/evidence/mig-2026-01/PRD-v2.md" <<'MD'
+# PRD fixture
+Workspace {{BASELINE.workspace_version}} en {{BASELINE.head_sha}}.
+Major {{BASELINE.decisions.major_target}}, backports {{BASELINE.decisions.backport_line}}.
+Índice: **RF-01** congelar baseline; **RF-23** semver; **RF-24** backports.
+MD
+  : > "$d/evidence/mig-2026-01/TRAIN_OPEN"
+  printf '%s' "$d"
+}
+
+run_guard() { # tree [head_sha]
+  local d="$1" sha="${2:-$SHA}"
+  MIGRATION_ROOT="$d" \
+  MIGRATION_AUDITOR="$AUDITOR" \
+  MIGRATION_EVIDENCE="$d/evidence/mig-2026-01/baseline.json" \
+  MIGRATION_PRD="$d/evidence/mig-2026-01/PRD-v2.md" \
+  MIGRATION_TRAIN_OPEN="$d/evidence/mig-2026-01/TRAIN_OPEN" \
+  MIGRATION_HEAD_SHA="$sha" \
+    bash "$GUARD" >"$WORK/out.log" 2>&1
+  return $?
+}
+
+expect_ok()  { local label="$1"; shift; if run_guard "$@"; then ok "$label"; else bad "$label (esperaba verde)"; sed 's/^/    /' "$WORK/out.log"; fi; }
+expect_red() { local label="$1"; shift; if run_guard "$@"; then bad "$label (esperaba rojo, guard verde)"; sed 's/^/    /' "$WORK/out.log"; else ok "$label"; fi; }
+
+# --- 1. control positivo: un árbol coherente debe estar verde ---------------
+D="$(fixture)" || { echo "FAIL: no se pudo construir el fixture"; exit 1; }
+expect_ok "baseline + PRD + decisiones coherentes -> verde" "$D"
+
+# --- 2. evidencia ausente ---------------------------------------------------
+# NEGATION: un baseline borrado no puede degradar a "sin evidencia, sigo".
+D2="$(fixture)"; rm -f "$D2/evidence/mig-2026-01/baseline.json"
+expect_red "baseline ausente -> rojo" "$D2"
+
+# --- 3. JSON corrupto -------------------------------------------------------
+# NEGATION: un baseline ilegible no es un baseline vacío.
+D3="$(fixture)"; printf '{' > "$D3/evidence/mig-2026-01/baseline.json"
+expect_red "baseline con JSON inválido -> rojo" "$D3"
+
+# --- 4. hecho literal reintroducido en la prosa -----------------------------
+# NEGATION: el v1 murió de copiar cifras en el documento; el v2 las prohíbe.
+D4="$(fixture)"; printf '\nv7.7.1\n' >> "$D4/evidence/mig-2026-01/PRD-v2.md"
+expect_red "hecho literal del v1 en el PRD -> rojo" "$D4"
+
+# --- 5. placeholder sin resolver --------------------------------------------
+# NEGATION: un placeholder inventado debe fallar, no imprimirse tal cual.
+D5="$(fixture)"; printf '\n{{BASELINE.no.existe.esta.clave}}\n' >> "$D5/evidence/mig-2026-01/PRD-v2.md"
+expect_red "placeholder huérfano -> rojo" "$D5"
+
+# --- 6. RF huérfano (la deriva §3 -> §6 del v1) -----------------------------
+# NEGATION: C14 citaba un requisito que no existía; el índice lo detecta.
+D6="$(fixture)"; printf '\nVer RF-99 para guardas de ruta.\n' >> "$D6/evidence/mig-2026-01/PRD-v2.md"
+expect_red "RF citado y no definido -> rojo" "$D6"
+
+# --- 7. deriva de una decisión tras un release ------------------------------
+# NEGATION: un release que rota support.json invalida RF-23/RF-24 en silencio.
+D7="$(fixture)"; sed -i 's/version = "8.0.2"/version = "9.0.0"/' "$D7/Cargo.toml"
+expect_red "versión del workspace derivada -> rojo con tren abierto" "$D7"
+
+# --- 8. CONTROL POSITIVO: tren cerrado, la deriva es NOTE -------------------
+# Sin # NEGATION: este caso DEBE pasar. Es el límite que impide un gate ruidoso.
+D8="$(fixture)"; sed -i 's/version = "8.0.2"/version = "9.0.0"/' "$D8/Cargo.toml"
+rm -f "$D8/evidence/mig-2026-01/TRAIN_OPEN"
+expect_ok "tren cerrado + deriva -> NOTE no bloqueante" "$D8"
+
+# --- 9. decisión congelada que ya no se deriva de la política ---------------
+# NEGATION: si support.json rota, major/backport se recalculan; un JSON viejo
+# con las decisiones pegadas a mano debe caer.
+D9="$(fixture)"; python3 - "$D9/evidence/mig-2026-01/baseline.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["decisions"]["major_target"] = "1.0.0"
+json.dump(d, open(p, "w"))
+PY
+expect_red "decisiones que no se derivan de support.json -> rojo" "$D9"
+
+# --- 10. baseline medido sobre otro árbol -----------------------------------
+# NEGATION: el SHA del baseline no puede ser cualquier cadena de 40 hex.
+D10="$(fixture)"
+expect_red "head_sha que no es HEAD ni ancestro -> rojo" "$D10" "0000000000000000000000000000000000000000"
+
+printf '\nmigration evidence harness: %d OK, %d FAIL\n' "$PASS" "$FAIL"
+[[ $FAIL -eq 0 ]] || exit 1
+exit 0

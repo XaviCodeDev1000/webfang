@@ -1,0 +1,219 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-16T22:05:52+00:00",
+  "head_sha": "cb55c7fea32c1652a8bf8728395d593316730cd1",
+  "head_date": "2026-11-16T20:57:54+00:00",
+  "head_subject": "refactor: split processor.rs and crawl_task.rs below their ratchet baselines (#2827) (#2856)",
+  "workspace_version": "8.0.2",
+  "toolchain": {
+    "channel": "1.91.1",
+    "rust_version": "1.91",
+    "mise_rust": "1.91.1",
+    "components": [
+      "rustfmt",
+      "clippy"
+    ]
+  },
+  "edition": {
+    "workspace": "2021",
+    "members": [
+      "crates/webfang_core",
+      "crates/webfang_mcp",
+      "crates/webfang_cli",
+      "crates/webfang_test_utils",
+      "crates/webfang_benchmark"
+    ],
+    "members_inherit": [
+      "crates/webfang_core",
+      "crates/webfang_mcp",
+      "crates/webfang_cli",
+      "crates/webfang_test_utils",
+      "crates/webfang_benchmark"
+    ],
+    "members_inherit_count": 5,
+    "member_overrides": [],
+    "excluded": {
+      "fuzz/Cargo.toml": "2021",
+      "tools/intra-crate-lint/Cargo.toml": "2021"
+    }
+  },
+  "lints": {
+    "unsafe_code": "deny",
+    "env_mutation_owner": "webfang_test_utils"
+  },
+  "support": {
+    "stable": "8.0",
+    "stable_latest": "8.0.2",
+    "stable_initial": "8.0.0",
+    "maintenance": "7.7",
+    "maintenance_latest": "7.7.1",
+    "eol_first": "7.6",
+    "rotation": "auto: rotate-stable, third line back from STABLE",
+    "states": {
+      "8.0": "STABLE",
+      "7.7": "MAINTENANCE",
+      "7.6": "EOL",
+      "7.5": "EOL",
+      "7.4": "EOL",
+      "7.3": "EOL",
+      "7.2": "EOL",
+      "7.1": "EOL",
+      "7.0": "EOL",
+      "6.0": "EOL",
+      "5.0": "EOL",
+      "4.0": "EOL",
+      "3.0": "EOL",
+      "2.13": "EOL",
+      "2.12": "EOL",
+      "2.11": "EOL",
+      "2.10": "EOL",
+      "2.9": "EOL",
+      "2.8": "EOL",
+      "2.7": "EOL",
+      "2.6": "EOL",
+      "2.5": "EOL",
+      "2.4": "EOL",
+      "2.3": "EOL",
+      "2.2": "EOL",
+      "2.1": "EOL",
+      "2.0": "EOL"
+    }
+  },
+  "miri": {
+    "policy": "advisory",
+    "lanes": 4,
+    "jobs": [
+      "miri",
+      "miri-infra-fast",
+      "miri-infra-slow"
+    ],
+    "continue_on_error": true,
+    "never_merge_gate": true,
+    "known_limits": [
+      "servo_arc / Tree Borrows",
+      "BoringSSL FFI",
+      "inline asm / recent syscalls"
+    ]
+  },
+  "distribution": {
+    "kind": "binaries-only",
+    "crates_io": false
+  },
+  "release_targets": [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu"
+  ],
+  "toolchain_pins": {
+    "dtolnay_steps": 35,
+    "dtolnay_references": 37,
+    "sha_prefixes": {
+      "6bed0761d984": 29,
+      "02cb101ec7c4": 3,
+      "be39649afda9": 3
+    },
+    "stable_explicit": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "line": 2139,
+        "value": "1.91.1"
+      },
+      {
+        "file": ".github/workflows/release.yml",
+        "line": 210,
+        "value": "1.91.1"
+      },
+      {
+        "file": ".github/workflows/release.yml",
+        "line": 585,
+        "value": "1.91.1"
+      }
+    ],
+    "stable_explicit_count": 3,
+    "nightly_explicit": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "line": 2256,
+        "value": "nightly-2026-08-27"
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "line": 2326,
+        "value": "nightly-2026-08-27"
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "line": 2439,
+        "value": "nightly-2026-08-27"
+      }
+    ],
+    "nightly_explicit_count": 3
+  },
+  "counts": {
+    "rust_files": 687,
+    "assert_matches": 477,
+    "lossy_into_owned": 26,
+    "lossy_to_string": 12,
+    "all_into_owned": 87,
+    "strip_prefix_unwrap_or": 14,
+    "if_let": 641,
+    "allow_unsafe_code": 9,
+    "unsafe_blocks": 15,
+    "static_mut": 0,
+    "rpit": 10,
+    "gen_ident": 0,
+    "cfg_if": 0,
+    "env_mutations": 25,
+    "snapshots": 110,
+    "trybuild_stderr": 5,
+    "workflows": 17
+  },
+  "symbols": {
+    "SessionCap::try_admit": "crates/webfang_mcp/src/mcp_server/server/session_cap.rs",
+    "SessionCap prune loop": "crates/webfang_mcp/src/mcp_server/server/session_cap.rs",
+    "InFlightGuard": "crates/webfang_core/src/adapters/downloader/cache.rs",
+    "HandlerGuard": "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs",
+    "HandlerGuard::join": "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs",
+    "env_set": "crates/webfang_test_utils/src/lib.rs",
+    "env_remove": "crates/webfang_test_utils/src/lib.rs",
+    "EnvGuard": "crates/webfang_test_utils/src/lib.rs",
+    "env_invariant_scan": "crates/webfang_test_utils/tests/env_invariant_scan.rs",
+    "McpHandler::call_tool": "crates/webfang_mcp/src/mcp_server/mod.rs",
+    "CatchPanicLayer": "crates/webfang_mcp/src/mcp_server/server.rs"
+  },
+  "decisions": {
+    "major_target": "9.0.0",
+    "backport_line": "8.0",
+    "eol_on_release": "7.7",
+    "msrv_compat_toolchain": "1.91.1",
+    "miri_gate_wording": "advisory revisado, sin rojos nuevos atribuibles al bump",
+    "edition_flip": "atomic",
+    "support_rotation": "auto: rotate-stable, third line back from STABLE"
+  },
+  "decision_facts": [
+    "workspace_version",
+    "toolchain.channel",
+    "toolchain.rust_version",
+    "edition.workspace",
+    "support.stable",
+    "support.maintenance",
+    "support.eol_first",
+    "miri.policy",
+    "distribution.crates_io"
+  ],
+  "banned_literals": [
+    "v7\\.7\\.1",
+    "\\b8\\.0\\.0\\b",
+    "\\b474\\b",
+    "\\b35\\b pasos",
+    "steps=35",
+    "7\\.7 STABLE",
+    "7\\.6 MAINTENANCE",
+    "7\\.7/7\\.6",
+    "1,337",
+    "Miri verified",
+    "Miri verde",
+    "workspace `7\\.7\\.1`"
+  ]
+}
