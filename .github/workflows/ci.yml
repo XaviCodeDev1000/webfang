@@ -679,6 +679,30 @@ jobs:
       # so the edges are pinned by their own harness.
       - name: Docs claims wiring harness
         run: bash scripts/test_docs_claims_wiring.sh
+      # AGENTS.md size/structure gate (#2839): the always-loaded router regrew
+      # 740 -> 862 lines after the 2026-10-21 routerization because agents
+      # append runbook prose on every commit; #2834 pruned it back under the
+      # owner-approved budget (650 lines / 40960 bytes). Engram obs #368: "Sin
+      # un gate que falle, un doc largo no se auto-achica." The gate enforces
+      # the budget from scripts/quality-baselines.json (agents_doc key,
+      # descending-only ratchet), even fence balance, and zero line-number
+      # citations. REQUIRED from day one — no advisory phase: the budget is
+      # already met on main, so the guard blocks only on real growth.
+      # Offline, pure text over the checked-out tree: no cargo, no network.
+      - name: AGENTS.md size/structure gate (required, #2839)
+        # guard-required
+        run: bash scripts/check_agents_doc.sh
+      # Semantics harness: one negative case per check (oversize lines/bytes,
+      # odd fences, line citation, fail-closed inputs) plus the budget pin and
+      # the descending-only --update. A gate that only ever sees a healthy
+      # AGENTS.md is no gate. Offline mktemp fixtures, no repo state touched.
+      - name: AGENTS.md gate semantics harness
+        run: bash scripts/test_agents_doc.sh
+      # Wiring regression guard: the docs version-pin gate shipped inert for a
+      # whole release because no workflow invoked it (#2012). Same failure
+      # class here, so the edges are pinned by their own harness.
+      - name: AGENTS.md gate wiring harness
+        run: bash scripts/test_agents_doc_wiring.sh
       # Test inventory drift (auditoría QA/QC 2026-10-24): docs/test-inventory.json
       # is generated and committed, and nothing regenerated it — it described 163
       # files and 1,131 tests while the tree had 173 files and the suite ran
