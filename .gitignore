@@ -29,7 +29,7 @@ fuzz/coverage/
 # ═══════════════════════════════════════════════════════════
 # AI AGENTS
 # ═══════════════════════════════════════════════════════════
-# SDD / Agent working directories
+# ODD / Agent working directories (legacy `.sdd`/`sdd/` paths still ignored)
 .sdd/
 .sdd
 .atl/

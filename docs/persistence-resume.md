@@ -3,7 +3,7 @@
 This document is the authoritative description of WebFang's crash-recovery
 model: what is guaranteed, what is explicitly NOT guaranteed, and the exact
 policies implemented by the state machine, record store, JSONL writer, and
-resume gate (SDD change `stabilization-state-machine-resume`).
+resume gate (`stabilization-state-machine-resume`).
 
 ---
 
