@@ -9,7 +9,7 @@
       "crates/webfang_cli/src/main.rs": 1174,
       "crates/webfang_core/src/adapters/url_path.rs": 895,
       "crates/webfang_core/src/application/adaptive_engine/real.rs": 755,
-      "crates/webfang_core/src/application/batch/processor.rs": 1253,
+      "crates/webfang_core/src/application/batch/processor.rs": 570,
       "crates/webfang_core/src/application/container.rs": 1554,
       "crates/webfang_core/src/application/crawl_options.rs": 627,
       "crates/webfang_core/src/application/crawl_result_repository.rs": 1097,
