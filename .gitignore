@@ -52,7 +52,7 @@ STATE.md
 .qwen/settings.json
 .qwen/.env
 !.qwen/skills/
-
+.qwen/
 # Claude Code
 .claude/
 .claudeignore
