@@ -2,7 +2,8 @@
 //!
 //! Uses [`tokio::sync::Semaphore`] for job-level concurrency control.
 //! Each URL in the batch is a separate `crawl_site_with_options()` call, with
-//! the run-wide [`EngineOptions`] built once by `build_batch_engine_options`
+//! the run-wide [`EngineOptions`](crate::application::crawler::engine::EngineOptions)
+//! built once by `build_batch_engine_options`
 //! (#1369 — the knobless `crawl_site` entry is deprecated) and the job's ONE
 //! run-root correlation adopted by every engine call (#1439 — carried via
 //! [`BatchProcessor::with_correlation`], or minted once per job otherwise, so
