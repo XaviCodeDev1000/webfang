@@ -124,7 +124,18 @@ Las cinco variantes de transporte de S1 son `Network`, `Dns`, `Tls`, `Io` y
 - L9: PR #2838 (`fix/2824-cause-clone` → `main`), un commit (`144e2484`): el
   golden del extractor se refresca en el mismo commit que cambia el árbol, así
   que un commit intermedio sin su golden dejaría el árbol inconsistente ahí.
-- L10: Sin cambios de API incompatible: `ClassifiedNetworkError` mantiene su
+- L10: **Merge con `main`** (5 commits, #2835 encima): el contador de
+  resolución de #2823 y el slot de causa de #2824 ocupan las mismas costuras.
+  Cada mitad quedó donde vive su dueño: `CrawlResult` conserva los dos
+  contadores; el bookkeeping y sus tests, en `crawl_task/errors.rs`; el resumen
+  del run, en `engine/summary.rs`; la clasificación, en `crawl_error/classify.rs`;
+  el agregado del batch, en `batch/processor/aggregate.rs`.
+- L11: **Un cambio incompatible**: `CrawlError::PartialRun` embebía el resumen
+  por valor, y con dos contadores el `BatchError` del batch cruzó el umbral de
+  `result_large_err` (128 bytes). El payload va encajonado (`Box<CrawlResult>`)
+  — el mismo trato que #2784 dio a `HttpError::Connection` ✓. El PR lleva el
+  `!` por eso.
+- L12: Sin cambios de API incompatible en el resto: `ClassifiedNetworkError` mantiene su
   firma (`new`, `cause`) y gana `Clone`; `CauseCarrier` es un tipo nuevo;
   `CrawlResult` es `#[non_exhaustive]` y gana un campo + un método. El cambio de
   comportamiento del `Clone` es el que pide #2824.
