@@ -417,9 +417,6 @@ async fn fetch_html(
     let response = match client.get(url.as_str()).await {
         Ok(resp) => resp,
         Err(e) => {
-            // #2841 (S9): the cause field — the error now carries the
-            // classified transport cause through the port impls, so the trace
-            // emits it instead of silently omitting the field.
             log_scrape_error_with_cause(
                 &e,
                 url.as_str(),
