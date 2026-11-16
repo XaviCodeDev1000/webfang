@@ -193,7 +193,7 @@ fn test_crawl_rate_limited_classifies_as_transient_backoff() {
 
 #[test]
 fn test_crawl_timeout_classifies_as_transient_retriable() {
-    let crawl_err = crate::domain::error::CrawlError::Timeout;
+    let crawl_err = crate::domain::error::CrawlError::timeout();
     let scraper_err: ScraperError = crawl_err.into();
     assert_eq!(
         scraper_err.classify(),
@@ -243,7 +243,7 @@ fn test_timeout_maps_to_transient_io_source() {
     // EC-TIMEOUT: the Network source MUST be a synthetic io::Error with
     // ErrorKind::TimedOut so is_transient_network's downcast recognizes it.
     // A bare message would fall through to InternalFatal and defeat the fix.
-    let crawl_err = crate::domain::error::CrawlError::Timeout;
+    let crawl_err = crate::domain::error::CrawlError::timeout();
     let scraper_err: ScraperError = crawl_err.into();
     match &scraper_err {
         ScraperError::Network(source) => {

@@ -20,7 +20,7 @@ pub fn http_failure(
 ) -> crate::domain::http_error::HttpError {
     use crate::domain::http_error::HttpError;
     if error.is_timeout() {
-        HttpError::Timeout
+        HttpError::timeout()
     } else if error.is_connect() {
         http_connection_failure(error, FetchPhase::Connect, host, request_started)
     } else {

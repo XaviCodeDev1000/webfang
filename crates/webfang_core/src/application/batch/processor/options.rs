@@ -254,7 +254,7 @@ pub(crate) async fn process_single_url(
             .unwrap_or(0)
             > 0
         {
-            return Err(CrawlError::Timeout);
+            return Err(CrawlError::timeout());
         }
         // #2824: the aggregate keeps the cause the run already classified,
         // instead of rebuilding a `source: None` error that drops it.

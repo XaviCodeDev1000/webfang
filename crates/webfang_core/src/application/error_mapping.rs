@@ -114,8 +114,8 @@ mod tests {
 
     #[test]
     fn test_timeout_maps_to_timeout() {
-        let err = crawl_error_from_http(HttpError::Timeout, URL);
-        assert!(matches!(err, CrawlError::Timeout), "got: {err:?}");
+        let err = crawl_error_from_http(HttpError::timeout(), URL);
+        assert!(matches!(err, CrawlError::Timeout { .. }), "got: {err:?}");
     }
 
     #[test]

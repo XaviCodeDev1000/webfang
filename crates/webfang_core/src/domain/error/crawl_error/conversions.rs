@@ -23,9 +23,12 @@ impl From<crate::domain::http_error::HttpError> for CrawlError {
                 status: code,
                 url: String::new(),
             },
-            HttpError::Timeout => CrawlError::Timeout,
+            HttpError::Timeout { source } => CrawlError::Timeout { source },
             HttpError::Connection { message, source } => CrawlError::Connection { message, source },
             HttpError::Request(msg) => CrawlError::RequestFailed(msg),
+            // #2841: `Request` is reserved for request CONSTRUCTION failures; a
+            // transport failure the classifier could not name keeps its cause.
+            HttpError::Transport { message, source } => CrawlError::Transport { message, source },
             HttpError::WafChallenge(provider) => CrawlError::WafChallenge {
                 provider,
                 kind: WafDetectionKind::BodySignature,

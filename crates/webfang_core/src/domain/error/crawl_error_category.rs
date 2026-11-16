@@ -116,7 +116,10 @@ impl From<&CrawlError> for CrawlErrorCategory {
                     Self::Http
                 }
             },
-            CrawlError::Timeout => Self::Timeout,
+            // The `source` is deliberately NOT read here (#2841): the
+            // category of a timeout stays `Timeout` whatever the cause, so a
+            // `ConnectTimeout` cannot silently become a `Network` row.
+            CrawlError::Timeout { .. } => Self::Timeout,
             // The `source` is deliberately NOT matched: a transport failure
             // now carries the classified cause there (#2784), so requiring
             // `source: None` would silently drop the WAF/RateLimit attribution
@@ -134,6 +137,7 @@ impl From<&CrawlError> for CrawlErrorCategory {
             // that maps between them (#2784).
             CrawlError::Network { .. }
             | CrawlError::Connection { .. }
+            | CrawlError::Transport { .. }
             | CrawlError::Download(..) => crate::domain::error::cause::cause_in_chain(err).map_or(
                 Self::Network,
                 crate::domain::error::cause::NetworkCause::category,
@@ -276,7 +280,7 @@ mod tests {
 
     #[test]
     fn categorize_timeout() {
-        let err = CrawlError::Timeout;
+        let err = CrawlError::timeout();
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Timeout);
     }
 

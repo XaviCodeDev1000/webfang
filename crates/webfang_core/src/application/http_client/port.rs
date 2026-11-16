@@ -31,7 +31,7 @@ impl HttpClientPort for wreq::Client {
             let request_started = std::time::Instant::now();
             let response = self.get(url.as_str()).send().await.map_err(|e| {
                 if e.is_timeout() {
-                    HttpError::Timeout
+                    HttpError::timeout()
                 } else if e.is_connect() {
                     crate::domain::error::mapping::http_connection_failure(
                         e,
@@ -100,10 +100,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_returns_timeout() {
-        let mock = MockHttpClient::new().with_response("https://slow.com", Err(HttpError::Timeout));
+        let mock = MockHttpClient::new().with_response("https://slow.com", Err(HttpError::timeout()));
         let result = mock.get("https://slow.com").await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), HttpError::Timeout));
+        assert!(matches!(result.unwrap_err(), HttpError::Timeout { .. }));
     }
 
     #[tokio::test]

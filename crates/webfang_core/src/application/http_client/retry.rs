@@ -156,7 +156,7 @@ pub(super) async fn retry_with_backoff(
         }
     }
     if last_failure_was_timeout {
-        return Err(HttpError::Timeout);
+        return Err(HttpError::timeout());
     }
     Err(policy.exhausted)
 }

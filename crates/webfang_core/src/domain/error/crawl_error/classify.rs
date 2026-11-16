@@ -96,7 +96,13 @@ impl CrawlError {
             // Row 3.
             Self::RateLimited(_) => ErrorClass::TransientBackoff,
             // Row 4.
-            Self::Timeout => ErrorClass::TransientBackoff,
+            Self::Timeout { .. } => ErrorClass::TransientBackoff,
+            // #2841: an unclassified transport failure is still a transport
+            // failure — the remote was unavailable, never a webfang bug. This
+            // arm must AGREE with `ScraperError::classify`'s `Network` arm
+            // (TransientRetriable, #1824), or the `From<CrawlError>` conversion
+            // would invert the class at the boundary.
+            Self::Transport { .. } => ErrorClass::TransientRetriable,
             // Row 1.
             Self::Connection { .. } => ErrorClass::TransientRetriable,
             // Variant contract (variant doc): non-transient request

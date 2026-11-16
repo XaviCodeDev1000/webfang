@@ -193,9 +193,16 @@ pub enum CrawlError {
     #[error("rate limited, retry after {0}s")]
     RateLimited(u64),
 
-    /// Request timeout
+    /// Request timeout — the `Display` text stays `"request timeout"`.
+    ///
+    /// The classified cause (`ConnectTimeout` / `ReadTimeout`) travels as the
+    /// `source` when the producer still holds the transport error (#2841): the
+    /// verdict and the `Display` text do not move, the cause is ADDED.
     #[error("request timeout")]
-    Timeout,
+    Timeout {
+        /// The classified transport failure, when one is available.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
 
     /// Connection error
     ///
@@ -215,6 +222,19 @@ pub enum CrawlError {
     /// transient. Maps to `ScraperError::Internal` (InternalFatal).
     #[error("request failed: {0}")]
     RequestFailed(String),
+
+    /// Transport failure that is neither a timeout nor a connection failure.
+    ///
+    /// The home of the failures the used-to-be `else` branch flattened into
+    /// [`Self::RequestFailed`]: the transport error keeps its own text and the
+    /// classified cause travels as `source` (#2841).
+    #[error("transport error: {message}")]
+    Transport {
+        /// Human-readable message (the transport error's own text).
+        message: String,
+        /// The original transport error, when one is available.
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    },
 
     /// Resource limit exhausted
     #[error("resource exhausted: {resource:?} limit={limit} actual={actual}")]
@@ -278,6 +298,30 @@ impl CrawlError {
             message: message.into(),
             status_code,
             source: None,
+        }
+    }
+
+    /// A timeout whose classified cause is not available.
+    #[must_use]
+    pub const fn timeout() -> Self {
+        Self::Timeout { source: None }
+    }
+
+    /// A timeout that keeps the classified cause (#2841).
+    #[must_use]
+    pub fn timeout_with_cause(source: crate::domain::error::cause::ErrorSource) -> Self {
+        Self::Timeout { source: Some(source) }
+    }
+
+    /// An unclassified transport failure (#2841).
+    #[must_use]
+    pub fn transport(
+        message: impl Into<String>,
+        source: Option<crate::domain::error::cause::ErrorSource>,
+    ) -> Self {
+        Self::Transport {
+            message: message.into(),
+            source,
         }
     }
 }
@@ -451,7 +495,7 @@ mod tests {
 
     #[test]
     fn test_crawl_error_timeout() {
-        let error = CrawlError::Timeout;
+        let error = CrawlError::timeout();
         assert!(error.to_string().contains("timeout"));
     }
 
@@ -533,9 +577,9 @@ mod tests {
 
     #[test]
     fn test_http_error_timeout_to_crawl_error() {
-        let http_err = crate::domain::http_error::HttpError::Timeout;
+        let http_err = crate::domain::http_error::HttpError::timeout();
         let crawl_err: CrawlError = http_err.into();
-        assert!(matches!(crawl_err, CrawlError::Timeout));
+        assert!(matches!(crawl_err, CrawlError::Timeout { .. }));
     }
 
     #[test]
@@ -636,7 +680,7 @@ mod tests {
         #[test]
         fn timeout_is_transient_backoff() {
             // Matrix row 4.
-            assert_class(CrawlError::Timeout, ErrorClass::TransientBackoff);
+            assert_class(CrawlError::timeout(), ErrorClass::TransientBackoff);
         }
 
         #[test]

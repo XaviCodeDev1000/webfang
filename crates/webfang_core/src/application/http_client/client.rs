@@ -199,8 +199,12 @@ impl HttpClient {
                 let status = match e {
                     HttpError::WafChallenge(_) | HttpError::Forbidden => 403,
                     HttpError::RateLimited(_) => 429,
-                    HttpError::Timeout => 504,
+                    HttpError::Timeout { .. } => 504,
                     HttpError::Connection { .. } => 503,
+                    // #2841: an unclassified transport failure is the same
+                    // signal to the pool as a connection failure — the remote
+                    // was unavailable — NOT a 404-style "don't report".
+                    HttpError::Transport { .. } => 503,
                     HttpError::ClientError(404) => return, // don't report 404
                     HttpError::ClientError(code) => *code,
                     HttpError::ServerError(code) => *code,
@@ -291,7 +295,7 @@ impl HttpClient {
                         return Err(http_failure(e, url_host.as_deref(), request_started));
                     }
                     if attempt >= self.config.max_retries {
-                        return Err(HttpError::Timeout);
+                        return Err(HttpError::timeout());
                     }
                     attempt += 1;
                     let delay = compute_backoff_delay(
@@ -557,7 +561,7 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
             let request_started = std::time::Instant::now();
             let resp = self.client.get(url.as_str()).send().await.map_err(|e| {
                 if e.is_timeout() {
-                    crate::domain::http_error::HttpError::Timeout
+                    crate::domain::http_error::HttpError::timeout()
                 } else if e.is_connect() {
                     crate::domain::error::mapping::http_connection_failure(
                         e,
@@ -1439,7 +1443,7 @@ mod timeout_retry_tests {
         let client = HttpClient::new(parity_config(1)).expect("client builds");
         let result = client.get(&format!("{}/slow", server.uri())).await;
         assert!(
-            matches!(result, Err(HttpError::Timeout)),
+            matches!(result, Err(HttpError::Timeout { .. })),
             "exhausted timeouts must surface as Timeout, got: {result:?}"
         );
         assert_eq!(
