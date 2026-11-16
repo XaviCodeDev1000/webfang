@@ -15,6 +15,7 @@
 use crate::domain::auth_source::AuthError;
 use crate::domain::llm_port::LlmPort;
 use crate::infrastructure::llm::client::OpenAiLlmClient;
+use crate::infrastructure::llm::http_client::build_guarded_http_client;
 
 /// Configuración declarativa del provider: `crate::domain::providers::ProviderConfig`
 /// (con `kind`, `capabilities`, `model`, `embedding_dim`). Se re-exporta aquí
@@ -84,14 +85,7 @@ pub enum ProviderInitError {
 ///
 /// [`ProviderInitError::HttpClient`] si el builder falla.
 pub fn build_default_http_client() -> Result<wreq::Client, ProviderInitError> {
-    let builder = wreq::Client::builder()
-        .emulation(wreq_util::Profile::Chrome145)
-        .timeout(std::time::Duration::from_secs(60))
-        .connect_timeout(std::time::Duration::from_secs(10));
-    crate::domain::ssrf_guard::ssrf_guard()
-        .secure_client(builder)
-        .build()
-        .map_err(|e| ProviderInitError::HttpClient(e.to_string()))
+    build_guarded_http_client(false, None).map_err(|e| ProviderInitError::HttpClient(e.to_string()))
 }
 
 /// Provider OpenAI-compatible listo para inyectar en el Container como
