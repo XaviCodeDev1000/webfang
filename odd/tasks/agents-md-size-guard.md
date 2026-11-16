@@ -80,3 +80,10 @@ line-number citations. No prose/fact checking.
   `test_guard_coverage.sh`, fast-gate lanes); issue #2839 opened.
 - L2 (2026-11-16): guard + baseline key + both harnesses written; semantics 16/16; wiring
   red-then-green; ci.yml + fast-gate + coverage.tsv wired; meta-guard mutation caught.
+- L3 (2026-11-16): PR #2840 CI red — the fast-gate self-test (`scripts/test_ci_fast_gate.sh`,
+  repo-guards step) B52/B53 fixtures stub every CI-lane harness with `exit 0` from an
+  explicit list in `make_fixture`; the two new harnesses were missing, so the FULL lane
+  (`CI_HARNESS_MODE=always`) failed with rc=127 on the absent scripts. Fix: add
+  `test_agents_doc.sh test_agents_doc_wiring.sh` to the no-op list (the fixture pins the
+  LANE SHAPE, not harness semantics). Self-test now 97 ok / 0 fail; shellcheck clean.
+  Correction lands as a NEW commit on top (pushed history is immutable).
