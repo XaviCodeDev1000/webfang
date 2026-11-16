@@ -15,7 +15,7 @@ guard chain — this skill guides applying it, never replaces it. Cite the symbo
 | --- | --- | --- |
 | 1 Entry validation | `ValidUrl` / `try_from_url` | `crates/webfang_core/src/domain/value_objects.rs` |
 | 2 Pacing (scrape) | `scrape_urls` | `crates/webfang_core/src/cli/scrape_flow.rs` |
-| 2 Pacing (bucket build) | `build_scrape_rate_limiter` | `crates/webfang_core/src/application/batch/processor.rs` |
+| 2 Pacing (bucket build, batch) | `build_batch_rate_limiter` | `crates/webfang_core/src/application/batch/processor_url.rs` |
 | 2 Pacing (cancel-aware) | `until_ready_or_cancel_observed` / `RateLimiterConfig` | `crates/webfang_core/src/application/rate_limiter.rs` |
 | 3a/4 Timeout + retry | `WreqDownloader::fetch_inner` | `crates/webfang_core/src/infrastructure/downloader/wreq_downloader.rs` |
 | 3b Redirect policy | `redirect_policy` | `crates/webfang_core/src/domain/ssrf_guard.rs` |
