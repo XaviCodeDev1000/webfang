@@ -194,6 +194,10 @@ inventario/dead-tests/direcciones×2/intra-crate OK · golden refrescado sin dri
 jscpd 9081→8158 (795→785 clones). Pendiente: confirmación explícita para push + PR
 (`Closes part of #2584`, type:refactor) + ciclo RDD sobre los slices.
 
+L6 — Push + PR (2026-11-16): rama `refactor/ola1-mcp-server` pusheada, **PR #2830**
+abierto contra main (labels `type:refactor`, `status:approved` vía issue #2584; cuerpo
+con `Closes part of #2584`). Merge pendiente de CI verde + decisión del maintainer.
+
 L1 — Pedido (2026-11-15): el usuario arranca la misión del último monstruo >2000 de la
 Ola 1 (`server.rs` 2012). Worktree creado (`ola1-mcp-server`, rama
 `refactor/ola1-mcp-server` desde `origin/main` acd48b04). Medición: 2012 = 1068
