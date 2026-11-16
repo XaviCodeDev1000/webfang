@@ -202,6 +202,10 @@ mod tests {
     async fn the_listener_stops_when_the_token_is_fired_elsewhere() {
         let token = CancellationToken::new();
         let listener = tokio::spawn(wait_for_signal(token.clone()));
+        // Let the listener poll the termination wait before cancelling: without
+        // this yield the task may never reach the signal registration, making
+        // the test vacuous (#2845).
+        tokio::task::yield_now().await;
         token.cancel();
         listener.await.expect("listener must exit cleanly");
     }
