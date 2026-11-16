@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "generated_at": "2026-11-16T22:05:52+00:00",
-  "head_sha": "cb55c7fea32c1652a8bf8728395d593316730cd1",
-  "head_date": "2026-11-16T20:57:54+00:00",
-  "head_subject": "refactor: split processor.rs and crawl_task.rs below their ratchet baselines (#2827) (#2856)",
-  "workspace_version": "8.0.2",
+  "generated_at": "2026-11-16T23:50:15+00:00",
+  "head_sha": "d4cc9de0e9e7bbbb721b9b48e582850dab7aae7b",
+  "head_date": "2026-11-16T23:45:33Z",
+  "head_subject": "chore(support): declare the pending publication of v9.0.0",
+  "workspace_version": "9.0.0",
   "toolchain": {
     "channel": "1.91.1",
     "rust_version": "1.91",
@@ -42,16 +42,17 @@
     "env_mutation_owner": "webfang_test_utils"
   },
   "support": {
-    "stable": "8.0",
-    "stable_latest": "8.0.2",
-    "stable_initial": "8.0.0",
-    "maintenance": "7.7",
-    "maintenance_latest": "7.7.1",
-    "eol_first": "7.6",
+    "stable": "9.0",
+    "stable_latest": "9.0.0",
+    "stable_initial": "9.0.0",
+    "maintenance": "8.0",
+    "maintenance_latest": "8.0.2",
+    "eol_first": "7.7",
     "rotation": "auto: rotate-stable, third line back from STABLE",
     "states": {
-      "8.0": "STABLE",
-      "7.7": "MAINTENANCE",
+      "9.0": "STABLE",
+      "8.0": "MAINTENANCE",
+      "7.7": "EOL",
       "7.6": "EOL",
       "7.5": "EOL",
       "7.4": "EOL",
@@ -116,7 +117,7 @@
     "stable_explicit": [
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2139,
+        "line": 2154,
         "value": "1.91.1"
       },
       {
@@ -134,30 +135,30 @@
     "nightly_explicit": [
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2256,
+        "line": 2271,
         "value": "nightly-2026-08-27"
       },
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2326,
+        "line": 2341,
         "value": "nightly-2026-08-27"
       },
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2439,
+        "line": 2454,
         "value": "nightly-2026-08-27"
       }
     ],
     "nightly_explicit_count": 3
   },
   "counts": {
-    "rust_files": 687,
-    "assert_matches": 477,
+    "rust_files": 694,
+    "assert_matches": 486,
     "lossy_into_owned": 26,
     "lossy_to_string": 12,
     "all_into_owned": 87,
     "strip_prefix_unwrap_or": 14,
-    "if_let": 641,
+    "if_let": 642,
     "allow_unsafe_code": 9,
     "unsafe_blocks": 15,
     "static_mut": 0,
@@ -183,9 +184,9 @@
     "CatchPanicLayer": "crates/webfang_mcp/src/mcp_server/server.rs"
   },
   "decisions": {
-    "major_target": "9.0.0",
-    "backport_line": "8.0",
-    "eol_on_release": "7.7",
+    "major_target": "10.0.0",
+    "backport_line": "9.0",
+    "eol_on_release": "8.0",
     "msrv_compat_toolchain": "1.91.1",
     "miri_gate_wording": "advisory revisado, sin rojos nuevos atribuibles al bump",
     "edition_flip": "atomic",
