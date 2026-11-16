@@ -113,3 +113,24 @@ resolver está roto, que hoy frena 50 URLs como si fuera un WAF."
   `error_breakdown`, que el issue hermano de taxonomías no toca).
 - `BatchProcessor::with_downloader_factory` es el seam que permite inyectar el
   resolver en el test; en producción queda `None` (camino estático de siempre).
+
+## Nota: ratchet de tamaño de archivo
+
+`scripts/check_file_size.sh` es un ratchet DESCENDENTE: un archivo grandfathered
+no puede crecer ni una línea, y el baseline no se sube sin excepción del
+mantenedor. El precedente #2803 fijó la salida para este caso: **absorber el
+crecimiento extrayendo código**, no ensanchar el ratchet.
+
+Movimientos puros (sin cambio de comportamiento):
+
+- `processor.rs` 1253 → 1225: el bloque de config por URL / rate limiter /
+  engine options / `process_single_url` va a `processor/options.rs`; los tests
+  de resolución a `processor_resolution_tests.rs`.
+- `wreq_downloader.rs` 1856 → 1853: el presupuesto de resolución va a
+  `wreq_downloader/dns_budget.rs` y la aritmética de backoff a
+  `wreq_downloader/retry.rs`.
+- `crawl_task.rs` 1460 → 1456: el bookkeeping de finalización va a
+  `crawl_task/errors.rs` y los helpers de sesión a `crawl_task/sessions.rs`.
+
+Ningún archivo extraído supera el límite duro de 500 líneas, así que no se
+agrega ninguna entrada nueva al baseline.
