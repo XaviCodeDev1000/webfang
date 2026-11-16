@@ -19,6 +19,7 @@
 
 pub mod manager;
 pub mod processor;
+mod processor_url;
 pub mod progress;
 pub mod spool_export;
 

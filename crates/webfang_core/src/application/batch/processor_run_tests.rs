@@ -9,6 +9,7 @@ fn entry_off() -> webfang_test_utils::EnvGuard {
 use super::*;
 use crate::application::batch::BatchJob;
 use crate::domain::CrawlerConfig;
+use crate::{application::batch::processor_url::build_per_url_config, domain::JsStrategy};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use url::Url;
 

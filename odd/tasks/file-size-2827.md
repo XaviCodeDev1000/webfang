@@ -117,3 +117,25 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
   `--update` 1253→570 descendente en el mismo cambio; `check_file_size.sh` GREEN.
   Única línea no verbatim además de los `mod`: el bloque `use` recortado de
   `processor_run_tests.rs` (`BatchJob` solo; el import atomic queda sólo ahí).
+- **L5 — T2 commiteado como `b366ea5a`** (5 archivos, slice de 1505 líneas
+  principalmente movimiento verbatim de tests — boundary de slice registrado acá;
+  los slices siguientes son cortes de producción más chicos). Gates del commit:
+  check/clippy estricto/fmt limpios, nextest `batch::processor` 30/30 (20 en
+  `tests::` + 10 en `tests_run::`), ratchet GREEN con baseline 570. Context backstop
+  del parent disparado (152k tokens) ⇒ T3..T7 se delegan a `gentle-ai-worker` con
+  surfaces acotados; el parent commitea. Patrón: los workers NUNCA tocan
+  `quality-baselines.json` ni el golden — el parent hace `--remove`/`--update` y el
+  refresh en el mismo commit (evita que dos workers toquen el JSON en paralelo).
+- **L6 — T3 ejecutado por `gentle-ai-worker` (task `mwinyavg-2-3di8`), verificado por el
+  parent**: bloque 319–537 movido verbatim a `batch/processor_url.rs` (240 líneas; los 4
+  fns a `pub(super)` = único diff de visibilidad); `processor.rs` 570→348 (≤500) ⇒
+  entrada fuera del baseline con `--remove` en el mismo cambio; golden refrescado (15
+  sitios nuevos a processor_url). Dos líneas de doc-link declaradas (rustc marca como
+  unused los imports usados sólo por intra-doc links bajo -D warnings):
+  [`EngineOptions`] → path completo en el module doc de processor.rs;
+  [`BatchProcessor::with_content_sink`] → `super::processor::...` en processor_url.rs.
+  +1 línea de import en `processor_run_tests.rs` (probada por cargo check).
+  Verbatim: diff normalizado vacío (209/209 líneas). Gates: check / clippy estricto /
+  fmt / doc limpios; nextest `batch::processor` 30/30; ratchet GREEN.
+  `processor_url.rs` es el módulo con headroom donde aterriza después el adjunto de
+  causa dominante (#2824 / paso 2 de #2827).
