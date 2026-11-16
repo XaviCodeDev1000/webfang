@@ -1,6 +1,6 @@
 # Feature: AGENTS.md re-prune to the owner-approved budget (Slice 1 of 2)
 
-**Issue:** (created at delivery)
+**Issue:** #2832 — requires the owner's `status:approved` before the PR is opened.
 **Labels:** `type:docs`
 **Branch:** `docs/agents-reprune` (worktree `~/Projects/Rust/webfang-worktrees/docs-agents-reprune`), base `origin/main`
 **Delivery route:** sequential slices — Slice 1 (this PR) prunes; Slice 2 (`chore/agents-doc-guard`) adds the fail-closed size/structure guard after Slice 1 merges. No stacked PRs.
