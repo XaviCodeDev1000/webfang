@@ -135,6 +135,19 @@ dependencia inter-crate OK · dirección intra-crate OK (binario reconstruido co
 (795→785 clones) — el movimiento BAJA la métrica (los tests inline del hub eran
 clones). Falta: commit unidad + Log en el registro + push/PR con confirmación.
 
+L3 — PR 2 slice 1 ejecutado (2026-11-15, sin commit todavía): span 45–252 (208 líneas,
+`ServerOptions` + Debug redactado + `REDACTED_CREDENTIAL` + `Default` +
+`require_auth_for_external_bind` / `require_auth_or_explicit_anonymous` +
+`PLAINTEXT_BIND_WARNING` / `plaintext_bind_warning`) → `server/options.rs` (216 con
+header+imports), hub con `mod options; pub use options::*;` ⇒ **server.rs 1086→880**,
+baseline `--update` 1086→880. Verbatim: 201/201 líneas idénticas (norm ws) contra el span
+de HEAD. Fix de doc-link: `options.rs` importa `MAX_ALLOWED_SESSIONS_CAP` solo como
+target del intra-doc link (con `#[allow(unused_imports)]`) — `cargo doc -D warnings`
+exige que el link resuelva. Gates: check/clippy/fmt/doc 0 · lib 369=369 · integración
+session_cap 4/4, panic_containment 8/8, auth_fail_closed 9/9, scraping_coverage 15/15 ·
+ratchet/inventario/dead-tests/direcciones/intra-crate OK · golden refrescado (sin diff).
+Siguientes slices: rate_limit (~215) y session_cap (~315) ⇒ hub ≤500 ⇒ `--remove`.
+
 L1 — Pedido (2026-11-15): el usuario arranca la misión del último monstruo >2000 de la
 Ola 1 (`server.rs` 2012). Worktree creado (`ola1-mcp-server`, rama
 `refactor/ola1-mcp-server` desde `origin/main` acd48b04). Medición: 2012 = 1068
