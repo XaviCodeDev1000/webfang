@@ -78,15 +78,15 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
 
 | ID | Tarea | Specs | Ruta | Commit |
 |----|-------|-------|------|--------|
-| T1 | Worktree + bootstrap + índices + este doc + espejo Engram | S1 | inline | inicial |
-| T2 | processor.rs: extraer `mod tests` (563–1253) → `processor_tests.rs` (hasta ~891) + `processor_run_tests.rs` (desde ~892) vía `#[path]`; baseline `--update` 1253→medido | S4,S5,S8,S9 | inline | TBD |
-| T3 | processor.rs: corte producción 319–537 → `batch/processor_url.rs` (`mod` en `batch/mod.rs`, ítems `pub(super)`); re-point de imports; baseline `--remove` | S3,S4,S6,S7,S8 | inline | TBD |
-| T4 | crawl_task.rs: extraer `mod tests` (454–1460) → 4 archivos `crawl_task_*_tests.rs` por tema vía `#[path]`; baseline `--remove` (queda ≤500) | S4,S5,S8,S9 | inline | TBD |
-| T5 | crawl_task.rs: corte 31–81 → `crawler/crawl_task_errors.rs` + re-export `pub(crate) use` | S3,S6,S7 | inline | TBD |
-| T6 | crawl_task.rs: corte 240–352 → `crawler/crawl_task_fetch.rs` | S4,S7,S8 | inline | TBD |
-| T7 | crawl_task.rs: corte 354–453 → `crawler/crawl_task_pipeline.rs` | S4,S7,S8 | inline | TBD |
-| T8 | Golden intra-crate refrescado en el mismo commit + jscpd + compuertas S10 + ci_fast_gate GREEN | S9,S10 | inline | TBD |
-| T9 | Reporte: listas `Movido sin cambios` / `Corregido / mejorado` + resultado explícito por lentes | S4 | inline | — |
+| T1 | Worktree + bootstrap + índices + este doc + espejo Engram | S1 | inline | (inicial, en T2) |
+| T2 | processor.rs: tests inline → `processor_tests.rs` + `processor_run_tests.rs` vía `#[path]`; baseline `--update` 1253→570 | S4,S5,S8,S9 | inline | b366ea5a |
+| T3 | processor.rs: corte producción 319–537 → `batch/processor_url.rs`; baseline `--remove` | S3,S4,S6,S7,S8 | worker mwinyavg-2-3di8 | 99237d06 |
+| T4 | crawl_task.rs: tests inline → 4 `crawl_task_*_tests.rs`; baseline `--remove` | S4,S5,S8,S9 | worker mwiouwfi-3-n42s (timeout en verificación; parent la terminó) | e0ac0547 |
+| T5 | crawl_task.rs: corte 31–81 → `crawl_task_errors.rs` + `pub(crate) use` | S3,S6,S7 | worker mwjb7tlk-4-7899 | 0428c782 |
+| T6 | crawl_task.rs: corte 185–300 → `crawl_task_fetch.rs` | S4,S7,S8 | worker mwjdb3df-5-t97c | 12fcc7fb |
+| T7 | crawl_task.rs: corte 182–281 → `crawl_task_pipeline.rs` | S4,S7,S8 | worker mwjgaas9-6-juog | f613bbf9 |
+| T8 | fix intra-crate (UrlQueue a cfg(test) del padre) + golden en el mismo commit; compuertas S10; fast gate GREEN | S9,S10 | inline | df2aec10 |
+| T9 | skill symbol map + reporte + push/PR | S4 | inline | 0000e4d6 + (doc/PR) |
 
 ## Log
 
@@ -186,3 +186,30 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
   33/33. Golden en el mismo commit. Robots/is_internal_link/is_allowed movidos
   byte-for-byte. **Ambas entradas fuera del baseline**: processor.rs y crawl_task.rs ya
   no están en `quality-baselines.json`.
+- **L11 — T8 (compuertas finales) + fix intra-crate**: suite completa
+  `cargo nextest run --workspace --all-features` = **5572 passed, 8 skipped, 0 failed**
+  (`--list` 5572); check/clippy estricto/fmt/doc limpios; `check_file_size.sh` GREEN;
+  `check_test_inventory.sh`, `check_dead_tests.sh`, `check_dependency_direction.sh` OK;
+  `check_duplication.sh` 8157 ≤ 8219 (jscpd 5.4.0); golden harness 8/8. Hallazgo y fix:
+  el extractor AST intra-crate barre cada `.rs` por separado y sólo excluye regiones
+  cfg(test) del MISMO archivo (B36), así que `use crate::infrastructure::crawler::UrlQueue`
+  en `crawl_task_support_tests.rs` era 1 violación ADR-0010 ⇒ se movió a `crawl_task.rs`
+  bajo `#[cfg(all(test, not(miri)))]` (llega a los hijos vía `use super::*`); gate en 0
+  violaciones SIN tocar el allowlist (commit `df2aec10`, golden refrescado en el mismo
+  commit tras el amend). 2 líneas de doc-link a paths completos declaradas (rustc marca
+  unused los imports sólo-de-doc-link bajo -D warnings). `ci_fast_gate.sh` (con
+  `--allow-unregistered-target` porque el guard del harness bloquea `.envrc`):
+  **PASS=44 FAIL=0 SKIP=2** (skips declarados: pinned-lint por scope, windows
+  cross-target); reporte de cobertura leído — `test-full` corrido a mano (5572/5572) y
+  doc gate corrido a mano.
+- **L12 — Cierre**: push de `refactor/2827-split-processor-crawl-task` y PR abierto con
+  `Closes part of #2584` + `Closes part of #2827`, label `type:refactor`, base `main`
+  (autorizado por el usuario: "push y pr cuando termines todo"). Merge queda en decisión
+  del maintainer. El paso 2 de #2827 (desglose por causa: contadores en
+  `crawl_task_errors.rs::handle_task_error`, causa dominante en
+  `processor_url.rs::process_single_url`) es el PR siguiente; boxear `CrawlResult` en
+  `PartialRun` sigue siendo decisión de maintainer. Estado final: processor.rs 348,
+  crawl_task.rs 201, ambos ≤500 y fuera del baseline; archivos nuevos: processor_url.rs
+  (240), processor_tests.rs (317), processor_run_tests.rs (375), crawl_task_errors.rs
+  (65), crawl_task_fetch.rs (142), crawl_task_pipeline.rs (125),
+  crawl_task_{support,fetch,pipeline,errors}_tests.rs (358/201/292/171).
