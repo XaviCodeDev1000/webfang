@@ -238,3 +238,111 @@ async fn retry_after_is_respected_while_the_jitter_is_active() {
         "the retry waited {gap:?} — the server-dictated `Retry-After: {RETRY_AFTER_SECS}` was not respected"
     );
 }
+
+/// #2610 (laboratory T5): the CEILING and the DISTRIBUTION of the jittered gaps.
+///
+/// The floor is proved above; what no test pinned is the other half of the
+/// contract. The jitter adds `U[0, jitter]` to the base delay, so the gap must
+/// ALSO never exceed `delay + jitter`, and the mean gap over many samples must
+/// be the documented `delay + jitter/2` — the rate an operator actually pays.
+///
+/// The bands are wide on purpose: the mean is a statistic over 49 gaps and the
+/// ceiling carries a slack for the sleep's overshoot. A band tight enough to
+/// flake is worse than no band at all.
+#[tokio::test]
+async fn jittered_gaps_stay_within_the_ceiling_and_average_the_documented_rate() {
+    const SAMPLES: usize = 50;
+    const DELAY: u64 = 50;
+    const JITTER: u64 = 150;
+    /// Slack for the sleep's overshoot and the server's own latency. The bound
+    /// stays `delay + jitter + CEILING_SLACK_MS`: loose enough not to flake on
+    /// a loaded machine, tight enough to catch a schedule that over-spreads.
+    const CEILING_SLACK_MS: u64 = 400;
+
+    let (base, log) = start_fixture().await;
+    let urls: Vec<String> = (0..SAMPLES).map(|i| format!("{base}/p{i}")).collect();
+    let out = tempfile::TempDir::new().expect("temp output dir");
+    run_batch(&urls, DELAY, JITTER, &out);
+
+    let arrivals = page_arrivals(&log);
+    assert_eq!(
+        arrivals.len(),
+        SAMPLES,
+        "every batch URL must arrive exactly once (a skip would fake a pass)"
+    );
+
+    let floor = std::time::Duration::from_millis((SPACING_TOLERANCE * DELAY as f64) as u64);
+    let ceiling = std::time::Duration::from_millis(DELAY + JITTER + CEILING_SLACK_MS);
+    let mut gaps: Vec<u64> = Vec::with_capacity(arrivals.len() - 1);
+    for pair in arrivals.windows(2) {
+        let gap = pair[1].duration_since(pair[0]);
+        assert!(
+            gap >= floor,
+            "server-side gap {gap:?} < {floor:?} — the pacing floor was broken"
+        );
+        assert!(
+            gap <= ceiling,
+            "server-side gap {gap:?} > {ceiling:?} — the jitter over-spread the gap"
+        );
+        gaps.push(gap.as_millis() as u64);
+    }
+
+    let mean = gaps.iter().sum::<u64>() as f64 / gaps.len() as f64;
+    let low = DELAY as f64 + JITTER as f64 / 4.0;
+    let high = DELAY as f64 + 3.0 * JITTER as f64 / 4.0;
+    assert!(
+        mean >= low && mean <= high,
+        "mean server-side gap {mean:.1}ms outside [{low:.1}, {high:.1}] — the jittered rate is not delay + jitter/2"
+    );
+}
+
+/// #2610 (laboratory T5): the CONCURRENCY dimension.
+///
+/// Every pacing test in the repository ran at concurrency one, so nothing said
+/// what the jitter does when several engines are in flight. The schedule's
+/// slots are absolute, so the floor must hold across parallel requests — and
+/// this is where a schedule that only spaces the *refills* would show up.
+#[tokio::test]
+async fn jittered_floor_holds_above_concurrency_one() {
+    const URLS: usize = 12;
+    const DELAY: u64 = 60;
+    const JITTER: u64 = 120;
+
+    let (base, log) = start_fixture().await;
+    let urls: Vec<String> = (0..URLS).map(|i| format!("{base}/p{i}")).collect();
+    let out = tempfile::TempDir::new().expect("temp output dir");
+
+    let mut batch_cmd = cmd();
+    batch_cmd
+        .env(DISABLE_VALIDATING_RESOLVER_ENV, "1")
+        .arg("--batch")
+        .arg("--delay-ms")
+        .arg(DELAY.to_string())
+        .arg("--jitter-ms")
+        .arg(JITTER.to_string())
+        .arg("--batch-concurrency")
+        .arg("4")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(out.path())
+        .write_stdin(urls.join("\n"))
+        .timeout(std::time::Duration::from_secs(120))
+        .assert()
+        .success();
+
+    let arrivals = page_arrivals(&log);
+    assert_eq!(
+        arrivals.len(),
+        URLS,
+        "every batch URL must arrive exactly once (a skip would fake a pass)"
+    );
+
+    let floor = std::time::Duration::from_millis((SPACING_TOLERANCE * DELAY as f64) as u64);
+    for pair in arrivals.windows(2) {
+        let gap = pair[1].duration_since(pair[0]);
+        assert!(
+            gap >= floor,
+            "server-side gap {gap:?} < {floor:?} under concurrency 4 — the jitter did not hold the floor"
+        );
+    }
+}
