@@ -10,6 +10,7 @@ pub mod content_sink;
 pub(crate) mod crawl_scheduler;
 pub(crate) mod crawl_task;
 pub mod crawl_task_ctx;
+mod crawl_task_errors;
 pub mod discovery;
 pub mod engine;
 pub(crate) mod ports;

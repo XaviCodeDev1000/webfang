@@ -153,3 +153,14 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
   pipeline,errors}::*`. Lección: el worker stalleó >4 min en un `cargo` largo sin
   salida (mbx reconstruyendo) — los gates del parent con salida acotada salieron en 6s
   con la cache tibia.
+- **L8 — T5 ejecutado por `gentle-ai-worker` (task `mwjb7tlk-4-7899`), verificado por el
+  parent**: bloque 31–81 (`handle_crawl_result` pub(crate) + `handle_task_error` +
+  `handle_join_error`) movido byte-idéntico a `crawl_task_errors.rs` (65 líneas);
+  `crawl_task.rs` 468→417; re-export `pub(crate) use super::crawl_task_errors::
+  handle_crawl_result;` preserva el path externo (crawl_loop.rs / lifecycle.rs sin
+  tocar). Diff de visibilidad VACÍO (S7). Verbatim: cmp byte-idéntico + diff
+  normalizado vacío. Gates: check/clippy estricto/fmt/doc limpios; nextest
+  `crawl_task` 33/33. Golden refrescado en el mismo commit (sitios 175/193/220
+  driftean a 124/142/169). `crawl_task_errors.rs` es el módulo con headroom para los
+  contadores por `NetworkCause` (#2824 / paso 2 de #2827). Nota: `mod crawl_task_errors;`
+  quedó tras `pub mod crawl_task_ctx;` porque rustfmt ordena los mods alfabéticamente.
