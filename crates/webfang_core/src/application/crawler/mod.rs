@@ -11,6 +11,7 @@ pub(crate) mod crawl_scheduler;
 pub(crate) mod crawl_task;
 pub mod crawl_task_ctx;
 mod crawl_task_errors;
+mod crawl_task_fetch;
 pub mod discovery;
 pub mod engine;
 pub(crate) mod ports;

@@ -164,3 +164,13 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
   driftean a 124/142/169). `crawl_task_errors.rs` es el módulo con headroom para los
   contadores por `NetworkCause` (#2824 / paso 2 de #2827). Nota: `mod crawl_task_errors;`
   quedó tras `pub mod crawl_task_ctx;` porque rustfmt ordena los mods alfabéticamente.
+- **L9 — T6 ejecutado por `gentle-ai-worker` (task `mwjdb3df-5-t97c`), verificado por el
+  parent**: bloque re-medido 185–300 (los 6 helpers fetch/session/WAF/cookies) movido
+  verbatim a `crawl_task_fetch.rs` (142 líneas); `crawl_task.rs` 417→297 post-fmt.
+  Diff de visibilidad = exactamente los 6 fns a `pub(super)` (S7). Verbatim a nivel de
+  tokens: único delta no normalizado = una coma final que rustfmt re-wrappeó en la firma
+  de `report_session_success` (misma clase que L4). `crawl_task_fetch_tests.rs` sin
+  tocar (cero llamadas directas a los helpers desde tests, confirmado con
+  codegraph/codedb). Gates: check/clippy estricto/fmt/doc limpios; nextest `crawl_task`
+  33/33. Golden refrescado en el mismo commit. Seguridad: WAF ban + cookie bridge
+  movidos verbatim (guard chain).
