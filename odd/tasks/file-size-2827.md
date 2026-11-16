@@ -174,3 +174,15 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
   codegraph/codedb). Gates: check/clippy estricto/fmt/doc limpios; nextest `crawl_task`
   33/33. Golden refrescado en el mismo commit. Seguridad: WAF ban + cookie bridge
   movidos verbatim (guard chain).
+- **L10 — T7 ejecutado por `gentle-ai-worker` (task `mwjgaas9-6-juog`), verificado por el
+  parent**: bloque 182–281 (`run_pipeline` + `extract_and_queue_links`) movido verbatim
+  a `crawl_task_pipeline.rs` (125 líneas); `crawl_task.rs` 297→**201**. Diff de
+  visibilidad = exactamente los 2 fns a `pub(super)`. Verbatim a nivel de tokens: único
+  delta = la coma final del re-wrap de firma de `run_pipeline` (fmt). El worker añadió 3
+  imports `#[cfg(all(test, not(miri)))]` en crawl_task.rs porque los archivos de test
+  hermanos resuelven esos nombres vía `use super::*` (probado con cargo check: 17
+  E0412/E0433 antes del fix) — desviación declarada, sólo en cfg(test). Tests de
+  pipeline sin tocar. Gates: check/clippy estricto/fmt/doc limpios; nextest `crawl_task`
+  33/33. Golden en el mismo commit. Robots/is_internal_link/is_allowed movidos
+  byte-for-byte. **Ambas entradas fuera del baseline**: processor.rs y crawl_task.rs ya
+  no están en `quality-baselines.json`.

@@ -12,6 +12,7 @@ pub(crate) mod crawl_task;
 pub mod crawl_task_ctx;
 mod crawl_task_errors;
 mod crawl_task_fetch;
+mod crawl_task_pipeline;
 pub mod discovery;
 pub mod engine;
 pub(crate) mod ports;
