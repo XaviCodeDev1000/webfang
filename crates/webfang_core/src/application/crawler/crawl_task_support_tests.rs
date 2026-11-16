@@ -9,7 +9,6 @@ use crate::domain::cookie_bridge::CookieBridge;
 use crate::domain::downloader_port::Cookie;
 use crate::domain::session_port::{SessionId, SessionPort};
 use crate::domain::CorrelationId;
-use crate::infrastructure::crawler::UrlQueue;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

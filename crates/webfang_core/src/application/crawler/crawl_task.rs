@@ -28,6 +28,11 @@ use crate::application::pipeline::{ScrapedItem, StageOutcome};
 use crate::domain::crawler_port::UrlSource;
 #[cfg(all(test, not(miri)))]
 use crate::domain::CrawlErrorCategory;
+// Test-only concrete queue: tests_support resolves it via `use super::*`.
+// Kept here (not in the #[path] file) because the intra-crate lint only
+// excludes cfg(test) regions in the same file (ADR-0010, B36).
+#[cfg(all(test, not(miri)))]
+use crate::infrastructure::crawler::UrlQueue;
 
 pub(crate) use super::crawl_task_errors::handle_crawl_result;
 
