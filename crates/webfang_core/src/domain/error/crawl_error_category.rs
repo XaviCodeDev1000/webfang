@@ -129,9 +129,15 @@ impl From<&CrawlError> for CrawlErrorCategory {
                 status_code: Some(429),
                 ..
             } => Self::RateLimit,
+            // The cause decides the bucket: the vocabulary and this enum are
+            // ONE taxonomy, and `NetworkCause::category` is the only place
+            // that maps between them (#2784).
             CrawlError::Network { .. }
             | CrawlError::Connection { .. }
-            | CrawlError::Download(..) => Self::Network,
+            | CrawlError::Download(..) => crate::domain::error::cause::cause_in_chain(err).map_or(
+                Self::Network,
+                crate::domain::error::cause::NetworkCause::category,
+            ),
             CrawlError::RateLimited(..) => Self::RateLimit,
             CrawlError::Parse(..) => Self::Extraction,
             // Every arm below was previously the `_ => Self::Internal`
@@ -294,6 +300,28 @@ mod tests {
             "reset",
         )));
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Network);
+    }
+
+    /// The two taxonomies are ONE (#2784): every cause folds into the bucket
+    /// it declares, and an error that CARRIES a cause categorizes as that bucket.
+    #[test]
+    fn every_cause_folds_into_the_category_it_declares() {
+        use crate::domain::error::cause::{ClassifiedNetworkError, NetworkCause};
+        for cause in NetworkCause::ALL {
+            assert_eq!(cause.category(), CrawlErrorCategory::Network, "{cause:?}");
+            let err = CrawlError::Connection {
+                message: cause.message().to_string(),
+                source: Some(Box::new(ClassifiedNetworkError::new(
+                    cause,
+                    Box::new(std::io::Error::other(cause.message())),
+                ))),
+            };
+            assert_eq!(
+                CrawlErrorCategory::from(&err),
+                cause.category(),
+                "{cause:?}"
+            );
+        }
     }
 
     /// A transport `Network` failure with the given status, optionally carrying
