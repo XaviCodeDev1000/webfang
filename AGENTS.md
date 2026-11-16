@@ -91,6 +91,11 @@ What the compiler **cannot** catch; the rest comes from the harness or the table
   lines, labels), link the source.
 - **Do not touch `CHANGELOG.md`** in a work PR — there is a single writer (the Release PR).
 - **Do not touch `docs/`** unless explicitly asked.
+- **`docs/` holds living decisions; `evidence/` holds frozen run-records.** Mission
+  evidence (audits, measurements, PRDs anchored to a SHA) lives in `evidence/<mission>/` —
+  annotate, never rewrite. Artifacts a gate reads (`baseline.json`, sentinel markers) stay
+  next to that evidence; `docs/adr/` is the home for living ADRs referencing a frozen
+  bundle; raw scraping-download audits live outside the repo (`/webfang-audit/`).
 
 ### The local gate mirrors `gate.needs`
 
