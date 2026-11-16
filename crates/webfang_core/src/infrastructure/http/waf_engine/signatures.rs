@@ -407,7 +407,7 @@ pub const SILENT_CHALLENGE_MIN_SCRIPTS: usize = 5;
 /// This caps the T2 allocation, NOT detection sensitivity: the whole body is
 /// scanned, and a [`WafTier::Challenge`] (T1) marker short-circuits the pass the
 /// moment it survives the boundary filter, so a T1 marker past this many earlier
-/// T2 matches is still detected (see [`collect_body_evidence`]). A verdict needs
+/// T2 matches is still detected (see [`super::collect_body_evidence`]). A verdict needs
 /// at most one T1 marker (blocks any status) or one [`WafTier::Fingerprint`]
 /// marker correlated with a WAF status, and 64 is far beyond any real challenge
 /// page's signal count. Without the cap the all-evidence collector materialized
