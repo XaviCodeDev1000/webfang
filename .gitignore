@@ -77,6 +77,7 @@ STATE.md
 !.agents/skills/webfang-ci-gate/
 !.agents/skills/webfang-testing/
 !.agents/skills/webfang-fetch-path/
+!.agents/skills/webfang-file-splits/
 .agent/
 /skills/
 .opencode/
