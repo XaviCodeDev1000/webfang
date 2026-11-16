@@ -71,14 +71,45 @@ de `log_batch_summary` los reporta. `CrawlErrorCategory` NO se toca (hermano de 
 
 ## Tasks
 
-- [ ] T1 — helper de dominio `is_resolution_failure` (S1)
-- [ ] T2 — `WreqDownloader::fetch_inner`: presupuesto propio y retardo fijo (S1)
-- [ ] T3 — batch: racha + abort + contadores separados (S2, S5)
-- [ ] T4 — tests con resolver inyectado (S4)
-- [ ] T5 — docs/help si aplica + verificación
+- [x] T1 — helper de dominio `is_resolution_failure` (S1) — `domain/error/mapping.rs`
+- [x] T2 — `WreqDownloader::fetch_inner`: presupuesto propio y retardo fijo (S1)
+- [x] T3 — batch: racha + abort + contadores separados (S2, S5)
+- [x] T4 — tests con resolver inyectado (S4)
+- [x] T5 — verificación (sin cambios de help/docs: no hay flags nuevos)
 
 ## Log
 
 L1 — Petición original del usuario:
 "issue #2823 — el de más valor para corridas reales. Bloquea la escalera de trips cuando el
 resolver está roto, que hoy frena 50 URLs como si fuera un WAF."
+## Evidencia
+
+- `cargo nextest run -p webfang_core`: **4707 passed, 8 skipped**.
+- `cargo clippy -p webfang_core --all-targets --all-features -- -D warnings
+  -W clippy::cognitive_complexity -W clippy::too_many_lines`: limpio.
+- `cargo fmt --all -- --check`: limpio.
+- `cargo check --workspace --all-targets`: limpio (un warning preexistente en
+  `webfang_mcp/tests/scraping_coverage_test.rs`).
+- `cargo doc` con `RUSTDOCFLAGS=-D warnings`: **no disponible** — ICE de rustdoc
+  (`scoped-tls: cannot access a scoped thread local variable`) reproducible
+  también en `fix-2824-cause-clone` (base sin estos cambios). `cargo doc` sin
+  `RUSTDOCFLAGS` sí genera los docs.
+- Snapshot actualizado (revisado): `dns_tls_exit_code_test__dns_failure_redacted_stderr`
+  ahora muestra los dos WARN del presupuesto de resolución y sigue saliendo 69.
+
+## Decisiones de implementación
+
+- El "contador de intentos" del sitio vive en `WreqDownloader::fetch_inner`
+  (`attempt` + `backoff_delay_ms`). El fallo de resolución se reconoce por la
+  CAUSA (`dns_resolution`) y se reintenta con presupuesto propio
+  (`DNS_RETRY_BUDGET = 2`, retardo fijo `DNS_RETRY_DELAY_MS = 250`); nunca
+  incrementa `attempt`.
+- El batch NO tiene backoff propio (usa el `fetch_url` estático, sin reintentos).
+  Su problema real es que ninguna corrida aborta: 50 URLs × connect timeout.
+  Por eso el abort se implementa en `application/batch/processor.rs` con una
+  racha de fallos de resolución (`RESOLUTION_ABORT_THRESHOLD = 5`).
+- Para que el batch pueda clasificar por causa, el motor cuenta los fallos de
+  resolución en `CrawlResult.resolution_failures` (campo nuevo, fuera de
+  `error_breakdown`, que el issue hermano de taxonomías no toca).
+- `BatchProcessor::with_downloader_factory` es el seam que permite inyectar el
+  resolver en el test; en producción queda `None` (camino estático de siempre).

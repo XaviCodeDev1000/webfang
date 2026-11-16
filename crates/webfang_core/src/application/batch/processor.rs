@@ -41,12 +41,14 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn, Instrument};
 
-use super::BatchJob;
+use super::{BatchJob, BatchProgress};
 use crate::application::crawler::content_sink::CrawlContentSink;
 use crate::application::crawler::engine::EngineOptions;
 use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
 use crate::domain::budget::detector::SystemDetector;
 use crate::domain::budget::BudgetModel;
+use crate::domain::downloader_factory::DownloaderFactory;
+use crate::domain::error::cause::{ClassifiedNetworkError, NetworkCause};
 use crate::domain::{CorrelationId, CrawlError, CrawlErrorCategory, CrawlerConfig, JsStrategy};
 use crate::error::ScraperError;
 use crate::ValidUrl;
@@ -72,6 +74,21 @@ pub struct BatchResult {
     /// so exit-code routing can aggregate severity via
     /// [`ScraperError::classify`] (#537).
     pub errors: Vec<(String, ScraperError)>,
+    /// Failed URLs whose cause was NAME RESOLUTION — our resolver, not the site
+    /// refusing us (#2823).
+    ///
+    /// Reported APART from [`Self::block_failures`]: the category taxonomy
+    /// folds both into `Network`, so a run that only ever failed to resolve
+    /// used to look exactly like a site that blocked every URL.
+    pub resolution_failures: usize,
+    /// Failed URLs the SITE refused (WAF challenge, 401/403/429, any other
+    /// non-resolution failure) (#2823).
+    pub block_failures: usize,
+    /// Whether the run stopped dispatching because the resolver was down.
+    ///
+    /// `true` means some URLs were never attempted; `total` counts the ones
+    /// that were.
+    pub aborted_on_resolution: bool,
 }
 
 /// Batch processor with concurrency control
@@ -96,6 +113,13 @@ pub struct BatchProcessor {
     /// job honest: `process_batch_cancellable` mints exactly one root at
     /// the job boundary — never one per URL (the old #687-class split).
     correlation: Option<CorrelationId>,
+    /// Optional fetch-downloader factory (#2823).
+    ///
+    /// `None` (production) keeps the batch on the static `fetch_url` path, the
+    /// historical behavior. `Some` replaces the transport for the whole run, so
+    /// a caller can inject a resolver that never answers and exercise the
+    /// resolution-abort path deterministically — no real network, no real DNS.
+    downloader_factory: Option<Arc<dyn DownloaderFactory>>,
 }
 
 impl BatchProcessor {
@@ -126,6 +150,7 @@ impl BatchProcessor {
             semaphore: Arc::new(Semaphore::new(max_concurrent.get())),
             content_sink: None,
             correlation: None,
+            downloader_factory: None,
         }
     }
 
@@ -136,6 +161,18 @@ impl BatchProcessor {
     #[must_use]
     pub fn with_content_sink(mut self, sink: Arc<dyn CrawlContentSink>) -> Self {
         self.content_sink = Some(sink);
+        self
+    }
+
+    /// Replace the run's fetch transport with `factory` (#2823).
+    ///
+    /// Production leaves this unset and the batch keeps the static
+    /// `fetch_url` path. It exists so the resolution-abort path can be driven
+    /// by an injected resolver instead of a real one: a batch pointed at a
+    /// dead resolver is otherwise only reproducible with a real network.
+    #[must_use]
+    pub fn with_downloader_factory(mut self, factory: Arc<dyn DownloaderFactory>) -> Self {
+        self.downloader_factory = Some(factory);
         self
     }
 
@@ -211,7 +248,11 @@ impl BatchProcessor {
         // the whole run, so `--delay-ms` paces across URLs instead of
         // granting each URL a fresh burst. `None` at `delay_ms == 0`
         // keeps unthrottled runs on the historical per-engine limiters.
-        let mut base_options = build_batch_engine_options(&base_config, self.content_sink.clone());
+        let mut base_options = build_batch_engine_options(
+            &base_config,
+            self.content_sink.clone(),
+            self.downloader_factory.clone(),
+        );
         base_options.rate_limiter = build_batch_rate_limiter(&base_config);
         // #1439: exactly ONE run-root per job. The production caller's root
         // arrives through `with_correlation`; a standalone library job mints
@@ -223,8 +264,10 @@ impl BatchProcessor {
 
         let mut join_set = JoinSet::new();
         let mut errors: Vec<(String, ScraperError)> = Vec::new();
+        let mut tally = BatchTally::default();
 
         let mut cancelled = false;
+        let mut aborted_on_resolution = false;
         for url_str in &job.urls {
             if cancel.is_cancelled() {
                 cancelled = true;
@@ -234,6 +277,17 @@ impl BatchProcessor {
                 );
                 break;
             }
+
+            // Harvest what ALREADY finished before waiting for the next
+            // permit: the outcome of a task that just completed is what can
+            // abort the run, and the permit it freed is exactly what let us
+            // get here. Without this the loop would dispatch the whole list
+            // before reading a single outcome (#2823).
+            if drain_finished(&mut join_set, &mut tally, &progress, &mut errors, &run_root) {
+                aborted_on_resolution = true;
+                break;
+            }
+
             let url = url_str.clone();
             let config = base_config.clone();
             let options = base_options.clone();
@@ -246,49 +300,38 @@ impl BatchProcessor {
                 // LCOV_EXCL_LINE defensive: semaphore-closed — acquire_owned fails only when the batch governor is shut down
                 .map_err(|_| BatchError::SemaphoreClosed)?;
 
+            // The permit we just got was freed by a completion. Read that
+            // outcome BEFORE dispatching another URL, so the abort fires on
+            // the result itself instead of one URL later (#2823).
+            if drain_finished(&mut join_set, &mut tally, &progress, &mut errors, &run_root) {
+                aborted_on_resolution = true;
+                break;
+            }
+
             progress.start_one();
 
             join_set.spawn(
                 async move {
                     let _permit = permit; // Hold permit for duration of task
-                    let result = process_single_url(&url, config, options, &correlation).await;
+                    let result = process_single_url(&url, config, options, &correlation)
+                        .await
+                        .map(|_| ());
                     (url, result)
                 }
                 .in_current_span(),
             );
         }
 
-        // Collect results as tasks complete
-        while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok((url, Ok(_))) => {
-                    progress.complete_one();
-                    info!("Completed crawl for {url}");
-                },
-                Ok((url, Err(e))) => {
-                    progress.fail_one();
-                    // Preserve the full variant through the CrawlError ->
-                    // ScraperError conversion (#537): severity routing needs
-                    // classify(), which a flattened string cannot provide.
-                    let scraper_err = ScraperError::from(e);
-                    crate::infrastructure::observability::log_scrape_error_with_cause(
-                        &scraper_err,
-                        &url,
-                        "batch_crawl",
-                        Some(&run_root),
-                        "batch URL crawl failed",
-                    );
-                    errors.push((url, scraper_err));
-                },
-                Err(e) => {
-                    progress.fail_one();
-                    error!(error = %e, "batch crawl task panicked");
-                    errors.push((
-                        "unknown".to_string(),
-                        ScraperError::Internal(format!("task-panic: {e}")),
-                    ));
-                },
+        // Drain whatever is still in flight. An abort does NOT cancel these:
+        // an abrupt drop would lose the pages already fetched (#653).
+        while let Some(joined) = join_set.join_next().await {
+            if record_batch_outcome(&mut tally, &progress, &mut errors, joined, &run_root) {
+                aborted_on_resolution = true;
             }
+        }
+
+        if aborted_on_resolution {
+            log_resolution_abort(&job.id, &tally);
         }
 
         let succeeded = progress.completed();
@@ -297,6 +340,8 @@ impl BatchProcessor {
 
         if cancelled {
             job.fail("cancelled by shutdown signal".to_string());
+        } else if aborted_on_resolution {
+            job.fail("aborted: the resolver is not answering".to_string());
         } else {
             job.complete();
         }
@@ -312,8 +357,135 @@ impl BatchProcessor {
             succeeded,
             failed,
             errors,
+            resolution_failures: tally.resolution_failures,
+            block_failures: tally.block_failures,
+            aborted_on_resolution,
         })
     }
+}
+
+/// How many CONSECUTIVE name-resolution failures abort a batch run (#2823).
+///
+/// Below this, dispatch is already amortized and aborting would punish an
+/// isolated failure. At this, the resolver is plainly down: every remaining
+/// URL would pay the same connect timeout, which is exactly the "50 URLs
+/// frenadas como si fuera un WAF" the issue describes.
+const RESOLUTION_ABORT_THRESHOLD: usize = 5;
+
+/// Run-level tally of a batch: the two failure populations and the streak.
+///
+/// Kept as one value so the abort decision and the reported counters can
+/// never disagree — they are read from the same place (#2823).
+#[derive(Debug, Default)]
+struct BatchTally {
+    /// Failed URLs attributed to name resolution.
+    resolution_failures: usize,
+    /// Failed URLs the site refused (everything else).
+    block_failures: usize,
+    /// Unbroken run of resolution failures ending at the last finished URL.
+    consecutive_resolutions: usize,
+}
+
+impl BatchTally {
+    /// Whether the streak has reached the abort threshold.
+    fn resolver_is_down(&self) -> bool {
+        self.consecutive_resolutions >= RESOLUTION_ABORT_THRESHOLD
+    }
+}
+
+/// Record one finished URL and report whether the run must stop dispatching.
+///
+/// The outcome is classified by CAUSE, never by message text: a resolution
+/// failure is OURS, and the streak it feeds is what tells a broken resolver
+/// apart from a site that is refusing us (#2823).
+///
+/// Returns `true` when the resolver streak reached
+/// [`RESOLUTION_ABORT_THRESHOLD`] and no further URL should be dispatched.
+fn record_batch_outcome(
+    tally: &mut BatchTally,
+    progress: &BatchProgress,
+    errors: &mut Vec<(String, ScraperError)>,
+    joined: Result<(String, Result<(), CrawlError>), tokio::task::JoinError>,
+    run_root: &CorrelationId,
+) -> bool {
+    match joined {
+        Ok((url, Ok(_))) => {
+            progress.complete_one();
+            // A URL that succeeded proves the resolver answered for it.
+            tally.consecutive_resolutions = 0;
+            info!("Completed crawl for {url}");
+            false
+        },
+        Ok((url, Err(e))) => {
+            progress.fail_one();
+            // Preserve the full variant through the CrawlError ->
+            // ScraperError conversion (#537): severity routing needs
+            // classify(), which a flattened string cannot provide.
+            let scraper_err = ScraperError::from(e);
+            if crate::domain::error::mapping::is_resolution_failure(&scraper_err) {
+                tally.resolution_failures += 1;
+                tally.consecutive_resolutions += 1;
+            } else {
+                tally.block_failures += 1;
+                tally.consecutive_resolutions = 0;
+            }
+            crate::infrastructure::observability::log_scrape_error_with_cause(
+                &scraper_err,
+                &url,
+                "batch_crawl",
+                Some(run_root),
+                "batch URL crawl failed",
+            );
+            errors.push((url, scraper_err));
+            tally.resolver_is_down()
+        },
+        Err(e) => {
+            progress.fail_one();
+            // A panic is neither population: it says nothing about the
+            // resolver, so it breaks the streak without joining either
+            // counter.
+            tally.consecutive_resolutions = 0;
+            error!(error = %e, "batch crawl task panicked");
+            errors.push((
+                "unknown".to_string(),
+                ScraperError::Internal(format!("task-panic: {e}")),
+            ));
+            false
+        },
+    }
+}
+
+/// The run-level trace for a resolver abort: ONE event, not one per URL.
+fn log_resolution_abort(job_id: &str, tally: &BatchTally) {
+    warn!(
+        job_id,
+        resolution_failures = tally.resolution_failures,
+        block_failures = tally.block_failures,
+        threshold = RESOLUTION_ABORT_THRESHOLD,
+        "batch aborted — the resolver is not answering"
+    );
+}
+
+/// Drain every task that has ALREADY finished, returning whether the
+/// resolver streak reached the abort threshold (#2823).
+///
+/// Non-blocking by construction: `try_join_next` never waits, so the dispatch
+/// loop reads the outcomes it needs before spending another permit.
+fn drain_finished(
+    join_set: &mut JoinSet<(String, Result<(), CrawlError>)>,
+    tally: &mut BatchTally,
+    progress: &BatchProgress,
+    errors: &mut Vec<(String, ScraperError)>,
+    run_root: &CorrelationId,
+) -> bool {
+    let mut aborted = false;
+    while let Some(joined) = join_set.try_join_next() {
+        if record_batch_outcome(tally, progress, errors, joined, run_root) {
+            aborted = true;
+            break;
+        }
+    }
+    aborted
 }
 
 /// Build the per-URL [`CrawlerConfig`] used by [`process_single_url`].
@@ -444,13 +616,15 @@ fn build_batch_rate_limiter(base_config: &CrawlerConfig) -> Option<SharedRateLim
 fn build_batch_engine_options(
     base_config: &CrawlerConfig,
     content_sink: Option<Arc<dyn CrawlContentSink>>,
+    downloader_factory: Option<Arc<dyn DownloaderFactory>>,
 ) -> EngineOptions {
     EngineOptions {
         checkpoint_path: None,
         session_pool_enabled: false,
         ignore_robots: base_config.ignore_robots,
         js_strategy: JsStrategy::Static,
-        downloader_factory: None,
+        // `None` in production: the batch keeps the static `fetch_url` path.
+        downloader_factory,
         content_sink,
         ..Default::default()
     }
@@ -515,6 +689,28 @@ async fn process_single_url(
                 "crawl completed with {} error(s)",
                 result.errors
             )));
+        }
+
+        // #2823: a resolution failure is OUR resolver, not the site refusing
+        // us. Surface it as its own typed failure so the batch can tell the two
+        // populations apart and stop dispatching, instead of running the whole
+        // list as if every URL were blocked. The cause rides in the source so
+        // the classification stays by TYPE (#2784), never by message text.
+        if result.resolution_failures > 0 {
+            return Err(CrawlError::Network {
+                message: format!(
+                    "{}: {} URL(s) failed to resolve",
+                    NetworkCause::DnsResolution.message(),
+                    result.resolution_failures
+                ),
+                status_code: None,
+                source: Some(Box::new(ClassifiedNetworkError::new(
+                    NetworkCause::DnsResolution,
+                    Box::new(std::io::Error::other(
+                        "the resolver did not answer".to_string(),
+                    )),
+                ))),
+            });
         }
 
         // Purely transient/external: surface as a transient error → exit 69.
@@ -685,6 +881,9 @@ mod tests {
                     ))),
                 ),
             ],
+            resolution_failures: 1,
+            block_failures: 1,
+            aborted_on_resolution: false,
         };
 
         assert_eq!(result.total, 10);
@@ -716,6 +915,9 @@ mod tests {
             succeeded: 3,
             failed: 0,
             errors: vec![],
+            resolution_failures: 0,
+            block_failures: 0,
+            aborted_on_resolution: false,
         };
         assert_eq!(result.total, result.succeeded);
         assert_eq!(result.failed, 0);
@@ -739,6 +941,9 @@ mod tests {
                     ScraperError::Internal("error b".to_string()),
                 ),
             ],
+            resolution_failures: 0,
+            block_failures: 2,
+            aborted_on_resolution: false,
         };
         assert_eq!(result.succeeded, 0);
         assert_eq!(result.failed, result.total);
@@ -761,6 +966,9 @@ mod tests {
             succeeded: 5,
             failed: 5,
             errors,
+            resolution_failures: 0,
+            block_failures: 5,
+            aborted_on_resolution: false,
         };
         assert_eq!(result.succeeded + result.failed, result.total);
         assert_eq!(result.errors.len(), result.failed);
@@ -1039,7 +1247,7 @@ mod tests {
         let base = CrawlerConfig::builder(Url::parse("https://example.com").unwrap())
             .ignore_robots(true)
             .build();
-        let options = build_batch_engine_options(&base, None);
+        let options = build_batch_engine_options(&base, None, None);
         assert!(
             options.ignore_robots,
             "the batch's robots source is the base config"
@@ -1073,7 +1281,7 @@ mod tests {
             );
 
         let sink = Arc::new(crate::application::crawler::content_sink::InMemoryContentSink::new());
-        let options = build_batch_engine_options(&base, Some(sink));
+        let options = build_batch_engine_options(&base, Some(sink), None);
         assert!(
             options.content_sink.is_some(),
             "the processor's shared sink must ride on the options"
@@ -1081,7 +1289,7 @@ mod tests {
 
         let enforcing = CrawlerConfig::new(Url::parse("https://example.com").unwrap());
         assert!(
-            !build_batch_engine_options(&enforcing, None).ignore_robots,
+            !build_batch_engine_options(&enforcing, None, None).ignore_robots,
             "the default config's respect-robots must flow through both ways"
         );
     }
@@ -1101,7 +1309,7 @@ mod tests {
     #[test]
     fn batch_engine_options_transport_scalars_pin_the_audited_policy() {
         let base = CrawlerConfig::new(Url::parse("https://example.com").unwrap());
-        let options = build_batch_engine_options(&base, None);
+        let options = build_batch_engine_options(&base, None, None);
 
         // Expected values are literals copied from the audited
         // `crawl_site_inner` TransportPolicy (engine.rs #1369 migration),
@@ -1248,6 +1456,247 @@ mod tests {
             gauge.max_inflight.load(AtomicOrdering::SeqCst),
             1,
             "override crawl=1 must cap concurrent fetches at 1 through batch mode"
+        );
+    }
+
+    // =====================================================================
+    // #2823 — a resolution failure is its own population
+    // =====================================================================
+
+    /// A `CrawlError` that carries the `dns_resolution` cause, the shape the
+    /// fetch stack produces when the resolver never answers.
+    fn resolution_error() -> CrawlError {
+        CrawlError::Network {
+            message: "no se pudo resolver el nombre del dominio".to_string(),
+            status_code: None,
+            source: Some(Box::new(
+                crate::domain::error::cause::ClassifiedNetworkError::new(
+                    crate::domain::error::cause::NetworkCause::DnsResolution,
+                    Box::new(std::io::Error::other("resolver down")),
+                ),
+            )),
+        }
+    }
+
+    /// A `CrawlError` the SITE produced: the population that must keep its
+    /// historical behaviour untouched (#2823, AC3).
+    fn site_refusal_error() -> CrawlError {
+        CrawlError::WafChallenge {
+            provider: "cloudflare".to_string(),
+            url: "https://example.com".to_string(),
+            kind: crate::domain::error::WafDetectionKind::BodySignature,
+        }
+    }
+
+    /// The streak aborts at the threshold, and a site refusal breaks it.
+    ///
+    /// The two facts together are the acceptance criterion: a run whose
+    /// resolver is down stops dispatching, while a run the site is blocking
+    /// keeps going exactly as before.
+    #[test]
+    fn resolution_streak_aborts_at_the_threshold_and_a_refusal_breaks_it() {
+        let progress = BatchProgress::new(64);
+        let mut errors = Vec::new();
+        let root = CorrelationId::new();
+        let mut tally = BatchTally::default();
+
+        for i in 1..RESOLUTION_ABORT_THRESHOLD {
+            progress.start_one();
+            let abort = record_batch_outcome(
+                &mut tally,
+                &progress,
+                &mut errors,
+                Ok((format!("https://dead-{i}.test/"), Err(resolution_error()))),
+                &root,
+            );
+            assert!(
+                !abort,
+                "the run must survive {i} resolution failures (threshold {RESOLUTION_ABORT_THRESHOLD})"
+            );
+        }
+        progress.start_one();
+        let abort = record_batch_outcome(
+            &mut tally,
+            &progress,
+            &mut errors,
+            Ok((
+                "https://dead-last.test/".to_string(),
+                Err(resolution_error()),
+            )),
+            &root,
+        );
+        assert!(
+            abort,
+            "the threshold-th consecutive resolution failure must abort the run"
+        );
+        assert_eq!(tally.resolution_failures, RESOLUTION_ABORT_THRESHOLD);
+        assert_eq!(
+            tally.block_failures, 0,
+            "a resolution failure is not a site refusal"
+        );
+
+        // A site refusal in the middle is a DIFFERENT population: it resets
+        // the streak instead of counting towards the abort.
+        let progress = BatchProgress::new(64);
+        let mut errors = Vec::new();
+        let mut tally = BatchTally::default();
+        for i in 0..RESOLUTION_ABORT_THRESHOLD - 1 {
+            progress.start_one();
+            record_batch_outcome(
+                &mut tally,
+                &progress,
+                &mut errors,
+                Ok((format!("https://dead-{i}.test/"), Err(resolution_error()))),
+                &root,
+            );
+        }
+        progress.start_one();
+        let abort = record_batch_outcome(
+            &mut tally,
+            &progress,
+            &mut errors,
+            Ok((
+                "https://blocked.test/".to_string(),
+                Err(site_refusal_error()),
+            )),
+            &root,
+        );
+        assert!(!abort, "a site refusal must not abort the run");
+        assert_eq!(tally.block_failures, 1);
+        assert_eq!(tally.resolution_failures, RESOLUTION_ABORT_THRESHOLD - 1);
+
+        for i in 0..RESOLUTION_ABORT_THRESHOLD - 1 {
+            progress.start_one();
+            let abort = record_batch_outcome(
+                &mut tally,
+                &progress,
+                &mut errors,
+                Ok((
+                    format!("https://dead-again-{i}.test/"),
+                    Err(resolution_error()),
+                )),
+                &root,
+            );
+            assert!(
+                !abort,
+                "the refusal reset the streak, so {RESOLUTION_ABORT_THRESHOLD} - 1 new failures must not abort"
+            );
+        }
+        assert_eq!(
+            tally.resolution_failures,
+            2 * (RESOLUTION_ABORT_THRESHOLD - 1),
+            "both populations are counted apart"
+        );
+    }
+
+    /// A downloader whose every fetch is a resolution failure — the injected
+    /// resolver the issue asks the test to drive (#2823, AC4).
+    #[derive(Debug)]
+    struct DeadResolverDownloader;
+
+    impl crate::domain::downloader_port::Downloader for DeadResolverDownloader {
+        fn fetch<'a>(
+            &'a self,
+            _url: &'a Url,
+        ) -> futures::future::BoxFuture<
+            'a,
+            Result<
+                crate::domain::downloader_port::FetchedPage,
+                crate::domain::downloader_port::DownloadError,
+            >,
+        > {
+            Box::pin(async {
+                Err(crate::domain::error::mapping::attach_cause(
+                    crate::domain::downloader_port::DownloadError::dns(
+                        "the resolver did not answer",
+                    ),
+                    crate::domain::error::cause::NetworkCause::DnsResolution,
+                ))
+            })
+        }
+
+        fn supports_interactions(&self) -> bool {
+            false
+        }
+
+        fn memory_cost(&self) -> usize {
+            0
+        }
+    }
+
+    /// Factory that always hands back the same injected downloader.
+    #[derive(Debug)]
+    struct FixedDownloaderFactory;
+
+    impl crate::domain::downloader_factory::DownloaderFactory for FixedDownloaderFactory {
+        fn build(
+            &self,
+            _spec: &crate::domain::downloader_factory::DownloaderSpec,
+            _cookie_bridge: Arc<tokio::sync::RwLock<crate::domain::cookie_bridge::CookieBridge>>,
+            _cancel_token: CancellationToken,
+        ) -> Result<
+            Arc<dyn crate::domain::downloader_port::Downloader>,
+            crate::domain::downloader_port::DownloadError,
+        > {
+            Ok(Arc::new(DeadResolverDownloader))
+        }
+    }
+
+    /// End to end: a batch pointed at a resolver that never answers stops
+    /// dispatching and reports the two populations apart (#2823).
+    ///
+    /// No network and no real DNS: the resolver is injected through the
+    /// downloader seam, so the outcome is deterministic.
+    #[cfg(not(miri))] // wreq/btls-sys FFI is not supported by Miri
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn batch_aborts_when_the_resolver_is_down_and_reports_both_populations() {
+        let urls: Vec<String> = (0..40)
+            .map(|i| format!("https://dead-resolver-{i}.test/"))
+            .collect();
+        let seed = Url::parse("https://dead-resolver-0.test/").unwrap();
+        let base = CrawlerConfig::builder(seed)
+            .max_depth(0)
+            .max_pages(1)
+            .timeout_secs(1)
+            .ignore_robots(true)
+            .build();
+
+        let job = BatchJob::new("dns-storm".to_string(), urls, base);
+        let processor = BatchProcessor::new(2)
+            .unwrap()
+            .with_downloader_factory(Arc::new(FixedDownloaderFactory));
+
+        let result = processor.process_batch(job).await.unwrap();
+        assert!(
+            result.aborted_on_resolution,
+            "a resolver that never answers must stop the run"
+        );
+        // `total` is the JOB size, not what was attempted: the abort is read
+        // from how many URLs actually finished.
+        assert_eq!(result.total, 40, "the job still describes every URL");
+        assert!(
+            result.failed < 40,
+            "the run must NOT attempt all 40 URLs; it attempted {}",
+            result.failed
+        );
+        assert!(
+            result.failed <= RESOLUTION_ABORT_THRESHOLD + 2,
+            "the abort must be prompt: attempted {} URLs for a threshold of {}",
+            result.failed,
+            RESOLUTION_ABORT_THRESHOLD
+        );
+        assert_eq!(
+            result.block_failures, 0,
+            "a resolution failure must never be reported as a site refusal"
+        );
+        assert!(
+            result.resolution_failures >= RESOLUTION_ABORT_THRESHOLD,
+            "every failure must land in the resolution counter, got {}",
+            result.resolution_failures
+        );
+        assert_eq!(
+            result.succeeded, 0,
+            "no URL could succeed against a dead resolver"
         );
     }
 }

@@ -186,6 +186,12 @@ pub struct Engine {
     error_count: Arc<AtomicUsize>,
     /// Per-category error counters indexed by `CrawlErrorCategory::index()` (issue #374).
     error_breakdown: Arc<[AtomicUsize; 8]>,
+    /// Fetch failures attributed to NAME RESOLUTION (#2823).
+    ///
+    /// Counted apart from the category breakdown, which folds every transport
+    /// cause into `Network`, so a batch run can tell "the site refused us"
+    /// from "the resolver is down".
+    resolution_failures: Arc<AtomicUsize>,
     /// Checkpoint store for persistence (stateless — always available).
     checkpoint_store: BincodeCheckpoint,
     /// Loaded checkpoint state for crash recovery (`None` = fresh start).

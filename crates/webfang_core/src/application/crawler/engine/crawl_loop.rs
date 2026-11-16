@@ -228,7 +228,12 @@ impl Engine {
     /// Process completed tasks (non-blocking) and update error counters.
     fn process_completed_tasks(&self, tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>) {
         while let Some(result) = tasks.try_join_next() {
-            handle_crawl_result(result, &self.error_count, &self.error_breakdown);
+            handle_crawl_result(
+                result,
+                &self.error_count,
+                &self.error_breakdown,
+                &self.resolution_failures,
+            );
         }
     }
 
@@ -295,7 +300,12 @@ impl Engine {
 
         match tokio::time::timeout(worker_wait_bound, tasks.join_next()).await {
             Ok(Some(result)) => {
-                handle_crawl_result(result, &self.error_count, &self.error_breakdown);
+                handle_crawl_result(
+                    result,
+                    &self.error_count,
+                    &self.error_breakdown,
+                    &self.resolution_failures,
+                );
                 WaitOutcome::Progress
             },
             Ok(None) => WaitOutcome::Progress,

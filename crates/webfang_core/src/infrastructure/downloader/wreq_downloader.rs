@@ -634,6 +634,10 @@ impl WreqDownloader {
             client_id = %format!("{:p}", Arc::as_ptr(&self.client))
         )
     )]
+    // The attempt loop carries the ladder, the 403 rotation and the body read
+    // in the order they must run. #2823 added the resolver branch to an
+    // already ~90-line flow; splitting it would hide that order.
+    #[allow(clippy::too_many_lines)]
     async fn fetch_inner(&self, url: &Url) -> Result<FetchedPage, DownloadError> {
         debug!("Fetching URL: {}", url);
 

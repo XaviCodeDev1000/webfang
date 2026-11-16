@@ -219,6 +219,7 @@ impl Engine {
             &mut tasks,
             &self.error_count,
             &self.error_breakdown,
+            &self.resolution_failures,
             drain_bound,
         )
         .await;
@@ -295,7 +296,12 @@ impl Engine {
         let total_pages = collected_urls.len();
         let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
         let breakdown = self.collect_error_breakdown();
-        CrawlResult::new(collected_urls, total_pages, errors, breakdown)
+        let resolution_failures = self
+            .resolution_failures
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let mut summary = CrawlResult::new(collected_urls, total_pages, errors, breakdown);
+        summary.resolution_failures = resolution_failures;
+        summary
     }
 
     /// Collect what the run completed and wrap `err` so the partial results
@@ -436,11 +442,12 @@ impl Engine {
         tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
         error_count: &Arc<AtomicUsize>,
         error_breakdown: &Arc<[AtomicUsize; 8]>,
+        resolution_failures: &Arc<AtomicUsize>,
         bound: Duration,
     ) {
         let drained = tokio::time::timeout(bound, async {
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(result, error_count, error_breakdown);
+                handle_crawl_result(result, error_count, error_breakdown, resolution_failures);
             }
         })
         .await
@@ -455,7 +462,7 @@ impl Engine {
             );
             tasks.abort_all();
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(result, error_count, error_breakdown);
+                handle_crawl_result(result, error_count, error_breakdown, resolution_failures);
             }
         }
     }
