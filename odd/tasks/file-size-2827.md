@@ -139,3 +139,17 @@ líneas; `docs/test-inventory.json` no driftea (el generador sólo camina
   fmt / doc limpios; nextest `batch::processor` 30/30; ratchet GREEN.
   `processor_url.rs` es el módulo con headroom donde aterriza después el adjunto de
   causa dominante (#2824 / paso 2 de #2827).
+- **L7 — T4 ejecutado por `gentle-ai-worker` (task `mwiouwfi-3-n42s`, timeouteó en la
+  verificación pero el corte quedó completo; el parent terminó la verificación y
+  commiteó)**: `mod tests` inline de `crawl_task.rs` (454–1460) → 4 archivos vía
+  `#[cfg(all(test, not(miri)))] #[path]`: `crawl_task_support_tests.rs` (358),
+  `crawl_task_fetch_tests.rs` (201), `crawl_task_pipeline_tests.rs` (292),
+  `crawl_task_errors_tests.rs` (171) — todos ≤500. `crawl_task.rs` 1460→468 (≤500) ⇒
+  entrada fuera del baseline con `--remove` en el mismo commit (hecho por el parent).
+  Verbatim post-fmt: sólo líneas de continuación de bloques `use` reubicadas (cada
+  archivo tiene su propio header) + joins de rustfmt — sin cambio de lógica. Tests
+  33 = 33; nextest `crawl_task` 33/33. Gates: fmt/check/clippy estricto/doc limpios.
+  Renombre declarado: `crawl_task::tests::*` → `crawl_task::tests_{support,fetch,
+  pipeline,errors}::*`. Lección: el worker stalleó >4 min en un `cargo` largo sin
+  salida (mbx reconstruyendo) — los gates del parent con salida acotada salieron en 6s
+  con la cache tibia.
