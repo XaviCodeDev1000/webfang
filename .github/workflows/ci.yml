@@ -1903,22 +1903,25 @@ jobs:
   # created on first failure, one comment per failing run, closed
   # automatically when a scheduled run goes green again (McQuaid, "Make
   # GitHub Actions Do More For You", 2026-06).
-  # `needs` covers the core producers only (#1510): the three Miri jobs are
-  # advisory (continue-on-error: true) and deliberately OUTSIDE `needs` —
-  # their structural red (BoringSSL FFI, inline asm, recent syscalls) must not
-  # keep the weekly schedule red forever. They are still REPORTED: the Miri
-  # step below mirrors any red Miri job into the tracking issue with the run
-  # link. `release` and `coverage` are push/PR-only and never run on schedule,
-  # so they are not listed.
+  # `needs` covers the core producers AND both Miri matrix jobs (#2836): the
+  # Miri jobs remain advisory (continue-on-error: true), so their structural
+  # red (BoringSSL FFI, inline asm, recent syscalls) still cannot keep the
+  # weekly schedule red. They must be FINISHED before the report step reads
+  # their conclusions, though: at 9 minutes into run 43804159513 all six were
+  # still `in_progress` with `conclusion: null`, and the old filter counted
+  # null as red — that is how #2836 was opened claiming six red Miri jobs
+  # when only `Miri (core)` ended red. `release` and `coverage` are push/PR-only
+  # and never run on schedule, so they are not listed.
   # ============================================================================
   notify:
     name: Notify (scheduled CI result)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [gate, code-quality, tokio-console-smoke, feature-matrix, mcp]
-    # #1510: Miri jobs (miri, miri-infra-fast, miri-infra-slow) are advisory
-    # and intentionally absent from this needs list.
-    if: ${{ !cancelled() && github.event_name == 'schedule' }}
+    needs: [gate, code-quality, tokio-console-smoke, feature-matrix, mcp, miri, miri-infra-slow]
+    # #2836: the report must read COMPLETED conclusions, never a mid-run null.
+    # Miri stays advisory via continue-on-error; `always()` keeps failure
+    # reporting alive when a needed job fails or is cancelled.
+    if: ${{ always() && github.event_name == 'schedule' }}
     permissions:
       # #1633: `actions: read` is REQUIRED by the `miri-report` step below, not
       # optional hardening. It calls
@@ -1953,7 +1956,7 @@ jobs:
         run: |
           gh label create "ci-health" --color "0E8A16" --description "Auto-managed by CI Health Observer" 2>/dev/null || true
           RED_MIRI="$(gh api "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
-            --jq '[.jobs[] | select(.name | startswith("Miri")) | select(.conclusion != "success" and .conclusion != "skipped") | .name] | join(", ")')"
+            --jq '[.jobs[] | select(.name | startswith("Miri")) | select(.status == "completed" and (.conclusion | IN("success", "skipped", "neutral") | not)) | .name] | join(", ")')"
           if [ -z "$RED_MIRI" ]; then
             echo "All Miri jobs green — nothing to report."
             echo "miri_red=false" >> "$GITHUB_OUTPUT"
