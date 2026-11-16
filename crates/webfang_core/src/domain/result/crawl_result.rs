@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::domain::crawl_job::DiscoveredUrl;
+use crate::domain::error::cause::NetworkCause;
 use crate::domain::CrawlErrorCategory;
 
 /// Crawl result containing discovered URLs
@@ -22,6 +23,12 @@ pub struct CrawlResult {
     pub errors: usize,
     /// Error counts by category (issue #374)
     pub error_breakdown: BTreeMap<CrawlErrorCategory, usize>,
+    /// The first classified transport cause of the run (#2824).
+    ///
+    /// The per-task failures are COUNTED, not kept: this is the one cause the
+    /// application boundary needs to name the failure it reports. `None` when
+    /// no task failed with a classified transport failure.
+    pub transport_cause: Option<NetworkCause>,
 }
 
 impl CrawlResult {
@@ -37,7 +44,14 @@ impl CrawlResult {
             total_pages,
             errors,
             error_breakdown,
+            transport_cause: None,
         }
+    }
+
+    /// Attach the classified transport cause of the run (#2824).
+    pub fn with_transport_cause(mut self, cause: NetworkCause) -> Self {
+        self.transport_cause = Some(cause);
+        self
     }
 
     /// Create an empty crawl result

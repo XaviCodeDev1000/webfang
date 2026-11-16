@@ -6,7 +6,7 @@
 //! nothing here is part of the crate's public surface.
 
 use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -22,6 +22,7 @@ use crate::application::crawler::ports::TerminationSource;
 use crate::application::crawler::session::{CheckpointAction, CrawlExec};
 use crate::application::rate_limiter::SharedRateLimiter;
 use crate::domain::crawler_port::UrlSource;
+use crate::domain::error::cause::NetworkCause;
 use crate::domain::{CrawlError, CrawlErrorCategory, CrawlResult, CrawlerConfig};
 
 impl Engine {
@@ -219,6 +220,7 @@ impl Engine {
             &mut tasks,
             &self.error_count,
             &self.error_breakdown,
+            &self.transport_cause,
             drain_bound,
         )
         .await;
@@ -295,7 +297,14 @@ impl Engine {
         let total_pages = collected_urls.len();
         let errors = self.error_count.load(std::sync::atomic::Ordering::SeqCst);
         let breakdown = self.collect_error_breakdown();
-        CrawlResult::new(collected_urls, total_pages, errors, breakdown)
+        // The first classified transport cause of the run travels with the
+        // summary (#2824): the failures themselves are counted, not kept, and
+        // the application boundary needs one cause to name what failed.
+        let mut result = CrawlResult::new(collected_urls, total_pages, errors, breakdown);
+        if let Some(cause) = self.transport_cause.get().copied() {
+            result = result.with_transport_cause(cause);
+        }
+        result
     }
 
     /// Collect what the run completed and wrap `err` so the partial results
@@ -436,11 +445,12 @@ impl Engine {
         tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
         error_count: &Arc<AtomicUsize>,
         error_breakdown: &Arc<[AtomicUsize; 8]>,
+        transport_cause: &Arc<OnceLock<NetworkCause>>,
         bound: Duration,
     ) {
         let drained = tokio::time::timeout(bound, async {
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(result, error_count, error_breakdown);
+                handle_crawl_result(result, error_count, error_breakdown, transport_cause);
             }
         })
         .await
@@ -455,7 +465,7 @@ impl Engine {
             );
             tasks.abort_all();
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(result, error_count, error_breakdown);
+                handle_crawl_result(result, error_count, error_breakdown, transport_cause);
             }
         }
     }

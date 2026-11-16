@@ -6,7 +6,8 @@
 
 use crate::domain::downloader_port::DownloadError;
 use crate::domain::error::cause::{
-    cause_in_chain, classify, ClassifiedNetworkError, DnsResolutionError, FetchPhase, NetworkCause,
+    cause_in_chain, classify, CauseCarrier, ClassifiedNetworkError, DnsResolutionError, FetchPhase,
+    NetworkCause,
 };
 use crate::domain::error::resolution::refine_connect_cause;
 
@@ -98,7 +99,7 @@ pub fn with_cause(
 /// | variant | where the cause travels |
 /// |---|---|
 /// | `Network` | the carrier IS the payload |
-/// | `Io` | the carrier is the I/O error's payload (the kind survives) |
+/// | `Io` | the carrier is the I/O error's payload, behind a `CauseCarrier` (the kind survives) |
 /// | `Dns` / `Tls` / `Timeout` | the carrier is the variant's `source` |
 #[must_use]
 pub fn attach_cause(error: DownloadError, cause: NetworkCause) -> DownloadError {
@@ -110,11 +111,14 @@ pub fn attach_cause(error: DownloadError, cause: NetworkCause) -> DownloadError 
         DownloadError::Io(io_err) => {
             // An `io::Error` does not expose its payload as a source, but it
             // keeps the KIND — the retry rule's input — and renders the
-            // payload, so the message names the cause (#2784).
+            // payload, so the message names the cause (#2784). The payload is
+            // a `CauseCarrier`, whose `source()` IS the classified error: the
+            // plain `source()` walk reaches the typed cause without knowing
+            // the `io::Error` quirk (#2824). The kind does not move.
             let kind = io_err.kind();
             DownloadError::Io(std::io::Error::new(
                 kind,
-                ClassifiedNetworkError::new(cause, Box::new(io_err)),
+                CauseCarrier::new(ClassifiedNetworkError::new(cause, Box::new(io_err))),
             ))
         },
         DownloadError::Dns { message, source } => {

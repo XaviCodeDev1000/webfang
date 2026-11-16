@@ -527,10 +527,7 @@ async fn process_single_url(
         {
             return Err(CrawlError::Timeout);
         }
-        return Err(CrawlError::Connection {
-            message: format!("crawl completed with {} transient error(s)", result.errors),
-            source: None,
-        });
+        return Err(super::aggregate::aggregate_transient_failure(&result));
     }
 
     Ok(result)

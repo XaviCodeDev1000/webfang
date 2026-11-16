@@ -65,6 +65,7 @@ impl Engine {
         let collector = ResultsCollector::new(config_clone.max_pages, Some(config_clone.max_pages));
         let error_count = Arc::new(AtomicUsize::new(0));
         let error_breakdown = Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)));
+        let transport_cause = Arc::new(std::sync::OnceLock::new());
         let pages_crawled = Arc::new(AtomicU64::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
 
@@ -88,6 +89,7 @@ impl Engine {
             budget,
             error_count,
             error_breakdown,
+            transport_cause,
             checkpoint_store: BincodeCheckpoint::new(),
             checkpoint_state: None,
             checkpoint_path: None,

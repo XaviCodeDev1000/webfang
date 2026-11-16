@@ -461,6 +461,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/classified_cause_boundary_2824.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 2,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/cleaning_pipelines_regression.rs",
       "crate": "webfang_core",
       "area": "core",

@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use futures::future::BoxFuture;
 use url::Url;
 
+use crate::domain::error::cause::{CauseCarrier, ClassifiedNetworkError};
+
 /// Downloader trait for fetching pages — domain-owned port.
 ///
 /// Dyn-compatible via `BoxFuture` (like `VectorRepository` in
@@ -157,37 +159,52 @@ pub enum DownloadError {
     },
 }
 
-/// Best-effort clone.
+/// A copy that keeps the classified cause (#2824).
 ///
-/// A boxed cause cannot be cloned, so the copy keeps the **variant**, the
-/// message and the class, and drops the classified cause (#2784). The class
-/// is what the retry rule reads — never the cause — so a copy never changes
-/// the retry behaviour; it only loses the cause's presence in the chain.
+/// The cause is part of the diagnosis: the retry clones this error, so a copy
+/// that dropped the cause would turn a classified refusal into an anonymous
+/// network error at the application boundary. The carrier is clonable (the
+/// original error is shared behind an `Arc`), so the copy keeps the cause AND
+/// the chain behind it.
+///
+/// The class never moves — it is what the retry rule reads — and a source that
+/// is not the classified carrier cannot be cloned: the copy carries none, and
+/// the variant, the message and the class survive.
 impl Clone for DownloadError {
     fn clone(&self) -> Self {
         match self {
             DownloadError::Network(e) => {
-                if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                if let Some(carrier) = e.downcast_ref::<ClassifiedNetworkError>() {
+                    DownloadError::Network(Box::new(carrier.clone()))
+                } else if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
                     DownloadError::Network(Box::new(std::io::Error::new(
                         io_err.kind(),
                         io_err.to_string(),
                     )))
                 } else {
-                    // The classified carrier cannot be cloned: keep the
-                    // variant (the class does not move) and the rendered
-                    // message, drop the cause from the chain.
+                    // Not a classified carrier: keep the variant (the class
+                    // does not move) and the rendered message.
                     DownloadError::Network(Box::new(std::io::Error::other(e.to_string())))
                 }
             },
-            DownloadError::Dns { message, .. } => DownloadError::Dns {
+            DownloadError::Dns { message, source } => DownloadError::Dns {
                 message: message.clone(),
-                source: None,
+                source: clone_carrier(source.as_deref()),
             },
-            DownloadError::Tls { message, .. } => DownloadError::Tls {
+            DownloadError::Tls { message, source } => DownloadError::Tls {
                 message: message.clone(),
-                source: None,
+                source: clone_carrier(source.as_deref()),
             },
-            DownloadError::Io(e) => DownloadError::Io(std::io::Error::new(e.kind(), e.to_string())),
+            DownloadError::Io(e) => {
+                // The kind is the retry rule's input: it survives the copy
+                // untouched. The payload keeps the classified cause when it
+                // carries one (#2824).
+                let kind = e.kind();
+                match clone_io_payload(e) {
+                    Some(payload) => DownloadError::Io(std::io::Error::new(kind, payload)),
+                    None => DownloadError::Io(std::io::Error::new(kind, e.to_string())),
+                }
+            },
             DownloadError::Http { status, message } => DownloadError::Http {
                 status: *status,
                 message: message.clone(),
@@ -195,9 +212,9 @@ impl Clone for DownloadError {
             DownloadError::WafChallenge(s) => DownloadError::WafChallenge(s.clone()),
             DownloadError::SpaDetected(s) => DownloadError::SpaDetected(s.clone()),
             DownloadError::InvalidUrl(s) => DownloadError::InvalidUrl(s.clone()),
-            DownloadError::Timeout { secs, .. } => DownloadError::Timeout {
+            DownloadError::Timeout { secs, source } => DownloadError::Timeout {
                 secs: *secs,
-                source: None,
+                source: clone_carrier(source.as_deref()),
             },
             DownloadError::Internal(s) => DownloadError::Internal(s.clone()),
             DownloadError::ResourceExhausted(s) => DownloadError::ResourceExhausted(s.clone()),
@@ -206,6 +223,35 @@ impl Clone for DownloadError {
             DownloadError::BodyTooLarge { limit } => DownloadError::BodyTooLarge { limit: *limit },
         }
     }
+}
+
+/// Clone the classified carrier a transport variant carries, when it has one.
+///
+/// A source that is not the classified carrier cannot be cloned (it is a boxed
+/// error): the copy carries none.
+fn clone_carrier(
+    source: Option<&(dyn std::error::Error + Send + Sync + 'static)>,
+) -> Option<crate::domain::error::cause::ErrorSource> {
+    source
+        .and_then(|source| source.downcast_ref::<ClassifiedNetworkError>())
+        .map(|classified| -> crate::domain::error::cause::ErrorSource {
+            Box::new(classified.clone())
+        })
+}
+
+/// Clone the payload of an `io::Error` when it carries a classified cause.
+///
+/// The payload of a classified `Io` failure is a [`CauseCarrier`], whose
+/// `source()` is the classified error; a payload that carries the carrier
+/// directly is covered too. Any other payload cannot be cloned.
+fn clone_io_payload(error: &std::io::Error) -> Option<crate::domain::error::cause::ErrorSource> {
+    let payload = error.get_ref()?;
+    if let Some(carrier) = payload.downcast_ref::<CauseCarrier>() {
+        return Some(Box::new(carrier.clone()));
+    }
+    payload.downcast_ref::<ClassifiedNetworkError>().map(
+        |classified| -> crate::domain::error::cause::ErrorSource { Box::new(classified.clone()) },
+    )
 }
 
 impl DownloadError {
@@ -279,80 +325,4 @@ impl From<DownloadError> for crate::domain::CrawlError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_fetched_page_clone() {
-        let page = FetchedPage {
-            url: "https://example.com".parse().unwrap(),
-            html: "<html></html>".to_string(),
-            status: 200,
-            headers: HashMap::new(),
-            cookies: vec![],
-        };
-        let cloned = page.clone();
-        assert_eq!(page.url, cloned.url);
-        assert_eq!(page.html, cloned.html);
-    }
-
-    #[test]
-    fn test_download_error_display() {
-        let err = DownloadError::Http {
-            status: 403,
-            message: "forbidden".into(),
-        };
-        assert!(err.to_string().contains("403"));
-    }
-
-    #[test]
-    fn test_download_error_classify() {
-        use crate::domain::error::ErrorClass;
-        let dns = DownloadError::dns("NXDOMAIN");
-        assert_eq!(dns.classify(), ErrorClass::PermanentFatal);
-        let timeout = DownloadError::timeout(5);
-        assert_eq!(timeout.classify(), ErrorClass::TransientBackoff);
-    }
-
-    /// #2784: a copy keeps the class and the message, and loses only the cause.
-    ///
-    /// The class is what the retry rule reads — never the cause — so a copy
-    /// must never move it. The cause cannot be cloned (it is a boxed error),
-    /// and losing it is the documented price of the copy.
-    #[test]
-    fn a_clone_keeps_the_class_and_drops_only_the_cause() {
-        use crate::domain::error::cause::{cause_in_chain, ClassifiedNetworkError, NetworkCause};
-        use crate::domain::error::ErrorClass;
-
-        let carrier = ClassifiedNetworkError::new(
-            NetworkCause::ConnectRefused,
-            Box::new(std::io::Error::other("connection refused")),
-        );
-        let original = DownloadError::Network(Box::new(carrier));
-        assert_eq!(original.classify(), ErrorClass::InternalFatal);
-
-        let copy = original.clone();
-        assert_eq!(
-            copy.classify(),
-            ErrorClass::InternalFatal,
-            "the class must not move: the retry rule reads it"
-        );
-        assert!(
-            copy.to_string().contains("el servidor rechazó la conexión"),
-            "the message must survive the copy: {copy}"
-        );
-        assert!(
-            cause_in_chain(&copy).is_none(),
-            "the cause cannot be cloned: the copy carries none"
-        );
-    }
-
-    #[test]
-    fn test_downloader_trait_is_dyn_compatible() {
-        // Compile-time proof that `dyn Downloader` is object-safe via BoxFuture
-        #[allow(dead_code)]
-        fn assert_dyn(_: &dyn Downloader) {}
-        // If this compiles, the trait is dyn-compatible
-        assert_eq!(1, 1);
-    }
-}
+mod tests;
