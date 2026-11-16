@@ -201,10 +201,13 @@ mod tests {
     #[tokio::test]
     async fn the_listener_stops_when_the_token_is_fired_elsewhere() {
         let token = CancellationToken::new();
-        let listener = tokio::spawn(wait_for_signal(token.clone()));
+        // #2845: the real wait registers `sigaction`, which Miri cannot
+        // execute. A never-resolving wait keeps the cancel-while-armed race
+        // under test without touching the OS.
+        let never_signals: TerminationWait = Box::pin(std::future::pending());
+        let listener = tokio::spawn(wait_for_signal_from(token.clone(), never_signals));
         // Let the listener poll the termination wait before cancelling: without
-        // this yield the task may never reach the signal registration, making
-        // the test vacuous (#2845).
+        // this yield the task may never reach the wait, making the test vacuous.
         tokio::task::yield_now().await;
         token.cancel();
         listener.await.expect("listener must exit cleanly");
