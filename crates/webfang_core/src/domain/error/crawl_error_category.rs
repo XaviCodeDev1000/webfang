@@ -284,6 +284,23 @@ mod tests {
         assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Timeout);
     }
 
+    /// #2841 (S9): the category of a timeout is cause-blind — a timeout whose
+    /// `source` carries a classified connect-cause must still land in the
+    /// `Timeout` row, never leak into `Network` because of what it carries.
+    #[test]
+    fn categorize_timeout_is_cause_blind() {
+        let err = CrawlError::timeout_with_cause(Box::new(
+            crate::domain::error::cause::ClassifiedNetworkError::new(
+                crate::domain::error::cause::NetworkCause::ConnectTimeout,
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "connect deadline",
+                )),
+            ),
+        ));
+        assert_eq!(CrawlErrorCategory::from(&err), CrawlErrorCategory::Timeout);
+    }
+
     #[test]
     fn categorize_network() {
         let err = CrawlError::Network {
