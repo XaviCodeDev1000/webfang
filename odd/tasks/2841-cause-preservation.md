@@ -1,0 +1,40 @@
+# Feature 2841 — la causa clasificada sobrevive la ruta de scraper
+
+Issue: https://github.com/XaviCodeDev1000/webfang/issues/2841 (`status:approved`, `type:bug`).
+Rama: `fix/2841-cause-preservation` · Worktree: `~/Projects/Rust/webfang-worktrees/fix-2841-cause-preservation`.
+Objetivo: que un timeout, un fallo de transporte no-conexión y el agotamiento de reintentos
+lleguen a la frontera CON la causa clasificada, sin mover `Display`, `ErrorClass` ni exit codes.
+
+## Specs
+
+- **S1** (issue, verbatim): "Un timeout de la ruta de scraper llega a la frontera con la causa clasificada (`ConnectTimeout` o `ReadTimeout`), no sin causa."
+- **S2** (issue, verbatim): "Un fallo de transporte que no es timeout ni conexión llega con su causa, no como `HttpError::Request` aplanado."
+- **S3** (humano, verbatim): "El agotamiento del presupuesto de reintentos entrega la causa del último fallo de transporte."
+- **S4** (humano, verbatim): "Se adjunta la causa solo si el **último intento** falló por transporte." / "Si el último intento fue un status, no se adjunta causa. Como mucho se registra el fallo previo en el log, pero no en la cadena `source`."
+- **S5** (humano, verbatim): "Los errores `is_builder()` van a `Request`; el transporte no clasificable va a la variante nueva `Transport { message, source }`."
+- **S6** (humano, verbatim): "La clasificación debe vivir en una función que reciba `&(dyn Error + 'static)` más los hints (`is_timeout`, `is_connect`, `is_builder`, fase). Los wrappers de `wreq` solo extraen esos hints."
+- **S7** (humano, verbatim): "Los tres sitios de mapeo duplicados (`http_failure`, `send_with_timeout_retry`, `port.rs`/impl de `HttpClientPort`) comparten **una sola función de clasificación**. Si no, la duplicación vuelve."
+- **S8** (humano, verbatim): "La fase debe salir de `is_connect()` como pista: timeout y connect dan `ConnectTimeout`, timeout sin connect da `ReadTimeout`. Y se clasifica siempre, sin filtrar por `is_connect()`."
+- **S9** (humano, verbatim): "`fetch_html` usa `log_scrape_error_with_cause`. Hoy el campo `cause` ni se emite." / "Los snapshots de traza se actualizan con el campo nuevo." / "Se cubre el agotamiento de `RateLimited` y `ServerError`, no solo el de timeout." / "Se fija con un test que `CrawlErrorCategory` sigue siendo cause-blind para `Timeout`."
+- **S10** (humano, verbatim): "Tests con fallos inyectados, sin red." / "El test de `https://` contra wiremock en claro puede dar una cadena distinta de `InvalidData`. Hay que tratarlo como test de integración informativo, no como el que cumple el criterio."
+- **S11** (humano, verbatim): "Los `Display`, `ErrorClass` y exit codes quedan fijados con tests de regresión."
+- **S12** (issue, verbatim): "`HttpError::Request` queda reservado a los fallos de construcción de la petición." / "`ConnectTimeout`, `ReadTimeout` y `TlsHandshake` se observan de extremo a extremo en al menos un test inyectado, sin red."
+
+## Tasks
+
+| ID | Tarea | Specs | Ruta | Commit |
+|---|---|---|---|---|
+| T1 | Tipos: `source: Option<ErrorSource>` en `HttpError::Timeout` y `CrawlError::Timeout`; variante nueva `Transport { message, source }`; matches exhaustivos. Sin cambio de comportamiento. | S5, S12 | inline | — |
+| T2 | Costura de clasificación única (`&(dyn Error + 'static)` + hints + fase) y mapeo en los tres sitios; tests unitarios con cadenas fabricadas (`TlsHandshake`, `ConnectTimeout`, `ReadTimeout`). | S1, S6, S7, S8 | inline | — |
+| T3 | `retry_with_backoff` conserva `Option<wreq::Error>` (último fallo de transporte) en vez del booleano, con la regla de agotamiento; lectura de cuerpo 2xx deja de ser `Request`. | S2, S3, S4 | inline | — |
+| T4 | `error/conversions.rs`: la causa como payload del `io::Error` (`ErrorKind::TimedOut` intacto); `fetch_html` usa `log_scrape_error_with_cause`; snapshots de traza. | S9, S11 | inline | — |
+| T5 | Tests de integración wiremock (`mount_delayed`, `127.0.0.1:9`, `.invalid`); el de handshake `https://` queda como informativo. Pin de `CrawlErrorCategory` cause-blind y de Display/exit codes. | S10, S11, S12 | inline | — |
+| T6 | Puerta local completa (`ci_fast_gate` + pre-commit + nextest) y verificación independiente (Risk ítem 3: tipos consumidos por CLI, MCP y trazado). | todos | `gentle-ai-verify` | — |
+
+## Log
+
+- **L1** (humano, verbatim): "vamos a analizar la issue #2841 y consulta la documentacion oficial en caso de sudas como lo hemos hecho en sesiones interiores guardadas en engram"
+- **L2** (humano, verbatim): "Mi recomendación es **ajustar la issue primero y luego implementar**. Es barato, y varios de los criterios que faltan cambian el alcance del PR. No puedo verificar el código desde aquí, así que lo que sigue se apoya en tu análisis." — seguido de: (1) criterios a añadir; (2) dos puntos de diseño — 2a "La costura testeable" y 2b "La causa en el agotamiento de reintentos", con "Se adjunta la causa solo si el último intento falló por transporte"; (3) plan de implementación en un solo PR con 5 commits; "Como toca tipos públicos consumidos por la CLI, el MCP y el trazado, sí pediría verificación independiente." / "Si te parece bien, actualizo el texto de la issue con los criterios del punto 1 y la regla 2b, y después abro el branch y el PR."
+- **L3** (evidencia, 2026-11-16 16:17Z): issue #2841 actualizada con los criterios del humano y las decisiones de diseño (`gh issue edit`); el texto de "Propuesta" pasó a "Propuesta y decisiones" y se añadió "## Plan de implementación". Hallazgo propio añadido a la issue: en `retry_with_backoff`, el fallo de lectura del cuerpo en la rama de éxito (`resp.text()`) también se aplana a `HttpError::Request` — es transporte, no construcción.
+- **L4** (evidencia, análisis previo): verificación read-only de las cuatro pérdidas contra el código actual; semántica de `wreq` confirmada contra el tag oficial `v6.0.0-rc.29` — `is_timeout()`/`is_connect()` son pistas ("relacionado con"), el connector incluye DNS+TCP+TLS y asigna `ErrorKind::Connect` a cualquier fallo del connector (un handshake TLS cae en `is_connect()`); el deadline de connect se envuelve como `TimedOut`. `wreq::Error` no tiene constructor público ⇒ de ahí la costura S6. Persistido en Engram (#2987).
+- **L5** (decisión): el agotamiento de `RateLimited`/`ServerError` con último intento por transporte adjunta la causa portada por la variante (S3+S4); el PR y el push quedan a decisión del humano.
