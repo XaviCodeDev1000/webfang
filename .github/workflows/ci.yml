@@ -1323,7 +1323,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      # Per-step restore deadline (#2805): a slow cache restore once consumed
+      # ~11 of this job's 12-minute budget (run 43601529904), and the job-level
+      # timeout then cancelled the tests step AND the if: failure() JUnit
+      # upload — a mystery cancellation with nothing left to diagnose. GitHub
+      # gives steps their own timeout-minutes, so the deadline lives HERE: a
+      # slow restore becomes a fast, attributable failure of this step and the
+      # JUnit upload still runs. A normal restore is ~25s (run 43974537791),
+      # so 5 minutes is a ~12x margin over the healthy path.
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+        timeout-minutes: 5
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # SC-11: the `tool:` input is pinned. This action's DEFAULT tool set is
