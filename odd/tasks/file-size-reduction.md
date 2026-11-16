@@ -3,8 +3,16 @@
 Plan persistido, **no ejecutado**. El ratchet (`scripts/check_file_size.sh`,
 misión en `odd/tasks/file-size-ratchet.md`) congela a los ofensores históricos
 en su conteo exacto; este programa es la dirección descendente: partirlos por
-seams reales hasta que todas las partes queden <=500 y cada entrada salga del
-baseline con `--remove`.
+seams reales hasta que cada entrada salga del baseline con `--remove`.
+
+El 500 es un guardrail local de AGENTS.md, **no una regla de Rust**: la doc
+oficial (The Rust Book, cap. 7) pide agrupar funcionalidad relacionada y
+limitar el detalle que hay que mantener en la cabeza, sin fijar líneas; el
+único umbral numérico oficial es de **función**, no de archivo
+(`clippy::too_many_lines`, default 100, y `clippy::cognitive_complexity`,
+default 25, ambos ya activos en el gate de CI). Cerrar una misión exige que la
+cohesión y la complejidad bajen de verdad; `<=500` es el disparador de revisión,
+no la meta en sí.
 
 El listado vigente NO se copia acá (estado mutable): la fuente de verdad es
 `file_size_rust.grandfathered` en `scripts/quality-baselines.json`.
@@ -22,17 +30,27 @@ El listado vigente NO se copia acá (estado mutable): la fuente de verdad es
   código que lo genera.
 - Objetivo de cada split: todas las partes <=500 -> `--remove` de la entrada
   original. Una parte nueva >500: se sigue partiendo, o entra al baseline por
-  edición manual revisada por maintainer (excepcional, visible en review).
+  edición manual revisada por maintainer (visible en review).
+- Criterio de cierre (co-equal): además del guard de líneas, las funciones
+  tocadas deben pasar `clippy::too_many_lines` (100) y
+  `clippy::cognitive_complexity` (25) sin supresiones nuevas, y el `cx` de
+  `jscpd --complexity` no debe subir. Un archivo de 450 líneas con funciones
+  cortas está mejor que uno de 300 con una función de 180: si solo bajó el
+  contador de líneas, el split no arregló nada.
 - Excepciones documentadas: archivos declarativos/enumerativos cohesionados
   (candidatos: `error.rs`, `mcp_server/params.rs`, posiblemente
   `cli/args/mod.rs`) no se parten; quedan grandfathered con el porqué en las
   `notes` del JSON. La decisión se toma POR archivo en su misión, no acá.
+  No son un caso excepcional que haya que rejustificar cada vez: basta que el
+  archivo sea una sola unidad (enum, state machine, tabla o `match` exhaustivo)
+  con lógica funcional mínima y que el gate de funciones esté limpio.
 - Net-zero en grandfathered: mientras un archivo esté en el baseline, crecerlo
   una línea falla el guard — todo cambio que lo toque termina neto en cero o
   lo parte. Por eso las misiones de Ola 1 se secuencian antes que cualquier
   feature que necesite tocar esos archivos.
-- Confirmar que mejoró: líneas con el guard y `cx` con `jscpd --complexity`
-  sobre los archivos tocados — el binario pinneado 5.4.0 (instalado con
+- Confirmar que mejoró: líneas con el guard, `cx` con `jscpd --complexity` y
+  los lints de función del gate de CI sobre los archivos tocados — el binario
+  pinneado 5.4.0 (instalado con
   `cargo install jscpd --version 5.4.0 --locked`, ver
   `scripts/check_duplication.sh`), nunca `npx` (versión sin pin). Un split
   que solo mueve código no arregló nada, lo renombró.
@@ -49,6 +67,12 @@ Bandas: Ola 0 = [501, 570] · oportunista = [571, 999] · Ola 3 = [1000, 1499] �
 Ola 2 = [1500, 2000] · Ola 1 = (2000, ∞). Snapshot sobre
 origin/main@fb411dac (2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
 
+Dentro de cada banda el orden NO lo da el conteo de líneas: lo dan el churn
+(`git log --follow --format=%ad --date=short -- <archivo>`), el historial de
+bugs y la complejidad medida. Un archivo de 1400 líneas que cambia cada semana
+va antes que uno de 1900 que nadie toca; "el peor y el hot path" fue el
+criterio que puso `engine.rs` al frente de la Ola 1.
+
 - **T1 — Ola 0, calibración:** banda [501, 570]. Extracciones chicas y de
   bajo riesgo; ejercita `--update`/`--remove` y el flujo completo de PR antes
   de tocar monstruos.
@@ -64,17 +88,23 @@ origin/main@fb411dac (2026-11-03): 15 / 51 / 30 / 8 / 9 = 113.
 
 1. **CodeGraph explore** (callers + blast radius) antes de tocar — nunca
    editar a ciegas.
-2. **Nombrar el driver real**: ¿varios módulos pegados? ¿una función con
+2. **Pregunta previa de frontera**: el Google Rust Style Guide manda decidir
+   los límites de crate antes que los submódulos. Si el seam real pide un crate
+   nuevo, eso es una decisión de arquitectura y va a su propia misión/PR —
+   nunca se cuela en un split mecánico (ver protocolo de dos sombreros).
+3. **Nombrar el driver real**: ¿varios módulos pegados? ¿una función con
    varias responsabilidades? ¿un `match` gigante? El driver elige la
    estrategia: extract module / extract function / tabla.
-3. **Split por seams**, un commit de unidad por extracción, tests verdes
+4. **Split por seams**, un commit de unidad por extracción, tests verdes
    entre unidades.
-4. **Verificación doble**: el guard (líneas) + `jscpd --complexity` (binario
-   pinneado 5.4.0) sobre los tocados (`cx` debe bajar de verdad).
-5. **Cerrar en el ratchet**: `--update` a las partes que quedaron >500 pero
+5. **Verificación triple**: el guard (líneas) + `jscpd --complexity` (binario
+   pinneado 5.4.0, `cx` debe bajar de verdad) + los lints de función ya
+   activos en CI (`clippy::too_many_lines` 100, `clippy::cognitive_complexity`
+   25), sin supresiones nuevas.
+6. **Cerrar en el ratchet**: `--update` a las partes que quedaron >500 pero
    más chicas; `--remove` a las <=500; parte nueva >500 = seguir partiendo o
    entrada revisada.
-6. **Revisión compañera obligatoria**: revisar lo movido con las cuatro lentes
+7. **Revisión compañera obligatoria**: revisar lo movido con las cuatro lentes
    (lógica, eficiencia, seguridad, mantenibilidad) y dejar el resultado en el
    PR; "sin hallazgos" es una respuesta válida, pero debe ser explícita.
 
@@ -171,3 +201,14 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   semántico, reglas de evidencia (rojo→verde, test negativo, medida o
   complejidad menor) y registro de hallazgos ajenos como issues. El PR de
   cada split declara `Movido sin cambios` y `Corregido / mejorado`.
+- L5 (2026-11-16): el usuario pidió contrastar el plan con la documentación
+  oficial y la guía de expertos: "que recomiendan los expertos y la doc oficial
+  ? y comparalo con mi plan de OLAS." y autorizó el cambio: "adelante hazlo en
+  un worktree,". Verificado: ninguna fuente oficial fija líneas por archivo
+  (The Rust Book cap. 7, Google Rust Style Guide, Microsoft M-SMALLER-CRATES);
+  el único umbral numérico es de función en Clippy. Se elevan los lints de
+  función y `cx` a criterio de cierre co-equal, se explicita la excepción de
+  unidades declarativas cohesionadas, se agrega la pregunta de frontera de
+  crate antes del split y se ordenan las olas por churn/complejidad dentro de
+  cada banda. Sin cambio de alcance: el 500 sigue siendo guardrail y la
+  catraca queda intacta.
