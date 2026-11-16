@@ -86,6 +86,22 @@ impl NetworkCause {
         Self::Unknown,
     ];
 
+    /// The metric bucket this cause belongs to.
+    ///
+    /// The cause vocabulary and `CrawlErrorCategory`
+    /// were two PARALLEL
+    /// taxonomies: one said `Network`, the other said `dns_resolution`, and
+    /// nothing pinned them together. A dashboard counting the category and a
+    /// trace counting the cause could disagree, with no test to catch it
+    /// (#2784). This is the ONE place the two meet: every cause is a network
+    /// failure, so they all fold into the same bucket, and
+    /// `CrawlErrorCategory::from(&CrawlError)` routes through here instead of
+    /// deciding on its own.
+    #[must_use]
+    pub const fn category(self) -> crate::domain::error::crawl_error_category::CrawlErrorCategory {
+        crate::domain::error::crawl_error_category::CrawlErrorCategory::Network
+    }
+
     /// The stable wire value (what the trace carries).
     #[must_use]
     pub fn as_str(self) -> &'static str {

@@ -804,8 +804,13 @@ async fn extract_batch_content(
 /// Print the batch completion summary and log each failed URL.
 ///
 /// `root_correlation` is the batch run-root identity: each failed URL emits
-/// the shared operational error contract (`log_scrape_error`) carrying it,
-/// so trace-file queries join failures with the run (#1604).
+/// the shared operational error contract carrying it, so trace-file queries
+/// join failures with the run (#1604).
+///
+/// The cause travels WITH the summary, not only with the per-URL event the
+/// processor emits: this is the event an operator reads after the run, and
+/// before #2784 it was the one place a batch failure was reported with no
+/// cause at all.
 fn log_batch_summary(summary: &BatchManagerSummary, root_correlation: &domain::CorrelationId) {
     println!(
         "Batch complete: {}/{} succeeded, {} failed",
@@ -813,7 +818,7 @@ fn log_batch_summary(summary: &BatchManagerSummary, root_correlation: &domain::C
     );
 
     for (url, err) in &summary.errors {
-        crate::infrastructure::observability::log_scrape_error(
+        crate::infrastructure::observability::log_scrape_error_with_cause(
             err,
             url,
             "batch",

@@ -821,7 +821,8 @@ acknowledgement, commit / push / PR / release stay under ordinary repository pol
   26 categories; category prefixes: `own-`, `err-`, `async-`, `api-`, `test-`, …),
   `branch-pr`, `work-unit-commits`, `chained-pr`, `rdd-defect-workflow`,
   `cognitive-doc-design` (user scope) and `codebase-refactoring`, `dry-refactoring`, `jscpd`,
-  `webfang-architecture` (repo scope).
+  `webfang-architecture`, `webfang-worktree-ops`, `webfang-ci-gate`, `webfang-testing`,
+  `webfang-fetch-path` (repo scope).
 - **Loading the right rules is mandatory:** before any Rust code change, resolve the applicable
   Rust skill by the task's code context (file extensions and what the task asks for) via the
   skill registry: `rust-skills` (265 rules across 26 categories, granular coverage for

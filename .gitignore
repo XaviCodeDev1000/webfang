@@ -73,6 +73,10 @@ STATE.md
 !.agents/skills/dry-refactoring/
 !.agents/skills/codebase-refactoring/
 !.agents/skills/webfang-architecture/
+!.agents/skills/webfang-worktree-ops/
+!.agents/skills/webfang-ci-gate/
+!.agents/skills/webfang-testing/
+!.agents/skills/webfang-fetch-path/
 .agent/
 /skills/
 .opencode/
