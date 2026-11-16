@@ -43,6 +43,20 @@ const WREQ_MEMORY_COST: usize = 1_024 * 1_024; // ~1 MB
 /// below `max_page_bytes`: this is evidence, not content.
 const WAF_SNIFF_MAX_BYTES: u64 = 8 * 1024;
 
+/// Extra attempts a NAME RESOLUTION failure gets, on top of the first one.
+///
+/// It does NOT consume `max_retries`: a broken resolver is OUR problem, not the
+/// site's, and the site-rejection ladder must stay intact for the URLs that
+/// actually reach a peer (#2823).
+pub(crate) const DNS_RETRY_BUDGET: u32 = 2;
+
+/// The fixed delay between resolution attempts, in milliseconds.
+///
+/// Deliberately short and CONSTANT: waiting longer does not make a resolver
+/// answer, and an exponential ladder here is what turned a broken DNS into a
+/// WAF-looking slowdown of a whole 50-URL run (#2823).
+pub(crate) const DNS_RETRY_DELAY_MS: u64 = 250;
+
 /// What to do when a bounded body read reaches its ceiling.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BoundedRead {
@@ -293,6 +307,33 @@ impl WreqDownloader {
         }
     }
 
+    /// Test-only constructor: an injected client with an explicit retry policy.
+    ///
+    /// The production constructors derive the policy from the operator's knobs
+    /// (seconds and milliseconds that are right for a real run). A test that
+    /// drives a resolver failure needs the policy pinned to milliseconds so the
+    /// retry ACCOUNTING is observable without a real network or a real clock
+    /// (#2823).
+    #[cfg(test)]
+    pub(crate) fn from_client_with_retry(
+        client: Client,
+        timeout_secs: u64,
+        max_retries: u32,
+        backoff_base_ms: u64,
+        backoff_max_ms: u64,
+    ) -> Self {
+        Self {
+            client: Arc::new(client),
+            timeout_secs,
+            pinned_ua: None,
+            max_page_bytes: crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES,
+            max_retries,
+            backoff_base_ms,
+            backoff_max_ms,
+            ignore_waf: false,
+        }
+    }
+
     /// Extract cookies from a wreq response.
     fn extract_cookies(url: &Url, response: &wreq::Response) -> Vec<Cookie> {
         let mut cookies = Vec::new();
@@ -420,6 +461,44 @@ impl WreqDownloader {
                 request_started,
             )
         })
+    }
+
+    /// Send one request, retrying a NAME RESOLUTION failure on its OWN budget.
+    ///
+    /// A resolver that never answers is not the site refusing us: the request
+    /// never reached a peer, so waiting longer cannot change the outcome. It
+    /// gets a small fixed budget and a fixed short delay, and the
+    /// site-rejection ladder (`max_retries` with exponential backoff) is never
+    /// charged for it — that ladder is what turned a broken DNS into a
+    /// WAF-looking slowdown of a whole 50-URL run (#2823).
+    ///
+    /// Every OTHER failure is returned at once: the caller's ladder decides
+    /// whether it earns a retry.
+    async fn send_request_on_dns_budget(&self, url: &Url) -> Result<wreq::Response, DownloadError> {
+        let mut dns_attempts = 0u32;
+        loop {
+            match self.send_request(url, None).await {
+                Ok(response) => return Ok(response),
+                Err(err) => {
+                    if !crate::domain::error::mapping::is_resolution_failure(&err) {
+                        return Err(err);
+                    }
+                    if dns_attempts >= DNS_RETRY_BUDGET {
+                        return Err(err);
+                    }
+                    dns_attempts += 1;
+                    warn!(
+                        url = %url,
+                        attempt = dns_attempts,
+                        max_dns_retries = DNS_RETRY_BUDGET,
+                        delay_ms = DNS_RETRY_DELAY_MS,
+                        error = %err,
+                        "name resolution failed — retrying on the resolver budget"
+                    );
+                    tokio::time::sleep(Duration::from_millis(DNS_RETRY_DELAY_MS)).await;
+                },
+            }
+        }
     }
 
     /// Calculate the exponential backoff delay for a given attempt, capped at
@@ -562,7 +641,7 @@ impl WreqDownloader {
         let mut last_error: Option<DownloadError> = None;
 
         for attempt in 0..=self.max_retries {
-            let response = match self.send_request(url, None).await {
+            let response = match self.send_request_on_dns_budget(url).await {
                 Ok(res) => res,
                 Err(dl_err) => {
                     // Single classification rule (FIX-1, #1236): retry
@@ -579,6 +658,14 @@ impl WreqDownloader {
                     // UnexpectedEof) stay retriable (#649 mid-body transient
                     // fix).
                     if matches!(dl_err.classify(), ErrorClass::PermanentFatal) {
+                        return Err(dl_err);
+                    }
+                    // #2823: a resolution failure that reaches here has already
+                    // spent its OWN budget. It is our resolver, never the site
+                    // refusing us, so it is returned instead of consuming the
+                    // site-rejection ladder — that is the whole point of the
+                    // separate budget.
+                    if crate::domain::error::mapping::is_resolution_failure(&dl_err) {
                         return Err(dl_err);
                     }
                     // The "retrying" event only fires when a retry will
