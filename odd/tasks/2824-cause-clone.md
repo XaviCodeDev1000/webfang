@@ -121,7 +121,10 @@ Las cinco variantes de transporte de S1 son `Network`, `Dns`, `Tls`, `Io` y
   `cargo fmt --all -- --check` en verde; `RUSTDOCFLAGS=-D warnings cargo doc
   --workspace --all-features` en verde; `bash scripts/ci_fast_gate.sh` en
   verde.
-- L9: Sin cambios de API incompatible: `ClassifiedNetworkError` mantiene su
+- L9: PR #2838 (`fix/2824-cause-clone` → `main`), un commit (`144e2484`): el
+  golden del extractor se refresca en el mismo commit que cambia el árbol, así
+  que un commit intermedio sin su golden dejaría el árbol inconsistente ahí.
+- L10: Sin cambios de API incompatible: `ClassifiedNetworkError` mantiene su
   firma (`new`, `cause`) y gana `Clone`; `CauseCarrier` es un tipo nuevo;
   `CrawlResult` es `#[non_exhaustive]` y gana un campo + un método. El cambio de
   comportamiento del `Clone` es el que pide #2824.
