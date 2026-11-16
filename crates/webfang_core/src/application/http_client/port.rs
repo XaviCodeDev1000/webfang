@@ -104,7 +104,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_returns_timeout() {
-        let mock = MockHttpClient::new().with_response("https://slow.com", Err(HttpError::timeout()));
+        let mock =
+            MockHttpClient::new().with_response("https://slow.com", Err(HttpError::timeout()));
         let result = mock.get("https://slow.com").await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), HttpError::Timeout { .. }));

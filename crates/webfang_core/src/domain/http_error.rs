@@ -184,7 +184,9 @@ impl HttpError {
     /// stays `"Request Timeout"`, the chain gains the cause.
     #[must_use]
     pub fn timeout_with_cause(source: crate::domain::error::cause::ErrorSource) -> Self {
-        Self::Timeout { source: Some(source) }
+        Self::Timeout {
+            source: Some(source),
+        }
     }
 
     /// A transport failure, with its cause when the producer classified one.

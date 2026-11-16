@@ -6,8 +6,8 @@
 
 use crate::domain::downloader_port::DownloadError;
 use crate::domain::error::cause::{
-    cause_in_chain, classify, CauseCarrier, ClassifiedNetworkError, DnsResolutionError, ErrorSource,
-    FetchPhase, NetworkCause,
+    cause_in_chain, classify, CauseCarrier, ClassifiedNetworkError, DnsResolutionError,
+    ErrorSource, FetchPhase, NetworkCause,
 };
 use crate::domain::error::resolution::refine_connect_cause;
 
@@ -129,9 +129,9 @@ pub fn build_http_failure(
     use crate::domain::http_error::HttpError;
     match verdict {
         TransportVerdict::RequestConstruction => HttpError::Request(error.to_string()),
-        TransportVerdict::Timeout { cause } => HttpError::timeout_with_cause(Box::new(
-            ClassifiedNetworkError::new(cause, error),
-        )),
+        TransportVerdict::Timeout { cause } => {
+            HttpError::timeout_with_cause(Box::new(ClassifiedNetworkError::new(cause, error)))
+        },
         TransportVerdict::Connection { cause } => {
             let cause = match host {
                 Some(host) => {
@@ -588,7 +588,10 @@ mod tests {
             FetchPhase::Connect,
         );
         assert!(
-            matches!(&http, crate::domain::http_error::HttpError::Transport { .. }),
+            matches!(
+                &http,
+                crate::domain::http_error::HttpError::Transport { .. }
+            ),
             "expected the Transport variant, got: {http:?}"
         );
         assert_eq!(
@@ -602,6 +605,68 @@ mod tests {
             scraper.classify(),
             crate::error::ErrorClass::TransientRetriable,
             "an unclassified transport failure is a transport failure, not a bug"
+        );
+    }
+
+    /// #2841 (S12): `ConnectTimeout` observed end to end with an injected
+    /// failure — the cause walks verdict → `HttpError` → `CrawlError` →
+    /// `ScraperError`, and the class stays the timeout's own.
+    #[test]
+    fn a_connect_timeout_reaches_the_boundary_through_the_conversion_chain() {
+        let original: ErrorSource = Box::new(std::io::Error::new(
+            io::ErrorKind::TimedOut,
+            "connect deadline",
+        ));
+        let http = build_http_failure(
+            TransportVerdict::Timeout {
+                cause: NetworkCause::ConnectTimeout,
+            },
+            original,
+            None,
+            std::time::Instant::now(),
+            FetchPhase::Connect,
+        );
+        assert_eq!(http.to_string(), "Request Timeout");
+        let scraper: crate::error::ScraperError =
+            crate::domain::error::CrawlError::from(http).into();
+        assert_eq!(
+            cause_in_chain(&scraper),
+            Some(NetworkCause::ConnectTimeout),
+            "the connect timeout cause must reach the boundary: {scraper}"
+        );
+        assert_eq!(
+            scraper.classify(),
+            crate::error::ErrorClass::TransientRetriable,
+            "the boundary's TimedOut row — the class does not move with the cause"
+        );
+    }
+
+    /// #2841 (S12): `TlsHandshake` observed end to end with an injected
+    /// failure — the connector reports a handshake failure in the CONNECT
+    /// phase, and the classified cause survives to the boundary.
+    #[test]
+    fn a_tls_handshake_reaches_the_boundary_through_the_conversion_chain() {
+        let original: ErrorSource =
+            Box::new(std::io::Error::new(io::ErrorKind::InvalidData, "tls alert"));
+        let http = build_http_failure(
+            TransportVerdict::Connection {
+                cause: NetworkCause::TlsHandshake,
+            },
+            original,
+            None,
+            std::time::Instant::now(),
+            FetchPhase::Connect,
+        );
+        let scraper: crate::error::ScraperError =
+            crate::domain::error::CrawlError::from(http).into();
+        assert_eq!(
+            cause_in_chain(&scraper),
+            Some(NetworkCause::TlsHandshake),
+            "the TLS handshake cause must reach the boundary: {scraper}"
+        );
+        assert_eq!(
+            scraper.classify(),
+            crate::error::ErrorClass::TransientRetriable,
         );
     }
 

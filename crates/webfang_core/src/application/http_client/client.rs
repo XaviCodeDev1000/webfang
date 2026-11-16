@@ -298,12 +298,8 @@ impl HttpClient {
                     // the budget keeps its classified cause (S3) instead of
                     // the old bare `HttpError::timeout()`.
                     let timeout_err = e.is_timeout();
-                    let mapped = http_failure(
-                        e,
-                        FetchPhase::Connect,
-                        url_host.as_deref(),
-                        request_started,
-                    );
+                    let mapped =
+                        http_failure(e, FetchPhase::Connect, url_host.as_deref(), request_started);
                     if !timeout_err {
                         return Err(mapped);
                     }

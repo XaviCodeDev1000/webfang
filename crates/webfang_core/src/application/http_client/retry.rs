@@ -344,15 +344,10 @@ mod tests {
                 exhausted,
                 label,
             };
-            let err = retry_with_backoff(
-                &client,
-                &server.uri(),
-                &config,
-                "webfang-test/1.0",
-                policy,
-            )
-            .await
-            .expect_err("the status-only budget must exhaust");
+            let err =
+                retry_with_backoff(&client, &server.uri(), &config, "webfang-test/1.0", policy)
+                    .await
+                    .expect_err("the status-only budget must exhaust");
             assert_eq!(
                 crate::domain::error::cause::cause_in_chain(&err),
                 None,

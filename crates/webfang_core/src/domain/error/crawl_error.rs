@@ -310,7 +310,9 @@ impl CrawlError {
     /// A timeout that keeps the classified cause (#2841).
     #[must_use]
     pub fn timeout_with_cause(source: crate::domain::error::cause::ErrorSource) -> Self {
-        Self::Timeout { source: Some(source) }
+        Self::Timeout {
+            source: Some(source),
+        }
     }
 
     /// An unclassified transport failure (#2841).
