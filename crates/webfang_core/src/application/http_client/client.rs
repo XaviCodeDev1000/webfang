@@ -560,18 +560,13 @@ impl crate::domain::http_port::HttpClientPort for HttpClient {
             // a full HttpResponse (status + body + headers).
             let request_started = std::time::Instant::now();
             let resp = self.client.get(url.as_str()).send().await.map_err(|e| {
-                if e.is_timeout() {
-                    crate::domain::http_error::HttpError::timeout()
-                } else if e.is_connect() {
-                    crate::domain::error::mapping::http_connection_failure(
-                        e,
-                        crate::domain::error::cause::FetchPhase::Connect,
-                        url_host_of(&url).as_deref(),
-                        request_started,
-                    )
-                } else {
-                    crate::domain::http_error::HttpError::Request(e.to_string())
-                }
+                // #2841: the ONE classification seam, shared with `http_failure`
+                // — no second tri-branch to drift.
+                crate::domain::error::mapping::http_failure(
+                    e,
+                    url_host_of(&url).as_deref(),
+                    request_started,
+                )
             })?;
 
             let status = resp.status().as_u16();

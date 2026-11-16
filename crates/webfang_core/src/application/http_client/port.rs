@@ -30,18 +30,10 @@ impl HttpClientPort for wreq::Client {
         Box::pin(async move {
             let request_started = std::time::Instant::now();
             let response = self.get(url.as_str()).send().await.map_err(|e| {
-                if e.is_timeout() {
-                    HttpError::timeout()
-                } else if e.is_connect() {
-                    crate::domain::error::mapping::http_connection_failure(
-                        e,
-                        crate::domain::error::cause::FetchPhase::Connect,
-                        None,
-                        request_started,
-                    )
-                } else {
-                    HttpError::Request(e.to_string())
-                }
+                // #2841: the ONE classification seam — the same call
+                // `http_failure` makes, so the inline tri-branch can no longer
+                // drift from the one `HttpClient` uses.
+                crate::domain::error::mapping::http_failure(e, None, request_started)
             })?;
 
             let status = response.status().as_u16();
