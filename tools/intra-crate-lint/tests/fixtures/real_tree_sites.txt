@@ -1848,6 +1848,10 @@ infrastructure/http/waf_engine.rs	43	use	crate::domain::waf::WafVerdict
 infrastructure/http/waf_engine.rs	43	use	crate::domain::waf::is_t2_blocking_status
 infrastructure/http/waf_engine.rs	475	inline	crate::domain::waf::sealed::Sealed
 infrastructure/http/waf_engine.rs	477	inline	crate::domain::waf::WafInspectorPort
+infrastructure/http/waf_engine/tests_context.rs	10	use	crate::domain::waf::fixtures
+infrastructure/http/waf_engine/tests_context.rs	11	use	crate::error::ScraperError
+infrastructure/http/waf_engine/tests_context.rs	136	inline	crate::error::ErrorClass::PermanentFatal
+infrastructure/http/waf_engine/tests_inspect.rs	11	use	crate::domain::waf::fixtures
 infrastructure/llm/client.rs	9	use	crate::domain::credentials::ApiKey
 infrastructure/llm/client.rs	10	use	crate::domain::llm_port::ChatMessage
 infrastructure/llm/client.rs	10	use	crate::domain::llm_port::LlmPort
