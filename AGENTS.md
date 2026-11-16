@@ -662,7 +662,8 @@ acknowledgement, commit / push / PR / release stay under ordinary repository pol
   categories) and `rust-best-practices` (distilled checklist) cover the same ground at different
   granularity; `rust-review` for a cited review report. Other relevant skills: `branch-pr`,
   `work-unit-commits`, `chained-pr`, `rdd-defect-workflow`, `cognitive-doc-design`,
-  `codebase-refactoring`, `dry-refactoring`, `jscpd`, `webfang-architecture`.
+  `codebase-refactoring`, `dry-refactoring`, `jscpd`, `webfang-architecture`,
+  `webfang-worktree-ops`, `webfang-ci-gate`, `webfang-testing`, `webfang-fetch-path`.
 - **Every delegation to a subagent must include:** the skill paths to read, the intelligence
   mandate (explore impact before editing; `cargo check` before returning), the exact verification
   commands, and the absolute worktree path.
