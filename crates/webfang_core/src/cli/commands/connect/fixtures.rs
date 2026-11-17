@@ -5,10 +5,12 @@
 
 use std::path::Path;
 
-use super::{
-    display_for_id, write_provider, AuthSource, Capability, NetworkPolicy, ProviderConfig,
-    ProviderKind,
-};
+use super::{display_for_id, AuthSource, Capability, NetworkPolicy, ProviderConfig, ProviderKind};
+// `write_provider` is reached only from the `#[cfg(unix)]` file-mode fixtures
+// below, so importing it unconditionally is an unused import under the
+// windows cross-lint target (`-D warnings`). Same shape as #2888.
+#[cfg(unix)]
+use super::write_provider;
 use wiremock::matchers::{method, path as path_matcher};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

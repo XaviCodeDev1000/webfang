@@ -415,7 +415,7 @@ Batch Processing:
 
       --strict-input
           Fail with exit 78 (configuration error) when any batch input line is rejected as invalid, instead of continuing with the rest
-
+          
           [env: WEBFANG_STRICT_INPUT=]
 
 Item Pipeline:
