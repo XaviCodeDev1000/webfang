@@ -14,8 +14,9 @@
 
 use crate::domain::auth_source::AuthError;
 use crate::domain::llm_port::LlmPort;
+use crate::domain::proxy_config::ProxyRegistry;
 use crate::infrastructure::llm::client::OpenAiLlmClient;
-use crate::infrastructure::llm::http_client::build_guarded_http_client;
+use crate::infrastructure::llm::http_client::{build_guarded_http_client, build_llm_client};
 
 /// Configuración declarativa del provider: `crate::domain::providers::ProviderConfig`
 /// (con `kind`, `capabilities`, `model`, `embedding_dim`). Se re-exporta aquí
@@ -121,8 +122,25 @@ impl OpenAiCompatibleProvider {
     /// [`ProviderInitError`] si la credencial no resuelve, la URL es inválida
     /// o no se puede construir el cliente compartido.
     pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
-        let http = build_default_http_client()?;
-        Self::with_http(config, http)
+        Self::new_with_registry(config, &ProxyRegistry::default())
+    }
+
+    /// ADR-0021 variant: builds the client from the provider's optional proxy
+    /// declaration resolved against `registry`. A provider that declares a
+    /// proxy but is built without a catalog fails loud (unknown reference),
+    /// never silently falling back to direct egress.
+    ///
+    /// # Errors
+    ///
+    /// [`ProviderInitError`] for a rejected proxy, an unresolved credential,
+    /// or a builder failure — and every error [`Self::with_http`] reports.
+    pub fn new_with_registry(
+        config: ProviderConfig,
+        registry: &ProxyRegistry,
+    ) -> Result<Self, ProviderInitError> {
+        let bundle = build_llm_client(&config, registry)
+            .map_err(|e| ProviderInitError::HttpClient(e.to_string()))?;
+        Self::with_http(config, bundle.client)
     }
 
     /// Variante con cliente HTTP inyectado (composición root/tests).

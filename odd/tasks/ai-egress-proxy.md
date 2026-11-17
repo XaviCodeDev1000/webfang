@@ -63,8 +63,11 @@ phase on `main` (no stacked PRs). Test runner: `cargo nextest`. Local gate:
   same commit). NOTE: the trait method's infrastructure impl travels with the declaration (a
   declaration without impl does not compile); P2 keeps the shared-builder path, adapter wiring,
   407 classification and CLI/registry glue.
-- T3 (S5): P2 — `DefaultSsrfGuard::secure_client_with_profile` impl + symmetric wiring + 407 —
-  inline — branch `feat/ai-proxy-transport-wiring` — TBD.
+- T3 (S5): P2 — profile-aware shared LLM builder + resolved proxy auth + symmetric wiring into
+  `RemoteEmbeddingAdapter` / `OpenAiCompatibleProvider` / `llm_wire` / `webfang_cli` + 407 terminal
+  classification + `[[proxies]]` config load and `ProxyRegistry` resolution — inline — branch
+  `feat/ai-proxy-transport-wiring` — TBD. The guard method itself already landed in T2 and is NOT
+  reimplemented here.
 - T4 (S6): P3 — doctor/show posture + tracing + disclosure docs — inline — branch
   `feat/ai-proxy-diagnostics` — TBD.
 - T5 (S7): P4 — E2E harness — inline — branch `feat/ai-proxy-e2e-harness` — TBD.
@@ -146,3 +149,36 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   commits at push time → squash uses the PR title as the changelog line. CI checks pending at
   creation; auto-label job applies `type:feature` from the title. Merge remains a maintainer
   decision; next slice T3 starts from `main` after #2884 lands.
+- L12 (scope decision, 2026-11-17): T3 starts from `main f1f42951` (v9.1.0 release #2892, which
+  absorbed the redundant Windows-cross-lint fix PR #2894). Exploration showed the ADR's declaration
+  surface (Decision 1, `ConfigDefaults` top-level `[[proxies]]`) was never wired: no production
+  `ProxyRegistry` construction exists and `ConfigDefaults` has no `proxies` field, so a
+  `ProxySpec::Named` could never resolve at runtime. Decision: fold the minimal catalog load +
+  per-provider resolution into T3 — without it the builder/wiring is unreachable and T5's E2E
+  harness cannot drive a configured proxy. This is recorded as an assumption of S5, not a new user
+  requirement; it keeps the ADR's slice boundary intact.
+- L13 (T3 map): `DefaultSsrfGuard::secure_client_with_profile` already implemented at
+  `infrastructure/ssrf.rs` with the mandated order (destination redirect policy → `.proxy(...)` →
+  proxy-or-destination resolver). Remaining: `build_guarded_http_client` profile variant + basic
+  auth resolution from `ProxyAuth.password: AuthSource`; both adapters' constructors; the
+  production completion path in `webfang_cli/src/main.rs` (it bypasses `llm_wire`); 407 terminal
+  branches mirroring the 401 handler in `remote_embedding.rs`. RED tests go next to
+  `plain_guard_client_builds` in `http_client.rs` and beside `status_400_is_terminal_without_retry`
+  in `remote_embedding.rs`.
+- L14 (T3 delivered, 2026-11-17) — commit `6d83f05a`, branch `feat/ai-proxy-transport-wiring`,
+  based on main `f1f42951`. RED→GREEN: 5 profile-builder tests (3 new) + 2 407 integration tests
+  in `tests/ai_proxy_407_test.rs` (moved out of the grandfathered parent to keep the ratchet).
+  Implementation: `ValidatedProxy::with_basic_auth` installs the resolved `AuthSource` credential
+  on the prebuilt matcher; `build_llm_client(config, registry)` returns client + proxy-auth
+  provenance; both adapters get `new_with_registry` / `with_http_and_proxy_auth`; `llm_wire` gets
+  `_with_registry` variants; `main.rs` loads `[[proxies]]` via `proxy_wire`; 407 is terminal with
+  Spanish configured-vs-anonymous messages and zero credential logging. File-size ratchet held by
+  splitting 407 diagnostics/wiring into `remote_embedding/{proxy_auth,proxy_wiring}.rs`,
+  `llm_wire/proxy.rs` and `webfang_cli/src/proxy_wire.rs`; `remote_embedding.rs` baseline lowered
+  1773→1714. Tree-derived artifacts refreshed in the same commit (golden set, ai-providers pins,
+  test inventory, baseline). Verification: cargo check/clippy --all-targets --all-features -D
+  warnings/fmt --check/rustdoc -D warnings OK · `check_ai_providers_doc.sh` OK (30 claim, 8 shape,
+  5 impl, 47 cites) · **ci_fast_gate GREEN PASS=45 FAIL=0 SKIP=2** (windows cross-target skipped
+  locally — no mingw-gcc/lib.exe; CI covers it). Windows cross-lint risk: no `cfg(windows)` arm
+  touched, but the new integration test file uses `#[cfg_attr(test, allow(unwrap/expect))]` like
+  its siblings. T3 unpublished pending owner push/PR decision; T4/T5 remain.
