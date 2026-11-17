@@ -2,26 +2,36 @@
   "schema_version": 1,
   "lines": [
     {
-      "minor": "9.0",
+      "minor": "9.1",
       "state": "STABLE",
       "branch": null,
-      "latest": "9.0.0",
-      "released_at": "2026-11-16T23:45:33+00:00",
+      "latest": "9.1.0",
+      "released_at": "2026-11-17T01:44:46+00:00",
       "accepts": [
         "bugfix",
         "security"
       ]
     },
     {
-      "minor": "8.0",
+      "minor": "9.0",
       "state": "MAINTENANCE",
       "branch": null,
-      "latest": "8.0.2",
-      "released_at": "2026-11-15T23:00:30+00:00",
+      "latest": "9.0.0",
+      "released_at": "2026-11-16T23:45:33+00:00",
       "accepts": [
         "security"
       ],
-      "demoted_from_stable_at": "2026-11-16T23:45:33+00:00"
+      "demoted_from_stable_at": "2026-11-17T01:44:46+00:00"
+    },
+    {
+      "minor": "8.0",
+      "state": "EOL",
+      "branch": null,
+      "latest": "8.0.2",
+      "released_at": "2026-11-15T23:00:30+00:00",
+      "demoted_from_stable_at": "2026-11-16T23:45:33+00:00",
+      "eol_at": "2026-11-17T01:44:46+00:00",
+      "eol_reason": "auto: rotate-stable, third line back from STABLE"
     },
     {
       "minor": "7.7",
