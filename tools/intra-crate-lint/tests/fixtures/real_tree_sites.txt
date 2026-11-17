@@ -1957,9 +1957,9 @@ infrastructure/downloader/mod.rs	27	use	crate::domain::downloader_port::FetchedP
 infrastructure/downloader/mod.rs	117	use	crate::domain::error::cause::DnsResolutionError
 infrastructure/downloader/obscura_downloader/mod.rs	69	use	crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY
 infrastructure/downloader/obscura_downloader/mod.rs	71	use	crate::domain::downloader_factory::DEFAULT_MAX_PAGE_BYTES
-infrastructure/downloader/obscura_downloader/tests.rs	269	inline	crate::application::extraction::extract_with_selector
-infrastructure/downloader/obscura_downloader/tests.rs	275	inline	crate::domain::ExtractResult::Matched
-infrastructure/downloader/obscura_downloader/tests.rs	285	inline	crate::infrastructure::scraper::readability::parse
+infrastructure/downloader/obscura_downloader/tests.rs	284	inline	crate::application::extraction::extract_with_selector
+infrastructure/downloader/obscura_downloader/tests.rs	290	inline	crate::domain::ExtractResult::Matched
+infrastructure/downloader/obscura_downloader/tests.rs	300	inline	crate::infrastructure::scraper::readability::parse
 infrastructure/downloader/resource_governor.rs	49	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_WARNING_PERCENT
 infrastructure/downloader/resource_governor.rs	54	inline	crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT
 infrastructure/downloader/resource_governor.rs	196	inline	crate::domain::budget::derivation::derive_max_instances

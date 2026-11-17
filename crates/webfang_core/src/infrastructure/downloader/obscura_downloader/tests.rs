@@ -190,6 +190,35 @@ fn write_fake_obscura(dir: &std::path::Path, body: &str, stderr_line: &str) -> P
     bin_path
 }
 
+/// Core arrange for the fake-binary tests (#793, #2722): write the fixture,
+/// build the downloader with optional UA / stdout-cap overrides, fetch
+/// `url_str`, and return the recorded argv plus the fetch result. One
+/// arrange block keeps the test bodies free of exact clones
+/// (jscpd `--min-tokens 50`).
+#[cfg(unix)]
+async fn fake_fetch(
+    body: &str,
+    stderr_line: &str,
+    user_agent: Option<&str>,
+    max_page_bytes: Option<u64>,
+    url_str: &str,
+) -> (String, Result<FetchedPage, DownloadError>) {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let bin_path = write_fake_obscura(tmp.path(), body, stderr_line);
+    let mut dl = ObscuraDownloader::new(15, &bin_path);
+    if let Some(ua) = user_agent {
+        dl = dl.with_user_agent(Some(ua.to_string()));
+    }
+    if let Some(cap) = max_page_bytes {
+        dl = dl.with_max_page_bytes(cap);
+    }
+    let url: Url = url_str.parse().expect("valid test URL");
+    let result = dl.fetch(&url).await;
+    let args = std::fs::read_to_string(tmp.path().join("args.txt"))
+        .expect("fake obscura must have recorded its argv");
+    (args, result)
+}
+
 /// #793 (REQ-OBS-01): Layer 2 must ask obscura for `--dump html` —
 /// never markdown — and the HTML printed on stdout lands verbatim in
 /// `FetchedPage.html`.
@@ -197,12 +226,8 @@ fn write_fake_obscura(dir: &std::path::Path, body: &str, stderr_line: &str) -> P
 #[cfg(unix)]
 #[tokio::test]
 async fn fake_binary_dump_html_args_and_page() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let bin_path = write_fake_obscura(tmp.path(), FAKE_HTML, "");
-
-    let dl = ObscuraDownloader::new(15, &bin_path);
-    let url: Url = "https://example.com/page".parse().expect("valid test URL");
-    let page = dl.fetch(&url).await.expect("fake obscura fetch");
+    let (args, result) = fake_fetch(FAKE_HTML, "", None, None, "https://example.com/page").await;
+    let page = result.expect("fake obscura fetch");
 
     assert!(
         page.html.contains("<h1>Obscura Article</h1>"),
@@ -211,8 +236,6 @@ async fn fake_binary_dump_html_args_and_page() {
     );
     assert_eq!(page.status, 200);
 
-    let args = std::fs::read_to_string(tmp.path().join("args.txt"))
-        .expect("fake obscura must have recorded its argv");
     assert!(
         args.contains("--dump html"),
         "Layer 2 must request `fetch --dump html`, got argv: {args}"
@@ -234,12 +257,8 @@ async fn fake_binary_dump_html_args_and_page() {
 #[cfg(unix)]
 #[tokio::test]
 async fn fake_binary_page_headers_mark_html_and_stateless() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let bin_path = write_fake_obscura(tmp.path(), FAKE_HTML, "");
-
-    let dl = ObscuraDownloader::new(15, &bin_path);
-    let url: Url = "https://example.com".parse().expect("valid test URL");
-    let page = dl.fetch(&url).await.expect("fake obscura fetch");
+    let (_, result) = fake_fetch(FAKE_HTML, "", None, None, "https://example.com").await;
+    let page = result.expect("fake obscura fetch");
 
     assert_eq!(
         page.headers.get("content-type").map(String::as_str),
@@ -259,12 +278,8 @@ async fn fake_binary_page_headers_mark_html_and_stateless() {
 #[cfg(unix)]
 #[tokio::test]
 async fn fake_binary_html_survives_extraction_path() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let bin_path = write_fake_obscura(tmp.path(), FAKE_HTML, "");
-
-    let dl = ObscuraDownloader::new(15, &bin_path);
-    let url: Url = "https://example.com".parse().expect("valid test URL");
-    let page = dl.fetch(&url).await.expect("fake obscura fetch");
+    let (_, result) = fake_fetch(FAKE_HTML, "", None, None, "https://example.com").await;
+    let page = result.expect("fake obscura fetch");
 
     match crate::application::extraction::extract_with_selector(
         &page.html,
@@ -303,16 +318,16 @@ async fn fake_binary_html_survives_extraction_path() {
 #[cfg(unix)]
 #[tokio::test]
 async fn pinned_user_agent_reaches_obscura_argv() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let bin_path = write_fake_obscura(tmp.path(), FAKE_HTML, "");
+    let (args, result) = fake_fetch(
+        FAKE_HTML,
+        "",
+        Some("OperatorUA/3.1"),
+        None,
+        "https://example.com/page",
+    )
+    .await;
+    result.expect("fake obscura fetch");
 
-    let dl =
-        ObscuraDownloader::new(15, &bin_path).with_user_agent(Some("OperatorUA/3.1".to_string()));
-    let url: Url = "https://example.com/page".parse().expect("valid test URL");
-    dl.fetch(&url).await.expect("fake obscura fetch");
-
-    let args = std::fs::read_to_string(tmp.path().join("args.txt"))
-        .expect("fake obscura must have recorded its argv");
     assert!(
         args.contains("--user-agent OperatorUA/3.1"),
         "the pinned User-Agent must reach obscura's argv, got: {args}"
@@ -325,15 +340,9 @@ async fn pinned_user_agent_reaches_obscura_argv() {
 #[cfg(unix)]
 #[tokio::test]
 async fn unpinned_user_agent_passes_no_flag() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let bin_path = write_fake_obscura(tmp.path(), FAKE_HTML, "");
+    let (args, result) = fake_fetch(FAKE_HTML, "", None, None, "https://example.com/page").await;
+    result.expect("fake obscura fetch");
 
-    let dl = ObscuraDownloader::new(15, &bin_path);
-    let url: Url = "https://example.com/page".parse().expect("valid test URL");
-    dl.fetch(&url).await.expect("fake obscura fetch");
-
-    let args = std::fs::read_to_string(tmp.path().join("args.txt"))
-        .expect("fake obscura must have recorded its argv");
     assert!(
         !args.contains("--user-agent"),
         "an unpinned UA must not pass --user-agent, got: {args}"
@@ -347,14 +356,10 @@ async fn unpinned_user_agent_passes_no_flag() {
 #[cfg(unix)]
 #[tokio::test]
 async fn stderr_page_loaded_line_becomes_fetched_page_url() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
     let stderr = "Fetching https://example.com/page...\n\
                   Page loaded: https://redirected.example/final - \"Final Title\"\n";
-    let bin_path = write_fake_obscura(tmp.path(), FAKE_HTML, stderr);
-
-    let dl = ObscuraDownloader::new(15, &bin_path);
-    let url: Url = "https://example.com/page".parse().expect("valid test URL");
-    let page = dl.fetch(&url).await.expect("fake obscura fetch");
+    let (_, result) = fake_fetch(FAKE_HTML, stderr, None, None, "https://example.com/page").await;
+    let page = result.expect("fake obscura fetch");
 
     let expected: Url = "https://redirected.example/final"
         .parse()
@@ -372,12 +377,8 @@ async fn stderr_page_loaded_line_becomes_fetched_page_url() {
 #[cfg(unix)]
 #[tokio::test]
 async fn missing_page_loaded_line_falls_back_to_requested_url() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let bin_path = write_fake_obscura(tmp.path(), FAKE_HTML, "");
-
-    let dl = ObscuraDownloader::new(15, &bin_path);
-    let url: Url = "https://example.com/page".parse().expect("valid test URL");
-    let page = dl.fetch(&url).await.expect("fake obscura fetch");
+    let (_, result) = fake_fetch(FAKE_HTML, "", None, None, "https://example.com/page").await;
+    let page = result.expect("fake obscura fetch");
 
     let expected: Url = "https://example.com/page".parse().expect("valid test URL");
     assert_eq!(
@@ -419,16 +420,9 @@ fn parse_page_loaded_url_contract() {
 #[cfg(unix)]
 #[tokio::test]
 async fn oversized_stdout_aborts_with_body_too_large() {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
     let big_body = "x".repeat(256);
-    let bin_path = write_fake_obscura(tmp.path(), &big_body, "");
-
-    let dl = ObscuraDownloader::new(15, &bin_path).with_max_page_bytes(64);
-    let url: Url = "https://example.com/big".parse().expect("valid test URL");
-    let err = dl
-        .fetch(&url)
-        .await
-        .expect_err("output past the cap must abort the fetch");
+    let (_, result) = fake_fetch(&big_body, "", None, Some(64), "https://example.com/big").await;
+    let err = result.expect_err("output past the cap must abort the fetch");
     assert!(
         matches!(err, DownloadError::BodyTooLarge { limit: 64 }),
         "expected BodyTooLarge {{ limit: 64 }}, got: {err:?}"
