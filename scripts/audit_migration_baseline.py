@@ -517,7 +517,12 @@ def verify(root: Path, evidence_path: Path, prd_path: Path,
             drift.append(f"decisions.{key}: {ev.get('decisions', {}).get(key)!r} -> {value!r}")
 
     if drift:
-        msg = ("DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba: "
+        # The pointer names the document and its section, and copies no command:
+        # instructions in a message would be a second copy that rots. The reader
+        # lands on the procedure itself (docs/src/release-process.md).
+        msg = ("DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba "
+               "(ver docs/src/release-process.md, «Re-freezing the evidence baseline "
+               "on a Release PR»): "
                + " | ".join(drift))
         if train_marker.is_file():
             errors.append(msg)
