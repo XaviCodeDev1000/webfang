@@ -3,7 +3,8 @@
 #
 # Gate fail-closed de F0. Verifica evidence/mig-2026-01/baseline.json contra:
 #   * el PRD v2 (sin hechos literales, placeholders resueltos, RFs no huérfanos),
-#   * la historia de git (el SHA medido sigue siendo ancestro de HEAD),
+#   * la historia de git (el SHA medido es HEAD, ancestro o el árbol de un
+#     squash; el único cambio de árbol permitido es el propio baseline),
 #   * las políticas vivas (Cargo.toml, rust-toolchain.toml, support.json, README).
 #
 # A diferencia de un gate de contadores, esto NO pone rojo main cada vez que

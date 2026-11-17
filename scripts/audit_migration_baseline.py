@@ -16,10 +16,10 @@ La corrección estructural es quitarle los hechos al documento:
                evidence/mig-2026-01/baseline.json (evidencia de F0).
   * `--check`  verifica que el PRD v2 no contenga hechos literales, que cada
                {{BASELINE.ruta}} resuelva, que no cite RFs inexistentes, que
-               el SHA siga en la historia, y que las DECISIONES que el v1
-               escribía a mano (major, línea de backport, gate de Miri, flip
-               de edición) sigan siendo las que se DERIVAN de las políticas
-               vivas del repo.
+               el SHA siga siendo HEAD, ancestro o el árbol de un squash, y
+               que las DECISIONES que el v1 escribía a mano (major, línea de
+               backport, gate de Miri, flip de edición) sigan siendo las que
+               se DERIVAN de las políticas vivas del repo.
 
 `--check` nunca compara un contador contra un número congelado: los contadores
 son evidencia de F0, no un gate sobre main. Sí compara un conjunto pequeño de
@@ -105,16 +105,43 @@ def toml_scalar(text: str, section: str, key: str) -> str | None:
     return m.group(1) if m else None
 
 
-def git(root: Path, *args: str) -> str:
+def git_rc(root: Path, *args: str) -> tuple[int, str]:
+    """Ejecuta git y conserva el código de salida (fail-closed en el caller)."""
     if not (root / ".git").exists():
-        return ""
+        return 1, ""
     try:
-        return subprocess.run(
+        p = subprocess.run(
             ["git", "-C", str(root), *args],
             capture_output=True, text=True, timeout=10, check=False,
-        ).stdout.strip()
+        )
+        return p.returncode, p.stdout
     except (OSError, subprocess.SubprocessError):
-        return ""
+        return 1, ""
+
+
+def git(root: Path, *args: str) -> str:
+    _, out = git_rc(root, *args)
+    return out.strip()
+
+
+def head_sha_matches_history(root: Path, sha: str, live_head: str) -> bool:
+    """Acepta HEAD, ancestría real o un SQUASH que preservó el árbol medido.
+
+    La cola de merge usa SQUASH: el tip del PR no es ancestro de main, pero su
+    árbol sí sobrevive al squash. `--write` congela el tip YA medido y recién
+    después escribe baseline.json, así que entre el árbol del SHA y el del
+    squash el único cambio legítimo es el propio baseline. Cualquier otra
+    diferencia (o un git sin ese objeto) sigue fail-closed.
+    """
+    if sha == live_head:
+        return True
+    rc, _ = git_rc(root, "merge-base", "--is-ancestor", sha, live_head)
+    if rc == 0:
+        return True
+    rc, changed = git_rc(root, "diff", "--name-only", "-z", sha, live_head)
+    if rc != 0:
+        return False
+    return all(path == DEFAULT_EVIDENCE for path in changed.split("\0") if path)
 
 
 def resolve_head_sha(root: Path, explicit: str | None) -> str:
@@ -452,22 +479,15 @@ def verify(root: Path, evidence_path: Path, prd_path: Path,
             errors.append("RFs citados pero no definidos en el índice: " + ", ".join("RF-" + x for x in orphan))
         notes.append(f"{len(defined)} RFs definidos, {len(mentioned)} citados, 0 huérfanos" if not orphan else "índice de RFs incompleto")
 
-    # 5. el SHA del baseline sigue en la historia -------------------------
+    # 5. el SHA del baseline sigue en la historia (o en el squash) ---------
     sha = str(ev.get("head_sha", ""))
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         errors.append(f"head_sha no es un SHA completo: {sha!r}")
-    elif live_head and sha != live_head:
-        ancestor = False
-        if (root / ".git").exists():
-            ancestor = subprocess.run(
-                ["git", "-C", str(root), "merge-base", "--is-ancestor", sha, live_head],
-                capture_output=True, check=False,
-            ).returncode == 0
-        if not ancestor:
-            errors.append(
-                f"head_sha {sha[:12]} no es HEAD ni ancestro de {live_head[:12]}: "
-                "el baseline fue medido sobre otro árbol"
-            )
+    elif live_head and not head_sha_matches_history(root, sha, live_head):
+        errors.append(
+            f"head_sha {sha[:12]} no es HEAD, ancestro ni equivalente en árbol a "
+            f"{live_head[:12]}: el baseline fue medido sobre otro árbol"
+        )
     if not live_head:
         errors.append("no se pudo determinar el HEAD vivo (git o MIGRATION_HEAD_SHA)")
 

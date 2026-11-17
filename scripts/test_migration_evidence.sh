@@ -2,7 +2,9 @@
 # Semantics harness for scripts/check_migration_evidence.sh — issue #2056.
 #
 # Hermético: construye árboles mínimos en mktemp, no llama a cargo, rustc, red
-# ni git, y nunca toca el árbol real. Cada caso negativo lleva su `# NEGATION:`.
+# ni servicios externos, y nunca toca el árbol real. Dos casos crean un repo
+# git LOCAL con fechas fijas para reproducir un SQUASH. Cada caso negativo
+# lleva su `# NEGATION:`.
 # El caso límite (tren cerrado) es un CONTROL POSITIVO y por eso NO lo lleva:
 # el guard debe dejar pasar la deriva cuando TRAIN_OPEN no existe.
 #
@@ -99,6 +101,50 @@ run_guard() { # tree [head_sha]
 expect_ok()  { local label="$1"; shift; if run_guard "$@"; then ok "$label"; else bad "$label (esperaba verde)"; sed 's/^/    /' "$WORK/out.log"; fi; }
 expect_red() { local label="$1"; shift; if run_guard "$@"; then bad "$label (esperaba rojo, guard verde)"; sed 's/^/    /' "$WORK/out.log"; else ok "$label"; fi; }
 
+# Identidad y fecha deterministas: el runner de CI no tiene user.name/email
+# global, así que TODO commit del harness debe llevarla explícita.
+git_identity() {
+  export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
+  export GIT_AUTHOR_NAME="Migration Test" GIT_AUTHOR_EMAIL="migration@example.com"
+  export GIT_COMMITTER_NAME="Migration Test" GIT_COMMITTER_EMAIL="migration@example.com"
+}
+
+# Imprime "<sha_medido> <sha_squash>": base -> PR -> tip con baseline, y un
+# squash que comparte el ÁRBOL del tip pero cuyo padre es la base. Así el SHA
+# medido NO es ancestro del squash y el guard debe decidir por árbol, igual que
+# hace la cola de merge de este repo (.github/merge-queue.json, SQUASH).
+make_squash_tree() { # dir -> "<measured_sha> <squash_sha>"
+  local d="$1" base measured tree
+  (
+    cd "$d" || exit 1
+    git_identity
+    git init -q
+    git add -A && git commit -q -m base
+    base="$(git rev-parse HEAD)"
+    printf 'release work\n' > notes.txt
+    git add -A && git commit -q -m pr-work
+    measured="$(git rev-parse HEAD)"
+    # --write congela el tip YA medido; recién después se commitea el baseline.
+    python3 "$AUDITOR" --root "$d" --write "$d/evidence/mig-2026-01/baseline.json" >/dev/null || exit 1
+    git add -A && git commit -q -m tip
+    tree="$(git rev-parse 'HEAD^{tree}')"
+    printf '%s %s\n' "$measured" "$(git commit-tree "$tree" -p "$base" -m squash)"
+  )
+}
+
+expect_red_message() { # label tree head_sha expected_message
+  local label="$1" tree="$2" sha="$3" msg="$4"
+  if run_guard "$tree" "$sha"; then
+    bad "$label (esperaba rojo, guard verde)"
+    sed 's/^/    /' "$WORK/out.log"
+  elif grep -Fq "$msg" "$WORK/out.log"; then
+    ok "$label"
+  else
+    bad "$label (rojo pero sin el mensaje esperado)"
+    sed 's/^/    /' "$WORK/out.log"
+  fi
+}
+
 # --- 1. control positivo: un árbol coherente debe estar verde ---------------
 D="$(fixture)" || { echo "FAIL: no se pudo construir el fixture"; exit 1; }
 expect_ok "baseline + PRD + decisiones coherentes -> verde" "$D"
@@ -155,6 +201,55 @@ expect_red "decisiones que no se derivan de support.json -> rojo" "$D9"
 # NEGATION: el SHA del baseline no puede ser cualquier cadena de 40 hex.
 D10="$(fixture)"
 expect_red "head_sha que no es HEAD ni ancestro -> rojo" "$D10" "0000000000000000000000000000000000000000"
+
+# --- 11. CONTROL POSITIVO: el tip medido sobrevive al SQUASH ----------------
+# Sin # NEGATION: el guard DEBE pasar cuando el baseline se midió en el tip del
+# PR y el squash conservó su árbol cambiando sólo baseline.json.
+D11="$(fixture)"
+read -r measured squash <<<"$(make_squash_tree "$D11")"
+if git -C "$D11" merge-base --is-ancestor "$measured" "$squash"; then
+  bad "fixture squash inválida: el SHA medido sí es ancestro (no prueba tree-equality)"
+else
+  expect_ok "tip medido + squash del mismo árbol -> verde" "$D11" "$squash"
+fi
+
+# --- 12. baseline medido sobre OTRO ÁRBOL -----------------------------------
+# NEGATION: un squash con otro árbol no puede colar aunque el SHA sea real.
+D12="$(fixture)"
+read -r measured squash <<<"$(make_squash_tree "$D12")"
+(
+  cd "$D12" || exit 1
+  git_identity
+  printf 'otro arbol\n' > other.txt
+  git add -A && git commit -q -m other
+)
+other="$(git -C "$D12" rev-parse HEAD)"
+python3 - "$D12/evidence/mig-2026-01/baseline.json" "$other" <<'PY'
+import json, sys
+p, sha = sys.argv[1], sys.argv[2]
+d = json.load(open(p))
+d["head_sha"] = sha
+json.dump(d, open(p, "w"))
+PY
+expect_red_message "SHA de otro árbol -> rojo con mensaje de árbol" "$D12" "$squash" "el baseline fue medido sobre otro árbol"
+
+# --- 13. SHA inexistente con git real ---------------------------------------
+# NEGATION: un objeto que no existe no puede colar por la rama de árbol.
+D13="$(fixture)"
+read -r measured squash <<<"$(make_squash_tree "$D13")"
+python3 - "$D13/evidence/mig-2026-01/baseline.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["head_sha"] = "f" * 40
+json.dump(d, open(p, "w"))
+PY
+expect_red_message "head_sha inexistente con git real -> rojo con mensaje" "$D13" "$squash" "el baseline fue medido sobre otro árbol"
+
+# --- 14. repo sin .git -------------------------------------------------------
+# NEGATION: sin git no se puede probar ancestría ni equivalencia de árbol.
+D14="$(fixture)"
+expect_red_message "repo sin .git -> rojo con mensaje de árbol" "$D14" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "el baseline fue medido sobre otro árbol"
 
 printf '\nmigration evidence harness: %d OK, %d FAIL\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1
