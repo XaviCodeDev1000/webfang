@@ -127,3 +127,33 @@ pedido explícito (H4, contrato ya documentado en el tipo); concurrencia sin cam
   Static/Full y su llamada WreqDownloader::new quedaron byte-idénticos, y los
   tests de preflight/SSRF con binarios falsos ejercitan la ruta híbrida real
   contra la misma corpora en ambos lados del cambio.
+- L9 (2026-11-17) — el gate local destapó 3 rojos del propio diff (corrección
+  en la misma rama, sombreros separados por commit):
+  - Ratchet de tamaño: obscura_downloader.rs (777), fetch_router.rs (517) y
+    hybrid_router.rs (680 > baseline 623, grandfathered) → splits mecánicos
+    por el seam real (módulo de tests a subdirectorio, patrón
+    wreq_downloader/wreq_body): `0759c371` (338+438, golden refresh incluido),
+    `91f01223` (fetch_router 298+217; hybrid_router 211+468 + --remove del
+    baseline con la edición descendente sancionada + golden). 185/185 green
+    entre commits.
+  - jscpd: +4 líneas duplicadas sobre baseline (8223 > 8219) — clones arrange
+    de los 8 tests fake-binary → helper compartido `fake_fetch` → 8178 ≤ 8219.
+    `4c2294d1` (test refactor, mismo comportamiento, 16/16 green).
+  - intra-crate lint: golden set de sitios 2263 vs 2262 (un sitio nuevo en el
+    árbol) → refresh con el script sancionado, en el mismo commit que cada
+    split que cambió el conteo (contrato del propio test).
+- L10 (2026-11-17) — re-ejecución del gate local completa tras las correcciones:
+  **fast-gate GREEN** (PASS=45 FAIL=0 SKIP=2 — ambos SKIP declarados: pinned
+  lint por changed-scope y windows type-check sin módulos de plataforma
+  tocados). Notas advisory (nunca rojas): 25 tests "sin referencia issue/PR" —
+  falso positivo del checker por los archivos de tests nuevos (los nombres son
+  pre-existentes movidos mecánicamente; los tests nuevos citan #2722 en sus
+  docs). Oddity ambiental observada: rustdoc emitó ICEs internos
+  (scoped-tls/search-index) durante la lane pero el paso rustdoc reportó PASS;
+  el run directo previo sobre webfang_core fue limpio — no atribuible al diff.
+- L11 (2026-11-17) — cierre: rama con 6 commits (5a68a29c feat L2 honesty
+  downloader, 4c023be0 feat router classification, e4e34df5 docs misión,
+  0759c371 split obscura, 91f01223 splits routers + ratchet --remove,
+  4c2294d1 dedup tests). Delivery `ask-on-risk`: sin push ni PR — la apertura
+  de PR queda para el maintainer (issue #2722 necesita status:approved antes
+  de abrir PR por la gate de metadatos).
