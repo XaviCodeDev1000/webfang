@@ -1344,9 +1344,9 @@ cli/preflight/config_stages.rs	7	use	crate::OutputFormat
 cli/preflight/env_cli_stages.rs	5	use	crate::Args
 cli/preflight/field_book.rs	4	use	crate::domain::budget::BudgetOverrides
 cli/preflight/field_book.rs	229	inline	crate::domain::budget::tiers::CrawlConcurrency::new
-cli/preflight/js_strategy.rs	8	use	crate::application::crawl_options::CrawlOptions
-cli/preflight/js_strategy.rs	9	use	crate::domain::JsStrategy
-cli/preflight/js_strategy.rs	10	use	crate::CliExit
+cli/preflight/js_strategy.rs	7	use	crate::application::crawl_options::CrawlOptions
+cli/preflight/js_strategy.rs	8	use	crate::domain::JsStrategy
+cli/preflight/js_strategy.rs	9	use	crate::CliExit
 cli/preflight/normalization.rs	7	use	crate::application::crawl_options::CrawlOptions
 cli/preflight/normalization.rs	8	use	crate::cli::config::ConfigDefaults
 cli/preflight/normalization.rs	9	use	crate::domain::budget::BudgetOverrides

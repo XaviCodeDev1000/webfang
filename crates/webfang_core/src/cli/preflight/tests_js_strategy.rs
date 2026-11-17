@@ -193,3 +193,110 @@ fn full_strategy_errors_when_no_binary_found() {
         other => panic!("expected ConfigError, got: {other:?}"),
     }
 }
+
+// ========================================================================
+// #2722 Phase 2 — obscura build-variant diagnostic (render capability)
+// ========================================================================
+
+/// Write an executable fake obscura that answers `--version` with a valid
+/// semver and, when invoked as the variant probe (`fetch … --screenshot
+/// <file>`), behaves per `render_build`. The probe only reads the exit
+/// status, so the render arm just touches the target file.
+#[cfg(unix)]
+fn write_variant_probe_obscura(dir: &std::path::Path, render_build: bool) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin_path = dir.join("obscura");
+    let render_arm = if render_build {
+        "  touch \"$6\"\n  exit 0\n"
+    } else {
+        // Upstream's no-render refusal: clear message on stderr, non-zero exit.
+        "  echo \"--screenshot requires a build with the render feature\" >&2\n  exit 1\n"
+    };
+    // Probe argv: $1=fetch $2=--dump $3=html $4=about:blank $5=--screenshot $6=<file>.
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo \"obscura 0.2.7\"\n  exit 0\nfi\nif [ \"$1\" = \"fetch\" ]; then\n{render_arm}fi\nexit 0\n",
+        render_arm = render_arm,
+    );
+    std::fs::write(&bin_path, script).expect("write fake obscura");
+    std::fs::set_permissions(&bin_path, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod +x fake obscura");
+    bin_path
+}
+
+/// S2 (#2722 Phase 2): a `no-render` build refuses `--screenshot` with a
+/// non-zero exit; the probe must classify that build as `Missing`.
+#[cfg_attr(miri, ignore)] // Command::spawn → posix_spawnattr_init unsupported by Miri (#775)
+#[cfg(unix)]
+#[test]
+fn render_probe_classifies_no_render_build() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let bin = write_variant_probe_obscura(tmp.path(), false);
+    assert_eq!(
+        probe_render_capability(&bin),
+        RenderCapability::Missing,
+        "a build refusing --screenshot is a no-render build"
+    );
+}
+
+/// S2: a render-capable build paints `about:blank` and exits 0 → `Capable`.
+#[cfg_attr(miri, ignore)] // Command::spawn → posix_spawnattr_init unsupported by Miri (#775)
+#[cfg(unix)]
+#[test]
+fn render_probe_classifies_render_build() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let bin = write_variant_probe_obscura(tmp.path(), true);
+    assert_eq!(
+        probe_render_capability(&bin),
+        RenderCapability::Capable,
+        "a build accepting --screenshot is render-capable"
+    );
+}
+
+/// Pure classifier contract (Miri-safe): no output → `Unknown` (no signal
+/// must not invent a diagnostic), success → `Capable`, failure → `Missing`.
+#[test]
+fn classify_render_probe_maps_output_shapes() {
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt;
+    let ok = std::process::Output {
+        status: std::process::ExitStatus::from_raw(0),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    };
+    let failed = std::process::Output {
+        status: std::process::ExitStatus::from_raw(1),
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    };
+    assert_eq!(classify_render_probe(None), RenderCapability::Unknown);
+    assert_eq!(classify_render_probe(Some(&ok)), RenderCapability::Capable);
+    assert_eq!(
+        classify_render_probe(Some(&failed)),
+        RenderCapability::Missing
+    );
+}
+
+/// S2: the variant diagnostic is a WARNING, never a gate failure — a
+/// `no-render` build must pass the Hybrid preflight (verified upstream: the
+/// `--dump html` path is feature-independent, only paint resources are
+/// gated by the render feature).
+#[cfg(unix)]
+#[test]
+fn no_render_build_passes_preflight_with_warning() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let bin = write_variant_probe_obscura(tmp.path(), false);
+    let mut opts = CrawlOptions::default();
+    opts.network.js_strategy = JsStrategy::Hybrid;
+    opts.network.obscura_binary = bin.to_string_lossy().into_owned();
+    assert!(
+        check_js_dependencies_with(
+            &["definitely-not-installed-9x4k"],
+            true,
+            &tmp.path().to_string_lossy(),
+            &opts
+        )
+        .is_ok(),
+        "a no-render build is a diagnostic warning, not a gate failure"
+    );
+}
