@@ -101,6 +101,14 @@ run_guard() { # tree [head_sha]
 expect_ok()  { local label="$1"; shift; if run_guard "$@"; then ok "$label"; else bad "$label (esperaba verde)"; sed 's/^/    /' "$WORK/out.log"; fi; }
 expect_red() { local label="$1"; shift; if run_guard "$@"; then bad "$label (esperaba rojo, guard verde)"; sed 's/^/    /' "$WORK/out.log"; else ok "$label"; fi; }
 
+# Identidad y fecha deterministas: el runner de CI no tiene user.name/email
+# global, así que TODO commit del harness debe llevarla explícita.
+git_identity() {
+  export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
+  export GIT_AUTHOR_NAME="Migration Test" GIT_AUTHOR_EMAIL="migration@example.com"
+  export GIT_COMMITTER_NAME="Migration Test" GIT_COMMITTER_EMAIL="migration@example.com"
+}
+
 # Imprime "<sha_medido> <sha_squash>": base -> PR -> tip con baseline, y un
 # squash que comparte el ÁRBOL del tip pero cuyo padre es la base. Así el SHA
 # medido NO es ancestro del squash y el guard debe decidir por árbol, igual que
@@ -109,9 +117,7 @@ make_squash_tree() { # dir -> "<measured_sha> <squash_sha>"
   local d="$1" base measured tree
   (
     cd "$d" || exit 1
-    export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
-    export GIT_AUTHOR_NAME="Migration Test" GIT_AUTHOR_EMAIL="migration@example.com"
-    export GIT_COMMITTER_NAME="Migration Test" GIT_COMMITTER_EMAIL="migration@example.com"
+    git_identity
     git init -q
     git add -A && git commit -q -m base
     base="$(git rev-parse HEAD)"
@@ -213,6 +219,7 @@ D12="$(fixture)"
 read -r measured squash <<<"$(make_squash_tree "$D12")"
 (
   cd "$D12" || exit 1
+  git_identity
   printf 'otro arbol\n' > other.txt
   git add -A && git commit -q -m other
 )
