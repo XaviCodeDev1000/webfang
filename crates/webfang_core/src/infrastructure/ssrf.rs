@@ -63,6 +63,7 @@
 // other modules set it before building clients; the rest have in-module
 // consumers only.
 use crate::domain::network_policy::NetworkPolicy;
+use crate::domain::proxy_config::ClientSecurityProfile;
 #[cfg(test)]
 pub(crate) use crate::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV;
 use crate::domain::ssrf_guard::{
@@ -135,53 +136,9 @@ pub struct ValidatingResolver {
     name_source: Arc<dyn NameSource>,
 }
 
-/// Boxed error shared by the lookup seam and the scan: the same
-/// `Box<dyn Error + Send + Sync>` wreq's `Resolving` hands back.
-type BoxedLookupError = Box<dyn std::error::Error + Send + Sync>;
+mod name_source;
 
-/// Boxed future returned by [`NameSource::lookup`].
-type LookupFuture = std::pin::Pin<
-    Box<
-        dyn std::future::Future<Output = Result<Vec<std::net::SocketAddr>, BoxedLookupError>>
-            + Send,
-    >,
->;
-
-/// The answer-set lookup seam behind [`ValidatingResolver`].
-///
-/// Production uses [`GaiNameSource`] — the same blocking `getaddrinfo`
-/// (through `tokio::net::lookup_host`) that `gai_lookup` called inline before.
-/// The trait exists so the wiring from `resolve` to `fail_closed_scan` can be
-/// exercised by a test with a fixed answer set: a real LAN resolution is not
-/// reproducible in CI (it depends on the machine's resolver/routing), and the
-/// two halves — the lookup and the scan — were previously only tested in
-/// isolation, so a bug in how `gai_lookup` joins them could not be observed.
-///
-/// It is deliberately NOT public API: the only non-test implementor is the
-/// private default below, and the injection point is `#[cfg(test)]`.
-trait NameSource: Send + Sync + std::fmt::Debug {
-    /// Resolve `host` to its answer set, without policy (the caller applies
-    /// [`ValidatingResolver::fail_closed_scan`]).
-    fn lookup(&self, host: String) -> LookupFuture;
-}
-
-/// The production [`NameSource`]: blocking `getaddrinfo` via
-/// `tokio::net::lookup_host`, exactly the call `gai_lookup` used inline.
-///
-/// `tokio::net::lookup_host` resolves IP literals locally (no network, no
-/// resolver daemon) and delegates real names to the system resolver.
-#[derive(Debug)]
-struct GaiNameSource;
-
-impl NameSource for GaiNameSource {
-    fn lookup(&self, host: String) -> LookupFuture {
-        Box::pin(async move {
-            let addrs: Vec<std::net::SocketAddr> =
-                tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
-            Ok(addrs)
-        })
-    }
-}
+use self::name_source::{BoxedLookupError, GaiNameSource, NameSource};
 
 impl ValidatingResolver {
     /// Builds a resolver; validation state is captured from
@@ -439,6 +396,47 @@ impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::Default
             .no_proxy()
             .dns_resolver(ValidatingResolver::with_policy(allow_loopback, policy))
     }
+
+    fn secure_client_with_profile(
+        &self,
+        builder: wreq::ClientBuilder,
+        profile: &ClientSecurityProfile<'_>,
+    ) -> wreq::ClientBuilder {
+        let dest = &profile.destination;
+        // Stage 3b: the redirect stop always carries the DESTINATION policy.
+        // Allowing a private CIDR for the proxy hop never opens literal
+        // redirects into that CIDR (ADR-0021 Decision 2).
+        let builder = builder.redirect(redirect_policy_with_policy(
+            dest.allow_loopback,
+            dest.network_policy.clone(),
+        ));
+        // #2500 pin: ambient HTTP_PROXY/HTTPS_PROXY/ALL_PROXY stay ignored on
+        // every client. The explicit config-only declaration is attached
+        // AFTER `.no_proxy()`, so the environment never participates in
+        // routing (ADR-0021 Decision 1).
+        let builder = match profile.via_proxy {
+            // The matcher was built once at `ValidatedProxy` construction from
+            // the validated origin; infallible here by construction. The
+            // resolved Basic-auth credential is installed by the provider
+            // startup wiring (Slice 2), which resolves `ProxyAuth` once.
+            Some(proxy) => builder.proxy(proxy.wreq_proxy().clone()),
+            None => builder,
+        };
+        // Stage 3c: without a proxy the resolver validates the DESTINATION —
+        // byte-for-byte today's behavior. With one, the resolver validates the
+        // PROXY dial under the proxy's own policy (allow_cidrs AND allow_hosts
+        // + FIN-017): destination hostname resolution is delegated to the
+        // proxy by protocol construction (CONNECT / absolute-form), the
+        // split-horizon corporate-DNS case this variant exists for.
+        let resolver_policy = match profile.via_proxy {
+            Some(proxy) => proxy.endpoint_policy(),
+            None => dest.clone(),
+        };
+        builder.dns_resolver(ValidatingResolver::with_policy(
+            resolver_policy.allow_loopback,
+            &resolver_policy.network_policy,
+        ))
+    }
 }
 
 // The pair, in process: the resolver that never answers against the accept
@@ -504,7 +502,7 @@ mod tests {
         }
 
         impl NameSource for FixedNameSource {
-            fn lookup(&self, _host: String) -> LookupFuture {
+            fn lookup(&self, _host: String) -> self::name_source::LookupFuture {
                 let outcome = match self {
                     Self::Answers(addrs) => Ok(addrs.clone()),
                     Self::Fails(msg) => {

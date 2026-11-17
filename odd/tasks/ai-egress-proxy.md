@@ -58,7 +58,11 @@ phase on `main` (no stacked PRs). Test runner: `cargo nextest`. Local gate:
   `94a1c226` (+ mission doc `74314acd`); golden set 2262→2264 and ai-providers doc pins travel
   in the same commit.
 - T2 (S4): P1 — domain types + `SsrfGuard::secure_client_with_profile` declaration + ProviderConfig
-  `proxy` field + ai-providers-doc claims — inline — branch `feat/ai-proxy-domain-types` — TBD.
+  `proxy` field + ai-providers-doc claims — inline — branch `feat/ai-proxy-domain-types` — commit
+  `5cb6641a` (golden refresh + ai-providers manifest C2/C3/C6 + baseline descents travel in the
+  same commit). NOTE: the trait method's infrastructure impl travels with the declaration (a
+  declaration without impl does not compile); P2 keeps the shared-builder path, adapter wiring,
+  407 classification and CLI/registry glue.
 - T3 (S5): P2 — `DefaultSsrfGuard::secure_client_with_profile` impl + symmetric wiring + 407 —
   inline — branch `feat/ai-proxy-transport-wiring` — TBD.
 - T4 (S6): P3 — doctor/show posture + tracing + disclosure docs — inline — branch
@@ -94,3 +98,51 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   `74314acd` (mission doc). PR gates pre-checked: #2357 CLOSED but carries `status:approved`;
   validator checks labels only, `Closes part of #2357` passes.
 - L6: awaiting owner decision on push + PR (push/PR are human decisions; #2357 linkage ready).
+- L7 (T2 verification, 2026-11-17): RED exception documented (new domain types + additive trait
+  method; behavior covered by 20 new unit tests: proxy_config 16, config_serde 4). Observed:
+  fmt --check OK · clippy --all-targets --all-features -D warnings OK · rustdoc -D warnings OK ·
+  proxy_config 16/16 · config_serde 4/4 · providers 18/18 · ssrf_guard 47/47 · infra ssrf 31/31 ·
+  connect 35/35 · llm_wire 21/21 · llm 52/52 · resilience 8/8 · auth_source_none 13/13 ·
+  ssrf_policy_e2e 7/7 · real_tree 2/2 · ai-providers drift gate OK · file-size ratchet OK
+  (baselines LOWERED: providers.rs 593→546, connect.rs 1974→1874, remote_embedding.rs
+  1825→1773 — pure-move extractions: ssrf_guard/registry.rs, infrastructure/ssrf/name_source.rs,
+  domain/config_serde.rs, three test-fixture submodules, twin-fixture dedupe in
+  auth_source_none_test.rs). Design deviations recorded: `ValidatedProxy::try_new` takes the
+  `ProxyConfig` (catalog form) plus `try_inline(&ProxyDefinition)` for the provider-inline form
+  (the ADR's single-ctor signature cannot serve both provenances); the `wreq::Proxy` matcher is
+  built inside `try_new` so wiring stays infallible; proxy auth stays unresolved in Slice 1
+  (resolution + basic_auth install is Slice 2).
+- L8 (DEFECTS + root cause): (1) `proxy_config.rs` was corrupted twice by in-place awk streaming
+  rewrite (self-truncation) and by an unrestored stub from a doc-ICE bisection probe — recovered
+  from context each time; lesson enforced: commit after every verified step, never run in-place
+  awk rewrites, back up BOTH halves of a file split. (2) The rustdoc "ICE" (scoped-tls panic)
+  was the mbx shim bug (obs #2967, upstream mr-boxington#966): deterministic via mbx, clean via
+  real cargo with the same pinned toolchain; ci_fast_gate's doc step reports it as failed, so
+  the gate is run with `PATH="$HOME/.cargo/bin:$PATH"` (real cargo, same target dir).
+- L9 (rebase onto post-P0 main, 2026-11-17): P0 merged as PR #2878 (main `5d044bba`) before T2
+  published. Rebased `feat/ai-proxy-domain-types` from `1fece35b` onto `5d044bba` — commits were
+  unpushed, so no history rewrite on a public SHA. Add/add conflict on this mission doc resolved
+  by union (P0 T1 delivery + T2 verification/log); content conflicts on the ai-providers doc
+  claim pins and the intra-crate golden set resolved against the rebased tree (golden regenerated
+  with `scripts/refresh_real_tree_golden.sh`, pins refreshed from the merged symbols). T1 stays
+  DELIVERED; T2 stays unpublished pending owner push/PR decision.
+- L10 (post-rebase verification, 2026-11-17): full re-run on the rebased tree with the worktree's
+  own env (`CARGO_TARGET_DIR=~/.cache/cargo-target/feat-ai-proxy-domain-types`, real cargo via
+  `PATH="$HOME/.cargo/bin:$PATH"` — the inherited shell pointed at main's target dir and the mbx
+  shim). Observed: cargo check OK · clippy --all-targets --all-features -D warnings
+  (-W cognitive_complexity -W too_many_lines) OK · fmt --check OK · rustdoc -D warnings OK ·
+  `scripts/check_ai_providers_doc.sh` OK (30 claim, 8 shape, 5 impl, 1 absent, 47 prose cites,
+  26 § refs) · ci_fast_gate **GREEN PASS=45 FAIL=0 SKIP=2** (declares pinned-lint changed-scope +
+  windows; nextest integration 4923/4923 passed) · golden set regenerated, no drift. Branch
+  `feat/ai-proxy-domain-types` @ 2 unpushed commits (feature `5cb6641a` + this log), based on main
+  `5d044bba`, identity proxy OK, clean status, nothing pushed. NOT-covered CI jobs (toolchain,
+  artifact-guards, merge-metrics,
+  test-full, security) untouched by this change; windows cross-target skipped (no cfg(windows) arm
+  touched).
+- L11 (publish, 2026-11-17): owner explicitly authorized push + PR. Pushed
+  `feat/ai-proxy-domain-types` (remote @ `65879bc1`) and opened PR #2884 against `main` — title
+  `feat(ai): ADR-0021 Slice 1 — proxy domain types with type-separated SSRF policies`, body carries
+  `Closes part of #2551` (issue OPEN, labels `status:approved` + `type:feature`). Two unpushed
+  commits at push time → squash uses the PR title as the changelog line. CI checks pending at
+  creation; auto-label job applies `type:feature` from the title. Merge remains a maintainer
+  decision; next slice T3 starts from `main` after #2884 lands.

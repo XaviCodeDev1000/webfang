@@ -101,6 +101,7 @@ fn provider(base_url: &str, network_policy: NetworkPolicy) -> ProviderConfig {
         embedding_dim: None,
         allow_loopback: false,
         network_policy,
+        proxy: None,
     }
 }
 

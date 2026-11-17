@@ -211,6 +211,7 @@ mod tests {
             embedding_dim: None,
             allow_loopback: false,
             network_policy: crate::domain::network_policy::NetworkPolicy::default(),
+            proxy: None,
         }
     }
 

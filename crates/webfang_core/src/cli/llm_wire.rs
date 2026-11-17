@@ -265,32 +265,13 @@ pub async fn build_tier2_embedding_provider(
 }
 
 #[cfg(test)]
+mod fixtures;
+
+#[cfg(test)]
 mod tests {
+    use super::fixtures::{opts_with_llm, provider};
     use super::*;
     use crate::domain::auth_source::AuthSource;
-
-    fn opts_with_llm(extract: bool, provider_id: Option<&str>) -> CrawlOptions {
-        CrawlOptions {
-            extract_with_llm: extract,
-            llm_provider: provider_id.map(str::to_string),
-            ..Default::default()
-        }
-    }
-
-    fn provider(id: &str, kind: ProviderKind, auth: AuthSource) -> ProviderConfig {
-        ProviderConfig {
-            id: id.to_string(),
-            display_name: id.to_string(),
-            kind,
-            base_url: url::Url::parse("https://api.example.com/v1").expect("url"),
-            auth,
-            capabilities: vec![Capability::Completion],
-            model: Some("gpt-test".to_string()),
-            embedding_dim: None,
-            allow_loopback: false,
-            network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-        }
-    }
 
     #[test]
     fn flag_absent_returns_none_without_looking_at_config() {

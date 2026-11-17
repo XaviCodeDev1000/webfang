@@ -18,6 +18,7 @@ pub mod axtree_port;
 pub mod body_cap;
 pub mod clock;
 pub mod config;
+pub mod config_serde;
 pub mod config_value;
 pub mod console;
 pub mod cpu_executor;
@@ -57,6 +58,10 @@ pub mod pipeline_item;
 pub mod ports;
 pub mod post_load_wait;
 pub mod profile;
+/// Explicit per-provider forward proxy for AI egress (ADR-0021): the
+/// `[[proxies]]` catalog, the fail-closed validation of the proxy dial, and
+/// the destination/proxy policy pair the guard consumes.
+pub mod proxy_config;
 pub mod repositories;
 pub mod repository;
 pub mod result;
