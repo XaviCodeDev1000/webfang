@@ -139,3 +139,10 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   artifact-guards, merge-metrics,
   test-full, security) untouched by this change; windows cross-target skipped (no cfg(windows) arm
   touched).
+- L11 (publish, 2026-11-17): owner explicitly authorized push + PR. Pushed
+  `feat/ai-proxy-domain-types` (remote @ `65879bc1`) and opened PR #2884 against `main` — title
+  `feat(ai): ADR-0021 Slice 1 — proxy domain types with type-separated SSRF policies`, body carries
+  `Closes part of #2551` (issue OPEN, labels `status:approved` + `type:feature`). Two unpushed
+  commits at push time → squash uses the PR title as the changelog line. CI checks pending at
+  creation; auto-label job applies `type:feature` from the title. Merge remains a maintainer
+  decision; next slice T3 starts from `main` after #2884 lands.
