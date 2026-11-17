@@ -1,7 +1,6 @@
 //! JS strategy dependency preflight (#685): Chrome/Obscura binary gates.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use tracing::warn;
 
@@ -12,6 +11,14 @@ use crate::CliExit;
 use super::path_resolution::{
     has_path_separator, resolve_executable_in_path, resolve_obscura_binary,
 };
+
+mod variant;
+
+// Production code reaches the variant diagnostic through
+// `variant::warn_on_missing_render_capability`; the classifier and the
+// probe enum are exercised directly by the sibling test module only.
+#[cfg(test)]
+pub(super) use variant::{classify_render_probe, probe_render_capability, RenderCapability};
 
 // ============================================================================
 // JS strategy dependency preflight (#685)
@@ -132,59 +139,19 @@ pub fn resolve_chrome_binary() -> Option<PathBuf> {
 /// check degrades to "unknown version" with a warning).
 const VERSION_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Poll interval while waiting for a `--version` probe to exit.
-const VERSION_PROBE_POLL: std::time::Duration = std::time::Duration::from_millis(20);
-
 /// Run `<path> --version` silently and bounded (XP-S-06, #1608).
 ///
-/// Returns the process `Output` (status + captured stdout/stderr) or `None`
-/// when the spawn fails, the wait errors, or the deadline elapses first
-/// (the child is killed and reaped before returning). The probe probes the
-/// exact file the launcher will execute, so gate-certified and launched are
-/// the same binary by construction; output is captured because the Obscura
-/// version check parses it.
+/// Delegates to the shared bounded runner ([`variant::run_probe_with_timeout`]):
+/// the same wait/poll/kill contract serves the version checks and the
+/// build-variant diagnostic (#2722 Phase 2). The probe probes the exact file
+/// the launcher will execute, so gate-certified and launched are the same
+/// binary by construction; output is captured because the Obscura version
+/// check parses it.
 pub(super) fn run_version_probe_with_timeout(
     path: &Path,
     timeout: std::time::Duration,
 ) -> Option<std::process::Output> {
-    let mut child = Command::new(path)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .ok()?;
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                use std::io::Read as _;
-                // The child has exited: the pipes are closed on its side, so
-                // read_to_end drains the buffered output without blocking.
-                let mut stdout = Vec::new();
-                let mut stderr = Vec::new();
-                if let Some(mut pipe) = child.stdout.take() {
-                    let _ = pipe.read_to_end(&mut stdout);
-                }
-                if let Some(mut pipe) = child.stderr.take() {
-                    let _ = pipe.read_to_end(&mut stderr);
-                }
-                return Some(std::process::Output {
-                    status,
-                    stdout,
-                    stderr,
-                });
-            },
-            Ok(None) => {},
-            Err(_) => return None,
-        }
-        if std::time::Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(VERSION_PROBE_POLL);
-    }
+    variant::run_probe_with_timeout(path, &["--version"], timeout)
 }
 
 /// Silent `--version` probe against an already-resolved file path, bounded
@@ -308,10 +275,20 @@ fn check_chrome_binary(
     ))
 }
 
-/// Hybrid-strategy check (#787): the configured Obscura binary exists.
+/// Hybrid-strategy check (#787): the configured Obscura binary exists,
+/// meets the version floor (#793, #1710), and — diagnostic only — reports
+/// its build variant's render capability (#2722 Phase 2).
 fn check_obscura_binary(binary: &str, path_value: &str) -> Result<(), CliExit> {
     match resolve_obscura_binary(binary, path_value) {
-        Some(resolved) => check_obscura_version(binary, &resolved),
+        Some(resolved) => {
+            let version_verdict = check_obscura_version(binary, &resolved);
+            if version_verdict.is_ok() {
+                // Diagnostic only (verified upstream: the render feature gates
+                // paint resources, not the --dump html path L2 consumes).
+                variant::warn_on_missing_render_capability(binary, &resolved);
+            }
+            version_verdict
+        },
         None if has_path_separator(binary) => Err(CliExit::ConfigError(format!(
             "--js-strategy hybrid requiere el binario obscura: la ruta \"{binary}\" no existe \
              o no es un archivo; verificá --obscura-binary o WEBFANG_OBSCURA_BINARY"
