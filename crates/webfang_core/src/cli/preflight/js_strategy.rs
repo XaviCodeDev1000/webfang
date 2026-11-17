@@ -17,8 +17,12 @@ mod variant;
 // Production code reaches the variant diagnostic through
 // `variant::warn_on_missing_render_capability`; the classifier and the
 // probe enum are exercised directly by the sibling test module only.
+// The probe's two consumers are `#[cfg(unix)]`, so importing it on Windows
+// would be an unused import under `-D warnings`.
+#[cfg(all(test, unix))]
+pub(super) use variant::probe_render_capability;
 #[cfg(test)]
-pub(super) use variant::{classify_render_probe, probe_render_capability, RenderCapability};
+pub(super) use variant::{classify_render_probe, RenderCapability};
 
 // ============================================================================
 // JS strategy dependency preflight (#685)
