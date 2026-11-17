@@ -226,6 +226,24 @@ json.dump(d, open(p, "w"))
 PY
 expect_red_message "SHA de otro árbol -> rojo con mensaje de árbol" "$D12" "$squash" "el baseline fue medido sobre otro árbol"
 
+# --- 13. SHA inexistente con git real ---------------------------------------
+# NEGATION: un objeto que no existe no puede colar por la rama de árbol.
+D13="$(fixture)"
+read -r measured squash <<<"$(make_squash_tree "$D13")"
+python3 - "$D13/evidence/mig-2026-01/baseline.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["head_sha"] = "f" * 40
+json.dump(d, open(p, "w"))
+PY
+expect_red_message "head_sha inexistente con git real -> rojo con mensaje" "$D13" "$squash" "el baseline fue medido sobre otro árbol"
+
+# --- 14. repo sin .git -------------------------------------------------------
+# NEGATION: sin git no se puede probar ancestría ni equivalencia de árbol.
+D14="$(fixture)"
+expect_red_message "repo sin .git -> rojo con mensaje de árbol" "$D14" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "el baseline fue medido sobre otro árbol"
+
 printf '\nmigration evidence harness: %d OK, %d FAIL\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1
 exit 0
