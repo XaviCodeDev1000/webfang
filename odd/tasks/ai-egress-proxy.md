@@ -70,7 +70,8 @@ phase on `main` (no stacked PRs). Test runner: `cargo nextest`. Local gate:
   landed in T2 and is NOT reimplemented here.
 - T4 (S6): P3 — doctor/show posture + tracing + disclosure docs — inline — branch
   `feat/ai-proxy-diagnostics` — commit `f3b0f011` (PR #2904).
-- T5 (S7): P4 — E2E harness — inline — branch `feat/ai-proxy-e2e-harness` — delivered (see L17).
+- T5 (S7): P4 — E2E harness — inline — branch `feat/ai-proxy-e2e-harness` — commit `47ae5765`
+  (+ mission log in the follow-up doc commit).
 
 Delivery forecast ≈ 1200–1500 authored lines across 5 PRs → strategy `ask-on-risk` (default):
 when publishing beyond the first slice, ask the owner once for the chain strategy.
@@ -204,7 +205,8 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   pin the legacy wording and the no-secret guarantee. Gate GREEN PASS=45 FAIL=0 SKIP=2; rustdoc
   -D warnings OK. Tree-derived golden set refreshed in the same commit. Unpublished pending
   owner decision.
-- L17 (T5 delivered, 2026-11-17): branch `feat/ai-proxy-e2e-harness` from main `f3b0f011`.
+- L17 (T5 delivered, 2026-11-17): branch `feat/ai-proxy-e2e-harness` from main `f3b0f011`;
+  test slice commit `47ae5765`.
   New `crates/webfang_core/tests/ai_proxy_e2e_test.rs` (6 tests, no production change):
   ambient `HTTP(S)_PROXY` ignored (provider hit once, ambient proxy zero); configured proxy
   without loopback opt-in rejected pre-socket (exit 78, Spanish SSRF-guard fragment, zero
