@@ -157,3 +157,12 @@ pedido explícito (H4, contrato ya documentado en el tipo); concurrencia sin cam
   4c2294d1 dedup tests). Delivery `ask-on-risk`: sin push ni PR — la apertura
   de PR queda para el maintainer (issue #2722 necesita status:approved antes
   de abrir PR por la gate de metadatos).
+- L12 (2026-11-17) — publicación autorizada por el maintainer: push de la rama
+  (hooks pre-push verdes), maintainer aplicó `status:approved` a #2722
+  personalmente (readback verificado), **PR #2880 abierto** con la plantilla
+  del repo: título `feat(http): make the Obscura L2 contract honest` (será la
+  línea de changelog — squash de 7 commits), `Closes part of #2722` (slice
+  parcial del umbrella), label `type:feature`, declaración de dos sombreros
+  en el cuerpo (moves mecánicos vs commits semánticos). Merge vía
+  `scripts/merge-when-green.sh 2880 --queue` queda como decisión del
+  maintainer cuando CI reporte verde.
