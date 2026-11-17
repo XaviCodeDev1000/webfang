@@ -216,6 +216,16 @@ ignore = [
     # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0543
     # Expires: 2027-05-17
     { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45 unmaintained; direct workspace dependency for date parsing/formatting, also transitive via rmcp, schemars and rusqlite's chrono feature; advisory reports no safe upgrade because every version is affected, so the fix is an API migration to jiff/time rather than a version bump" },
+
+    # RUSTSEC-2026-0542 (humantime 2.4.0, severity: unmaintained)
+    # Transitive via console-subscriber 0.4.1 <- the OPTIONAL `console`
+    # feature of webfang_core (tokio-console diagnostics), enabled only by
+    # the `console` feature and the dev-only tokio-console smoke job. Never
+    # linked into a default build, and the crate only formats human-readable
+    # durations for the console UI.
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0542
+    # Expires: 2027-05-17
+    { id = "RUSTSEC-2026-0542", reason = "humantime 2.4.0 unmaintained; transitive via console-subscriber 0.4.1 behind the optional console feature of webfang_core (tokio-console diagnostics), never linked into a default build and used only to format durations for the console UI" },
 ]
 
 [licenses]
