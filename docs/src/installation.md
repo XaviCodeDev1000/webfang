@@ -218,10 +218,17 @@ fails with exit 78 (ADR-0004 §46, corrected 2026-10-21).
 WebFang ignores the proxy environment (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`)
 by design — for the AI endpoints and for crawling alike (#2500, see
 [data flow](data-flow.md#proxy-posture-the-proxy-environment-is-ignored-by-design)).
-If your network only egresses through a proxy, run a local forwarding sidecar,
-point the provider's `base_url` at it, and opt that provider into loopback
-endpoints; the sidecar talks to the corporate proxy, WebFang does not.
-`webfang doctor` states this posture on every run.
+If your network only egresses through a proxy, declare it explicitly in
+`config.toml`: add a `[[proxies]]` entry (`id`, `url`, optional `allow_loopback`
+and `network_policy`, and `auth` for Basic credentials) and reference it from
+the provider with `proxy = "<id>"`, or use the inline table form. Only
+`http`/`https` forward proxies are supported; credentials belong in
+`proxy.auth`, never in the URL. There is no CLI `--proxy` flag and no env read.
+Alternatively, run a local forwarding sidecar, point the provider's `base_url`
+at it, and opt that provider into loopback endpoints; the sidecar talks to the
+corporate proxy, WebFang does not. `webfang doctor` and `webfang show` print the
+effective proxy origin, provenance, policy and auth-source label — never the
+credential — on every run.
 
 ### Windows
 

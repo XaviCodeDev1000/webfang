@@ -63,10 +63,25 @@ reaches the target with zero requests observable at the proxy (both through
 the downloader and the `webfang` binary). `webfang doctor` states the posture
 on every run.
 
-**If you cannot dial out directly** (mandatory corporate proxy): run a local
-forwarding sidecar, point the provider's `base_url` at it, and opt into
-loopback endpoints for that provider — the sidecar, not WebFang, talks to the
-corporate proxy. WebFang never reads the proxy environment itself.
+**Opt-in explicit proxy (ADR-0021).** AI providers may declare `proxy`: a
+string `id` referencing a top-level `[[proxies]]` catalog entry, or an inline
+table with `url`, optional `allow_loopback` / `network_policy` and `auth`.
+Ambient variables stay ignored — the only declaration surface is `config.toml`:
+there is no CLI `--proxy` flag and no environment read for the AI path. Only
+`http`/`https` forward proxies are supported (SOCKS is rejected), proxy URLs
+carry no userinfo (`proxy.auth` holds the credential), and the proxy's dial
+policy is type-separated from the destination's. Destination DNS is delegated
+to the proxy; the SSRF validating resolver re-checks every proxy dial, and a
+literal-IP redirect into a forbidden range is still stopped. `webfang doctor`
+and `webfang show` print the effective proxy origin, provenance, policy counts
+and auth-source label — never the credential itself. Crawl, scrape and the
+general downloader stay direct-only.
+
+**If you cannot dial out directly** (mandatory corporate proxy): either use the
+explicit proxy declaration above, or run a local forwarding sidecar, point the
+provider's `base_url` at it, and opt into loopback endpoints for that provider —
+the sidecar, not WebFang, talks to the corporate proxy. WebFang never reads the
+proxy environment itself.
 
 ---
 
@@ -164,6 +179,9 @@ contains | .webfang-batch-capture.jsonl
 contains | crawl.db
 contains | credentials.age
 contains | state-recovery-runbook.md
+contains | [[proxies]]
+contains | proxy.auth
+contains | no CLI `--proxy` flag
 code | crates/webfang_core/src/application/llm_extraction.rs | raw HTML never reaches
 code | crates/webfang_core/src/infrastructure/semantic_cleaner.rs | extract_text_content
 code | crates/webfang_core/src/infrastructure/llm/client.rs | chat/completions
@@ -172,6 +190,9 @@ code | crates/webfang_core/src/cli/llm_wire.rs | build_llm_provider
 code | crates/webfang_core/src/cli/batch_flow.rs | .webfang-batch-capture.jsonl
 code | crates/webfang_core/src/infrastructure/autotuning.rs | crawl.db
 code | crates/webfang_core/src/domain/local_secret_store.rs | credentials.age
+code | crates/webfang_core/src/domain/proxy_config.rs | ValidatedProxy
+code | crates/webfang_core/src/infrastructure/llm/http_client.rs | build_llm_client
+code | crates/webfang_core/src/cli/commands/blocks.rs | proxy_posture_lines
 ```
 claims:end -->
 
