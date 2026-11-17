@@ -9,6 +9,7 @@
 use crate::domain::credentials::ApiKey;
 use crate::domain::llm_port::{ChatMessage, LlmPort, LlmRequest, LlmResponse};
 use crate::error::{Result, ScraperError};
+use crate::infrastructure::llm::http_client::build_guarded_http_client;
 
 /// Maximum LLM completion body size (decompressed bytes). Completion payloads
 /// are JSON well below this in practice; the cap bounds a broken or malicious
@@ -19,7 +20,6 @@ use serde::Deserialize;
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
-use std::time::Duration;
 use url::Url;
 
 /// Wire request for OpenAI-compatible `POST /chat/completions`.
@@ -92,17 +92,11 @@ impl OpenAiLlmClient {
     ///
     /// Returns [`ScraperError::Config`] if the wreq client cannot be built.
     pub fn new(base_url: Url, api_key: ApiKey) -> Result<Self> {
-        let builder = wreq::Client::builder()
-            .emulation(wreq_util::Profile::Chrome145)
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(10));
         // SSRF guard (#703) applied through the domain `SsrfGuard` port:
         // literal-IP redirect guard + connect-time validating resolver that
         // re-validates every DNS answer. Entry-level `ssrf_gate` stays as
         // fast-fail typed UX; this is defense in depth.
-        let client = crate::domain::ssrf_guard::ssrf_guard()
-            .secure_client(builder)
-            .build()
+        let client = build_guarded_http_client(false, None)
             .map_err(|e| ScraperError::Config(format!("no se pudo crear el cliente LLM: {e}")))?;
         Ok(Self::with_http(client, base_url, api_key))
     }

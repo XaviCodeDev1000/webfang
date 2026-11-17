@@ -34,5 +34,6 @@ merge-metrics-guards	-	ci,full	-	the four harnesses run only when their own file
 test-core	full	code	workspace nextest	nextest for the crates the classifier selected, not the workspace
 test-full	full	-	workspace nextest with --all-features	-
 test-release-provenance	code,full	-	scripts/test_release_provenance.sh	-
+obscura-hybrid	-	-	-	the real-binary hybrid E2E runs only in CI; no local lane downloads Obscura
 security	-	ci,full	-	the cached zizmor audit runs; cargo deny and cargo audit never do
 doc-quality	-	code,full	-	cargo doc only; cargo test --doc never runs locally

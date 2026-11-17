@@ -57,9 +57,9 @@
 //! then, do not read a green gate as "the domain layer is framework-free".
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, OnceLock};
 
 use crate::domain::network_policy::NetworkPolicy;
+use crate::domain::proxy_config::ClientSecurityProfile;
 
 use wreq::redirect::Policy;
 
@@ -419,60 +419,40 @@ pub trait SsrfGuard: Send + Sync + sealed::Sealed {
         allow_loopback: bool,
         policy: &NetworkPolicy,
     ) -> wreq::ClientBuilder;
+
+    /// Additive profile variant (ADR-0021): the full guard with the
+    /// destination and proxy trust domains separated BY TYPE —
+    /// `domain::proxy_config::ClientSecurityProfile` pairs the destination
+    /// `domain::proxy_config::EndpointPolicy` (entry gate, redirect stops,
+    /// direct-dial resolver) with an optional validated proxy (its own dial
+    /// policy + prebuilt `wreq` matcher).
+    ///
+    /// Wiring order is the fetch-guard invariant (AGENTS.md): redirect from
+    /// the DESTINATION policy → `.no_proxy()` (ambient env stays ignored) →
+    /// the proxy matcher, when configured → the validating resolver carrying
+    /// the PROXY policy when proxying, the destination policy otherwise.
+    /// Allowing a private CIDR for the proxy hop never opens redirects into
+    /// that CIDR — the redirect guard only ever sees the destination policy.
+    ///
+    /// Infallible on purpose: every proxy validation happens once at
+    /// `ValidatedProxy::try_new` (including building the `wreq` matcher), so
+    /// no wiring-time failure path exists to surface.
+    ///
+    /// Additive like its siblings: the three pre-ADR-0021 methods keep their
+    /// exact signatures, and every caller without a proxy declaration is
+    /// untouched.
+    fn secure_client_with_profile(
+        &self,
+        builder: wreq::ClientBuilder,
+        profile: &ClientSecurityProfile<'_>,
+    ) -> wreq::ClientBuilder;
 }
 
-/// Process-wide SSRF guard instance, populated by the composition root
-/// (`Container::new`) at startup and read by call sites that build HTTP
-/// clients but cannot reach into the infrastructure layer.
-///
-/// The static is typed as the **domain** trait [`SsrfGuard`] so the domain
-/// layer never names the infrastructure concrete — the trait impl for
-/// [`DefaultSsrfGuard`] lives in the infrastructure `ssrf` module, reachable
-/// only through this trait object.
-static SSRF_GUARD: OnceLock<Arc<dyn SsrfGuard>> = OnceLock::new();
+mod registry;
 
-/// Install the process-wide SSRF guard. Idempotent: a second call is a
-/// no-op when the first value is already set (keep-first, #996). Called by
-/// the composition root (`Container::new`) at startup.
-///
-/// Arming-order caveat: the arming only wins the race if no client was built
-/// earlier in the process — earlier builds materialize the fallback through
-/// [`ssrf_guard`]. This cannot change behavior: the fallback and the armed
-/// guard are behaviorally identical (`DefaultSsrfGuard` both ways), so arming
-/// order only matters for test sentinels and future overrides.
-pub fn set_ssrf_guard(guard: Arc<dyn SsrfGuard>) {
-    let _ = SSRF_GUARD.set(guard);
-}
-
-/// Test-only probe: was the registry armed by a composition root?
-///
-/// The armed guard and the fallback are behaviorally identical
-/// (`DefaultSsrfGuard` both ways), so [`ssrf_guard`] cannot distinguish
-/// them; wiring tests need this probe to prove `Container::new` actually
-/// calls [`set_ssrf_guard`] (strict-TDD RED without the arm).
 #[cfg(test)]
-pub(crate) fn ssrf_guard_armed() -> bool {
-    SSRF_GUARD.get().is_some()
-}
-
-/// Read the process-wide SSRF guard. When no composition root has armed one,
-/// falls back to the self-sufficient [`DefaultSsrfGuard`] (whose impl applies
-/// the full guard — redirect policy + validating resolver) so paths that build
-/// HTTP clients while bypassing `Container` (CLI preflight, crawler discovery,
-/// sitemap discovery) are protected exactly like Container-wired clients.
-///
-/// The fallback is materialized once, at first use, and never replaced by a
-/// later arming (the registry is keep-first).
-#[must_use]
-pub fn ssrf_guard() -> Arc<dyn SsrfGuard> {
-    if let Some(guard) = SSRF_GUARD.get() {
-        return guard.clone();
-    }
-    static FALLBACK: OnceLock<Arc<dyn SsrfGuard>> = OnceLock::new();
-    FALLBACK
-        .get_or_init(|| Arc::new(DefaultSsrfGuard) as Arc<dyn SsrfGuard>)
-        .clone()
-}
+pub(crate) use registry::ssrf_guard_armed;
+pub use registry::{set_ssrf_guard, ssrf_guard};
 
 #[cfg(test)]
 mod tests_ip;

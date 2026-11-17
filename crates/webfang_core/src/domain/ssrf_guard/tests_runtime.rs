@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::tests_support::*;
 use super::*;
 
@@ -103,6 +105,14 @@ impl SsrfGuard for NoopGuard {
         builder: wreq::ClientBuilder,
         _allow_loopback: bool,
         _policy: &crate::domain::network_policy::NetworkPolicy,
+    ) -> wreq::ClientBuilder {
+        builder
+    }
+
+    fn secure_client_with_profile(
+        &self,
+        builder: wreq::ClientBuilder,
+        _profile: &crate::domain::proxy_config::ClientSecurityProfile<'_>,
     ) -> wreq::ClientBuilder {
         builder
     }

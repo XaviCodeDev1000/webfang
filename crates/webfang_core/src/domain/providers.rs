@@ -12,7 +12,9 @@
 use url::Url;
 
 use crate::domain::auth_source::AuthSource;
+use crate::domain::config_serde::{deserialize_dim_no_null, deserialize_proxy_spec_no_null};
 use crate::domain::network_policy::NetworkPolicy;
+use crate::domain::proxy_config::ProxySpec;
 
 /// Versioned model profiles live in the sibling [`crate::domain::model_profile`]
 /// module; they are re-exported here because both are read from the same user
@@ -122,6 +124,15 @@ pub struct ProviderConfig {
     /// additionally requires itself in `allow_hosts` (AND, #1947).
     #[serde(default)]
     pub network_policy: NetworkPolicy,
+    /// Explicit forward proxy for this provider's AI egress (ADR-0021):
+    /// either an `[[proxies]]` catalog id or an inline table. Absent means
+    /// direct egress, exactly today's behavior; an explicit `null` is a
+    /// deserialization error, never a silent direct fallback. The proxy dials
+    /// under the PROXY's own `allow_loopback`/`network_policy` (a separate
+    /// trust domain from this provider's destination policy), and ambient
+    /// proxy environment variables stay ignored in every case.
+    #[serde(default, deserialize_with = "deserialize_proxy_spec_no_null")]
+    pub proxy: Option<ProxySpec>,
 }
 
 impl ProviderConfig {
@@ -130,65 +141,6 @@ impl ProviderConfig {
     pub fn has_capability(&self, capability: Capability) -> bool {
         self.capabilities.contains(&capability)
     }
-}
-
-/// Rejection message for an explicit `null` dimension: `null` in the config
-/// file is a typo and must fail loudly — shared by both null-rejecting
-/// visitor methods so the two arms cannot drift (#1462).
-const NULL_EMBEDDING_DIM_MSG: &str =
-    "embedding_dim: null explícito no permitido; omití el campo para adoptar la dimensión remota";
-
-/// Build the explicit-`null` rejection error for [`deserialize_dim_no_null`].
-fn null_dim_error<E>() -> E
-where
-    E: serde::de::Error,
-{
-    E::custom(NULL_EMBEDDING_DIM_MSG)
-}
-
-/// Reject an explicit `null` for `embedding_dim` while keeping the
-/// absent-means-`None` default.
-///
-/// With plain `#[serde(default)]`, `Option<usize>` maps explicit `null` to
-/// `None` — a silent adopt. Routing through `deserialize_option` with a
-/// visitor that errors on `None` keeps absent → `None` (serde never calls
-/// the deserializer for missing fields) while failing loudly on `null`.
-fn deserialize_dim_no_null<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    struct NoNull;
-
-    impl<'de> serde::de::Visitor<'de> for NoNull {
-        type Value = Option<usize>;
-
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("an embedding dimension (explicit null is not allowed; omit the field)")
-        }
-
-        fn visit_none<E>(self) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            Err(null_dim_error())
-        }
-
-        fn visit_unit<E>(self) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            Err(null_dim_error())
-        }
-
-        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            <usize as serde::Deserialize<'de>>::deserialize(deserializer).map(Some)
-        }
-    }
-
-    deserializer.deserialize_option(NoNull)
 }
 
 /// Top-level provider configuration — the `[[providers]]` array of the config
@@ -347,6 +299,7 @@ mod tests {
             embedding_dim: None,
             allow_loopback: false,
             network_policy: crate::domain::network_policy::NetworkPolicy::default(),
+            proxy: None,
         }
     }
 

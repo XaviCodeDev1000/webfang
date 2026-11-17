@@ -73,6 +73,7 @@ fn anonymous_config(base_url: String) -> ProviderConfig {
         // Loopback es el wiremock; el opt-in de config es lo que lo permite.
         allow_loopback: true,
         network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
+        proxy: None,
     }
 }
 

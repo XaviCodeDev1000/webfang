@@ -48,19 +48,11 @@ const EMBEDDINGS_PATH: &str = "/embeddings";
 /// Un `ProviderConfig` de embeddings apuntando al wiremock, con la fuente de
 /// auth que cada fila necesita.
 fn config_for(server: &wiremock::MockServer, auth: AuthSource) -> ProviderConfig {
-    ProviderConfig {
-        id: "anon-endpoint".to_string(),
-        display_name: "Anonymous Endpoint".to_string(),
-        kind: ProviderKind::OpenAiCompatible,
-        base_url: url::Url::parse(&server.uri()).expect("mock uri parses"),
+    provider_with(
+        url::Url::parse(&server.uri()).expect("mock uri parses"),
+        true,
         auth,
-        capabilities: vec![Capability::Embedding],
-        model: Some("nomic-embed-text".to_string()),
-        embedding_dim: None,
-        // Loopback es el wiremock; el opt-in de config es lo que lo permite.
-        allow_loopback: true,
-        network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
-    }
+    )
 }
 
 async fn mount_embeddings(
@@ -80,17 +72,28 @@ async fn mount_embeddings(
 /// construcción (no hacen ninguna petición): no necesitan un servidor real,
 /// y una base URL pública basta porque la fila no llega a abrir un socket.
 fn config_without_server(auth: AuthSource) -> ProviderConfig {
+    provider_with(
+        url::Url::parse("https://api.example.com/v1").expect("url"),
+        false,
+        auth,
+    )
+}
+
+/// El `ProviderConfig` de embeddings compartido por los dos arrange: los
+/// gemelos sólo diferían en base URL y en el opt-in de loopback del wiremock.
+fn provider_with(base_url: url::Url, allow_loopback: bool, auth: AuthSource) -> ProviderConfig {
     ProviderConfig {
         id: "anon-endpoint".to_string(),
         display_name: "Anonymous Endpoint".to_string(),
         kind: ProviderKind::OpenAiCompatible,
-        base_url: url::Url::parse("https://api.example.com/v1").expect("url"),
+        base_url,
         auth,
         capabilities: vec![Capability::Embedding],
         model: Some("nomic-embed-text".to_string()),
         embedding_dim: None,
-        allow_loopback: false,
+        allow_loopback,
         network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
+        proxy: None,
     }
 }
 

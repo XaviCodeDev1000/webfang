@@ -265,6 +265,7 @@ mod tests {
             embedding_dim: None,
             allow_loopback: false,
             network_policy: NetworkPolicy::default(),
+            proxy: None,
         }
     }
 

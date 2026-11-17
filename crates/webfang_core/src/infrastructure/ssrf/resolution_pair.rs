@@ -21,6 +21,7 @@
 
 #[cfg(test)]
 mod pair {
+    use super::super::name_source::LookupFuture;
     use super::super::*;
     use crate::domain::error::cause::NetworkCause;
     use std::sync::Arc;

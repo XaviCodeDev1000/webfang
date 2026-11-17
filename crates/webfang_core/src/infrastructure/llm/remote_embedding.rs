@@ -38,6 +38,7 @@ use crate::domain::embedding_port::EmbeddingPort;
 use crate::domain::network_policy::NetworkPolicy;
 use crate::domain::providers::ProviderConfig;
 use crate::error::SemanticError;
+use crate::infrastructure::llm::http_client::build_guarded_http_client;
 use crate::infrastructure::llm::provider::ProviderInitError;
 
 /// A boxed future for dyn-compatible async port methods.
@@ -182,13 +183,7 @@ fn embedding_http_client(
     allow_loopback: bool,
     network_policy: &NetworkPolicy,
 ) -> Result<wreq::Client, ProviderInitError> {
-    let builder = wreq::Client::builder()
-        .emulation(wreq_util::Profile::Chrome145)
-        .timeout(Duration::from_secs(60))
-        .connect_timeout(Duration::from_secs(10));
-    crate::domain::ssrf_guard::ssrf_guard()
-        .secure_client_with_policy(builder, allow_loopback, network_policy)
-        .build()
+    build_guarded_http_client(allow_loopback, Some(network_policy))
         .map_err(|e| ProviderInitError::HttpClient(e.to_string()))
 }
 
@@ -877,65 +872,13 @@ impl RemoteEmbeddingAdapter {
 }
 
 #[cfg(test)]
+mod fixtures;
+
+#[cfg(test)]
 mod tests {
+    use super::fixtures::*;
     use super::*;
     use crate::domain::auth_source::AuthSource;
-    use crate::domain::providers::{Capability, ProviderKind};
-
-    /// Base URLs for the entry-gate and dial cases, composed at runtime rather
-    /// than written as one `IP:port` literal. That shape reads as `path:line`
-    /// to tooling that scans evidence locations, and the native review
-    /// admission layer rejects a reviewer result citing one as
-    /// `evidence_path_out_of_scope`. The fixtures themselves are unchanged.
-    const LAN_HOST: &str = "10.0.0.5";
-    const LAN_PORT: u16 = 8000;
-    const LOOPBACK_HOST: &str = "127.0.0.1";
-    const LOOPBACK_PORT: u16 = 9;
-
-    /// Regla de actualización de fixtures (patrón `fixtures/llm`): los
-    /// fixtures viven fuera del código; si un vendor deriva el wire shape,
-    /// el fixture se actualiza primero en commit separado con justificación.
-    fn load_fixture(name: &str) -> String {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(format!("../../fixtures/remote_embedding/{name}"));
-        std::fs::read_to_string(&path).expect("fixture legible")
-    }
-
-    fn config_with(auth: AuthSource) -> ProviderConfig {
-        ProviderConfig {
-            id: "test-remote".to_string(),
-            display_name: "Test Remote".to_string(),
-            kind: ProviderKind::OpenAiCompatible,
-            base_url: Url::parse("https://api.example.com/v1").expect("url"),
-            auth,
-            capabilities: vec![Capability::Embedding],
-            model: Some("nomic-embed-text".to_string()),
-            embedding_dim: None,
-            allow_loopback: false,
-            network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-        }
-    }
-
-    fn adapter_for(
-        server: &wiremock::MockServer,
-        modifier: impl FnOnce(&mut ProviderConfig),
-    ) -> RemoteEmbeddingAdapter {
-        let env = webfang_test_utils::EnvGuard::with(&[("WEBFANG_TEST_REMOTE_KEY", "sk-test")]);
-        let mut cfg = config_with(AuthSource::Env {
-            var: "WEBFANG_TEST_REMOTE_KEY".to_string(),
-        });
-        cfg.base_url = Url::parse(&server.uri()).expect("mock uri parses");
-        cfg.allow_loopback = true;
-        modifier(&mut cfg);
-        let client = wreq::Client::builder()
-            .build()
-            .expect("plain test client builds");
-        let adapter = RemoteEmbeddingAdapter::with_http(cfg, client).expect("test adapter builds");
-        // `with_http` resolves the credential in the constructor: dropping
-        // the env guard here proves later calls never re-resolve.
-        drop(env);
-        adapter
-    }
 
     // --- Trait contract through the vtable ---
 
