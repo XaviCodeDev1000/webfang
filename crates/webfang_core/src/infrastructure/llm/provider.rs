@@ -108,6 +108,9 @@ pub fn build_default_http_client() -> Result<wreq::Client, ProviderInitError> {
 pub struct OpenAiCompatibleProvider {
     client: OpenAiLlmClient,
     config: ProviderConfig,
+    /// ADR-0021: whether the proxy hop had a configured credential. Used only
+    /// by the 407 diagnostic; the secret itself is never retained here.
+    proxy_auth_configured: bool,
 }
 
 impl OpenAiCompatibleProvider {
@@ -140,7 +143,7 @@ impl OpenAiCompatibleProvider {
     ) -> Result<Self, ProviderInitError> {
         let bundle = build_llm_client(&config, registry)
             .map_err(|e| ProviderInitError::HttpClient(e.to_string()))?;
-        Self::with_http(config, bundle.client)
+        Self::with_http_and_proxy_auth(config, bundle.client, bundle.proxy_auth_configured)
     }
 
     /// Variante con cliente HTTP inyectado (composición root/tests).
@@ -155,6 +158,19 @@ impl OpenAiCompatibleProvider {
     pub fn with_http(
         config: ProviderConfig,
         http: wreq::Client,
+    ) -> Result<Self, ProviderInitError> {
+        Self::with_http_and_proxy_auth(config, http, false)
+    }
+
+    /// ADR-0021: records proxy-auth provenance for the 407 diagnostic.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::with_http`].
+    pub fn with_http_and_proxy_auth(
+        config: ProviderConfig,
+        http: wreq::Client,
+        proxy_auth_configured: bool,
     ) -> Result<Self, ProviderInitError> {
         let secret = config
             .auth
@@ -177,7 +193,11 @@ impl OpenAiCompatibleProvider {
             });
         };
         let client = OpenAiLlmClient::with_http(http, config.base_url.clone(), secret);
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            config,
+            proxy_auth_configured,
+        })
     }
 
     /// Identificador del provider.
@@ -205,8 +225,42 @@ impl LlmPort for OpenAiCompatibleProvider {
                 + 'a,
         >,
     > {
-        self.client.send_completion(request)
+        let proxy_auth_configured = self.proxy_auth_configured;
+        let provider_id = self.config.id.clone();
+        Box::pin(async move {
+            self.client
+                .send_completion(request)
+                .await
+                .map_err(|e| match &e {
+                    // ADR-0021: 407 is a terminal proxy-auth failure. The raw
+                    // `ScraperError::Http{407}` is terminal but cannot say whether
+                    // a proxy credential was configured — this adds that detail
+                    // without ever printing the secret.
+                    crate::error::ScraperError::Http { status: 407, .. } => {
+                        proxy_407_error(proxy_auth_configured, &provider_id)
+                    },
+                    _ => e,
+                })
+        })
     }
+}
+
+/// Spanish, credential-free 407 diagnostic for the completion path.
+fn proxy_407_error(proxy_auth_configured: bool, provider_id: &str) -> crate::error::ScraperError {
+    tracing::warn!(
+        provider_id = %provider_id,
+        status = 407,
+        proxy_auth_configured,
+        "forward proxy rejected a completion request"
+    );
+    let detail = if proxy_auth_configured {
+        "rechazó la credencial configurada en proxy.auth"
+    } else {
+        "exige autenticación pero no se declaró proxy.auth"
+    };
+    crate::error::ScraperError::Extraction(format!(
+        "el proxy del provider '{provider_id}' devolvió 407: {detail} (no se reintenta)"
+    ))
 }
 
 #[cfg(test)]

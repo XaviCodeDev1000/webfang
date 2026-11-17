@@ -2161,9 +2161,12 @@ infrastructure/llm/provider.rs	19	use	crate::infrastructure::llm::http_client::b
 infrastructure/llm/provider.rs	19	use	crate::infrastructure::llm::http_client::build_llm_client
 infrastructure/llm/provider.rs	24	use	crate::domain::providers::ProviderConfig
 infrastructure/llm/provider.rs	52	inline	crate::error::ScraperError
-infrastructure/llm/provider.rs	199	inline	crate::domain::llm_port::LlmRequest
-infrastructure/llm/provider.rs	203	inline	crate::domain::llm_port::LlmResponse
-infrastructure/llm/provider.rs	203	inline	crate::error::Result
+infrastructure/llm/provider.rs	219	inline	crate::domain::llm_port::LlmRequest
+infrastructure/llm/provider.rs	223	inline	crate::domain::llm_port::LlmResponse
+infrastructure/llm/provider.rs	223	inline	crate::error::Result
+infrastructure/llm/provider.rs	239	inline	crate::error::ScraperError::Http
+infrastructure/llm/provider.rs	249	inline	crate::error::ScraperError
+infrastructure/llm/provider.rs	261	inline	crate::error::ScraperError::Extraction
 infrastructure/llm/remote_embedding.rs	36	use	crate::domain::credentials::ApiKey
 infrastructure/llm/remote_embedding.rs	37	use	crate::domain::embedding_port::EmbeddingPort
 infrastructure/llm/remote_embedding.rs	38	use	crate::domain::providers::ProviderConfig

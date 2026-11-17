@@ -182,3 +182,12 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   locally — no mingw-gcc/lib.exe; CI covers it). Windows cross-lint risk: no `cfg(windows)` arm
   touched, but the new integration test file uses `#[cfg_attr(test, allow(unwrap/expect))]` like
   its siblings. T3 unpublished pending owner push/PR decision; T4/T5 remain.
+- L15 (completion 407 closed, 2026-11-17): owner asked to close the S8 gap before publishing.
+  `OpenAiCompatibleProvider` now carries proxy-auth provenance (no secret) via
+  `with_http_and_proxy_auth`; its `LlmPort::send_completion` maps the raw terminal
+  `ScraperError::Http{407}` to a Spanish `ScraperError::Extraction` that distinguishes a
+  configured `proxy.auth` credential from an anonymous proxy, with zero retries and no
+  credential in logs. Four integration tests in `ai_proxy_407_test.rs` (2 embedding + 2
+  completion) pass, each asserting `received_requests() == 1`. Doc pin for `provider.rs::new`
+  refreshed (124→127) in the same commit. Full gate re-run: GREEN PASS=45 FAIL=0 SKIP=2.
+  This completes S8's 407 contract on both AI ports.

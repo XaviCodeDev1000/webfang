@@ -336,7 +336,7 @@ Las decisiones de producto del wizard, fijadas en revisión antes de escribirlo:
 - `[x]` `ProviderRegistry::resolve(provider_id, Capability)` falla con `RegistryError::ProviderNotFound` si el ID no existe (`domain/providers.rs:207`, test en `:318`).
 - `[x]` `ProviderRegistry::resolve(provider_id, Capability::Embedding)` falla con `RegistryError::CapabilityMismatch` si el provider no declara `Embedding` (`providers.rs:219`, test en `:327`).
 - `[x]` `ProviderRegistry::resolve(provider_id, Capability::Completion)` falla con `RegistryError::CapabilityMismatch` si el provider no declara `Completion` (mismo camino de capacidad).
-- `[x]` `OpenAiCompatibleProvider` envuelve `OpenAiLlmClient` y resuelve la credencial una vez en startup (`infrastructure/llm/provider.rs:108`, `new()` en `:124`).
+- `[x]` `OpenAiCompatibleProvider` envuelve `OpenAiLlmClient` y resuelve la credencial una vez en startup (`infrastructure/llm/provider.rs:108`, `new()` en `:127`).
 - `[x]` `build_default_http_client()` produce la config canónica (Chrome145, 60s timeout, 10s connect, SSRF guard armado) — `infrastructure/llm/provider.rs:88-90` vía el constructor compartido `infrastructure/llm/http_client.rs`.
 
 > `resolve()` devuelve `&ProviderConfig`, no un port: la construcción del adapter es de la capa de binario (`crates/webfang_core/src/cli/llm_wire.rs`). Ver §5.
@@ -537,7 +537,7 @@ claim  | crates/webfang_core/src/cli/commands/doctor.rs | 72 | registry.resolve_
 claim  | crates/webfang_core/src/application/vault_search.rs | 70 | embedding: Arc<dyn EmbeddingPort>,
 # --- infraestructura LLM -----------------------------------------------------
 claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 108 | pub struct OpenAiCompatibleProvider {
-claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 124 | pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
+claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 127 | pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
 claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 88 | pub fn build_default_http_client() -> Result<wreq::Client, ProviderInitError> {
 claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 90 | }
 claim  | crates/webfang_core/src/infrastructure/llm/client.rs | 113 | pub fn with_http(client: wreq::Client, base_url: Url, api_key: ApiKey) -> Self {
