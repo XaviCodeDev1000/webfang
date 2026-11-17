@@ -212,7 +212,7 @@
       "path": "crates/webfang_core/tests/behavioral/cli/batch_test.rs",
       "crate": "webfang_core",
       "area": "cli",
-      "test_count": 12,
+      "test_count": 18,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"

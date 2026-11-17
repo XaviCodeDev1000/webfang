@@ -398,7 +398,7 @@ Batch Processing:
           [env: WEBFANG_BATCH=]
 
       --batch-file <BATCH_FILE>
-          Path to a file containing URLs to scrape (one per line), one page per URL, no crawling
+          Path to a file containing absolute http(s) URLs to scrape (one per line, one page per URL, no crawling). Blank lines and # comments are ignored; lines that fail URL validation are discarded with a warning carrying their line number, and the final summary reconciles the counts
           
           [env: WEBFANG_BATCH_FILE=]
 
@@ -412,6 +412,11 @@ Batch Processing:
           
           [env: WEBFANG_EXPORT_CHECKPOINT=]
           [default: 0]
+
+      --strict-input
+          Fail with exit 78 (configuration error) when any batch input line is rejected as invalid, instead of continuing with the rest
+          
+          [env: WEBFANG_STRICT_INPUT=]
 
 Item Pipeline:
       --pipeline
