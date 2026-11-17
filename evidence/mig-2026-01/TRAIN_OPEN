@@ -7,7 +7,7 @@ rojo repo-guards a propósito. No es un falso positivo: RF-23/RF-24 acaban de
 quedar escritos contra otra línea de soporte. La salida es:
 
   python3 scripts/audit_migration_baseline.py --write evidence/mig-2026-01/baseline.json
-  # revisar el diff, re-aprobar §16 del PRD-v2.md, y commitear ambos
+  # revisar el diff, re-aprobar §7 del PRD-v2.md, y commitear ambos
 
 Para degradar la deriva a NOTE (por ejemplo, al cerrar F3), borrar este fichero.
 El doc-lint (placeholders, RFs huérfanos, hechos literales, SHA) sigue activo.
