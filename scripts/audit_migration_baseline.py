@@ -497,7 +497,7 @@ def verify(root: Path, evidence_path: Path, prd_path: Path,
             drift.append(f"decisions.{key}: {ev.get('decisions', {}).get(key)!r} -> {value!r}")
 
     if drift:
-        msg = ("DERIVA DE DECISIÓN; re-corre --write, actualiza §16 y re-aprueba: "
+        msg = ("DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba: "
                + " | ".join(drift))
         if train_marker.is_file():
             errors.append(msg)

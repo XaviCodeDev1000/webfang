@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.1.0] - 2026-11-17
+
+
+### 🎉 Added
+
+- Make the Obscura L2 contract honest ([#2880](https://github.com/XaviCodeDev1000/webfang/pull/2880))
+- Warn on no-render obscura builds in the hybrid preflight ([#2881](https://github.com/XaviCodeDev1000/webfang/pull/2881))
+- ADR-0021 Slice 1 — proxy domain types with type-separated SSRF policies ([#2884](https://github.com/XaviCodeDev1000/webfang/pull/2884))
+
+### 🏗️ Architecture Improvements
+
+- Unify the LLM HTTP client builder behind one constructor ([#2878](https://github.com/XaviCodeDev1000/webfang/pull/2878))
+
+### 🔧 Fixed
+
+- Gate windows-only test import in js_strategy ([#2888](https://github.com/XaviCodeDev1000/webfang/pull/2888))
 ## [9.0.0] - 2026-11-16
 
 

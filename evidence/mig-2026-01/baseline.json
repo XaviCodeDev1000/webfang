@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "generated_at": "2026-11-16T23:50:15+00:00",
-  "head_sha": "d4cc9de0e9e7bbbb721b9b48e582850dab7aae7b",
-  "head_date": "2026-11-16T23:45:33Z",
-  "head_subject": "chore(support): declare the pending publication of v9.0.0",
-  "workspace_version": "9.0.0",
+  "generated_at": "2026-11-17T03:22:39+00:00",
+  "head_sha": "825fdd973132f1acfb0b8621c983260b23bd743e",
+  "head_date": "2026-11-17T04:22:33+01:00",
+  "head_subject": "fix(cli): gate the unix-only write_provider test import",
+  "workspace_version": "9.1.0",
   "toolchain": {
     "channel": "1.91.1",
     "rust_version": "1.91",
@@ -42,16 +42,17 @@
     "env_mutation_owner": "webfang_test_utils"
   },
   "support": {
-    "stable": "9.0",
-    "stable_latest": "9.0.0",
-    "stable_initial": "9.0.0",
-    "maintenance": "8.0",
-    "maintenance_latest": "8.0.2",
-    "eol_first": "7.7",
+    "stable": "9.1",
+    "stable_latest": "9.1.0",
+    "stable_initial": "9.1.0",
+    "maintenance": "9.0",
+    "maintenance_latest": "9.0.0",
+    "eol_first": "8.0",
     "rotation": "auto: rotate-stable, third line back from STABLE",
     "states": {
-      "9.0": "STABLE",
-      "8.0": "MAINTENANCE",
+      "9.1": "STABLE",
+      "9.0": "MAINTENANCE",
+      "8.0": "EOL",
       "7.7": "EOL",
       "7.6": "EOL",
       "7.5": "EOL",
@@ -107,17 +108,17 @@
     "x86_64-unknown-linux-gnu"
   ],
   "toolchain_pins": {
-    "dtolnay_steps": 35,
-    "dtolnay_references": 37,
+    "dtolnay_steps": 36,
+    "dtolnay_references": 38,
     "sha_prefixes": {
-      "6bed0761d984": 29,
+      "6bed0761d984": 30,
       "02cb101ec7c4": 3,
       "be39649afda9": 3
     },
     "stable_explicit": [
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2154,
+        "line": 2237,
         "value": "1.91.1"
       },
       {
@@ -135,30 +136,30 @@
     "nightly_explicit": [
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2271,
+        "line": 2354,
         "value": "nightly-2026-08-27"
       },
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2341,
+        "line": 2424,
         "value": "nightly-2026-08-27"
       },
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2454,
+        "line": 2537,
         "value": "nightly-2026-08-27"
       }
     ],
     "nightly_explicit_count": 3
   },
   "counts": {
-    "rust_files": 694,
-    "assert_matches": 486,
+    "rust_files": 707,
+    "assert_matches": 497,
     "lossy_into_owned": 26,
     "lossy_to_string": 12,
-    "all_into_owned": 87,
+    "all_into_owned": 89,
     "strip_prefix_unwrap_or": 14,
-    "if_let": 642,
+    "if_let": 645,
     "allow_unsafe_code": 9,
     "unsafe_blocks": 15,
     "static_mut": 0,
@@ -185,8 +186,8 @@
   },
   "decisions": {
     "major_target": "10.0.0",
-    "backport_line": "9.0",
-    "eol_on_release": "8.0",
+    "backport_line": "9.1",
+    "eol_on_release": "9.0",
     "msrv_compat_toolchain": "1.91.1",
     "miri_gate_wording": "advisory revisado, sin rojos nuevos atribuibles al bump",
     "edition_flip": "atomic",
