@@ -67,7 +67,6 @@
       "crates/webfang_core/src/infrastructure/crawler/link_extractor.rs": 741,
       "crates/webfang_core/src/infrastructure/crawler/resource_downloader.rs": 928,
       "crates/webfang_core/src/infrastructure/crawler/robots_utils.rs": 684,
-      "crates/webfang_core/src/infrastructure/crawler/sitemap_parser.rs": 1743,
       "crates/webfang_core/src/infrastructure/crawler/url_queue.rs": 881,
       "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs": 609,
       "crates/webfang_core/src/infrastructure/downloader/spa_detector.rs": 686,
