@@ -59,13 +59,8 @@ phase on `main` (no stacked PRs). Test runner: `cargo nextest`. Local gate:
   in the same commit.
 - T2 (S4): P1 — domain types + `SsrfGuard::secure_client_with_profile` declaration + ProviderConfig
   `proxy` field + ai-providers-doc claims — inline — branch `feat/ai-proxy-domain-types` — commit
-  TBD (golden refresh + ai-providers manifest C2/C3/C6 + baseline descents travel in the same
-  commit). NOTE: the trait method's infrastructure impl travels with the declaration (a
-  declaration without impl does not compile); P2 keeps the shared-builder path, adapter wiring,
-  407 classification and CLI/registry glue.
-  `proxy` field + ai-providers-doc claims — inline — branch `feat/ai-proxy-domain-types` — commit
-  TBD (golden refresh + ai-providers manifest C2/C3/C6 + baseline descents travel in the same
-  commit). NOTE: the trait method's infrastructure impl travels with the declaration (a
+  `5cb6641a` (golden refresh + ai-providers manifest C2/C3/C6 + baseline descents travel in the
+  same commit). NOTE: the trait method's infrastructure impl travels with the declaration (a
   declaration without impl does not compile); P2 keeps the shared-builder path, adapter wiring,
   407 classification and CLI/registry glue.
 - T3 (S5): P2 — `DefaultSsrfGuard::secure_client_with_profile` impl + symmetric wiring + 407 —
@@ -131,3 +126,16 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   claim pins and the intra-crate golden set resolved against the rebased tree (golden regenerated
   with `scripts/refresh_real_tree_golden.sh`, pins refreshed from the merged symbols). T1 stays
   DELIVERED; T2 stays unpublished pending owner push/PR decision.
+- L10 (post-rebase verification, 2026-11-17): full re-run on the rebased tree with the worktree's
+  own env (`CARGO_TARGET_DIR=~/.cache/cargo-target/feat-ai-proxy-domain-types`, real cargo via
+  `PATH="$HOME/.cargo/bin:$PATH"` — the inherited shell pointed at main's target dir and the mbx
+  shim). Observed: cargo check OK · clippy --all-targets --all-features -D warnings
+  (-W cognitive_complexity -W too_many_lines) OK · fmt --check OK · rustdoc -D warnings OK ·
+  `scripts/check_ai_providers_doc.sh` OK (30 claim, 8 shape, 5 impl, 1 absent, 47 prose cites,
+  26 § refs) · ci_fast_gate **GREEN PASS=45 FAIL=0 SKIP=2** (declares pinned-lint changed-scope +
+  windows; nextest integration 4923/4923 passed) · golden set regenerated, no drift. Branch
+  `feat/ai-proxy-domain-types` @ 2 unpushed commits (feature `5cb6641a` + this log), based on main
+  `5d044bba`, identity proxy OK, clean status, nothing pushed. NOT-covered CI jobs (toolchain,
+  artifact-guards, merge-metrics,
+  test-full, security) untouched by this change; windows cross-target skipped (no cfg(windows) arm
+  touched).
