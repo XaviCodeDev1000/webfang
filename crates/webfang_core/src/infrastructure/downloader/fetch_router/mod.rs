@@ -64,8 +64,17 @@ pub enum FetchRouter {
 ///
 /// Extracted as a named seam so tests can verify `--obscura-binary`
 /// propagation without inspecting the opaque [`HybridRouter`] internals.
-fn build_obscura_layer(timeout_secs: u64, obscura_binary: &str) -> ObscuraDownloader {
+/// `user_agent` is the operator-pinned User-Agent (`None` = obscura's own
+/// default) and `max_page_bytes` caps the child's stdout read (#2722).
+fn build_obscura_layer(
+    timeout_secs: u64,
+    obscura_binary: &str,
+    user_agent: Option<&str>,
+    max_page_bytes: u64,
+) -> ObscuraDownloader {
     ObscuraDownloader::new(timeout_secs, obscura_binary)
+        .with_user_agent(user_agent.map(str::to_string))
+        .with_max_page_bytes(max_page_bytes)
 }
 
 /// Build the [`FetchRouter`] for a given JavaScript rendering strategy.
@@ -81,8 +90,10 @@ fn build_obscura_layer(timeout_secs: u64, obscura_binary: &str) -> ObscuraDownlo
 /// wreq layer; `cookie_bridge` is shared with the Chromiumoxide layer for
 /// cookie injection; `ignore_waf` bypasses WAF classification on the hybrid
 /// spa-detection path (REQ-WAF-07); `user_agent` pins the User-Agent on the
-/// wreq layer (Static and Hybrid L1) so `--user-agent` reaches the wire —
-/// `None` keeps the emulation-default + 403-rotation behavior (#503);
+/// wreq layer (Static and Hybrid L1) and on the Hybrid Layer 2 obscura
+/// invocation so `--user-agent` reaches every wire — `None` keeps the
+/// emulation-default + 403-rotation behavior on L1 and obscura's own default
+/// on L2 (#503, #2722 H5);
 /// `cancel_token` is injected into the Full strategy's
 /// [`ResourceGovernor`] so permit waits abort on shutdown (#509) — pass an
 /// inert token where no cancellation policy exists; `obscura_binary` is the
@@ -141,6 +152,12 @@ pub(crate) fn build_fetch_router(
             .with_ignore_waf(ignore_waf),
         )),
         JsStrategy::Hybrid => {
+            let l2 = build_obscura_layer(
+                timeout_secs,
+                obscura_binary,
+                user_agent.as_deref(),
+                max_page_bytes,
+            );
             let l1 = WreqDownloader::new(
                 timeout_secs,
                 connect_timeout,
@@ -155,7 +172,6 @@ pub(crate) fn build_fetch_router(
                 max_page_bytes,
             )?
             .with_ignore_waf(ignore_waf);
-            let l2 = build_obscura_layer(timeout_secs, obscura_binary);
             let l3 = ChromiumoxideDownloader::new(
                 cookie_bridge,
                 post_load_wait,
@@ -279,200 +295,4 @@ impl DownloaderFactory for DefaultDownloaderFactory {
 }
 
 #[cfg(test)]
-#[cfg(not(miri))]
-mod router_tests {
-    use super::*;
-    use crate::domain::JsStrategy;
-    use std::path::PathBuf;
-
-    fn test_cookie_bridge() -> Arc<RwLock<CookieBridge>> {
-        Arc::new(RwLock::new(CookieBridge::new()))
-    }
-
-    #[test]
-    fn build_fetch_router_static_returns_static_variant() {
-        let router = build_fetch_router(
-            &JsStrategy::Static,
-            30,
-            Profile::Chrome145,
-            test_cookie_bridge(),
-            false,
-            None,
-            Vec::new(),
-            None,
-            None,
-            CancellationToken::new(),
-            3,
-            1000,
-            10000,
-            "obscura",
-            50_000_000,
-            // F-52-b: variant-selection tests settle immediately.
-            PostLoadWait::None,
-            // F-52-c: variant-selection tests need no pinned binary.
-            None,
-        )
-        .expect("static router must build");
-        assert!(
-            matches!(router, FetchRouter::Static(_)),
-            "Static strategy must produce FetchRouter::Static"
-        );
-    }
-
-    #[test]
-    fn build_fetch_router_hybrid_returns_hybrid_variant() {
-        let router = build_fetch_router(
-            &JsStrategy::Hybrid,
-            30,
-            Profile::Chrome145,
-            test_cookie_bridge(),
-            false,
-            None,
-            Vec::new(),
-            None,
-            None,
-            CancellationToken::new(),
-            3,
-            1000,
-            10000,
-            "obscura",
-            50_000_000,
-            // F-52-b: variant-selection tests settle immediately.
-            PostLoadWait::None,
-            // F-52-c: variant-selection tests need no pinned binary.
-            None,
-        )
-        .expect("hybrid router must build");
-        assert!(
-            matches!(router, FetchRouter::Hybrid(_)),
-            "Hybrid strategy must produce FetchRouter::Hybrid"
-        );
-    }
-
-    #[test]
-    fn build_fetch_router_full_returns_full_variant() {
-        let router = build_fetch_router(
-            &JsStrategy::Full,
-            30,
-            Profile::Chrome145,
-            test_cookie_bridge(),
-            false,
-            None,
-            Vec::new(),
-            None,
-            None,
-            CancellationToken::new(),
-            3,
-            1000,
-            10000,
-            "obscura",
-            50_000_000,
-            // F-52-b: variant-selection tests settle immediately.
-            PostLoadWait::None,
-            // F-52-c: variant-selection tests need no pinned binary.
-            None,
-        )
-        .expect("full router must build");
-        assert!(
-            matches!(router, FetchRouter::Full(..)),
-            "Full strategy must produce FetchRouter::Full (chrome-direct), not Hybrid"
-        );
-    }
-
-    /// F-52-c (#1278): the configured Chrome binary must reach the Full
-    /// launcher verbatim — the seam test proves gate-certified == launched
-    /// without spawning a browser (mirrors the obscura `.binary()` seam).
-    #[cfg(feature = "chromium")]
-    #[test]
-    fn build_fetch_router_full_passes_configured_chrome_binary() {
-        let pinned = PathBuf::from("/opt/google/chrome/chrome");
-        let router = build_fetch_router(
-            &JsStrategy::Full,
-            30,
-            Profile::Chrome145,
-            test_cookie_bridge(),
-            false,
-            None,
-            Vec::new(),
-            None,
-            None,
-            CancellationToken::new(),
-            3,
-            1000,
-            10000,
-            "obscura",
-            50_000_000,
-            PostLoadWait::None,
-            Some(pinned.clone()),
-        )
-        .expect("full router must build");
-        match router {
-            FetchRouter::Full(dl, _) => assert_eq!(
-                dl.chrome_binary(),
-                Some(pinned.as_path()),
-                "the Full launcher must carry the configured chrome binary"
-            ),
-            _other => panic!("expected Full router for the chrome-binary seam"),
-        }
-    }
-
-    /// #787: the `--obscura-binary` value must reach the Hybrid Layer 2
-    /// downloader verbatim — the seam test proves the configured path is
-    /// passed through instead of being replaced by the bare `obscura` name.
-    #[test]
-    fn build_obscura_layer_passes_configured_binary() {
-        let layer = build_obscura_layer(30, "/opt/tools/obscura");
-        assert_eq!(
-            layer.binary(),
-            PathBuf::from("/opt/tools/obscura").as_path(),
-            "the Hybrid Layer 2 must use the configured --obscura-binary"
-        );
-    }
-
-    /// #787: the default bare `obscura` name still resolves to the same
-    /// default binary (backwards compatibility).
-    #[test]
-    fn build_obscura_layer_default_preserved() {
-        let layer = build_obscura_layer(30, "obscura");
-        assert_eq!(
-            layer.binary(),
-            PathBuf::from("obscura").as_path(),
-            "the default bare name must be preserved on Layer 2"
-        );
-    }
-
-    /// F-52-b (#1277): the configured settle mode must reach the Full
-    /// launcher verbatim — proves propagation without spawning a browser.
-    #[cfg(feature = "chromium")]
-    #[test]
-    fn build_fetch_router_full_passes_configured_wait_mode() {
-        let router = build_fetch_router(
-            &JsStrategy::Full,
-            30,
-            Profile::Chrome145,
-            test_cookie_bridge(),
-            false,
-            None,
-            Vec::new(),
-            None,
-            None,
-            CancellationToken::new(),
-            3,
-            1000,
-            10000,
-            "obscura",
-            50_000_000,
-            PostLoadWait::Fixed(750),
-            None,
-        )
-        .expect("full router must build");
-        match router {
-            FetchRouter::Full(dl, _) => assert_eq!(
-                dl.post_load_wait(),
-                PostLoadWait::Fixed(750),
-                "the Full launcher must carry the configured wait mode"
-            ),
-            _other => panic!("expected Full router for the wait-mode seam"),
-        }
-    }
-}
+mod router_tests;

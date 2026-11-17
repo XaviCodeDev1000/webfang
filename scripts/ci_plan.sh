@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLASSIFIER="${CI_PLAN_CLASSIFIER:-$SCRIPT_DIR/ci_path_classifier.sh}"
 CROSSPLATFORM="${CI_PLAN_CROSSPLATFORM:-$SCRIPT_DIR/ci_crossplatform_scope.sh}"
 
-FULL_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,fmt,clippy,code-quality,test-core,test-full,test-release-provenance,security,doc-quality"
+FULL_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,fmt,clippy,code-quality,test-core,test-full,test-release-provenance,obscura-hybrid,security,doc-quality"
 NARROW_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,security,doc-quality"
 
 EVENT_NAME="${EVENT_NAME:-${GITHUB_EVENT_NAME:-}}"
