@@ -35,10 +35,8 @@ use url::Url;
 
 use crate::domain::credentials::ApiKey;
 use crate::domain::embedding_port::EmbeddingPort;
-use crate::domain::network_policy::NetworkPolicy;
 use crate::domain::providers::ProviderConfig;
 use crate::error::SemanticError;
-use crate::infrastructure::llm::http_client::build_guarded_http_client;
 use crate::infrastructure::llm::provider::ProviderInitError;
 
 /// A boxed future for dyn-compatible async port methods.
@@ -156,6 +154,8 @@ pub struct RemoteEmbeddingAdapter {
     /// `"encrypted_file"`), para que un 401 pueda decir en el log si se
     /// mandó credencial o no. Nunca deriva del secreto.
     auth_source: &'static str,
+    /// ADR-0021 proxy-auth provenance for the 407 diagnostic; never a secret.
+    proxy_auth_configured: bool,
     provider_id: String,
     pinned_dim: Option<usize>,
     dim: OnceLock<usize>,
@@ -166,25 +166,6 @@ pub struct RemoteEmbeddingAdapter {
     usage_prompt_tokens: std::sync::atomic::AtomicU64,
     usage_total_tokens: std::sync::atomic::AtomicU64,
     usage_request_count: std::sync::atomic::AtomicU64,
-}
-
-/// Build the guarded HTTP client for a remote embedding provider.
-///
-/// Same timeouts as the completion path (60s request / 10s connect); the
-/// SSRF guard is the parameterized variant carrying this provider's
-/// `allow_loopback` AND its B2 `network_policy` allowlist — never the process
-/// registry. Both travel as per-client parameters, so two providers with
-/// different policies in one process cannot influence each other.
-///
-/// # Errors
-///
-/// [`ProviderInitError::HttpClient`] if the builder fails.
-fn embedding_http_client(
-    allow_loopback: bool,
-    network_policy: &NetworkPolicy,
-) -> Result<wreq::Client, ProviderInitError> {
-    build_guarded_http_client(allow_loopback, Some(network_policy))
-        .map_err(|e| ProviderInitError::HttpClient(e.to_string()))
 }
 
 /// Render an error together with its `source` chain.
@@ -446,21 +427,6 @@ fn parse_embedding_body(
 }
 
 impl RemoteEmbeddingAdapter {
-    /// Build the adapter resolving the credential ONCE (startup).
-    ///
-    /// The entry gate runs first (forbidden `base_url` fails here), then the
-    /// credential resolves, then the parameterized guarded client is built.
-    ///
-    /// # Errors
-    ///
-    /// [`ProviderInitError`] when the entry gate rejects the URL, the
-    /// credential does not resolve, the model is undeclared, or the shared
-    /// client cannot be built.
-    pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
-        let http = embedding_http_client(config.allow_loopback, &config.network_policy)?;
-        Self::with_http(config, http)
-    }
-
     /// Variant with an already-built HTTP client (shared process client or
     /// wiremock in tests).
     ///
@@ -478,38 +444,7 @@ impl RemoteEmbeddingAdapter {
         config: ProviderConfig,
         http: wreq::Client,
     ) -> Result<Self, ProviderInitError> {
-        entry_gate(&config)?;
-        let auth_source = config.auth.label();
-        let secret = config
-            .auth
-            .resolve()
-            .map_err(|source| ProviderInitError::AuthFailed {
-                provider_id: config.id.clone(),
-                source,
-            })?;
-        let model = config
-            .model
-            .clone()
-            .ok_or_else(|| ProviderInitError::InvalidBaseUrl {
-                provider_id: config.id.clone(),
-                source: crate::error::ScraperError::Config(format!(
-                "el provider '{}' no declara `model`: el endpoint remoto lo exige en cada request",
-                config.id
-            )),
-            })?;
-        Ok(Self {
-            http,
-            base_url: config.base_url.clone(),
-            model,
-            api_key: secret,
-            auth_source,
-            provider_id: config.id.clone(),
-            pinned_dim: config.embedding_dim,
-            dim: OnceLock::new(),
-            usage_prompt_tokens: std::sync::atomic::AtomicU64::new(0),
-            usage_total_tokens: std::sync::atomic::AtomicU64::new(0),
-            usage_request_count: std::sync::atomic::AtomicU64::new(0),
-        })
+        Self::with_http_and_proxy_auth(config, http, false)
     }
 
     /// Provider identifier (startup diagnostics and error context).
@@ -646,6 +581,14 @@ impl RemoteEmbeddingAdapter {
                     // que esta fila evita.
                     if status == 401 {
                         return Err(self.unauthorized_error(status));
+                    }
+                    // 407 is a terminal proxy-auth failure: zero retries.
+                    if status == 407 {
+                        return Err(proxy_auth::proxy_auth_error(
+                            &self.provider_id,
+                            self.proxy_auth_configured,
+                            status,
+                        ));
                     }
                     return Err(last_status_error(&self.provider_id, status));
                 },
@@ -873,12 +816,15 @@ impl RemoteEmbeddingAdapter {
 
 #[cfg(test)]
 mod fixtures;
+mod proxy_auth;
+mod proxy_wiring;
 
 #[cfg(test)]
 mod tests {
     use super::fixtures::*;
     use super::*;
     use crate::domain::auth_source::AuthSource;
+    use crate::domain::network_policy::NetworkPolicy;
 
     // --- Trait contract through the vtable ---
 
