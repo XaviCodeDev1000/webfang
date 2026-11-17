@@ -27,10 +27,11 @@ use std::path::Path;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use super::input_lines::{parse_url_lines, warn_rejected_lines, BatchInputLines};
 use super::processor::{BatchError, BatchProcessor, BatchResult};
 use super::{BatchJob, BatchJobStatus};
 use crate::application::crawler::content_sink::CrawlContentSink;
-use crate::domain::{CrawlerConfig, ValidUrl};
+use crate::domain::CrawlerConfig;
 use crate::error::ScraperError;
 
 /// Queue-based manager for batch crawl jobs
@@ -41,6 +42,9 @@ use crate::error::ScraperError;
 pub struct BatchManager {
     processor: BatchProcessor,
     jobs: Vec<BatchJob>,
+    /// Input accounting when the URLs came from `--batch-file`/stdin (#2795);
+    /// `None` when the manager was built from in-process URLs.
+    input_stats: Option<BatchInputLines>,
 }
 
 impl BatchManager {
@@ -54,6 +58,7 @@ impl BatchManager {
         Self {
             processor: BatchProcessor::new_nonzero(max_concurrent),
             jobs: Vec::new(),
+            input_stats: None,
         }
     }
 
@@ -122,7 +127,14 @@ impl BatchManager {
         self
     }
 
-    /// Read URLs from a file (one URL per line, blank lines and `#` comments ignored)
+    /// Input accounting for `--batch-file`/stdin sources, when present (#2795).
+    #[must_use]
+    pub fn input_lines(&self) -> Option<&BatchInputLines> {
+        self.input_stats.as_ref()
+    }
+
+    /// Read URLs from a file (one URL per line, blank lines and `#` comments
+    /// ignored), retaining the per-line input accounting (#2795)
     ///
     /// # Errors
     ///
@@ -133,12 +145,12 @@ impl BatchManager {
         max_concurrent: NonZeroUsize,
     ) -> Result<Self, std::io::Error> {
         let content = std::fs::read_to_string(path)?;
-        let (urls, skipped) = Self::parse_url_lines(&content);
-        Self::warn_skipped_lines(&skipped);
-        Ok(Self::from_urls(urls, config, max_concurrent))
+        let (urls, stats) = parse_url_lines(&content);
+        Ok(Self::from_parsed_lines(urls, stats, config, max_concurrent))
     }
 
-    /// Read URLs from stdin (one URL per line)
+    /// Read URLs from stdin (one URL per line), retaining the per-line input
+    /// accounting (#2795)
     ///
     /// # Errors
     ///
@@ -149,46 +161,23 @@ impl BatchManager {
     ) -> Result<Self, std::io::Error> {
         let mut content = String::new();
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut content)?;
-        let (urls, skipped) = Self::parse_url_lines(&content);
-        Self::warn_skipped_lines(&skipped);
-        Ok(Self::from_urls(urls, config, max_concurrent))
+        let (urls, stats) = parse_url_lines(&content);
+        Ok(Self::from_parsed_lines(urls, stats, config, max_concurrent))
     }
 
-    /// Log lines rejected at the batch entry (F-R3-1). Never echoes the
-    /// offending text — a malformed line can still carry credential-looking
-    /// content, and traces must not capture it.
-    fn warn_skipped_lines(skipped: &[String]) {
-        for reason in skipped {
-            tracing::warn!(reason = %reason, "batch line rejected by URL entry validation");
-        }
-        if !skipped.is_empty() {
-            tracing::warn!(count = skipped.len(), "batch lines skipped");
-        }
-    }
-
-    /// Parse URL lines from text, skipping blanks and comments
-    ///
-    /// Each kept line is hardened through [`ValidUrl`] at the batch entry
-    /// (scheme allow-list + credential strip, F-R3-1): the raw string is
-    /// replaced by its sanitized rendering before it enters any job, so
-    /// credentials from `--batch-file`/stdin never reach logs, traces, or
-    /// the processor. Lines that fail `ValidUrl` are dropped and counted
-    /// in the returned skipped-line list.
-    fn parse_url_lines(content: &str) -> (Vec<String>, Vec<String>) {
-        let mut kept: Vec<String> = Vec::new();
-        let mut skipped: Vec<String> = Vec::new();
-        for line in content.lines().map(str::trim) {
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            match ValidUrl::parse(line) {
-                Ok(valid) => kept.push(valid.as_url().to_string()),
-                Err(e) => {
-                    skipped.push(e.to_string());
-                },
-            }
-        }
-        (kept, skipped)
+    /// Assemble a manager from already-parsed input lines: warn about the
+    /// rejected ones, then retain the accounting so the CLI can reconcile it
+    /// (#2795).
+    fn from_parsed_lines(
+        urls: Vec<String>,
+        stats: BatchInputLines,
+        config: CrawlerConfig,
+        max_concurrent: NonZeroUsize,
+    ) -> Self {
+        warn_rejected_lines(&stats.rejected_details);
+        let mut manager = Self::from_urls(urls, config, max_concurrent);
+        manager.input_stats = Some(stats);
+        manager
     }
 
     /// Process all queued jobs sequentially
@@ -239,7 +228,12 @@ impl BatchManager {
         cancel: &CancellationToken,
     ) -> BatchManagerSummary {
         let results = self.process_all_cancellable(cancel).await;
-        let mut summary = BatchManagerSummary::default();
+        // #2795: the input accounting travels WITH the summary so the CLI can
+        // reconcile lines read vs valid/rejected/blank/comment in one line.
+        let mut summary = BatchManagerSummary {
+            input_lines: self.input_stats.clone(),
+            ..BatchManagerSummary::default()
+        };
 
         // Consume by value: `ScraperError` is not `Clone`, so error tuples are
         // moved into the summary rather than cloned (#537).
@@ -309,6 +303,10 @@ pub struct BatchManagerSummary {
     /// exit-code routing can aggregate severity via
     /// [`ScraperError::classify`] (#537).
     pub errors: Vec<(String, ScraperError)>,
+    /// Input accounting when the URLs came from `--batch-file`/stdin (#2795);
+    /// lets the CLI summary reconcile lines read vs valid/rejected/blank/
+    /// comment. `None` when the manager was built from in-process URLs.
+    pub input_lines: Option<BatchInputLines>,
 }
 
 #[cfg(test)]
@@ -340,53 +338,6 @@ mod tests {
     }
 
     #[test]
-    fn test_manager_parse_url_lines() {
-        let content = r#"
-# comment line
-https://example.com
-    
-https://example.com/about
-  # indented comment
-https://example.com/blog
-"#;
-        let (urls, skipped) = BatchManager::parse_url_lines(content);
-        assert!(skipped.is_empty());
-        // Url normalization adds the trailing slash to bare hosts.
-        assert_eq!(urls[0], "https://example.com/");
-        assert_eq!(urls[1], "https://example.com/about");
-        assert_eq!(urls[2], "https://example.com/blog");
-    }
-
-    #[test]
-    fn test_manager_parse_url_lines_rejects_non_http_and_strips_credentials() {
-        // F-R3-1: entry validation is uniform with the seed path (#1240).
-        let (urls, skipped) = BatchManager::parse_url_lines(
-            "https://user:secret@example.com/page\nfile:///etc/passwd\nnot a url",
-        );
-        // The valid line survives stripped: no credential text anywhere.
-        assert_eq!(urls, vec!["https://example.com/page".to_string()]);
-        // Both invalid lines are rejected at the entry.
-        assert_eq!(skipped.len(), 2);
-        // Rejection reasons never echo the offending line.
-        assert!(!skipped[0].contains("file:"));
-        assert!(!skipped[1].contains("not a url"));
-    }
-
-    #[test]
-    fn test_manager_parse_empty() {
-        let (urls, skipped) = BatchManager::parse_url_lines("");
-        assert!(urls.is_empty());
-        assert!(skipped.is_empty());
-    }
-
-    #[test]
-    fn test_manager_parse_only_comments() {
-        let (urls, skipped) = BatchManager::parse_url_lines("# just a comment\n# another");
-        assert!(urls.is_empty());
-        assert!(skipped.is_empty());
-    }
-
-    #[test]
     fn test_manager_from_file() {
         let dir = std::env::temp_dir().join("batch_manager_test");
         let _ = std::fs::create_dir_all(&dir);
@@ -396,6 +347,9 @@ https://example.com/blog
         let manager = BatchManager::from_file(&file_path, test_config(), nz(2)).unwrap();
         assert_eq!(manager.job_count(), 1);
         assert_eq!(manager.url_count(), 2);
+        // #2795: a file source retains its input accounting.
+        let stats = manager.input_lines().expect("file source must carry stats");
+        assert_eq!((stats.lines_read, stats.valid, stats.rejected), (2, 2, 0));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

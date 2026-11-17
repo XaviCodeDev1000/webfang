@@ -15,6 +15,7 @@
 
 use tracing::{error, info, warn};
 
+use super::batch_summary::{enforce_strict_input, input_accounting, log_batch_summary};
 use crate::application::batch::{BatchManager, BatchManagerSummary};
 use crate::application::crawl_options::{CrawlLimits, CrawlOptions};
 use crate::application::crawler::BoundedFileSink;
@@ -383,8 +384,18 @@ async fn prepare_batch_manager(
             // contract as the crawl-classic resume (#2609).
             info!("resume: all batch URLs already processed, nothing pending");
         } else {
+            // #2795: the error counts what the source yielded and why nothing
+            // is runnable — a bare "no URLs" sent the operator to count lines
+            // by hand. Exit stays 64: an input that yields no URL is a usage
+            // error (matrix row 15), strict-or-not.
             error!("No URLs provided for batch processing");
-            return Err(CliExit::UsageError("No URLs provided".into()));
+            let accounting = manager
+                .input_lines()
+                .map(input_accounting)
+                .unwrap_or_else(|| "sin líneas de entrada".to_string());
+            return Err(CliExit::UsageError(format!(
+                "No hay URLs para procesar ({accounting})"
+            )));
         }
     }
 
@@ -803,47 +814,6 @@ async fn extract_batch_content(
 
 /// Print the batch completion summary and log each failed URL.
 ///
-/// `root_correlation` is the batch run-root identity: each failed URL emits
-/// the shared operational error contract carrying it, so trace-file queries
-/// join failures with the run (#1604).
-///
-/// The cause travels WITH the summary, not only with the per-URL event the
-/// processor emits: this is the event an operator reads after the run, and
-/// before #2784 it was the one place a batch failure was reported with no
-/// cause at all.
-fn log_batch_summary(summary: &BatchManagerSummary, root_correlation: &domain::CorrelationId) {
-    println!(
-        "Batch complete: {}/{} succeeded, {} failed",
-        summary.succeeded, summary.total_urls, summary.failed
-    );
-
-    // #2823: the two failure populations are reported APART. A run whose
-    // resolver was down used to print exactly like a site that blocked every
-    // URL, and the operator had no way to tell them apart from the output.
-    if summary.resolution_failures > 0 || summary.block_failures > 0 {
-        println!(
-            "Failures by cause: {} resolution, {} site refusals",
-            summary.resolution_failures, summary.block_failures
-        );
-    }
-    if summary.aborted_on_resolution {
-        println!(
-            "Batch stopped early: the resolver is not answering ({} resolution failures)",
-            summary.resolution_failures
-        );
-    }
-
-    for (url, err) in &summary.errors {
-        crate::infrastructure::observability::log_scrape_error_with_cause(
-            err,
-            url,
-            "batch",
-            Some(root_correlation),
-            "batch URL failed",
-        );
-    }
-}
-
 /// Resolve the TLS/H2 fingerprint for the batch crawl engine.
 ///
 /// An unknown profile is a config error (exit 78), matching the scrape phase —
@@ -889,18 +859,20 @@ pub(crate) async fn load_batch_manager(
     crawler_config: CrawlerConfig,
     budget: &crate::domain::budget::BudgetModel,
 ) -> Result<BatchManager, CliExit> {
-    if let Some(ref path) = opts.batch.batch_file {
+    let manager = if let Some(ref path) = opts.batch.batch_file {
         info!("Reading URLs from file: {}", path.display());
         // #2355: the budget tier is already `NonZeroUsize` — hand the typed
         // value through instead of downgrading to `usize` and revalidating.
         BatchManager::from_file(path, crawler_config, budget.batch().nonzero()).map_err(|e| {
             error!(error = %e, "Failed to read URLs from file");
             CliExit::IoError(format!("Failed to read URLs from file: {e}"))
-        })
+        })?
     } else {
         info!("Reading URLs from stdin");
-        load_batch_manager_from_stdin(crawler_config, budget.batch().nonzero()).await
-    }
+        load_batch_manager_from_stdin(crawler_config, budget.batch().nonzero()).await?
+    };
+    enforce_strict_input(&manager, opts)?;
+    Ok(manager)
 }
 
 /// Read batch URLs from stdin on a blocking thread.

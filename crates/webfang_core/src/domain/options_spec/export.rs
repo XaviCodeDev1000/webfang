@@ -198,7 +198,7 @@ pub const BATCH_FILE: OptionSpec = OptionSpec {
     aliases: &[],
     env: Some("WEBFANG_BATCH_FILE"),
     default: None,
-    help: "Path to a file containing URLs to scrape (one per line), one page per URL, no crawling",
+    help: "Path to a file containing absolute http(s) URLs to scrape (one per line, one page per URL, no crawling). Blank lines and # comments are ignored; lines that fail URL validation are discarded with a warning carrying their line number, and the final summary reconciles the counts",
     heading: Some("Batch Processing"),
     kind: ValueKind::Path,
     visible_aliases: &[],
@@ -240,6 +240,26 @@ pub const EXPORT_CHECKPOINT: OptionSpec = OptionSpec {
     help: "Flush captured pages to markdown every N pages during a batch (0 = only at the clean close)",
     heading: Some("Batch Processing"),
     kind: ValueKind::uint_unbounded(),
+    visible_aliases: &[],
+    nullable: false,
+    description_override: None,
+    feature_gate: None,
+    value_delimiter: None,
+};
+
+/// `--strict-input` — fail on rejected batch input lines instead of
+/// continuing (#2795).
+pub const STRICT_INPUT: OptionSpec = OptionSpec {
+    id: "strict_input",
+    value_name: "STRICT_INPUT",
+    long: "strict-input",
+    short: None,
+    aliases: &[],
+    env: Some("WEBFANG_STRICT_INPUT"),
+    default: Some(DefaultValue::Bool(false)),
+    help: "Fail with exit 78 (configuration error) when any batch input line is rejected as invalid, instead of continuing with the rest",
+    heading: Some("Batch Processing"),
+    kind: ValueKind::Bool,
     visible_aliases: &[],
     nullable: false,
     description_override: None,
@@ -320,6 +340,7 @@ pub const GROUP: &[OptionSpec] = &[
     BATCH_FILE,
     BATCH_CONCURRENCY,
     EXPORT_CHECKPOINT,
+    STRICT_INPUT,
     PIPELINE,
     PIPELINE_OUTPUT,
     RETENTION_DAYS,

@@ -6,6 +6,7 @@
 pub mod args;
 pub mod batch_flow;
 pub mod batch_flush;
+pub mod batch_summary;
 pub mod commands;
 pub mod completions;
 pub mod config;
