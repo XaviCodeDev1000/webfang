@@ -90,7 +90,6 @@
       "crates/webfang_mcp/src/mcp_server/handlers/content.rs": 793,
       "crates/webfang_mcp/src/mcp_server/handlers/export.rs": 1500,
       "crates/webfang_mcp/src/mcp_server/handlers/security.rs": 898,
-      "crates/webfang_mcp/src/mcp_server/metrics.rs": 1770,
       "crates/webfang_mcp/src/mcp_server/panic_containment.rs": 585,
       "crates/webfang_mcp/src/mcp_server/params.rs": 1552,
       "crates/webfang_mcp/src/mcp_server/path_gate.rs": 957,
