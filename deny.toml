@@ -202,6 +202,12 @@ ignore = [
     # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0406
     # Expires: 2027-03-20
     { id = "RUSTSEC-2026-0406", reason = "zstd-safe 7.2.4 zstdmt is not enabled; only remaining consumer is wreq-util static emulation compression" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0543
+    # Expires: 2027-05-17
+    { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45 unmaintained (all versions); used directly across webfang_core (domain clock, entities, credentials, checkpoints and retention) and transitively by rmcp/schemars in webfang_mcp; maintenance-only advisory with no security finding, migration to jiff is a repo-wide change tracked separately" },
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0542
+    # Expires: 2027-05-17
+    { id = "RUSTSEC-2026-0542", reason = "humantime 2.4.0 unmaintained (all versions); only consumer is console-subscriber 0.4.1 for human-readable duration formatting in tokio-console diagnostics, never untrusted input; maintenance-only advisory with no security finding" },
 ]
 
 [licenses]

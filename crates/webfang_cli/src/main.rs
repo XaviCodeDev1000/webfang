@@ -47,6 +47,7 @@ use webfang_core::infrastructure::scraper::dom_inspector::DefaultDomInspector;
 use webfang_core::{init_logging_dual, is_no_color, Args, Commands};
 
 mod provider_id;
+mod proxy_wire;
 
 use provider_id::generated_provider_id;
 
@@ -906,13 +907,18 @@ async fn resolve_remote_embedding(
         return Ok(None);
     }
     let providers = load_providers();
-    webfang_core::cli::llm_wire::build_embedding_provider(opts, &providers, opts.ai_config.offline)
-        .await
-        .map(|adapter| {
-            adapter.map(|a| {
-                a as std::sync::Arc<dyn webfang_core::domain::embedding_port::EmbeddingPort>
-            })
-        })
+    let proxy_registry = proxy_wire::load_proxy_registry()?;
+    webfang_core::cli::llm_wire::build_embedding_provider_with_registry(
+        opts,
+        &providers,
+        opts.ai_config.offline,
+        &proxy_registry,
+    )
+    .await
+    .map(|adapter| {
+        adapter
+            .map(|a| a as std::sync::Arc<dyn webfang_core::domain::embedding_port::EmbeddingPort>)
+    })
 }
 
 /// Resolve the remote embedding adapter for the Tier 2 semantic inspector (ADR-0004).
@@ -1008,7 +1014,7 @@ async fn build_and_run(opts: CrawlOptions) -> CliExit {
         let providers_cfg = ConfigDefaults::load(&resolve_config_path());
         let registry = webfang_core::domain::providers::ProviderRegistry::new(
             webfang_core::domain::providers::ProvidersConfig {
-                providers: providers_cfg.providers,
+                providers: providers_cfg.providers.clone(),
             },
         );
         let provider_cfg = match registry.resolve_default_completion() {
@@ -1019,18 +1025,10 @@ async fn build_and_run(opts: CrawlOptions) -> CliExit {
                 ));
             },
         };
-        let http = match webfang_core::infrastructure::llm::provider::build_default_http_client() {
-            Ok(h) => h,
-            Err(e) => return CliExit::ConfigError(format!("cliente HTTP: {e}")),
+        let provider = match proxy_wire::build_completion_provider(&providers_cfg, provider_cfg) {
+            Ok(p) => p,
+            Err(e) => return e,
         };
-        let provider =
-            match webfang_core::infrastructure::llm::provider::OpenAiCompatibleProvider::with_http(
-                provider_cfg.clone(),
-                http,
-            ) {
-                Ok(p) => p,
-                Err(e) => return CliExit::ConfigError(format!("provider LLM: {e}")),
-            };
 
         // Build Container and inject provider — validates startup per §8b
         let container = match webfang_core::application::container::Container::new(

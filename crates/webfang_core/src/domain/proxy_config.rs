@@ -354,6 +354,22 @@ impl ValidatedProxy {
         &self.matcher
     }
 
+    /// Install a resolved Basic-auth credential into the proxy matcher.
+    ///
+    /// Consuming on purpose: every downstream consumer — including the
+    /// guard's `wreq_proxy()` clone — must see the credentialed matcher, never
+    /// the anonymous one. `wreq` copies the secret into its own URI/header
+    /// storage (not zeroized, outside this crate's control); this type never
+    /// logs or serializes it, and the declaration's `auth` provenance stays
+    /// available for diagnostics.
+    #[must_use]
+    pub fn with_basic_auth(self, username: &str, password: &str) -> Self {
+        Self {
+            matcher: self.matcher.clone().basic_auth(username, password),
+            ..self
+        }
+    }
+
     /// The declared Basic-auth credential, unresolved.
     #[must_use]
     pub fn auth(&self) -> Option<&ProxyAuth> {

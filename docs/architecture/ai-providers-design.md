@@ -229,7 +229,7 @@ Verificado en `crates/webfang_core/src/domain/providers.rs:207` (companions en `
 
 Las capacidades no necesitan un método propio: se leen de `ProviderConfig.capabilities` (`Vec<Capability>`, `providers.rs:93`), y `resolve()` valida contra esa lista antes de devolver la config. El diseño no incluye un accessor de capacidades separado.
 
-Esto permite que un caller resuelva un provider por slot (capabilidad) sin pasar por un handle genérico. Los consumidores reales del registry son la resolución de la config de embeddings (`crates/webfang_core/src/cli/llm_wire.rs:97` y `:103`) y el diagnóstico de `webfang doctor` (`crates/webfang_core/src/cli/commands/doctor.rs:59` y `:72`). `VaultSearchService` **no** es uno de ellos: recibe su `Arc<dyn EmbeddingPort>` por inyección al construirse (`crates/webfang_core/src/application/vault_search.rs:70`) y nunca consulta el registry — citarlo como consumidor del registry sería falso.
+Esto permite que un caller resuelva un provider por slot (capabilidad) sin pasar por un handle genérico. Los consumidores reales del registry son la resolución de la config de embeddings (`crates/webfang_core/src/cli/llm_wire.rs:74` y `:80`) y el diagnóstico de `webfang doctor` (`crates/webfang_core/src/cli/commands/doctor.rs:59` y `:72`). `VaultSearchService` **no** es uno de ellos: recibe su `Arc<dyn EmbeddingPort>` por inyección al construirse (`crates/webfang_core/src/application/vault_search.rs:70`) y nunca consulta el registry — citarlo como consumidor del registry sería falso.
 
 ### 6. `TenantAiContext` — contexto multi-tenant (contrato retirado)
 
@@ -336,8 +336,8 @@ Las decisiones de producto del wizard, fijadas en revisión antes de escribirlo:
 - `[x]` `ProviderRegistry::resolve(provider_id, Capability)` falla con `RegistryError::ProviderNotFound` si el ID no existe (`domain/providers.rs:207`, test en `:318`).
 - `[x]` `ProviderRegistry::resolve(provider_id, Capability::Embedding)` falla con `RegistryError::CapabilityMismatch` si el provider no declara `Embedding` (`providers.rs:219`, test en `:327`).
 - `[x]` `ProviderRegistry::resolve(provider_id, Capability::Completion)` falla con `RegistryError::CapabilityMismatch` si el provider no declara `Completion` (mismo camino de capacidad).
-- `[x]` `OpenAiCompatibleProvider` envuelve `OpenAiLlmClient` y resuelve la credencial una vez en startup (`infrastructure/llm/provider.rs:107`, `new()` en `:123`).
-- `[x]` `build_default_http_client()` produce la config canónica (Chrome145, 60s timeout, 10s connect, SSRF guard armado) — `infrastructure/llm/provider.rs:87-89` vía el constructor compartido `infrastructure/llm/http_client.rs`.
+- `[x]` `OpenAiCompatibleProvider` envuelve `OpenAiLlmClient` y resuelve la credencial una vez en startup (`infrastructure/llm/provider.rs:108`, `new()` en `:127`).
+- `[x]` `build_default_http_client()` produce la config canónica (Chrome145, 60s timeout, 10s connect, SSRF guard armado) — `infrastructure/llm/provider.rs:88-90` vía el constructor compartido `infrastructure/llm/http_client.rs`.
 
 > `resolve()` devuelve `&ProviderConfig`, no un port: la construcción del adapter es de la capa de binario (`crates/webfang_core/src/cli/llm_wire.rs`). Ver §5.
 
@@ -373,11 +373,11 @@ Estado real de cada punto del diseño, verificado contra el árbol.
 
 1. [x] **`AuthSource` + `AuthError` + `resolve()`** — `crates/webfang_core/src/domain/auth_source.rs` (`AuthError` `:20`, `AuthSource` `:58`, `resolve()` `:118`).
 2. [x] **`DetectedStore::detect()`** — `crates/webfang_core/src/domain/local_secret_store.rs` (`DetectedStore` `:16`, `detect()` `:48`). El tipo que este diseño llamaba `LocalSecretStore` se implementó como `DetectedStore`; el nombre antiguo quedó solo como nombre de módulo (ver §7).
-3. [x] **`build_default_http_client()`** extraída de `OpenAiLlmClient` — `crates/webfang_core/src/infrastructure/llm/provider.rs:87` (no en `infrastructure/http/`).
+3. [x] **`build_default_http_client()`** extraída de `OpenAiLlmClient` — `crates/webfang_core/src/infrastructure/llm/provider.rs:88` (no en `infrastructure/http/`).
 4. [x] **`OpenAiLlmClient::with_http(http, base_url, api_key)`** — `crates/webfang_core/src/infrastructure/llm/client.rs:113`.
 5. [x] **`ProvidersConfig` + `ProviderRegistry`** — `crates/webfang_core/src/domain/providers.rs` (`ProvidersConfig` `:153`, `ProviderRegistry` `:184`); viven en `domain/`, no en `application/`.
-6. [x] **`OpenAiCompatibleProvider`** — `crates/webfang_core/src/infrastructure/llm/provider.rs:107`.
-7. [x] **Integración con container** — el wiring real está en `crates/webfang_core/src/cli/llm_wire.rs:45` (`build_llm_provider`) y `:130` (`build_embedding_provider`), no en `container.rs`.
+6. [x] **`OpenAiCompatibleProvider`** — `crates/webfang_core/src/infrastructure/llm/provider.rs:108`.
+7. [x] **Integración con container** — el wiring real está en `crates/webfang_core/src/cli/llm_wire.rs:46` (`build_llm_provider`) y `:107` (`build_embedding_provider`), no en `container.rs`.
 8. [x] **Tests de integración** — `crates/webfang_core/tests/auth_source_none_test.rs` (`:35`, `:457`).
 9. [ ] **Fixtures de contrato** (`crates/webfang_core/tests/fixtures/{openai,openrouter,freellm,groq}.json`) — se mantienen por decisión del owner: la cobertura cross-proveedor sigue siendo necesaria.
 
@@ -528,18 +528,18 @@ impl   | crates/webfang_core/src/domain/local_secret_store.rs | 16 | pub struct 
 claim  | crates/webfang_core/src/domain/local_secret_store.rs | 37 | pub recommendation: AuthSource,
 claim  | crates/webfang_core/src/domain/local_secret_store.rs | 48 | pub fn detect() -> Self {
 # --- wiring binario ----------------------------------------------------------
-claim  | crates/webfang_core/src/cli/llm_wire.rs | 45 | pub fn build_llm_provider(
-claim  | crates/webfang_core/src/cli/llm_wire.rs | 130 | pub async fn build_embedding_provider(
-claim  | crates/webfang_core/src/cli/llm_wire.rs | 97 | registry.resolve(id, Capability::Embedding)
-claim  | crates/webfang_core/src/cli/llm_wire.rs | 103 | registry.resolve_default_embedding()
+claim  | crates/webfang_core/src/cli/llm_wire.rs | 46 | pub fn build_llm_provider(
+claim  | crates/webfang_core/src/cli/llm_wire.rs | 107 | pub async fn build_embedding_provider(
+claim  | crates/webfang_core/src/cli/llm_wire.rs | 74 | registry.resolve(id, Capability::Embedding)
+claim  | crates/webfang_core/src/cli/llm_wire.rs | 80 | registry.resolve_default_embedding()
 claim  | crates/webfang_core/src/cli/commands/doctor.rs | 59 | registry.resolve(id, Capability::Embedding)
 claim  | crates/webfang_core/src/cli/commands/doctor.rs | 72 | registry.resolve_default_embedding()
 claim  | crates/webfang_core/src/application/vault_search.rs | 70 | embedding: Arc<dyn EmbeddingPort>,
 # --- infraestructura LLM -----------------------------------------------------
-claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 107 | pub struct OpenAiCompatibleProvider {
-claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 123 | pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
-claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 87 | pub fn build_default_http_client() -> Result<wreq::Client, ProviderInitError> {
-claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 89 | }
+claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 108 | pub struct OpenAiCompatibleProvider {
+claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 127 | pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
+claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 88 | pub fn build_default_http_client() -> Result<wreq::Client, ProviderInitError> {
+claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 90 | }
 claim  | crates/webfang_core/src/infrastructure/llm/client.rs | 113 | pub fn with_http(client: wreq::Client, base_url: Url, api_key: ApiKey) -> Self {
 # --- tests de integración -----------------------------------------------------
 claim  | crates/webfang_core/tests/auth_source_none_test.rs | 35 | OpenAiCompatibleProvider
