@@ -63,7 +63,7 @@ Granite RSS budgets and the cold-pull check went with the deleted `model_asset_t
 ## Sitemap correction
 
 Stale roadmap claim "7 sitemap tests ignored" is **false**. Reality:
-- **1 ignored**: `test_parse_from_url_depth_one_attempts_fetch` in `crates/webfang_core/src/infrastructure/crawler/sitemap_parser.rs` (`requires network — hits real DNS for invalid-host-xyz-12345.com`, by design)
+- **1 ignored**: `test_parse_from_url_depth_one_attempts_fetch` in `crates/webfang_core/src/infrastructure/crawler/sitemap_parser/tests_fetch.rs` (`requires network — hits real DNS for invalid-host-xyz-12345.com`, by design)
 - **18 active** (`cargo nextest run -p webfang_core -- sitemap` passes)
 
 Matrix: [`COMPATIBILITY-MATRIX.md`](../COMPATIBILITY-MATRIX.md).
@@ -94,7 +94,7 @@ for doc/comment mentions (compared per file by count). `Line` is not recorded on
 |---|-------|------|------------|--------|-------|------|
 | 1 | Network | `crates/webfang_core/tests/cli_binary_test.rs` | `test_dry_run_with_url` | `requires network access` | #542 | keep ignored |
 | 2 | Network | `crates/webfang_core/src/application/http_client/client.rs` | `test_http_client_get_example_com` | `requires network - run with cargo test --ignored` | #542 | keep ignored |
-| 3 | Network | `crates/webfang_core/src/infrastructure/crawler/sitemap_parser.rs` | `test_parse_from_url_depth_one_attempts_fetch` | `requires network — hits real DNS for invalid-host-xyz-12345.com` | #542 | keep ignored (by design) |
+| 3 | Network | `crates/webfang_core/src/infrastructure/crawler/sitemap_parser/tests_fetch.rs` | `test_parse_from_url_depth_one_attempts_fetch` | `requires network — hits real DNS for invalid-host-xyz-12345.com` | #542 | keep ignored (by design) |
 | 4 | Tracing | `crates/webfang_core/src/infrastructure/observability/logging.rs` | `test_init_json_logging_with_temp_dir` | `tracing global subscriber may already be set in test context` | #501 | keep ignored |
 | 5 | Reproduction | `crates/webfang_core/tests/behavioral/cli/transactional_store_test.rs` | `concurrent_resume_processes_lose_no_records` | asserts the no-loss invariant under real multi-process contention, but measured 8/8 runs against the unfixed code with zero records lost — the clobber window is microseconds wide and a fixture cannot force it. NOT a falsifier of #1230; the deterministic falsifier is tests/record_store_transaction_test.rs | #1230 | Keep ignored; run by hand for stress evidence |
 | 6 | Reproduction | `crates/webfang_core/src/application/crawler/sitemap_session.rs` | `sitemap_entry_max_pages_truncates_many_url_fixture` | kept RED by design: asserts the naive unbounded reading (all 9 pages with max_pages=3), fails against the truncating bound; GREEN pin `sitemap_entry_max_pages_bound_pins_inflight_drain` carries the contract | #1429 | Keep ignored; RED-evidence for the overshoot bound, never run in CI |
