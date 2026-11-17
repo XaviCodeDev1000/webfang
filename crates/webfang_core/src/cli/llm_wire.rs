@@ -19,6 +19,7 @@ use crate::application::crawl_options::CrawlOptions;
 use crate::domain::providers::{
     Capability, ProviderConfig, ProviderKind, ProviderRegistry, ProvidersConfig, RegistryError,
 };
+use crate::domain::proxy_config::ProxyRegistry;
 use crate::infrastructure::llm::provider::OpenAiCompatibleProvider;
 use crate::infrastructure::llm::remote_embedding::RemoteEmbeddingAdapter;
 use crate::CliExit;
@@ -46,35 +47,11 @@ pub fn build_llm_provider(
     opts: &CrawlOptions,
     providers: &ProvidersConfig,
 ) -> Result<Option<Arc<OpenAiCompatibleProvider>>, CliExit> {
-    if !opts.extract_with_llm {
-        return Ok(None);
-    }
-
-    let registry = ProviderRegistry::new(providers.clone());
-    let resolved: Result<&ProviderConfig, RegistryError> = match opts.llm_provider.as_deref() {
-        Some(id) => registry.resolve(id, Capability::Completion),
-        None => registry.resolve_default_completion(),
-    };
-    let config = resolved.map_err(|e| {
-        CliExit::ConfigError(format!(
-            "'--extract-with-llm' requiere un provider LLM configurado \
-             con la capacidad `completion` en el archivo de configuración: {e}"
-        ))
-    })?;
-
-    match config.kind {
-        ProviderKind::OpenAiCompatible => {
-            let provider = OpenAiCompatibleProvider::new(config.clone())
-                .map_err(|e| CliExit::ConfigError(e.to_string()))?;
-            tracing::info!(
-                provider_id = %provider.id(),
-                base_url = %provider.config().base_url,
-                "LLM extraction provider ready"
-            );
-            Ok(Some(Arc::new(provider)))
-        },
-    }
+    proxy::build_llm_provider_with_registry(opts, providers, &ProxyRegistry::default())
 }
+
+mod proxy;
+pub use proxy::build_llm_provider_with_registry;
 
 /// Resolve the embedding slot to a remote provider config (#1462).
 ///
@@ -132,6 +109,21 @@ pub async fn build_embedding_provider(
     providers: &ProvidersConfig,
     offline: bool,
 ) -> Result<Option<Arc<RemoteEmbeddingAdapter>>, CliExit> {
+    build_embedding_provider_with_registry(opts, providers, offline, &ProxyRegistry::default())
+        .await
+}
+
+/// ADR-0021: same as [`build_embedding_provider`] with the proxy catalog.
+///
+/// # Errors
+///
+/// Plus a rejected proxy declaration or unresolved credential (exit 78).
+pub async fn build_embedding_provider_with_registry(
+    opts: &CrawlOptions,
+    providers: &ProvidersConfig,
+    offline: bool,
+    proxy_registry: &ProxyRegistry,
+) -> Result<Option<Arc<RemoteEmbeddingAdapter>>, CliExit> {
     let Some(config) = resolve_embedding_config(opts, providers)? else {
         return Ok(None);
     };
@@ -173,9 +165,11 @@ pub async fn build_embedding_provider(
     // The guard lives only inside the synchronous blocking task, never
     // across an `.await` (async-rules compliant).
     let span = tracing::Span::current();
+    let proxy_registry = proxy_registry.clone();
     let adapter = tokio::task::spawn_blocking(move || {
         let _span_guard = span.enter();
-        RemoteEmbeddingAdapter::new(config).map_err(|e| CliExit::ConfigError(e.to_string()))
+        RemoteEmbeddingAdapter::new_with_registry(config, &proxy_registry)
+            .map_err(|e| CliExit::ConfigError(e.to_string()))
     })
     .await
     .map_err(|e| {
