@@ -202,6 +202,20 @@ ignore = [
     # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0406
     # Expires: 2027-03-20
     { id = "RUSTSEC-2026-0406", reason = "zstd-safe 7.2.4 zstdmt is not enabled; only remaining consumer is wreq-util static emulation compression" },
+
+    # RUSTSEC-2026-0543 (chrono 0.4.45, severity: unmaintained)
+    # Direct workspace dependency (`chrono = { version = "0.4", features =
+    # ["serde"] }`) used by webfang_core for date parsing/formatting, and
+    # transitively via rmcp, schemars and rusqlite's `chrono` feature.
+    # Upstream declared the crate unmaintained and the advisory reports NO
+    # safe upgrade: every version is affected, so there is no version to
+    # move to. The recommended alternatives (jiff, time) are an API
+    # migration, not a version bump, and carry their own parse/format risk.
+    # This entry unblocks the merge queue; the migration is tracked
+    # separately and this ignore must be removed when it lands.
+    # Tracking: https://rustsec.org/advisories/RUSTSEC-2026-0543
+    # Expires: 2027-05-17
+    { id = "RUSTSEC-2026-0543", reason = "chrono 0.4.45 unmaintained; direct workspace dependency for date parsing/formatting, also transitive via rmcp, schemars and rusqlite's chrono feature; advisory reports no safe upgrade because every version is affected, so the fix is an API migration to jiff/time rather than a version bump" },
 ]
 
 [licenses]
