@@ -50,17 +50,24 @@ pub async fn run(config_path: &Path, args: &SubcommandArgs) -> CliExit {
         Err(exit) => return exit,
     };
     let profiles = defaults.model_profiles.clone();
-    let providers = defaults.providers;
+    let providers = defaults.providers.clone();
+    let proxy_registry =
+        match crate::domain::proxy_config::ProxyRegistry::try_new(defaults.proxies.clone()) {
+            Ok(registry) => registry,
+            Err(e) => return CliExit::ConfigError(e.to_string()),
+        };
     let registry = ProviderRegistry::new(ProvidersConfig {
         providers: providers.clone(),
     });
 
     match args.provider_id.as_deref() {
         Some(id) => match registry.resolve(id, Capability::Embedding) {
-            Ok(provider) => diagnose_provider(&provider.clone(), args, &profiles).await,
+            Ok(provider) => {
+                diagnose_provider(&provider.clone(), args, &profiles, &proxy_registry).await
+            },
             Err(e) => {
                 println!("\n=== doctor: ruta de embeddings ===\n");
-                crate::cli::commands::blocks::print_proxy_posture();
+                crate::cli::commands::blocks::print_proxy_posture(None, &proxy_registry);
                 println!();
                 println!("Estado: provider '{id}' no resoluble");
                 println!("  {e}");
@@ -70,17 +77,22 @@ pub async fn run(config_path: &Path, args: &SubcommandArgs) -> CliExit {
             },
         },
         None => match registry.resolve_default_embedding() {
-            Ok(provider) => diagnose_provider(&provider.clone(), args, &profiles).await,
-            Err(_) => diagnose_no_usable_provider(&providers),
+            Ok(provider) => {
+                diagnose_provider(&provider.clone(), args, &profiles, &proxy_registry).await
+            },
+            Err(_) => diagnose_no_usable_provider(&providers, &proxy_registry),
         },
     }
 }
 
 /// No embedding-capable provider resolved. Distinguish "nothing configured"
 /// from "something configured, but nothing that can serve embeddings".
-fn diagnose_no_usable_provider(providers: &[ProviderConfig]) -> CliExit {
+fn diagnose_no_usable_provider(
+    providers: &[ProviderConfig],
+    proxy_registry: &crate::domain::proxy_config::ProxyRegistry,
+) -> CliExit {
     println!("\n=== doctor: ruta de embeddings ===\n");
-    crate::cli::commands::blocks::print_proxy_posture();
+    crate::cli::commands::blocks::print_proxy_posture(None, proxy_registry);
     println!();
     if providers.is_empty() {
         println!("Estado: sin provider configurado");
@@ -122,9 +134,10 @@ async fn diagnose_provider(
     provider: &ProviderConfig,
     args: &SubcommandArgs,
     profiles: &ModelProfilesConfig,
+    proxy_registry: &crate::domain::proxy_config::ProxyRegistry,
 ) -> CliExit {
     println!("\n=== doctor: ruta de embeddings ===\n");
-    crate::cli::commands::blocks::print_proxy_posture();
+    crate::cli::commands::blocks::print_proxy_posture(Some(provider), proxy_registry);
     println!();
     crate::cli::commands::blocks::print_provider_block(provider, args.provider_id.is_some());
     print_profile_and_budget(args, profiles);
@@ -271,14 +284,14 @@ mod tests {
 
     #[test]
     fn empty_config_is_a_config_error_with_instructions() {
-        let exit = diagnose_no_usable_provider(&[]);
+        let exit = diagnose_no_usable_provider(&[], &Default::default());
         assert!(matches!(exit, CliExit::ConfigError(_)));
     }
 
     #[test]
     fn a_provider_without_embedding_capability_is_a_config_error() {
         let p = provider("completion", AuthSource::None, vec![Capability::Completion]);
-        let exit = diagnose_no_usable_provider(&[p]);
+        let exit = diagnose_no_usable_provider(&[p], &Default::default());
         assert!(matches!(exit, CliExit::ConfigError(_)));
     }
 

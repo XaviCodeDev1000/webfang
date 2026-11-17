@@ -98,17 +98,65 @@ pub fn print_provider_block(provider: &ProviderConfig, explicit: bool) {
     }
 }
 
-/// Print the shared proxy posture line (#2500).
+/// Render the shared proxy posture lines (ADR-0021 Slice 3).
 ///
-/// The proxy environment is ignored by design: egress is direct and the SSRF
-/// resolver always resolves the real destination. `doctor` states it on every
-/// run so an operator behind a corporate proxy gets an explicit answer here,
-/// not a TLS handshake failure at dial time.
-pub fn print_proxy_posture() {
-    println!(
+/// Ambient proxy variables are ALWAYS ignored (#2500). With no configured
+/// proxy the two legacy lines are preserved verbatim; with one, the effective
+/// origin, provenance, proxy-dial policy and auth-source label are shown.
+/// No credential value ever reaches these lines.
+pub fn proxy_posture_lines(
+    provider: Option<&crate::domain::providers::ProviderConfig>,
+    registry: &crate::domain::proxy_config::ProxyRegistry,
+) -> Vec<String> {
+    let proxy = provider
+        .and_then(|p| p.proxy.as_ref())
+        .and_then(|spec| registry.resolve(spec).ok());
+    let mut lines = vec![
         "Proxy: no se usa — el entorno HTTP_PROXY/HTTPS_PROXY/ALL_PROXY se ignora por diseño;"
-    );
-    println!("  el egreso es directo y el guard SSRF resuelve siempre el destino real (#2500).");
+            .to_string(),
+    ];
+    match proxy {
+        None => lines.push(
+            "  el egreso es directo y el guard SSRF resuelve siempre el destino real (#2500)."
+                .to_string(),
+        ),
+        Some(p) => {
+            lines.push(format!(
+                "  proxy efectivo: origen '{}' ({}), sin credenciales en la salida",
+                p.origin(),
+                p.proxy_id()
+                    .map(|id| format!("catálogo [[proxies]] id '{id}'"))
+                    .unwrap_or_else(|| "tabla inline del provider".to_string())
+            ));
+            let policy = p.endpoint_policy();
+            lines.push(format!(
+                "  política del proxy: allow_loopback={}, cidrs={}, hosts={}",
+                policy.allow_loopback,
+                policy.network_policy.allow_cidrs.len(),
+                policy.network_policy.allow_hosts.len()
+            ));
+            lines.push(format!(
+                "  autenticación del proxy: {}",
+                p.auth().map(|a| a.password.label()).unwrap_or("anónima")
+            ));
+            lines.push(
+                "  DNS: la resolución del destino la delega el proxy (sin resolución local);\
+                 el guard SSRF valida cada dial del proxy."
+                    .to_string(),
+            );
+        },
+    }
+    lines
+}
+
+/// Print the shared proxy posture line (#2500, ADR-0021 Slice 3).
+pub fn print_proxy_posture(
+    provider: Option<&crate::domain::providers::ProviderConfig>,
+    registry: &crate::domain::proxy_config::ProxyRegistry,
+) {
+    for line in proxy_posture_lines(provider, registry) {
+        println!("{line}");
+    }
 }
 
 /// Print the shared historical block: the `[[model_profiles]]` metadata.
@@ -156,5 +204,68 @@ fn print_historical_profile(profile: &crate::domain::model_profile::ModelProfile
         println!("  ATENCIÓN: el operador sobrescribió la identidad auditada (dim / matryoshka).");
         println!("  El perfil ya no es repo-verified; la cita sigue siendo del repo por");
         println!("  rastreabilidad, y el valor declarado es el del operador.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::auth_source::AuthSource;
+    use crate::domain::network_policy::NetworkPolicy;
+    use crate::domain::providers::{Capability, ProviderKind};
+    use crate::domain::proxy_config::{ProxyAuth, ProxyDefinition, ProxyRegistry, ProxySpec};
+
+    fn provider(proxy: Option<ProxySpec>) -> crate::domain::providers::ProviderConfig {
+        crate::domain::providers::ProviderConfig {
+            id: "diag".to_string(),
+            display_name: "Diag".to_string(),
+            kind: ProviderKind::OpenAiCompatible,
+            base_url: url::Url::parse("https://api.example.test/v1").expect("url"),
+            auth: AuthSource::None,
+            capabilities: vec![Capability::Embedding],
+            model: Some("m".to_string()),
+            embedding_dim: None,
+            allow_loopback: false,
+            network_policy: NetworkPolicy::default(),
+            proxy,
+        }
+    }
+
+    #[test]
+    fn direct_posture_keeps_the_2500_wording() {
+        let registry = ProxyRegistry::default();
+        let lines = proxy_posture_lines(None, &registry);
+        assert!(lines[0].contains("se ignora por diseño"));
+        assert!(lines.join("\n").contains("el egreso es directo"));
+    }
+
+    #[test]
+    fn proxied_posture_names_origin_provenance_and_auth_label_without_secrets() {
+        let definition = ProxyDefinition {
+            url: url::Url::parse("http://127.0.0.1:8888").expect("url"),
+            allow_loopback: true,
+            network_policy: NetworkPolicy::default(),
+            auth: Some(ProxyAuth {
+                user: "operator".to_string(),
+                password: AuthSource::Env {
+                    var: "WEBFANG_DIAG_PROXY_KEY".to_string(),
+                },
+            }),
+        };
+        let config = provider(Some(ProxySpec::Inline(definition)));
+        let registry = ProxyRegistry::default();
+        let lines = proxy_posture_lines(Some(&config), &registry).join("\n");
+        assert!(lines.contains("127.0.0.1:8888"), "origin: {lines}");
+        assert!(lines.contains("tabla inline"), "provenance: {lines}");
+        assert!(
+            lines.contains("autenticación del proxy: env"),
+            "label: {lines}"
+        );
+        assert!(lines.contains("DNS:"), "delegation notice: {lines}");
+        assert!(!lines.contains("operator"), "user must not leak: {lines}");
+        assert!(
+            !lines.contains("WEBFANG_DIAG_PROXY_KEY"),
+            "var must not leak: {lines}"
+        );
     }
 }

@@ -229,7 +229,7 @@ Verificado en `crates/webfang_core/src/domain/providers.rs:207` (companions en `
 
 Las capacidades no necesitan un método propio: se leen de `ProviderConfig.capabilities` (`Vec<Capability>`, `providers.rs:93`), y `resolve()` valida contra esa lista antes de devolver la config. El diseño no incluye un accessor de capacidades separado.
 
-Esto permite que un caller resuelva un provider por slot (capabilidad) sin pasar por un handle genérico. Los consumidores reales del registry son la resolución de la config de embeddings (`crates/webfang_core/src/cli/llm_wire.rs:74` y `:80`) y el diagnóstico de `webfang doctor` (`crates/webfang_core/src/cli/commands/doctor.rs:59` y `:72`). `VaultSearchService` **no** es uno de ellos: recibe su `Arc<dyn EmbeddingPort>` por inyección al construirse (`crates/webfang_core/src/application/vault_search.rs:70`) y nunca consulta el registry — citarlo como consumidor del registry sería falso.
+Esto permite que un caller resuelva un provider por slot (capabilidad) sin pasar por un handle genérico. Los consumidores reales del registry son la resolución de la config de embeddings (`crates/webfang_core/src/cli/llm_wire.rs:74` y `:80`) y el diagnóstico de `webfang doctor` (`crates/webfang_core/src/cli/commands/doctor.rs:64` y `:79`). `VaultSearchService` **no** es uno de ellos: recibe su `Arc<dyn EmbeddingPort>` por inyección al construirse (`crates/webfang_core/src/application/vault_search.rs:70`) y nunca consulta el registry — citarlo como consumidor del registry sería falso.
 
 ### 6. `TenantAiContext` — contexto multi-tenant (contrato retirado)
 
@@ -532,8 +532,8 @@ claim  | crates/webfang_core/src/cli/llm_wire.rs | 46 | pub fn build_llm_provide
 claim  | crates/webfang_core/src/cli/llm_wire.rs | 107 | pub async fn build_embedding_provider(
 claim  | crates/webfang_core/src/cli/llm_wire.rs | 74 | registry.resolve(id, Capability::Embedding)
 claim  | crates/webfang_core/src/cli/llm_wire.rs | 80 | registry.resolve_default_embedding()
-claim  | crates/webfang_core/src/cli/commands/doctor.rs | 59 | registry.resolve(id, Capability::Embedding)
-claim  | crates/webfang_core/src/cli/commands/doctor.rs | 72 | registry.resolve_default_embedding()
+claim  | crates/webfang_core/src/cli/commands/doctor.rs | 64 | registry.resolve(id, Capability::Embedding)
+claim  | crates/webfang_core/src/cli/commands/doctor.rs | 79 | registry.resolve_default_embedding()
 claim  | crates/webfang_core/src/application/vault_search.rs | 70 | embedding: Arc<dyn EmbeddingPort>,
 # --- infraestructura LLM -----------------------------------------------------
 claim  | crates/webfang_core/src/infrastructure/llm/provider.rs | 108 | pub struct OpenAiCompatibleProvider {

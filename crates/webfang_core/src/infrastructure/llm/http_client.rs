@@ -124,6 +124,11 @@ pub fn build_llm_client(
     registry: &ProxyRegistry,
 ) -> Result<LlmClientBundle, LlmClientProfileError> {
     let Some(spec) = config.proxy.as_ref() else {
+        tracing::info!(
+            provider_id = %config.id,
+            proxy_enabled = false,
+            "AI transport egress direct"
+        );
         return Ok(LlmClientBundle {
             client: build_guarded_http_client(config.allow_loopback, Some(&config.network_policy))
                 .map_err(|e| LlmClientProfileError::Client(e.to_string()))?,
@@ -131,6 +136,13 @@ pub fn build_llm_client(
         });
     };
     let validated = registry.resolve(spec)?;
+    tracing::info!(
+        provider_id = %config.id,
+        proxy_enabled = true,
+        proxy_origin = %validated.origin(),
+        proxy_id = validated.proxy_id().unwrap_or("inline"),
+        "AI transport egress through configured forward proxy"
+    );
     let declared_auth = validated.auth().cloned();
     let proxy_auth_configured = declared_auth.is_some();
     let validated = match declared_auth {

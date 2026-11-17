@@ -69,7 +69,7 @@ phase on `main` (no stacked PRs). Test runner: `cargo nextest`. Local gate:
   `feat/ai-proxy-transport-wiring` — TBD. The guard method itself already landed in T2 and is NOT
   reimplemented here.
 - T4 (S6): P3 — doctor/show posture + tracing + disclosure docs — inline — branch
-  `feat/ai-proxy-diagnostics` — TBD.
+  `feat/ai-proxy-diagnostics` — delivered (see L16), unpublished.
 - T5 (S7): P4 — E2E harness — inline — branch `feat/ai-proxy-e2e-harness` — TBD.
 
 Delivery forecast ≈ 1200–1500 authored lines across 5 PRs → strategy `ask-on-risk` (default):
@@ -191,3 +191,16 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   completion) pass, each asserting `received_requests() == 1`. Doc pin for `provider.rs::new`
   refreshed (124→127) in the same commit. Full gate re-run: GREEN PASS=45 FAIL=0 SKIP=2.
   This completes S8's 407 contract on both AI ports.
+- L16 (T4 delivered, 2026-11-17): branch `feat/ai-proxy-diagnostics` from main `d4825976`
+  (PR #2897 squash). `blocks.rs` now renders `proxy_posture_lines(provider, registry)` as a pure
+  function: the two #2500 direct-egress lines stay verbatim when no proxy is configured; with one
+  it prints the sanitized origin, provenance (`[[proxies]]` id vs inline), proxy-dial policy
+  counts, auth-source label (`AuthSource::label()`, never the user/secret) and the DNS-delegation
+  notice. Wired into all 3 `doctor.rs` sites and into `show.rs` (the ADR names both). The shared
+  builder emits `proxy_enabled` / `proxy_origin` / `proxy_id` structured fields on both egress
+  paths. `docs/src/data-flow.md` + `installation.md` updated with the opt-in proxy declaration;
+  the data-flow claims manifest gained 3 `contains` and 3 `code` claims and is green (13/11).
+  `ai-providers-design.md` doctor pins refreshed 59→64 / 72→79. Two new unit tests in `blocks.rs`
+  pin the legacy wording and the no-secret guarantee. Gate GREEN PASS=45 FAIL=0 SKIP=2; rustdoc
+  -D warnings OK. Tree-derived golden set refreshed in the same commit. Unpublished pending
+  owner decision.

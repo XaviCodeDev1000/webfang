@@ -50,9 +50,15 @@ pub fn run(args: &SubcommandArgs, config_path: &Path) -> CliExit {
         Err(exit) => return exit,
     };
 
+    let proxy_registry =
+        match crate::domain::proxy_config::ProxyRegistry::try_new(defaults.proxies.clone()) {
+            Ok(registry) => registry,
+            Err(e) => return CliExit::ConfigError(e.to_string()),
+        };
     println!("\n=== show: provider de embeddings efectivo ===\n");
     match resolve_effective_provider(args, &defaults) {
         Ok(Some(provider)) => {
+            crate::cli::commands::blocks::print_proxy_posture(Some(&provider), &proxy_registry);
             crate::cli::commands::blocks::print_provider_block(
                 &provider,
                 args.provider_id.is_some(),
