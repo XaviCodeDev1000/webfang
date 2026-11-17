@@ -1857,6 +1857,89 @@ jobs:
         run: cargo test --doc --workspace --all-features
 
   # ============================================================================
+  # TIER: OBSCURA HYBRID (real binary, end to end)
+  # Closes the H6 gap of #2722: every other lane uses a fake obscura or skips
+  # the binary entirely. This job pins a real upstream release and proves the
+  # hybrid path actually renders JavaScript through it.
+  # ============================================================================
+  obscura-hybrid:
+    name: Obscura hybrid (real binary)
+    needs: [toolchain, change-scope]
+    if: ${{ needs.change-scope.outputs.run_code_jobs == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: Install Obscura v0.2.7 (pinned asset)
+        env:
+          OBSCURA_SHA256: 11b53d27cd743e00e196e216920e7f3f794cf378e3f1792b8d25d3beabaf9cad
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/obscura.tar.gz" \
+            https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.7/obscura-x86_64-linux.tar.gz
+          echo "$OBSCURA_SHA256  $RUNNER_TEMP/obscura.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/obscura"
+          tar xzf "$RUNNER_TEMP/obscura.tar.gz" -C "$RUNNER_TEMP/obscura"
+          chmod +x "$RUNNER_TEMP/obscura/obscura" "$RUNNER_TEMP/obscura/obscura-worker"
+          "$RUNNER_TEMP/obscura/obscura" --version | grep -qx 'obscura 0.2.7'
+      - name: Build webfang CLI
+        run: cargo build -p webfang_cli --bin webfang --locked
+      - name: Exercise hybrid against the controlled fixture
+        env:
+          OBSCURA_BIN: ${{ runner.temp }}/obscura/obscura
+          # Loopback is the controlled URL; the three hatches disarm webfang's
+          # SSRF entry, resolver and redirect guards for this local server only.
+          WEBFANG_DISABLE_SSRF_ENTRY_GUARD: "1"
+          WEBFANG_DISABLE_SSRF_RESOLVER: "1"
+          WEBFANG_DISABLE_SSRF_REDIRECT_GUARD: "1"
+          # Obscura has its OWN SSRF guard and refuses loopback unless the
+          # operator opts in; inherited by the child process webfang spawns.
+          OBSCURA_ALLOW_PRIVATE_NETWORK: "1"
+        run: |
+          set -euo pipefail
+          # A JS shell (empty #root, <50 chars of static text) forces the
+          # hybrid router to escalate from L1 to L2. A prose-heavy fixture
+          # would be classified as static content and never exercise Obscura.
+          mkdir -p "$RUNNER_TEMP/obscura-fixture"
+          cat > "$RUNNER_TEMP/obscura-fixture/index.html" <<'HTML'
+          <!doctype html>
+          <html lang="en"><head><meta charset="utf-8"><title>Hybrid SPA fixture</title></head>
+          <body><div id="root"></div>
+          <script>
+            document.getElementById('root').innerHTML =
+              '<article><h1>OBSCURA_RENDERED_MARKER_HYBRID_7Q4</h1><p>This paragraph is injected into the DOM by JavaScript only and is never present in the raw server response, so its presence in the exported markdown proves a real render happened through the Obscura binary.</p></article>';
+          </script>
+          </body></html>
+          HTML
+          python3 -m http.server 8731 --bind 127.0.0.1 \
+            --directory "$RUNNER_TEMP/obscura-fixture" &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:8731/index.html -o /dev/null; then break; fi
+            sleep 0.2
+          done
+          curl -fsS http://127.0.0.1:8731/index.html -o /dev/null
+          mkdir -p "$RUNNER_TEMP/webfang-out"
+          ./target/debug/webfang http://127.0.0.1:8731/index.html \
+            --js-strategy hybrid \
+            --obscura-binary "$OBSCURA_BIN" \
+            --trace-file "$RUNNER_TEMP/webfang-trace.jsonl" \
+            -o "$RUNNER_TEMP/webfang-out"
+          # The marker exists ONLY after JavaScript runs: a static fallback
+          # would still exit 0 but would not contain it.
+          grep -R -q 'OBSCURA_RENDERED_MARKER_HYBRID_7Q4' "$RUNNER_TEMP/webfang-out"
+          # A real binary passed the preflight variant probe and L2 served the
+          # page; both events are structured fields in the JSONL trace.
+          grep -q 'obscura_variant_checked' "$RUNNER_TEMP/webfang-trace.jsonl"
+          grep -q 'Layer 2 returned' "$RUNNER_TEMP/webfang-trace.jsonl"
+
+  # ============================================================================
   # FINAL GATE: the ONLY required check produced by this workflow.
   # Aggregates the fast PR-blocking jobs. Fails on `failure` AND on unexpected
   # `skipped`/`cancelled` — GitHub treats skipped required checks as satisfied,
@@ -1869,7 +1952,7 @@ jobs:
   # ============================================================================
   gate:
     name: CI Gate
-    needs: [change-scope, toolchain, repo-guards, artifact-guards, merge-metrics-guards, fmt, clippy, code-quality, test-core, test-full, test-release-provenance, security, doc-quality]
+    needs: [change-scope, toolchain, repo-guards, artifact-guards, merge-metrics-guards, fmt, clippy, code-quality, test-core, test-full, test-release-provenance, obscura-hybrid, security, doc-quality]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1887,7 +1970,7 @@ jobs:
           # succeed while the skipped
           # code producers
           # (fmt, clippy, code-quality, test-core, test-full,
-          # test-release-provenance) must be `skipped` — skipped
+          # test-release-provenance, obscura-hybrid) must be `skipped` — skipped
           # non-applicable producers are explicitly allowed only from
           # change-scope, and any failure/cancelled result still fails.
           echo "$RESULTS"
@@ -1910,7 +1993,7 @@ jobs:
                 exit 1
               fi
             done
-            for job in fmt clippy code-quality test-core test-full test-release-provenance; do
+            for job in fmt clippy code-quality test-core test-full test-release-provenance obscura-hybrid; do
               r="$(echo "$RESULTS" | jq -r --arg j "$job" '.[$j].result')"
               if [ "$r" != "skipped" ]; then
                 echo "::error::Non-applicable code producer '$job' must be skipped in narrow scope (result=$r)."
