@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.2.0] - 2026-11-17
+
+
+### 🎉 Added
+
+- ADR-0021 Slice 2 — proxy-aware LLM client wiring and 407 ([#2897](https://github.com/XaviCodeDev1000/webfang/pull/2897))
+
+### 🏗️ Architecture Improvements
+
+- Split metrics.rs and export.rs under the ~500-line rule (part of #2584) ([#2893](https://github.com/XaviCodeDev1000/webfang/pull/2893))
+- Split sitemap_parser.rs under the ~500-line rule (part of #2584) ([#2896](https://github.com/XaviCodeDev1000/webfang/pull/2896))
+
+### 🔧 Fixed
+
+- Reconcile batch input accounting ([#2886](https://github.com/XaviCodeDev1000/webfang/pull/2886))
 ## [9.1.0] - 2026-11-17
 
 
