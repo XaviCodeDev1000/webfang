@@ -1,0 +1,96 @@
+# Mission: ai-egress-proxy — ADR-0021 (+ ADR-0020 Slice 2 dependency)
+
+Implement ADR-0021 "Explicit Per-Provider Forward Proxy for AI Egress" (docs-only PR #2870,
+`docs/adr/0021-explicit-ai-egress-proxy.md` — the ADR text there is the normative spec) plus
+the ADR-0020 Slice 2 dependency the owner chose to land first. Sequential delivery: one PR per
+phase on `main` (no stacked PRs). Test runner: `cargo nextest`. Local gate:
+`bash scripts/ci_fast_gate.sh` (with direnv env) before every push — tree-derived artifacts
+(golden set, test inventory, doc claim tables) travel with the tree (lesson #2547 L7).
+
+## Specs
+
+- S1: user request — "vamos a implementar la el ADR que esta en la pr #2870".
+- S2: sequencing decision (owner, 2026-11-17): "Aterrizar ADR-0020 Slice 2 primero" — P0 lands
+  ADR-0020 Slice 2 as its own behavior-preserving PR (`Closes part of #2357`) before ADR-0021
+  Slice 2.
+- S3 (P0, ADR-0020 Slice 2 verbatim): "`infrastructure/llm/http_client.rs` — Unified SSRF-aware
+  builder; `provider.rs` and both constructors delegate"; "Zero behavior change per slice:
+  every existing test — including `timeout_is_retried_and_recovery_is_served` — stays green
+  unmodified".
+- S4 (P1, ADR-0021 Slice 1 verbatim): domain types "`ProxyConfig`, `ProxyAuth`, `ProxySpec`
+  (`Named` | `Inline`), `ProxyRegistry`, `ValidatedProxy` (scheme `http`/`https`, no userinfo,
+  literal-IP gate + FIN-017), `EndpointPolicy`, `ClientSecurityProfile`, and
+  `SsrfGuard::secure_client_with_profile`. Unit-tested in domain (Miri-clean, no network).
+  Adding `proxy` to `ProviderConfig` also requires updating the `shape` row **and every
+  line-pinned claim** in the manifest of `docs/architecture/ai-providers-design.md` audited by
+  `scripts/check_ai_providers_doc.sh` (C2/C3/C6), not just the field list."
+- S5 (P2, ADR-0021 Slice 2 verbatim): "`DefaultSsrfGuard::secure_client_with_profile`
+  implementation (`.redirect(dest)` → `.no_proxy()` → `.proxy(...)` →
+  `.dns_resolver(proxy_or_dest)`), shared LLM HTTP client builder (ADR-0020 Slice 2), 407
+  classification, and symmetric wiring into both `RemoteEmbeddingAdapter` and
+  `OpenAiCompatibleProvider` (plus `webfang_cli` / `llm_wire`)."
+- S6 (P3, ADR-0021 Slice 3): `print_proxy_posture` (ambient env always ignored + effective
+  proxy: origin sanitized, provenance, proxy network policy, auth source label, DNS-delegation
+  notice); tracing fields `proxy_enabled`/`proxy_origin`/`proxy_id`; credentials never in logs
+  or `--trace-file`; `docs/src/{data-flow,installation}.md` + `scripts/check_data_flow_doc.sh`
+  claims manifest in lockstep.
+- S7 (P4, ADR-0021 Slice 4): E2E harness with wiremock as observable forward proxy
+  (absolute-form for `http://` targets only — no CONNECT coverage): ambient `HTTP_PROXY`/
+  `HTTPS_PROXY` ignored (0 requests at ambient proxy); configured proxy without opt-in
+  rejected pre-socket (0 requests); configured proxy with opt-in routes the AI request
+  (`received_requests() == 1`); client-side guarantees under proxy: literal-IP `302` into the
+  proxy's own subnet (or `169.254.169.254`) stopped before a second proxy request, 16 MiB body
+  cap triggers, `429` backoff pacing fires before retry.
+- S8 (ADR-0021 cross-cutting invariants): ambient env vars (`HTTP_PROXY`/`HTTPS_PROXY`/
+  `ALL_PROXY`/`NO_PROXY`) unconditionally ignored (`.no_proxy()` first everywhere); no CLI
+  `--proxy` flag; zero userinfo in `proxy.url` (exit 78 → `proxy.auth`); `proxy = null`
+  explicit → deserialization error; duplicate `[[proxies]]` ids / unknown `proxy = "id"` →
+  `CliExit::ConfigError` (exit 78) with Spanish message; SOCKS (`socks5`/`socks5h`) rejected
+  at `ValidatedProxy::try_new` with specific Spanish diagnostic; 407 terminal (zero retries),
+  Spanish error distinguishing configured vs anonymous proxy auth, never logging credentials;
+  crawl/scrape/`WreqDownloader`/`FetchRouter` stay direct-only; user-facing errors in Spanish,
+  tracing fields in English.
+
+## Tasks
+
+- T1 (S3): P0 — unified `infrastructure/llm/http_client.rs` builder; `client.rs`, `provider.rs`,
+  `remote_embedding.rs` delegate — inline — branch `refactor/llm-shared-http-client` — commit
+  `94a1c226` (+ mission doc `74314acd`); golden set 2262→2264 and ai-providers doc pins travel
+  in the same commit.
+- T2 (S4): P1 — domain types + `SsrfGuard::secure_client_with_profile` declaration + ProviderConfig
+  `proxy` field + ai-providers-doc claims — inline — branch `feat/ai-proxy-domain-types` — TBD.
+- T3 (S5): P2 — `DefaultSsrfGuard::secure_client_with_profile` impl + symmetric wiring + 407 —
+  inline — branch `feat/ai-proxy-transport-wiring` — TBD.
+- T4 (S6): P3 — doctor/show posture + tracing + disclosure docs — inline — branch
+  `feat/ai-proxy-diagnostics` — TBD.
+- T5 (S7): P4 — E2E harness — inline — branch `feat/ai-proxy-e2e-harness` — TBD.
+
+Delivery forecast ≈ 1200–1500 authored lines across 5 PRs → strategy `ask-on-risk` (default):
+when publishing beyond the first slice, ask the owner once for the chain strategy.
+
+## Log
+
+- L1: user request — "vamos a implementar la el ADR que esta en la pr #2870".
+- L2: verified state: PR #2870 open (docs-only, ADR-0021 refined); issue #2551 `status:approved`
+  + `type:feature`; `infrastructure/llm/http_client.rs` NOT on main (checked `ls`); no open PRs
+  for ADR-0020 slices; Engram #3016 documents the review objections already folded into the ADR.
+- L3: owner sequencing decision via ask → land ADR-0020 Slice 2 first (S2). Worktree
+  `refactor-llm-shared-http-client` @ origin/main f3ae9823; .envrc 5-line canonical form with
+  `export` (plain assignment is NOT captured by direnv 2.38.2 — first bootstrap attempt exported
+  only PATH); `seed: cold` (no published seed); codegraph init + codedb reindex OK (root=head=f3ae9823).
+- L4: prior-art found: `odd/tasks/proxy-posture.md` (mission #2500 → PR #2547) — the direct-egress
+  pin this ADR amends. `.no_proxy()` choke point: `DefaultSsrfGuard::secure_client*`
+  (`infrastructure/ssrf.rs`); doctor posture line + docs sections already exist (to be updated by
+  P3, not created).
+- L5 (T1 verification, 2026-11-17): zero-behavior-change exception to RED documented (refactor;
+  behavior pinned by existing tests, unmodified). Observed: cargo check OK · clippy
+  --all-targets --all-features -D warnings OK · fmt --check OK · rustdoc -D warnings OK · llm
+  unit tests 54/54 (incl. the 4 ADR-pinned transport tests) · new builder tests 2/2 ·
+  remote_embedding_resilience 8/8 · ci_fast_gate first run FAIL=2 (intra-crate golden set
+  2262→2264; ai-providers doc C2 line pins) → both refreshed per #2547 L6/L7 and re-run:
+  **fast-gate GREEN, PASS=45 FAIL=0 SKIP=2** (skips declared: pinned-lint changed-scope,
+  windows — no cfg(windows) touched). Coverage: NOT-covered jobs (toolchain, artifact-guards,
+  test-full, security) untouched by this change. Commits: `94a1c226` (refactor + artifacts),
+  `74314acd` (mission doc). PR gates pre-checked: #2357 CLOSED but carries `status:approved`;
+  validator checks labels only, `Closes part of #2357` passes.
+- L6: awaiting owner decision on push + PR (push/PR are human decisions; #2357 linkage ready).

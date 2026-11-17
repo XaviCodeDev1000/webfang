@@ -38,6 +38,7 @@ use crate::domain::embedding_port::EmbeddingPort;
 use crate::domain::network_policy::NetworkPolicy;
 use crate::domain::providers::ProviderConfig;
 use crate::error::SemanticError;
+use crate::infrastructure::llm::http_client::build_guarded_http_client;
 use crate::infrastructure::llm::provider::ProviderInitError;
 
 /// A boxed future for dyn-compatible async port methods.
@@ -182,13 +183,7 @@ fn embedding_http_client(
     allow_loopback: bool,
     network_policy: &NetworkPolicy,
 ) -> Result<wreq::Client, ProviderInitError> {
-    let builder = wreq::Client::builder()
-        .emulation(wreq_util::Profile::Chrome145)
-        .timeout(Duration::from_secs(60))
-        .connect_timeout(Duration::from_secs(10));
-    crate::domain::ssrf_guard::ssrf_guard()
-        .secure_client_with_policy(builder, allow_loopback, network_policy)
-        .build()
+    build_guarded_http_client(allow_loopback, Some(network_policy))
         .map_err(|e| ProviderInitError::HttpClient(e.to_string()))
 }
 
