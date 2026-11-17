@@ -50,6 +50,10 @@ pub struct ExportArgs {
     /// (#2611; 0 = only at the clean close — the historical default)
     pub export_checkpoint: u64,
 
+    /// Fail with exit 78 (configuration error) when any batch input line is
+    /// rejected as invalid, instead of continuing with the rest (#2795)
+    pub strict_input: bool,
+
     // ========== Item Pipeline ==========
     /// Enable item pipeline processing (validate → clean → output)
     pub pipeline: bool,
@@ -78,6 +82,7 @@ impl clap::FromArgMatches for ExportArgs {
             batch_file: extract::opt(m, "batch_file"),
             batch_concurrency: extract::opt(m, "batch_concurrency"),
             export_checkpoint: extract::value(m, "export_checkpoint")?,
+            strict_input: m.get_flag("strict_input"),
             pipeline: m.get_flag("pipeline"),
             pipeline_output: extract::value(m, "pipeline_output")?,
             retention_days: extract::value(m, "retention_days")?,

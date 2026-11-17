@@ -211,7 +211,9 @@ fn batch_empty_stdin_exits_64() {
                 ));
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if !stderr.contains("No URLs provided") {
+            // #2795: the no-URLs error counts what the source yielded (an
+            // empty file read 0 lines) instead of a bare "no URLs".
+            if !stderr.contains("No hay URLs para procesar") {
                 return Err(format!(
                     "stderr must name the empty batch, got: {}",
                     stderr.trim()
@@ -424,33 +426,15 @@ fn batch_empty_file_exits_64() {
     let batch_file = temp.path().join("urls.txt");
     std::fs::write(&batch_file, "").unwrap();
 
-    assert_spawn_within(
-        SPAWN_LATENCY_BUDGET,
+    // The shared counting-error shell (#2387 machinery inside); #2795 made
+    // the error count what the source yielded (an empty file read 0 lines).
+    assert_batch_file_exit(
         "batch_empty_file_exits_64",
-        move |child| {
-            // #2387: spawned through `BudgetChild::output` so the harness can
-            // kill an overrunning spawn; the assert_cmd `.timeout(5s)` second
-            // net is gone — the budget itself now bounds AND terminates it.
-            let mut command = std_cmd();
-            command.arg("--batch-file").arg(&batch_file);
-            let output = child.output(command)?;
-
-            if output.status.code() != Some(64) {
-                return Err(format!(
-                    "expected exit code 64, got {:?}; stderr: {}",
-                    output.status.code(),
-                    String::from_utf8_lossy(&output.stderr).trim()
-                ));
-            }
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if !stderr.contains("No URLs provided") {
-                return Err(format!(
-                    "stderr must name the empty batch, got: {}",
-                    stderr.trim()
-                ));
-            }
-            Ok(())
-        },
+        batch_file,
+        &[],
+        temp.path(),
+        64,
+        &["No hay URLs para procesar"],
     );
 }
 
@@ -757,4 +741,291 @@ async fn batch_max_pages_one_still_scrapes_every_seed() {
         lines.len()
     );
     assert_eq!(unique_urls.len(), 2, "both seeds must be scraped");
+}
+
+// ---------------------------------------------------------------------------
+// #2795 — batch input reconciliation: the final summary reconciles discarded
+// input lines, the per-line warning carries the line number, `--strict-input`
+// turns a rejected line into exit 78, and the no-URLs error reports counts.
+// The discard itself stays intentional (F-R3-1): these tests pin operator
+// reconciliation, never the removal of the discard.
+// ---------------------------------------------------------------------------
+
+/// Mount one single-route 200 article whose body clears the extractor's
+/// content floor. One builder for the single-URL fixtures — the jscpd
+/// ratchet counts three inline copies of the same mount block otherwise.
+async fn mount_single_article(server: &MockServer, route: &str, title: &str) {
+    Mock::given(method("GET"))
+        .and(path(route))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+            "<html><body><article><h1>{title}</h1>\
+             <p>Substantive body text so the extractor accepts this page.</p>\
+             </article></body></html>"
+        )))
+        .mount(server)
+        .await;
+}
+
+/// Shared shell for the counting-error batch tests (#1697 + #2795): spawn
+/// `--batch-file <file> [extra args]` under the spawn budget and expect one
+/// exact exit code plus every stderr substring in `must_contain`. One
+/// builder so the jscpd ratchet counts the BudgetChild boilerplate once,
+/// not once per test.
+fn assert_batch_file_exit(
+    what: &'static str,
+    batch_file: std::path::PathBuf,
+    extra_args: &[&str],
+    output_dir: &std::path::Path,
+    expected_code: i32,
+    must_contain: &'static [&'static str],
+) {
+    let extra: Vec<String> = extra_args.iter().map(ToString::to_string).collect();
+    let output_dir = output_dir.to_path_buf();
+    assert_spawn_within(SPAWN_LATENCY_BUDGET, what, move |child| {
+        let mut command = std_cmd();
+        command
+            .arg("--batch-file")
+            .arg(&batch_file)
+            .arg("--output")
+            .arg(&output_dir);
+        for arg in &extra {
+            command.arg(arg);
+        }
+        let output = child.output(command)?;
+
+        if output.status.code() != Some(expected_code) {
+            return Err(format!(
+                "expected exit code {expected_code}, got {:?}; stderr: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for needle in must_contain {
+            if !stderr.contains(needle) {
+                return Err(format!(
+                    "stderr must contain {needle:?}, got: {}",
+                    stderr.trim()
+                ));
+            }
+        }
+        Ok(())
+    });
+}
+
+/// S1/S5 (#2795): a 4-line input — 2 valid URLs (one OK, one HTTP 500), 1
+/// relative path, 1 blank line — reconciles in ONE summary line: the
+/// succeeded/failed totals over the valid URLs, then the input accounting
+/// (lines read = valid + rejected + blank). Before #2795 the summary said
+/// `2/2`-style totals only and the discarded lines vanished from it.
+#[tokio::test]
+async fn batch_summary_reconciles_discarded_lines() {
+    let t = BehavioralTest::new().await;
+    mount_single_article(&t.server, "/ok", "Ok").await;
+    Mock::given(method("GET"))
+        .and(path("/broken"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&t.server)
+        .await;
+
+    let uri = t.server.uri();
+    let batch_file = t.out.path().join("urls.txt");
+    std::fs::write(
+        &batch_file,
+        format!("{uri}/ok\n{uri}/broken\nnot-a-url/relative/path\n\n"),
+    )
+    .unwrap();
+    let out_path = t.out.path().to_path_buf();
+
+    assert_spawn_within_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "batch_summary_reconciles_discarded_lines",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--batch-file")
+                .arg(&batch_file)
+                .arg("--output")
+                .arg(&out_path);
+            let output = child.output(command)?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+
+            if !stdout.contains("Batch complete: 1/2 succeeded, 1 failed") {
+                return Err(format!(
+                    "summary must reconcile the 2 valid URLs (1 ok, 1 failed), got: {stdout}"
+                ));
+            }
+            if !stdout.contains("4 lines read: 2 valid, 1 rejected, 1 blank, 0 comment") {
+                return Err(format!(
+                    "summary must reconcile the discarded input lines, got: {stdout}"
+                ));
+            }
+            Ok(())
+        },
+    )
+    .await;
+}
+
+/// S2/S7 (#2795): the per-line rejection warning carries the physical input
+/// line number and NEVER echoes the offending text (F-R3-1: a malformed line
+/// can still carry credential-looking content).
+#[tokio::test]
+async fn batch_reject_warning_carries_line_number() {
+    let t = BehavioralTest::new().await;
+    mount_single_article(&t.server, "/only", "Only").await;
+
+    let uri = t.server.uri();
+    // Line 1 valid, line 2 blank, line 3 invalid: the warning must say `line: 3`.
+    let batch_file = t.out.path().join("urls.txt");
+    std::fs::write(
+        &batch_file,
+        format!("{uri}/only\n\nnot-a-url/relative/path\n"),
+    )
+    .unwrap();
+    let out_path = t.out.path().to_path_buf();
+
+    assert_spawn_within_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "batch_reject_warning_carries_line_number",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--batch-file")
+                .arg(&batch_file)
+                .arg("--output")
+                .arg(&out_path);
+            let output = child.output(command)?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            if !stderr.contains("batch line rejected by URL entry validation, line: 3") {
+                return Err(format!(
+                    "warning must carry the physical line number, got: {stderr}"
+                ));
+            }
+            if stderr.contains("not-a-url") {
+                return Err("the warning must never echo the offending line text (F-R3-1)".into());
+            }
+            Ok(())
+        },
+    )
+    .await;
+}
+
+/// S3 (#2795): `--strict-input` turns any rejected input line into exit 78
+/// with a message that counts the lines, instead of continuing with the rest.
+/// The gate fires at entry validation — before any fetch — so this test needs
+/// no server: the valid-looking URL is never fetched.
+#[test]
+fn batch_strict_input_fails_on_rejected_line() {
+    let temp = TempDir::new().unwrap();
+    let batch_file = temp.path().join("urls.txt");
+    std::fs::write(
+        &batch_file,
+        "http://127.0.0.1:9/never-fetched\nnot-a-url/relative/path\n",
+    )
+    .unwrap();
+
+    assert_batch_file_exit(
+        "batch_strict_input_fails_on_rejected_line",
+        batch_file,
+        &["--strict-input"],
+        temp.path(),
+        78,
+        &["--strict-input activo: la entrada tiene líneas rechazadas \
+             (líneas leídas: 2, válidas: 1, rechazadas: 1"],
+    );
+}
+
+/// S3/S5 boundary (#2795): blank and comment lines are legal input, not
+/// rejected lines — `--strict-input` does NOT trip on them, and the summary
+/// still shows their counts so the arithmetic closes.
+#[tokio::test]
+async fn batch_strict_input_ignores_blank_and_comment_lines() {
+    let t = BehavioralTest::new().await;
+    mount_single_article(&t.server, "/legal", "Legal").await;
+
+    let uri = t.server.uri();
+    let batch_file = t.out.path().join("urls.txt");
+    std::fs::write(
+        &batch_file,
+        format!("# list generated by the operator\n{uri}/legal\n\n"),
+    )
+    .unwrap();
+    let out_path = t.out.path().to_path_buf();
+
+    assert_spawn_within_blocking(
+        SPAWN_LATENCY_BUDGET,
+        "batch_strict_input_ignores_blank_and_comment_lines",
+        move |child| {
+            let mut command = std_cmd();
+            command
+                .arg("--batch-file")
+                .arg(&batch_file)
+                .arg("--strict-input")
+                .arg("--output")
+                .arg(&out_path);
+            let output = child.output(command)?;
+
+            if !output.status.success() {
+                return Err(format!(
+                    "blank and comment lines must not trip --strict-input, got {:?}; \
+                     stderr: {}",
+                    output.status.code(),
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.contains("3 lines read: 1 valid, 0 rejected, 1 blank, 1 comment") {
+                return Err(format!(
+                    "summary must reconcile the legal non-URL lines, got: {stdout}"
+                ));
+            }
+            Ok(())
+        },
+    )
+    .await;
+}
+
+/// S6 (#2795): a file with NO valid URL reports what it read and why it
+/// failed — per-line warnings with line numbers plus a counting error — not
+/// a bare "no URLs". Exit stays 64 (matrix row 15: InvalidUrl → usage error).
+#[test]
+fn batch_all_invalid_file_reports_counts() {
+    let temp = TempDir::new().unwrap();
+    let batch_file = temp.path().join("urls.txt");
+    std::fs::write(&batch_file, "not-a-url/one\nalso-bad/two\n").unwrap();
+
+    assert_batch_file_exit(
+        "batch_all_invalid_file_reports_counts",
+        batch_file,
+        &[],
+        temp.path(),
+        64,
+        &[
+            "No hay URLs para procesar (líneas leídas: 2, válidas: 0, rechazadas: 2",
+            "line: 1, reason:",
+            "line: 2, reason:",
+        ],
+    );
+}
+
+/// T3 characterization (#2795): a non-empty file of only blank lines fails
+/// with the counts — 3 lines read, 3 blank — not a bare "no URLs". Exit 64.
+#[test]
+fn batch_blank_only_file_reports_counts() {
+    let temp = TempDir::new().unwrap();
+    let batch_file = temp.path().join("urls.txt");
+    std::fs::write(&batch_file, "\n\n\n").unwrap();
+
+    assert_batch_file_exit(
+        "batch_blank_only_file_reports_counts",
+        batch_file,
+        &[],
+        temp.path(),
+        64,
+        &[
+            "No hay URLs para procesar (líneas leídas: 3, válidas: 0, rechazadas: 0, \
+             vacías: 3",
+        ],
+    );
 }
