@@ -6,8 +6,9 @@ Fuente de verdad: `.github/support.json`. Este archivo es una vista generada.
 
 | Línea | Estado | Última | Rama | Admite |
 |---|---|---|---|---|
-| 9.1 | STABLE | 9.1.0 | — | bugfix, security |
-| 9.0 | MAINTENANCE | 9.0.0 | — | security |
+| 9.2 | STABLE | 9.2.0 | — | bugfix, security |
+| 9.1 | MAINTENANCE | 9.1.0 | — | security |
+| 9.0 | EOL | 9.0.0 | — | — |
 | 8.0 | EOL | 8.0.2 | — | — |
 | 7.7 | EOL | 7.7.1 | — | — |
 | 7.6 | EOL | 7.6.6 | — | — |
