@@ -165,7 +165,7 @@ with the frozen snapshot in the active evidence directory. A release bumps the v
 the support lines, so that comparison fails by construction. While `TRAIN_OPEN` exists in that
 directory the drift is **blocking**, not a `NOTE`:
 
-```
+```text
 DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba: workspace_version: '…' -> '…' | …
 ```
 
