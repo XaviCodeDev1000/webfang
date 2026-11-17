@@ -257,8 +257,13 @@ fn render_probe_classifies_render_build() {
 /// must not invent a diagnostic), success → `Capable`, failure → `Missing`.
 #[test]
 fn classify_render_probe_maps_output_shapes() {
+    // `ExitStatus::from_raw` lives on a platform-specific extension trait.
+    // Import the matching one so this pure, Miri-safe test also type-checks
+    // under the Windows cross-lint target (invisible to the Linux gate).
     #[cfg(unix)]
     use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
     let ok = std::process::Output {
         status: std::process::ExitStatus::from_raw(0),
         stdout: Vec::new(),
