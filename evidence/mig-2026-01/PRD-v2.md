@@ -230,7 +230,7 @@ El gate valida que todo `RF-xx` citado esté en esta tabla.
   de recursos**. A favor: el repo ya contiene panics en el borde MCP
   (`McpHandler::call_tool`, `CatchPanicLayer`, #1611) y el unwind es requisito
   de corrección (#1219): el seam tiene precedente interno.
-- **§16 / README** — autorización de `docs/` **acotada a los pins** que el bump
+- **§7 / README** — autorización de `docs/` **acotada a los pins** que el bump
   obliga. El README ya retiró el conteo estático de tests y el badge de Miri
   (`check_docs_claims.sh` los tiene en `RETIRED_CLAIMS`); lo único a matizar es
   la frase que dice que Miri «valida» unidades lock-free, para que no se lea
