@@ -713,7 +713,7 @@ add_tags "$FX_ROT_GAP_TEN" v2.7.0 v2.8.0 v2.8.1 v2.9.0 v2.10.0 v2.11.0
 before="$(cat "$FX_ROT_GAP_TEN/.github/support.json")"
 rc=0
 out="$( cd "$FX_ROT_GAP_TEN" && ./scripts/rotate-stable.sh 2.11 2>&1 )" || rc=$?
-if [[ $rc -ne 0 ]] && grep -qF 'entre 2.8 y 2.11: 2.9 2.10' <<<"$out"; then
+if [[ $rc -ne 0 ]] && grep -qF 'between 2.8 and 2.11: 2.9 2.10' <<<"$out"; then
   pass "rechaza 2.8 -> 2.11 nombrando el gap del par .9/.10 (2.9, 2.10)"
 else
   fail "el rechazo del gap .9/.10 no es el de gobernanza (rc=$rc): $(tr '\n' ' ' <<<"$out")"

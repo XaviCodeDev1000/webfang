@@ -193,7 +193,7 @@ BEFORE_DEF="$(cat "$FX_DEF/.github/support.json")"
 run_rotate "$FX_DEF" 2.2
 # NEGATION: the default mode keeps the tag premise. Loosening it would let a
 # rotation declare a line for a release that never happened.
-if [[ "$LAST_RC" -ne 0 ]] && grep -qF 'v2.2.0 no está publicado' <<<"$LAST_OUT"; then
+if [[ "$LAST_RC" -ne 0 ]] && grep -qF 'v2.2.0 is not published' <<<"$LAST_OUT"; then
   pass "sin --pending-publication, la rotación exige el tag publicado"
 else
   fail "el modo por defecto dejó de exigir el tag (rc=$LAST_RC): $LAST_OUT"
@@ -223,7 +223,7 @@ BEFORE_VER="$(cat "$FX_VER/.github/support.json")"
 run_rotate "$FX_VER" 2.2 --pending-publication
 # NEGATION: the pending mode does not rotate "whatever looks next": the
 # checkout that prepares 2.3.0 may not declare 2.2.
-if [[ "$LAST_RC" -ne 0 ]] && grep -qF 'la versión del workspace de este checkout es' <<<"$LAST_OUT"; then
+if [[ "$LAST_RC" -ne 0 ]] && grep -qF 'the workspace version of this checkout is' <<<"$LAST_OUT"; then
   pass "una versión de workspace distinta de X.Y.0 se niega (por la versión, no por otra cosa)"
 else
   fail "la rotación pendiente aceptó una versión de workspace que no le corresponde (rc=$LAST_RC): $LAST_OUT"
@@ -242,7 +242,7 @@ FX_GAP="$(new_fx gap 2.3.0)"
 add_tags "$FX_GAP" v1.0.0 v2.0.0 v2.1.0 v2.2.0
 BEFORE_GAP="$(cat "$FX_GAP/.github/support.json")"
 run_rotate "$FX_GAP" 2.3 --pending-publication
-if [[ "$LAST_RC" -ne 0 ]] && grep -qF 'sin declarar entre' <<<"$LAST_OUT"; then
+if [[ "$LAST_RC" -ne 0 ]] && grep -qF 'not declared between' <<<"$LAST_OUT"; then
   pass "una minor publicada sin declarar entre medio se niega (por el gap, no por otra cosa)"
 else
   fail "la rotación pendiente rotó por encima de una minor sin declarar (rc=$LAST_RC): $LAST_OUT"
