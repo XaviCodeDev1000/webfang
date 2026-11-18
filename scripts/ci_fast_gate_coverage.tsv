@@ -25,7 +25,7 @@
 # missing prints its own SKIP line in the run itself.
 change-scope	docs,ci,code,full	-	the path classifier runs in every lane	-
 toolchain	-	-	-	verifies the installed rustc against Cargo.toml rust-version, and the local rustc is whatever the developer has
-repo-guards	-	docs,ci,code,full	-	a subset of the CI job's steps only; the intra-crate lint tool's own tests and the test-inventory drift check run in the code and full lanes; the AGENTS.md size/structure guard runs in the docs, code and full lanes and its harnesses in ci and full
+repo-guards	-	docs,ci,code,full	-	a subset of the CI job's steps only; the intra-crate lint tool's own tests and the test-inventory drift check run in the code and full lanes; the AGENTS.md size/structure guard runs in the docs, code and full lanes and its harnesses in ci and full; the file-size ratchet gate and the file-size preflight run in the code and full lanes, and their harnesses in ci and full
 fmt	code,full	-	cargo fmt --all -- --check	-
 clippy	code,full	-	clippy --all-targets --all-features with -D warnings	-
 artifact-guards	-	-	-	the five test_artifact_*.sh producers

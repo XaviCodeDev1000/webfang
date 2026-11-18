@@ -106,8 +106,11 @@ expect_eq() {
 }
 
 # expect_match <desc> <texto> <regex>  (regex extendida de grep)
+# grep -E -- "$3" > /dev/null, NOT -q: with set -o pipefail, -q's early exit
+# on the first match SIGPIPEs the printf when the text is larger than the
+# pipe buffer (the 161 KB ci.yml) and the pipeline fails DESPITE the match.
 expect_match() {
-  if printf '%s\n' "$2" | grep -Eq -- "$3"; then ok "$1" "$2"; else bad "$1" "sin match /$3/ en: $2"; fi
+  if printf '%s\n' "$2" | grep -E -- "$3" > /dev/null; then ok "$1" "$2"; else bad "$1" "sin match /$3/ en: $2"; fi
 }
 
 SB=""
