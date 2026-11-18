@@ -130,7 +130,7 @@ make_squash_tree() { # dir -> "<measured_sha> <squash_sha>"
     # niega, porque congelar un ancla así la deja huérfana en el PR siguiente
     # (#2909 -> 4efcaf66 quedó fuera de main para siempre).
     python3 "$AUDITOR" --root "$d" --write "$d/evidence/mig-2026-01/baseline.json" \
-      --allow-unmerged-anchor 2>&1 1>/dev/null || exit 1
+      --allow-unmerged-anchor >/dev/null 2>&1 || exit 1
     git add -A && git commit -q -m tip
     tree="$(git rev-parse 'HEAD^{tree}')"
     printf '%s %s\n' "$measured" "$(git commit-tree "$tree" -p "$base" -m squash)"
