@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "generated_at": "2026-11-17T20:33:35+00:00",
-  "head_sha": "4efcaf665e7a3bd296596fea462d4d8f2743736f",
-  "head_date": "2026-11-17T18:29:13Z",
-  "head_subject": "chore(support): declare the pending publication of v9.2.0",
+  "generated_at": "2026-11-18T01:55:12+00:00",
+  "head_sha": "bbf68517fc638d49ced664112b44b7c4bb7ec05d",
+  "head_date": "2026-11-17T22:43:44Z",
+  "head_subject": "chore: release v9.2.0 (#2909)",
   "workspace_version": "9.2.0",
   "toolchain": {
     "channel": "1.91.1",

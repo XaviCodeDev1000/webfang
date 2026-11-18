@@ -124,8 +124,13 @@ make_squash_tree() { # dir -> "<measured_sha> <squash_sha>"
     printf 'release work\n' > notes.txt
     git add -A && git commit -q -m pr-work
     measured="$(git rev-parse HEAD)"
-    # --write congela el tip YA medido; recién después se commitea el baseline.
-    python3 "$AUDITOR" --root "$d" --write "$d/evidence/mig-2026-01/baseline.json" >/dev/null || exit 1
+    # Este fixture representa el estado PRE-squash: el commit medido todavía no
+    # está en un ref durable, que es justo lo que el agregado de release produce.
+    # --allow-unmerged-anchor lo dice explícitamente; sin el flag --write se
+    # niega, porque congelar un ancla así la deja huérfana en el PR siguiente
+    # (#2909 -> 4efcaf66 quedó fuera de main para siempre).
+    python3 "$AUDITOR" --root "$d" --write "$d/evidence/mig-2026-01/baseline.json" \
+      --allow-unmerged-anchor 2>&1 1>/dev/null || exit 1
     git add -A && git commit -q -m tip
     tree="$(git rev-parse 'HEAD^{tree}')"
     printf '%s %s\n' "$measured" "$(git commit-tree "$tree" -p "$base" -m squash)"
@@ -250,6 +255,48 @@ expect_red_message "head_sha inexistente con git real -> rojo con mensaje" "$D13
 # NEGATION: sin git no se puede probar ancestría ni equivalencia de árbol.
 D14="$(fixture)"
 expect_red_message "repo sin .git -> rojo con mensaje de árbol" "$D14" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "el baseline fue medido sobre otro árbol"
+
+# --- 15. --write se niega a congelar un ancla huérfana ---------------------
+# NEGATION: es el defecto de #2909. `--write` congeló el tip de la rama del
+# release; la cola lo squasheó y el commit quedó fuera de main para siempre, así
+# que el baseline pasó una vez y falló en el PR siguiente. El guard tiene que
+# negarse a escribir ese ancla salvo que el operador lo pida explícitamente.
+D15="$(fixture)"
+(
+  cd "$D15" || exit 1
+  git_identity
+  git init -q
+  git add -A && git commit -q -m base
+  git branch -M main
+  printf 'orphan\n' > orphan.txt
+  git add -A && git commit -q -m "tip fuera de main"
+  git checkout -q -b release-line 2>/dev/null || true
+  printf 'release\n' > rel.txt
+  git add -A && git commit -q -m "tip de la rama del release"
+) >/dev/null 2>&1
+ORPHAN_SHA="$(git -C "$D15" rev-parse HEAD)"
+if [ "$ORPHAN_SHA" = "$(git -C "$D15" rev-parse main)" ]; then
+  bad "fixture 15 inválida: el tip no puede coincidir con main"
+else
+  if python3 "$AUDITOR" --root "$D15" --head-sha "$ORPHAN_SHA" \
+       --write "$WORK/orphan.json" >"$WORK/w.log" 2>&1; then
+    bad "--write aceptó un ancla huérfana (regresión de #2909)"
+    sed 's/^/    /' "$WORK/w.log"
+  elif grep -Fq "el próximo squash lo dejará huérfano" "$WORK/w.log"; then
+    ok "--write rechaza un ancla que ningún ref durable alcanza"
+  else
+    bad "--write falló pero sin el mensaje esperado"
+    sed 's/^/    /' "$WORK/w.log"
+  fi
+  # El escape explícito tiene que seguir existiendo para el estado pre-squash.
+  if python3 "$AUDITOR" --root "$D15" --head-sha "$ORPHAN_SHA" \
+       --write "$WORK/orphan.json" --allow-unmerged-anchor >"$WORK/w2.log" 2>&1; then
+    ok "--allow-unmerged-anchor sigue aceptando el estado pre-squash"
+  else
+    bad "--allow-unmerged-anchor no aceptó el estado pre-squash"
+    sed 's/^/    /' "$WORK/w2.log"
+  fi
+fi
 
 printf '\nmigration evidence harness: %d OK, %d FAIL\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1
