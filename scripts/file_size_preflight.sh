@@ -694,6 +694,10 @@ case "$MODE" in
         DEFECTS+=("glue on a file the plan does not touch: '$GKEY' (the plan moves to ${#PLAN_ORDER[@]} destination(s) and the source '$SRC_KEY')")
         continue
       fi
+      if [ -n "${GLUE[$GKEY]:-}" ]; then
+        DEFECTS+=("duplicate glue for '$GKEY': one --glue per file (summing silently would hide a plan typo)")
+        continue
+      fi
       GLUE["$GKEY"]="$GVAL"
     done
 

@@ -312,6 +312,66 @@ expect_rc "7.1 the adversarial file is measured (rc=0)" 0 "$RC" "$ERRF"
 expect_eq "7.2 the lexer finds the span at line 2 (span = total-2+1)" "$(field "$OUT" inline_tests)" "$((C_TOTAL - 1))"
 expect_eq "7.3 production is line 1 only" "$(field "$OUT" production)" "1"
 
+# 7.4-7.7 raw-string fixtures that FAIL against the pre-fix lexer (the 7
+# fixture passed by accident: r#" never entered RAW and the STR fallback
+# closed early). Every construct here broke a REAL corpus file (the 14
+# indeterminados of the first full-corpus contrast).
+new_sandbox c7b
+{
+  printf 'pub fn head() {}\n'
+  printf 'pub fn with_raw() {\n'
+  printf '    let j = r#"{\n'
+  printf '        "name": "x",\n'
+  printf '        \\"nested\\": 1\n'
+  printf '    }"#;\n'
+  printf '    assert!(j.contains("x"));\n'
+  printf '}\n'
+  printf '#[cfg(test)]\n'
+  printf 'mod tests {\n'
+  printf '    #[test]\n'
+  printf '    fn t1() { assert!(true); }\n'
+  printf '}\n'
+} > "$SB/crates/webfang_x/src/c7b.rs"
+run_pre --format "crates/webfang_x/src/c7b.rs"
+expect_rc "7.4 a multiline r# JSON string is measured (rc=0)" 0 "$RC" "$ERRF"
+expect_eq "7.4b the span is determinate at the mod (9..13 = 5)" "$(field "$OUT" inline_tests)" "5"
+
+new_sandbox c7c
+{
+  printf 'pub fn h() {}\n'
+  printf '#[cfg(test)]\n'
+  printf 'mod tests {\n'
+  printf '    fn a() { let s = r##"inner "# not a close"##; assert_eq!(s, "x"); }\n'
+  printf '}\n'
+} > "$SB/crates/webfang_x/src/c7c.rs"
+run_pre --format "crates/webfang_x/src/c7c.rs"
+expect_eq "7.5 an r## raw keeps its span determinate despite an inner quote-hash" "$(field "$OUT" inline_tests)" "4"
+
+new_sandbox c7d
+{
+  printf 'pub fn h() {}\n'
+  printf '#[cfg(test)]\n'
+  printf 'mod tests {\n'
+  printf '    fn a() { let s = br#"say "hi""#; assert!(s.contains("hi")); }\n'
+  printf '}\n'
+} > "$SB/crates/webfang_x/src/c7d.rs"
+run_pre --format "crates/webfang_x/src/c7d.rs"
+expect_eq "7.6 a br# raw with an inner quote keeps its span determinate" "$(field "$OUT" inline_tests)" "4"
+
+new_sandbox c7e
+{
+  printf 'pub fn h() {}\n'
+  printf '#[cfg(test)]\n'
+  printf 'mod tests {\n'
+  printf '    fn a() { assert!(true); }\n'
+  printf '}\n'
+  printf '#[test]\n'
+  printf 'fn bare_outside() { assert!(true); }\n'
+} > "$SB/crates/webfang_x/src/c7e.rs"
+run_pre --format "crates/webfang_x/src/c7e.rs"
+expect_match "7.7 a bare #[test] outside the span goes indeterminate, never a wrong number" "$OUT" "^inline_tests	indeterminado"
+expect_match "7.7b ... and classifies as revisar, never tests-mayoria" "$OUT" "^clasificacion	revisar"
+
 # --- 8. an UNBALANCED file says so; it does not invent a span ------------------
 # NEGATION: a truncated file (missing the closing brace after a crash) would
 # yield "production = 0" from a naive counter -- a plausible, wrong number.
@@ -515,8 +575,36 @@ new_sandbox c24
 write_code "$SB/crates/webfang_x/src/s3.rs" 600
 run_pre --simulate "src/z3.rs:11-40" --glue "src/untouched.rs=5" --format "crates/webfang_x/src/s3.rs"
 expect_rc "17.6 glue on a file the plan does not touch is a defect (rc=4)" 4 "$RC" "$ERRF"
+expect_match "17.6b ... naming the untouched destination" "$OUT$(cat "$ERRF" 2>/dev/null)" "src/untouched.rs"
 run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=-3" --format "crates/webfang_x/src/s3.rs"
 expect_rc "17.7 negative glue is a defect (rc=4)" 4 "$RC" "$ERRF"
+run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=abc" --format "crates/webfang_x/src/s3.rs"
+expect_rc "17.9 non-integer glue is a defect (rc=4)" 4 "$RC" "$ERRF"
+run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=" --format "crates/webfang_x/src/s3.rs"
+expect_rc "17.10 empty glue value is a defect (rc=4)" 4 "$RC" "$ERRF"
+run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=5" --glue "src/z3.rs=7" --format "crates/webfang_x/src/s3.rs"
+expect_rc "17.11 duplicate glue for the same file is refused, not silently summed (rc=4)" 4 "$RC" "$ERRF"
+
+new_sandbox c26
+write_code "$SB/crates/webfang_x/src/s5.rs" 600
+run_pre --simulate "src/z5.rs:1-450:header=40" --glue "src/z5.rs=20" --format "crates/webfang_x/src/s5.rs"
+expect_rc "17.12 glue counts toward the destination cap: 40+450+20 = 510 > 500 (rc=3)" 3 "$RC" "$ERRF"
+expect_match "17.12b ... naming the limit" "$OUT$(cat "$ERRF" 2>/dev/null)" "hard_limit"
+
+# 17.13 the FROZEN server.rs criterion fixture (owner round 3: no git show in
+# the harness — a shallow clone has no history). The data below is frozen
+# from the real split #2830 (commit 74ba3cb3); the producing commands were:
+#   git show 74ba3cb3^:crates/webfang_mcp/src/mcp_server/server.rs | wc -l   # 2012
+#   git show 74ba3cb3 -- crates/webfang_mcp/src/mcp_server/server.rs          # the 8 deleted runs (1681 lines)
+#   git show 74ba3cb3 --numstat -- crates/webfang_mcp/src/mcp_server/server.rs # +29 glue lines
+# The content is uniform: the arithmetic only needs the line COUNTS.
+new_sandbox c27
+write_code "$SB/crates/webfang_mcp/src/mcp_server/server.rs" 2012
+run_pre --simulate "child_1.rs:9-9" "child_2.rs:11-13" "child_3.rs:15-16" "child_4.rs:19-22" \
+  "child_5.rs:45-252" "child_6.rs:447-478" "child_7.rs:480-967" "child_8.rs:1070-2012" \
+  --glue "mcp_server/server.rs=29" --format "crates/webfang_mcp/src/mcp_server/server.rs"
+expect_eq "17.13 frozen #2830 data: source = 2012 - 1681 + 29 = 360" "$(sim_total "$OUT" mcp_server/server.rs)" "360"
+expect_rc "17.13b the aggregate 943-line child is still refused (negative test, rc=3)" 3 "$RC" "$ERRF"
 
 # --- 18. the harness watches its own house -------------------------------------
 # 18.1 the lesson of §8 (issue #2925): the file-size family carries no pipe
