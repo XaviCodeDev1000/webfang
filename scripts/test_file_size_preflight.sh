@@ -67,7 +67,7 @@ for arg in "$@"; do
       printf '%s\n' "Usage: bash scripts/test_file_size_preflight.sh [--negation]"
       printf '%s\n' ""
       printf '%s\n' "  --negation  flips the corpus-parity expectation."
-      printf '%s\n' "              Un harness que no puede fallar no prueba nada (#2056)."
+      printf '%s\n' "              A harness that cannot fail proves nothing (#2056)."
       exit 0 ;;
     *)
       printf 'unknown argument: %s\n' "$arg" >&2
@@ -155,7 +155,7 @@ json.dump({"file_size_rust": ratchet}, open(out, "w", encoding="utf-8"), indent=
 PY
 }
 
-# write_code <archivo> <n>: n funciones de una linea => el archivo mide n
+# write_code <file> <n>: n one-line functions => the file measures n
 write_code() {
   local f="$1" n="$2" i
   mkdir -p "$(dirname "$f")"
@@ -179,7 +179,7 @@ append_test_mod() {
   } >> "$f"
 }
 
-run_pre() { # corre la COPIA del sandbox; deja stdout en OUT, rc en RC
+run_pre() { # runs the sandbox COPY; leaves stdout in OUT and rc in RC
   local errf="$WORK/err.$$.$RANDOM"
   OUT="$(cd "$SB" && bash scripts/file_size_preflight.sh "$@" 2>"$errf")"
   RC=$?
@@ -584,6 +584,11 @@ run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=" --format "crates/webfan
 expect_rc "17.10 empty glue value is a defect (rc=4)" 4 "$RC" "$ERRF"
 run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=5" --glue "src/z3.rs=7" --format "crates/webfang_x/src/s3.rs"
 expect_rc "17.11 duplicate glue for the same file is refused, not silently summed (rc=4)" 4 "$RC" "$ERRF"
+run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=0" --format "crates/webfang_x/src/s3.rs"
+expect_rc "17.14 zero glue is legal and changes nothing (rc=0)" 0 "$RC" "$ERRF"
+expect_eq "17.14b dest = header + moved with zero glue" "$(sim_total "$OUT" src/z3.rs)" "30"
+run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=-5" --format "crates/webfang_x/src/s3.rs"
+expect_rc "17.15 negative glue (-5) is a defect (rc=4)" 4 "$RC" "$ERRF"
 
 new_sandbox c26
 write_code "$SB/crates/webfang_x/src/s5.rs" 600
