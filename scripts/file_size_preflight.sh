@@ -57,9 +57,9 @@ declare -A PLAN_CLIPPED=()
 
 usage() {
   cat <<'USAGE'
-Uso: bash scripts/file_size_preflight.sh [modo]
+Usage: bash scripts/file_size_preflight.sh [mode]
 
-  (sin argumentos)      el bloque de presupuesto P (lo que corre ci.yml: --budget)
+  (no arguments)        the budget block P (what ci.yml runs: --budget)
   --format <path>       the measurement block for one file (repo-relative path, as the guard spells it)
   --simulate <plan>...  with --format <source>: computes the cut; plan <dest>:<FROM>-<TO>[:header=<N>]
   --glue <file>=<N>     with --simulate: NON-moved lines the split adds to that file
@@ -225,7 +225,7 @@ if lines and lines[-1] == "":
 
 CODE, LC, BC, STR, RAW = range(5)
 STATE_NAMES = {
-    BC: "comentario de bloque", STR: "string", RAW: "raw string",
+    BC: "block comment", STR: "string", RAW: "raw string",
 }
 state = CODE
 raw_hashes = 0
@@ -528,11 +528,11 @@ case "$MODE" in
     ;;
 
   budget)
-    emit4 "presupuesto_diff" "$DIFF_BUDGET" "(add+del)" "warning at diff strictly > $DIFF_BUDGET (add+del); does not block; moves down only"
-    emit4 "muestra" "2246" "(add+del)" "gh pr view 2901 --json additions,deletions -q '.additions+.deletions'"
-    emit4 "muestra" "3018" "(add+del)" "gh pr view 2896 --json additions,deletions -q '.additions+.deletions'"
-    emit4 "muestra" "3933" "(add+del)" "gh pr view 2856 --json additions,deletions -q '.additions+.deletions'"
-    emit4 "muestra" "5101" "(add+del)" "gh pr view 2893 --json additions,deletions -q '.additions+.deletions'"
+    emit4 "budget_diff" "$DIFF_BUDGET" "(add+del)" "warning at diff strictly > $DIFF_BUDGET (add+del); does not block; moves down only"
+    emit4 "sample" "2246" "(add+del)" "gh pr view 2901 --json additions,deletions -q '.additions+.deletions'"
+    emit4 "sample" "3018" "(add+del)" "gh pr view 2896 --json additions,deletions -q '.additions+.deletions'"
+    emit4 "sample" "3933" "(add+del)" "gh pr view 2856 --json additions,deletions -q '.additions+.deletions'"
+    emit4 "sample" "5101" "(add+del)" "gh pr view 2893 --json additions,deletions -q '.additions+.deletions'"
     emit4 "prs" "0" "PRs" "ceil(2*moved/$DIFF_BUDGET); moved=0 with no plan"
     ;;
 
@@ -613,7 +613,7 @@ case "$MODE" in
     ALLOW_N="${ALLOW_N:-0}"
     emit4 "allow" "$ALLOW_N" "attrs" "grep -c 'allow(clippy::too_many_lines)' '$REL'"
 
-    emit4 "funciones" "" "-" "reserved (F1a): needs clippy/rustc, not available in the offline preflight"
+    emit4 "functions" "" "-" "reserved (F1a): needs clippy/rustc, not available in the offline preflight"
     emit4 "blast_radius" "indeterminate" "-" "-"
     emit2 "blast_radius_note" "codegraph explore / codedb callers on '$REL' (intelligence tools; the preflight is offline)"
     emit4 "overlap_prs" "indeterminate" "-" "-"
@@ -623,18 +623,18 @@ case "$MODE" in
     # §5 signals (glued modules, cohesive declarative, high risk,
     # architectural) are maintainer calls per §5's own Signals column.
     if [ "$IN_CORPUS" -eq 0 ]; then
-      emit2 "clasificacion" "na"
-      emit2 "clasificacion_note" "outside the ratchet's corpus (the guard's find); no §5 classification"
+      emit2 "classification" "na"
+      emit2 "classification_note" "outside the ratchet's corpus (the guard's find); no §5 classification"
     elif [ -n "${EXC["$REL"]:-}" ]; then
-      emit2 "clasificacion" "exception"
-      emit2 "clasificacion_note" "declared in the baseline's exceptions map; does not waive the limit or the net-zero"
+      emit2 "classification" "exception"
+      emit2 "classification_note" "declared in the baseline's exceptions map; does not waive the limit or the net-zero"
     elif [ -n "$INLINE_N" ] && [ "$((2 * INLINE_N))" -gt "$TOTAL" ]; then
-      emit2 "clasificacion" "tests-majority"
+      emit2 "classification" "tests-majority"
     elif [ "$ALLOW_N" -gt 0 ]; then
-      emit2 "clasificacion" "giant-function"
+      emit2 "classification" "giant-function"
     else
-      emit2 "clasificacion" "needs-review"
-      emit2 "clasificacion_note" "non-mechanical §5 signals (glued modules, cohesive declarative, high risk, architectural — cited from §5): a review decision"
+      emit2 "classification" "needs-review"
+      emit2 "classification_note" "non-mechanical §5 signals (glued modules, cohesive declarative, high risk, architectural — cited from §5): a review decision"
     fi
 
     [ "$MODE" = "format" ] && exit 0

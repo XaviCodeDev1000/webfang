@@ -40,6 +40,9 @@
 #  18. the harness watches its own house: no early-exit grep after a pipe in
 #      the four family scripts, the local-gate wiring is enforced on live code
 #      lines only, and a broken python3 fails with a named cause.
+#  19. the block keys are a CLOSED ENGLISH LIST: any key outside it (a new
+#      Spanish key included) turns this red; --help's usage lines are bound
+#      literally (round 8, the loose-word lesson).
 #
 # HERMETIC BY DESIGN. The tool is exercised as a COPY inside a sandbox tree (its
 # ROOT is derived from its own location), so this harness never writes to the
@@ -101,17 +104,17 @@ bad() {
   failed=$((failed + 1))
 }
 
-# expect_rc <desc> <esperado> <obtenido> [detalle]
+# expect_rc <desc> <expected> <real> [detail]
 expect_rc() {
   if [ "$2" = "$3" ]; then ok "$1" "rc=$3"; else bad "$1" "expected rc=$2, got rc=$3" "${4:-}"; fi
 }
 
-# expect_eq <desc> <obtenido> <esperado>
+# expect_eq <desc> <real> <expected>
 expect_eq() {
   if [ "$2" = "$3" ]; then ok "$1" "$2"; else bad "$1" "got='$2' expected='$3'"; fi
 }
 
-# expect_match <desc> <texto> <regex>  (regex extendida de grep)
+# expect_match <desc> <text> <regex>  (an extended grep regex)
 # grep -E -- "$3" > /dev/null, NOT -q: with set -o pipefail, -q's early exit
 # on the first match SIGPIPEs the printf when the text is larger than the
 # pipe buffer (the 161 KB ci.yml) and the pipeline fails DESPITE the match.
@@ -281,13 +284,13 @@ if [ -n "$T_CMD" ]; then
   REPRO="$(cd "$SB" && eval "$T_CMD" 2>/dev/null | tr -d ' ' | head -1)"
   expect_eq "6.1 the total command reproduces the total" "$REPRO" "$T_SIM"
 else
-  bad "6.1 the total command reproduces the total" "sin comando en la columna 4"
+  bad "6.1 the total command reproduces the total" "no command in column 4"
 fi
 if [ -n "$I_CMD" ]; then
   REPRO="$(cd "$SB" && eval "$I_CMD" 2>/dev/null | tr -d ' ' | head -1)"
   expect_eq "6.2 the inline-tests command reproduces the span" "$REPRO" "$I_SIM"
 else
-  bad "6.2 the inline-tests command reproduces the span" "sin comando en la columna 4"
+  bad "6.2 the inline-tests command reproduces the span" "no command in column 4"
 fi
 
 # --- 7. the span is LEXED, not brace-counted ----------------------------------
@@ -370,7 +373,7 @@ new_sandbox c7e
 } > "$SB/crates/webfang_x/src/c7e.rs"
 run_pre --format "crates/webfang_x/src/c7e.rs"
 expect_match "7.7 a bare #[test] outside the span goes indeterminate, never a wrong number" "$OUT" "^inline_tests	indeterminate"
-expect_match "7.7b ... and classifies as needs-review, never tests-majority" "$OUT" "^clasificacion	needs-review"
+expect_match "7.7b ... and classifies as needs-review, never tests-majority" "$OUT" "^classification	needs-review"
 
 # --- 8. an UNBALANCED file says so; it does not invent a span ------------------
 # NEGATION: a truncated file (missing the closing brace after a crash) would
@@ -428,7 +431,7 @@ expect_eq "10.2 the harness cut what it said it cut" "$REAL_DEST" "$((HEADER + M
 expect_eq "10.3 simulated source size == real cut source size" "$(sim_total "$OUT" src/f.rs)" "$REAL_SRC"
 expect_eq "10.4 simulated destination size == real cut destination size" "$(sim_total "$OUT" src/z.rs)" "$REAL_DEST"
 if [ "$EXPECT_SRC" != "$REAL_SRC" ]; then
-  bad "10.5 the cut is the one the plan describes" "esperado $EXPECT_SRC, real $REAL_SRC"
+  bad "10.5 the cut is the one the plan describes" "expected $EXPECT_SRC, real $REAL_SRC"
 else
   ok "10.5 the cut is the one the plan describes" "$REAL_SRC"
 fi
@@ -447,7 +450,7 @@ expect_match "11.2 ... naming the destination and the limit" "$OUT$(cat "$ERRF" 
 new_sandbox c12
 write_code "$SB/crates/webfang_x/src/h.rs" 540
 write_baseline "crates/webfang_x/src/h.rs:540"
-# mueve 10 lines pero el destino suma 20 de header: h queda en 530 <= 540, legal
+# moves 10 lines but the destination adds 20 header lines: h stays at 530 <= 540, legal
 run_pre --simulate "src/h2.rs:1-10:header=20" --format "crates/webfang_x/src/h.rs"
 expect_rc "11.3 a grandfathered source that SHRINKS stays legal (rc=0)" 0 "$RC" "$ERRF"
 
@@ -477,7 +480,7 @@ write_code "$SB/crates/webfang_x/src/k.rs" 500
 run_pre --budget
 expect_rc "13.1 --budget exits 0" 0 "$RC" "$ERRF"
 expect_match "13.2 P carries its unit (add+del)" "$OUT" "3000	(add\+del)|3000.*add\+del"
-expect_match "13.3 P states its comparator (strict >)" "$OUT" "(strict|estricto).*>"
+expect_match "13.3 P states its comparator (strict >)" "$OUT" "strict.*>"
 for sample in 2246#2901 3018#2896 3933#2856 5101#2893; do
   n="${sample%%#*}"
   pr="${sample##*#}"
@@ -527,7 +530,7 @@ new_sandbox c18
   printf '}\n'
 } > "$SB/crates/webfang_x/src/n.rs"
 run_pre --format "crates/webfang_x/src/n.rs"
-expect_match "16.1 inline > 50% suggests tests-majority" "$OUT" "^clasificacion	tests-majority"
+expect_match "16.1 inline > 50% suggests tests-majority" "$OUT" "^classification	tests-majority"
 
 new_sandbox c19
 {
@@ -537,19 +540,19 @@ new_sandbox c19
   printf '}\n'
 } > "$SB/crates/webfang_x/src/o.rs"
 run_pre --format "crates/webfang_x/src/o.rs"
-expect_match "16.2 an allow(too_many_lines) suggests giant-function" "$OUT" "^clasificacion	giant-function"
+expect_match "16.2 an allow(too_many_lines) suggests giant-function" "$OUT" "^classification	giant-function"
 
 new_sandbox c20
 write_code "$SB/crates/webfang_x/src/q.rs" 600
 run_pre --format "crates/webfang_x/src/q.rs"
-expect_match "16.3 production-heavy without signals says needs-review" "$OUT" "^clasificacion	needs-review"
-expect_match "16.4 ... naming the semantic §5 signals" "$OUT" "^clasificacion_note	"
+expect_match "16.3 production-heavy without signals says needs-review" "$OUT" "^classification	needs-review"
+expect_match "16.4 ... naming the semantic §5 signals" "$OUT" "^classification_note	"
 
 new_sandbox c21
 write_code "$SB/crates/webfang_x/src/r.rs" 512
 write_baseline "crates/webfang_x/src/r.rs:512" "exc:crates/webfang_x/src/r.rs"
 run_pre --format "crates/webfang_x/src/r.rs"
-expect_match "16.5 a declared exception says exception" "$OUT" "^clasificacion	exception"
+expect_match "16.5 a declared exception says exception" "$OUT" "^classification	exception"
 
 # --- 17. --glue: §4.3's "plus headers" completes the move model ---------------
 # NEGATION: a simulator that cannot model the glue FORCES criterion drift —
@@ -647,6 +650,38 @@ RC=$?
 ERRF="$WORK/err18"
 expect_rc "18.3 a broken python3 fails named (rc=1)" 1 "$RC" "$ERRF"
 expect_match "18.4 ... naming python3, never a bare traceback" "$(cat "$ERRF" 2>/dev/null)" "python3"
+
+# --- 19. the block keys are a CLOSED ENGLISH LIST -----------------------------
+# §8 lesson (round 8): the accent+stopword detector cannot see a loose Spanish
+# word with no accent — it missed "clasificacion", an emitted key, while the
+# five renamed tokens were being audited. So the contract is not DETECTED, it
+# is ENUMERATED: every key the tool may emit must be in this list; any new key
+# (Spanish or not) turns this red until the list is amended by a reviewed
+# commit. The union is fed by REAL outputs of fixtures in every branch: budget,
+# a classified file, the indeterminate-span branch, the no-git branch and a
+# simulate plan.
+CLOSED_KEYS='^(allow|blast_radius|blast_radius_note|churn_commits|churn_commits_note|classification|classification_note|functions|in_corpus|inline_tests|inline_tests_note|sample|overlap_prs|overlap_prs_note|path|plan|budget_diff|production|prs|total)$'
+new_sandbox c26
+write_code "$SB/crates/webfang_x/src/s5.rs" 600
+for i in $(seq 1 30); do echo "fn f$i() {"; done > "$SB/crates/webfang_x/src/u5.rs"
+run_pre --budget
+BUDGET_OUT="$OUT"
+run_pre --format "crates/webfang_x/src/s5.rs"
+FORMAT_OUT="$OUT"
+run_pre --format "crates/webfang_x/src/u5.rs"
+UNBAL_OUT="$OUT"
+run_pre --simulate "src/z2.rs:11-40:header=2" --glue "src/z2.rs=5" --format "crates/webfang_x/src/s5.rs"
+SIM_OUT="$OUT"
+KEYS="$(printf '%s\n' "$BUDGET_OUT" "$FORMAT_OUT" "$UNBAL_OUT" "$SIM_OUT" | awk -F'\t' 'NF>=2 && $1 ~ /^[a-z_]+$/ {print $1}' | sort -u)"
+BAD_KEYS="$(printf '%s\n' "$KEYS" | grep -cvE "$CLOSED_KEYS")" || BAD_KEYS=0
+expect_eq "19.1 every emitted block key is in the closed English list" "${BAD_KEYS:-0}" "0"
+expect_match "19.2 the union is fed and exercises the renamed keys" "$KEYS" "(classification|functions|sample|budget_diff)"
+run_pre --help
+expect_match "19.3 --help opens with the English usage line" "$OUT" "^Usage: bash scripts/file_size_preflight.sh \[mode\]$"
+expect_match "19.4 ... and the English no-arguments mode line" "$OUT" "^\s*\(no arguments\)\s+the budget block P \(what ci.yml runs: --budget\)$"
+expect_match "19.5 budget_diff carries P with unit and comparator" "$BUDGET_OUT" "^budget_diff	3000	\(add\+del\)	warning at diff strictly > 3000"
+expect_match "19.6 a sample row carries its gh command" "$BUDGET_OUT" "^sample	2246	\(add\+del\)	gh pr view 2901"
+expect_match "19.7 the reserved functions row is emitted" "$FORMAT_OUT" "^functions		-	reserved"
 
 # --- summary ------------------------------------------------------------------
 

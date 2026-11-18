@@ -103,6 +103,6 @@
       "crates/webfang_core/src/infrastructure/platform/windows_console.rs": "Platform file: hosts the crate documented legitimate unsafe Win32 FFI, invisible to every Linux gate. The only seam (~57 lines, the code-page cluster) is the thinnest of the band and any touch triggers cross-target cfg(windows) verification for the smallest gain of the seven. Deferred unless the file grows materially. Verdict: Ola 0 batch 3 exploration.",
       "crates/webfang_mcp/src/mcp_server/params.rs": "MCP wire-contract catalog: 16 Deserialize+JsonSchema param structs, each with a thin validate() over shared require_* guards, plus 3 colocated test modules (414 lines). The schema bridge consumes the types by name; splitting them into per-tool files would scatter one cohesive contract behind re-exports with no complexity gain. Function lints (too_many_lines 100, cognitive_complexity 25) are clean under CI. Verdict: Ola 2 mission (odd/tasks/file-size-ola2.md, L10). Migration condition: extract the three test modules by theme first, then group param structs by tool family only if a real seam appears."
     },
-    "funciones": {}
+    "functions": {}
   }
 }
