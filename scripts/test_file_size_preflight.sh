@@ -215,6 +215,17 @@ if [ "$NEGATION" = "1" ]; then
 fi
 expect_eq "2.1 --corpus-literal == el find del guard, byte a byte" "$OUT" "$EXPECT_CORPUS"
 
+# 2.2 the THREE-WAY LOCK: AGENTS.md documents the corpus, the guard owns it,
+# the preflight imports it. If the guard's find expression changes without
+# AGENTS.md moving with it (or vice versa), this fails: a corpus the
+# documentation does not describe is a corpus nobody can audit.
+AGENTS_CORPUS="$(grep -o "find crates -name '[^']*' -not -path '[^']*'" "$REPO_ROOT/AGENTS.md" | head -1)"
+if [ -z "$AGENTS_CORPUS" ]; then
+  bad "2.2 el harness extrae el corpus documentado de AGENTS.md" "sin 'find crates' en $REPO_ROOT/AGENTS.md"
+else
+  expect_eq "2.2 the corpus is the one AGENTS.md documents (three-way lock)" "$OUT" "$AGENTS_CORPUS"
+fi
+
 # --- 3. a missing path fails with a NAMED cause --------------------------------
 # NEGATION: an empty block for a typo reads as "healthy file".
 
