@@ -220,10 +220,10 @@ jobs:
     name: Repo guards
     runs-on: ubuntu-latest
     # fetch-depth: 0 en el checkout de abajo: `check_migration_evidence.sh`
-    # verifica que el SHA de F0 siga siendo ancestro de HEAD. Con el depth-1
-    # por defecto ese objeto no existe en un PR y el gate fallaría por el
-    # checkout, no por una deriva real. Es el mismo patrón que `change-scope`
-    # y `pr-validation.yml` ya usan para los guards que leen historia/tags.
+    # verifies that F0's SHA is still an ancestor of HEAD. With the default
+    # depth-1 that object does not exist in a PR and the gate would fail on the
+    # checkout, not on a real drift. It is the same pattern that `change-scope`
+    # and `pr-validation.yml` already use for the guards that read history/tags.
     # 20 min: warm runs finish in ~4 min, but a PR with a stale rust-cache
     # builds the intra-crate lint tool cold and measured 10.2 min when the
     # 10-minute wall killed it (PR #2260 run 39904199331, 2026-10-23). Per
@@ -687,7 +687,7 @@ jobs:
       # Offline, pure text over the checked-out tree: no cargo, no network.
       - name: Docs version pins wiring harness
         run: bash scripts/test_docs_version_pins_wiring.sh
-      # Docs claims gate (auditoría QA/QC 2026-10-24): README.md is the most
+      # Docs claims gate (QA/QC audit 2026-10-24): README.md is the most
       # read file in the repo and nothing read it. Measured drift at 15d4436:
       # the Architecture diagram drew `webfang_cli ──→ webfang_mcp`, an edge
       # no manifest has (AGENTS.md forbids it); a `tests-1,337` badge survived
@@ -714,8 +714,8 @@ jobs:
       # AGENTS.md size/structure gate (#2839): the always-loaded router regrew
       # 740 -> 862 lines after the 2026-10-21 routerization because agents
       # append runbook prose on every commit; #2834 pruned it back under the
-      # owner-approved budget (650 lines / 40960 bytes). Engram obs #368: "Sin
-      # un gate que falle, un doc largo no se auto-achica." The gate enforces
+      # owner-approved budget (650 lines / 40960 bytes). Engram obs #368: "Without
+      # a gate that fails, a long doc does not shrink itself." The gate enforces
       # the budget from scripts/quality-baselines.json (agents_doc key,
       # descending-only ratchet), even fence balance, and zero line-number
       # citations. REQUIRED from day one — no advisory phase: the budget is
@@ -735,7 +735,7 @@ jobs:
       # class here, so the edges are pinned by their own harness.
       - name: AGENTS.md gate wiring harness
         run: bash scripts/test_agents_doc_wiring.sh
-      # Test inventory drift (auditoría QA/QC 2026-10-24): docs/test-inventory.json
+      # Test inventory drift (QA/QC audit 2026-10-24): docs/test-inventory.json
       # is generated and committed, and nothing regenerated it — it described 163
       # files and 1,131 tests while the tree had 173 files and the suite ran
       # 4,835. A committed artifact no gate reads is a claim nobody watches.
@@ -914,12 +914,12 @@ jobs:
           fi
           if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
             git fetch --no-tags --depth=1 origin "$BASE" || {
-              echo "::error::no se pudo traer el commit base '$BASE' para el guard MCP"
+              echo "::error::could not fetch the base commit '$BASE' for the MCP guard"
               exit 1
             }
           fi
           if ! git cat-file -e "${BASE}^{commit}"; then
-            echo "::error::el commit base '$BASE' no está disponible tras el fetch"
+            echo "::error::the base commit '$BASE' is not available after the fetch"
             exit 1
           fi
           echo "base=$BASE" >> "$GITHUB_OUTPUT"
@@ -934,7 +934,7 @@ jobs:
           bash scripts/check_mcp_public_surface.sh --base "$BASE"
       # Breaking-marker guard harness (#2081). `merge-when-green.sh` is the
       # integration mechanism, and its squash path silently destroyed a breaking
-      # declaration twice while closing ADR-0004 paso 6: #2072 wrote the marker in
+      # declaration twice while closing ADR-0004 step 6: #2072 wrote the marker in
       # the wrong position, #2078 had it in the PR title and the squash subject
       # came out without it. Both shipped as patches. The guard refuses that merge
       # now, and this harness pins the refusal — including the negation that
@@ -2066,8 +2066,8 @@ jobs:
       # this job — which is in nobody's `needs` — turns the scheduled run red
       # with no tracking issue written: the exact silent-failure the shield was
       # supposed to prevent. Same scope, same call, same reason as
-      # ci-health.yml's top-level `actions: read` ("listar runs y jobs de los
-      # workflows observados").
+      # ci-health.yml's top-level `actions: read` ("list runs and jobs of the
+      # observed workflows").
       actions: read
       issues: write
       contents: read

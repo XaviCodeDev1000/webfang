@@ -11,7 +11,7 @@
 #     Incremental: a no-op when already up to date, so this is cheap to run
 #     locally and in CI.
 #     The `ai` feature was removed with the `webfang_ai` crate (ADR-0004
-#     paso 6), so the release set no longer carries it; the semantic-cleaning
+#     step 6), so the release set no longer carries it; the semantic-cleaning
 #     flags are UNGATED now (ADR-0004 slice C) and therefore appear in every
 #     build, gated or not.
 #   - Help output is captured via command substitution (`$(...)`), which

@@ -116,7 +116,7 @@ else
   # Every `-p <pkg>` token must name a package that EXISTS. `cargo bench -p
   # <ghost>` fails the whole nightly, and a stale hardcoded list is exactly
   # how that happens — the `webfang_ai` bench (ai_phase_profile.rs) went with
-  # the crate in ADR-0004 paso 6, and nothing about the derivation would
+  # the crate in ADR-0004 step 6, and nothing about the derivation would
   # complain if a hardcoded list still named it.
   GHOST=""
   for tok in $OUT; do

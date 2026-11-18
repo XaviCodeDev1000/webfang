@@ -121,7 +121,7 @@ YML
 
 # Wires only the guard, and mentions the harness in a COMMENT — a mention is
 # not a step. This is the shape that let a harness pass as "wired" while no
-# job ever ran it (#2070 ítem 2).
+# job ever ran it (#2070 item 2).
 wire_guard_only_commenting_harness() { # fixture-dir
   cat > "$1/.github/workflows/ci.yml" <<'YML'
 name: fixture
@@ -330,7 +330,7 @@ else
 fi
 
 # --- case 13: a harness named only in a COMMENT is not wired ----------------
-# NEGATION (#2070 ítem 2): `harness_wired` searched the workflow file RAW,
+# NEGATION (#2070 item 2): `harness_wired` searched the workflow file RAW,
 # while the neighbouring `guard_refs_in` / `script_refs_in` strip the comment
 # lines. A harness cited only in a comment therefore counted as WIRED: the
 # meta-guard reported "OK: 1 wired guard(s) covered" with exit 0, and the

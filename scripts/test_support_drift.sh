@@ -272,7 +272,7 @@ else
 fi
 # The acceptance must be READABLE: a note that names the line and says the
 # publication is pending, and NOT a `::error` annotation.
-if grep -qF 'publicación pendiente' <<<"$GATE_OUT" && grep -qF '2.2.1' <<<"$GATE_OUT"; then
+if grep -qF 'pending publication' <<<"$GATE_OUT" && grep -qF '2.2.1' <<<"$GATE_OUT"; then
   pass "la ventana en vuelo se anuncia nombrando la línea y la publicación pendiente"
 else
   fail "la aceptación de la ventana en vuelo no se distingue del silencio: $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -297,7 +297,7 @@ set_lines "$FX_TWO_AHEAD" '{
 add_tags "$FX_TWO_AHEAD" v2.0.0 v2.1.0 v2.1.1 v2.2.0
 run_gate "$FX_TWO_AHEAD" --scope=published
 if [[ "$GATE_RC" -ne 0 ]] \
-   && grep -qF 'v2.2: declarado v2.2.2, el parche published más nuevo es v2.2.0' <<<"$GATE_OUT"; then
+   && grep -qF 'v2.2: declared v2.2.2, the newest published patch is v2.2.0' <<<"$GATE_OUT"; then
   pass "dos parches por delante siguen siendo un error (una declaración que miente)"
 else
   fail "dos parches por delante no fallaron con el veredicto esperado (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -317,7 +317,7 @@ set_lines "$FX_BEHIND" '{
 add_tags "$FX_BEHIND" v2.0.0 v2.1.0 v2.1.1 v2.2.0 v2.2.1
 run_gate "$FX_BEHIND" --scope=published
 if [[ "$GATE_RC" -ne 0 ]] \
-   && grep -qF 'v2.2: declarado v2.2.0, el parche published más nuevo es v2.2.1' <<<"$GATE_OUT"; then
+   && grep -qF 'v2.2: declared v2.2.0, the newest published patch is v2.2.1' <<<"$GATE_OUT"; then
   pass "un .latest declarado detrás del parche published sigue fallando (la tolerancia no lo reabre)"
 else
   fail "un .latest declarado detrás del parche published dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -338,7 +338,7 @@ set_lines "$FX_NO_PATCH" '{
 add_tags "$FX_NO_PATCH" v2.0.0 v2.1.0 v2.1.1 v2.2.0
 run_gate "$FX_NO_PATCH" --scope=published
 if [[ "$GATE_RC" -ne 0 ]] \
-   && grep -qF 'v2.4: declarado v2.4.0, sin ningún parche X.Y.Z publicado' <<<"$GATE_OUT"; then
+   && grep -qF 'v2.4: declared v2.4.0, with no X.Y.Z patch published' <<<"$GATE_OUT"; then
   pass "una minor sin ningún parche published sigue fallando cerrado"
 else
   fail "una minor sin ningún parche published dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -396,7 +396,7 @@ if [[ "$GATE_RC" -eq 0 ]]; then
 else
   fail "el gate rechazó la ventana en vuelo de la rotación de minor (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
 fi
-if grep -qF 'rotación pendiente' <<<"$GATE_OUT" && grep -qF 'v2.2.0' <<<"$GATE_OUT"; then
+if grep -qF 'pending rotation' <<<"$GATE_OUT" && grep -qF 'v2.2.0' <<<"$GATE_OUT"; then
   pass "la rotación pendiente se anuncia nombrando la línea y el tag ausente"
 else
   fail "la aceptación de la rotación pendiente no se distingue del silencio: $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -424,7 +424,7 @@ set_lines "$FX_ROT_PENDING_GAP" '{
 add_tags "$FX_ROT_PENDING_GAP" v2.0.0 v2.1.0 v2.1.1
 run_gate "$FX_ROT_PENDING_GAP" --scope=published
 if [[ "$GATE_RC" -ne 0 ]] \
-   && grep -qF 'línea STABLE declarada: 2.3; minor publicada más reciente: 2.1' <<<"$GATE_OUT"; then
+   && grep -qF 'declared STABLE line: 2.3; most recently published minor: 2.1' <<<"$GATE_OUT"; then
   pass "una rotación que salta una minor sigue fallando (la tolerancia no abre el gap)"
 else
   fail "una rotación que salta una minor dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -446,7 +446,7 @@ set_lines "$FX_ROT_PENDING_NO_MAINT" '{
 add_tags "$FX_ROT_PENDING_NO_MAINT" v2.0.0 v2.1.0 v2.1.1
 run_gate "$FX_ROT_PENDING_NO_MAINT" --scope=published
 if [[ "$GATE_RC" -ne 0 ]] \
-   && grep -qF 'línea STABLE declarada: 2.2; minor publicada más reciente: 2.1' <<<"$GATE_OUT"; then
+   && grep -qF 'declared STABLE line: 2.2; most recently published minor: 2.1' <<<"$GATE_OUT"; then
   pass "una rotación pendiente sin predecesora en MAINTENANCE sigue fallando"
 else
   fail "una rotación pendiente sin predecesora en MAINTENANCE dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -468,7 +468,7 @@ set_lines "$FX_ROT_PENDING_PATCH" '{
 add_tags "$FX_ROT_PENDING_PATCH" v2.0.0 v2.1.0 v2.1.1
 run_gate "$FX_ROT_PENDING_PATCH" --scope=published
 if [[ "$GATE_RC" -ne 0 ]] \
-   && grep -qF 'v2.2: declarado v2.2.1, sin ningún parche X.Y.Z publicado' <<<"$GATE_OUT"; then
+   && grep -qF 'v2.2: declared v2.2.1, with no X.Y.Z patch published' <<<"$GATE_OUT"; then
   pass "una línea pendiente que no declara X.Y.0 sigue fallando cerrado"
 else
   fail "una línea pendiente que no declara X.Y.0 dejó de fallar (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -713,7 +713,7 @@ add_tags "$FX_ROT_GAP_TEN" v2.7.0 v2.8.0 v2.8.1 v2.9.0 v2.10.0 v2.11.0
 before="$(cat "$FX_ROT_GAP_TEN/.github/support.json")"
 rc=0
 out="$( cd "$FX_ROT_GAP_TEN" && ./scripts/rotate-stable.sh 2.11 2>&1 )" || rc=$?
-if [[ $rc -ne 0 ]] && grep -qF 'entre 2.8 y 2.11: 2.9 2.10' <<<"$out"; then
+if [[ $rc -ne 0 ]] && grep -qF 'between 2.8 and 2.11: 2.9 2.10' <<<"$out"; then
   pass "rechaza 2.8 -> 2.11 nombrando el gap del par .9/.10 (2.9, 2.10)"
 else
   fail "el rechazo del gap .9/.10 no es el de gobernanza (rc=$rc): $(tr '\n' ' ' <<<"$out")"
@@ -777,7 +777,7 @@ add_tags "$FX_GATE_TEN" v2.8.0 v2.8.1 v2.9.0 v2.10.0 v2.10.1
 # minor — the drift check never reached its own diagnosis.
 gate_rc=0
 gate_out="$( ( cd "$FX_GATE_TEN" && ./scripts/check_support_drift.sh --scope=published ) 2>&1 )" || gate_rc=$?
-if [[ $gate_rc -ne 0 ]] && grep -qF 'minors publicadas sin declarar en support.json: 2.9' <<<"$gate_out"; then
+if [[ $gate_rc -ne 0 ]] && grep -qF 'published minors not declared in support.json: 2.9' <<<"$gate_out"; then
   pass "marca 2.9 sin declarar cruzando el par .9/.10 con el veredicto de gobernanza"
 else
   fail "el gate no dio el veredicto de gobernanza (rc=$gate_rc): $(tr '\n' ' ' <<<"$gate_out")"
@@ -847,7 +847,7 @@ set_lines "$FX_DUP" '{
   ]
 }'
 run_gate "$FX_DUP" --scope=declared
-if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'minor declarada más de una vez' <<<"$GATE_OUT" \
+if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'minor declared more than once' <<<"$GATE_OUT" \
    && grep -qF '2.1' <<<"$GATE_OUT"; then
   pass "una minor declarada dos veces falla el scope declared nombrando la minor"
 else
@@ -872,7 +872,7 @@ set_lines "$FX_DUP_PUB" '{
 }'
 add_tags "$FX_DUP_PUB" v2.1.0 v2.1.1
 run_gate "$FX_DUP_PUB" --scope=published
-if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'minor declarada más de una vez' <<<"$GATE_OUT"; then
+if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'minor declared more than once' <<<"$GATE_OUT"; then
   pass "una minor declarada dos veces falla también el scope published (el gate requerido)"
 else
   fail "una minor declarada dos veces pasó el scope published (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -942,8 +942,8 @@ fi
 # approving it on the strength of an empty list (or blaming the STABLE line
 # for a file nobody could parse).
 run_gate "$FX_BAD" --scope=published
-if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'no se pudo leer la lista de minors declaradas' <<<"$GATE_OUT" \
-   && ! grep -qF 'no hay ninguna línea STABLE declarada' <<<"$GATE_OUT"; then
+if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'the list of declared minors could not be read' <<<"$GATE_OUT" \
+   && ! grep -qF 'no STABLE line is declared' <<<"$GATE_OUT"; then
   pass "el scope published falla ruidosamente ante un support.json ilegible"
 else
   fail "el scope published no falló ruidosamente ante un support.json ilegible (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"
@@ -966,7 +966,7 @@ set_lines "$FX_FLOOR" '{
 }'
 add_tags "$FX_FLOOR" v2.0.0 v9.0.0 v10.0.0
 run_gate "$FX_FLOOR" --scope=published
-if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'minors publicadas sin declarar en support.json: 9.0' <<<"$GATE_OUT"; then
+if [[ "$GATE_RC" -ne 0 ]] && grep -qF 'published minors not declared in support.json: 9.0' <<<"$GATE_OUT"; then
   pass "el piso de tracking usa el orden de versión del productor (9.0 no escapa del piso 2.0)"
 else
   fail "el piso de tracking no usa el orden de versión del productor (rc=$GATE_RC): $(tr '\n' ' ' <<<"$GATE_OUT")"

@@ -508,7 +508,7 @@ codedb index .
   depend on `mcp`; both are siblings over `core`.
 - **Port/Adapter pattern:** Domain defines traits, Infrastructure implements them
 - **Error types:** DomainError, InfraError → ScraperError (dual wrapping)
-- **User-facing errors:** Spanish. Internal logs: English.
+- **User-facing errors and internal logs:** English.
 
 **Stack:** Rust 1.91 · Tokio · wreq (TLS fingerprint) · scraper 0.27 · lol_html
 

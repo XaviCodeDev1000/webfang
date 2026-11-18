@@ -85,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f scripts/auto_label_type.sh ]; then
-            echo "::notice::La rama base todavia no tiene scripts/auto_label_type.sh: no hay nada que etiquetar."
+            echo "::notice::The base branch does not have scripts/auto_label_type.sh yet: there is nothing to label."
             exit 0
           fi
           bash scripts/auto_label_type.sh
@@ -176,7 +176,7 @@ jobs:
                 | sed -nE 's#^(refs/heads/)?gh-readonly-queue/.+/pr-([0-9]+)-[^/]+$#\2#p')"
               ;;
             *)
-              echo "::error::Evento no soportado para resolver el PR: $EVENT_NAME"
+              echo "::error::Event not supported to resolve the PR: $EVENT_NAME"
               exit 1
               ;;
           esac
@@ -186,7 +186,7 @@ jobs:
           fi
           state="$(gh pr view "$PR" --repo "$REPO" --json state --jq '.state')"
           if [ "$state" != "OPEN" ]; then
-            echo "::error::El PR #$PR no está abierto (state=$state)."
+            echo "::error::PR #$PR is not open (state=$state)."
             exit 1
           fi
           echo "pr=$PR" >> "$GITHUB_OUTPUT"
@@ -207,7 +207,7 @@ jobs:
           # in a chain to write a full-closing keyword, which auto-closed #994 after
           # sub-slice 1 of 5 with 0 of 11 acceptance criteria met.
           if ! printf '%s' "$BODY" | grep -qiE '(closes|fixes|resolves)([[:space:]]+(part|some|one)[[:space:]]+of)?[[:space:]]*#[[:space:]]*[0-9]+'; then
-            echo "::error::El cuerpo del PR debe vincular una issue con 'Closes #N', 'Fixes #N' o 'Resolves #N'. Para un slice parcial de una issue paraguas usa 'Closes part of #N' (pasa esta validación y NO cierra la issue)."
+            echo "::error::The PR body must link an issue with 'Closes #N', 'Fixes #N' or 'Resolves #N'. For a partial slice of an umbrella issue use 'Closes part of #N' (it passes this validation and does NOT close the issue)."
             exit 1
           fi
           echo "OK: issue vinculada."
@@ -229,7 +229,7 @@ jobs:
           # MAINTAIN/ADMIN) adds it, never the PR author agent.
           NUMBERS=$(printf '%s' "$BODY" | grep -oiE '(closes|fixes|resolves)([[:space:]]+(part|some|one)[[:space:]]+of)?[[:space:]]*#[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | sort -un || true)
           if [ -z "$NUMBERS" ]; then
-            echo "::error::No se pudo extraer el número de issue vinculado del cuerpo del PR."
+            echo "::error::Could not extract the linked issue number from the PR body."
             exit 1
           fi
           MISSING=""
@@ -239,10 +239,10 @@ jobs:
             fi
           done
           if [ -n "$MISSING" ]; then
-            echo "::error::Toda issue vinculada debe tener el label 'status:approved' (faltan:$MISSING). El label es protegido: pedí al mantenedor que apruebe la issue antes de abrir el PR."
+            echo "::error::Every linked issue must have the 'status:approved' label (missing:$MISSING). The label is protected: ask the maintainer to approve the issue before opening the PR."
             exit 1
           fi
-          echo "OK: todas las issues vinculadas tienen status:approved."
+          echo "OK: all linked issues have status:approved."
 
       - name: Require exactly one type:* label
         env:
@@ -254,7 +254,7 @@ jobs:
           count=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json labels \
             --jq '[.labels[].name | select(startswith("type:"))] | length')
           if [ "$count" -ne 1 ]; then
-            echo "::error::El PR debe tener exactamente un label 'type:*' (encontrados: $count)."
+            echo "::error::The PR must have exactly one 'type:*' label (found: $count)."
             exit 1
           fi
           echo "OK: label type:* presente."
@@ -275,7 +275,7 @@ jobs:
             chore/release-*) echo "OK: release-plz bot branch (exempt)."; exit 0 ;;
           esac
           if ! printf '%s' "$HEAD_REF" | grep -qE '^(feat|fix|hotfix|chore|docs|style|refactor|perf|test|build|ci|revert|release|support)/[a-z0-9._-]+$'; then
-            echo "::error::La rama '$HEAD_REF' debe seguir el patron type/description (ej: fix/mi-bug)."
+            echo "::error::The branch '$HEAD_REF' must follow the type/description pattern (e.g. fix/my-bug)."
             exit 1
           fi
           echo "OK: nombre de rama."
@@ -368,7 +368,7 @@ jobs:
                 | sed -nE 's#^(refs/heads/)?gh-readonly-queue/.+/pr-([0-9]+)-[^/]+$#\2#p')"
               ;;
             *)
-              echo "::error::Evento no soportado para resolver el PR: $EVENT_NAME"
+              echo "::error::Event not supported to resolve the PR: $EVENT_NAME"
               exit 1
               ;;
           esac
@@ -378,7 +378,7 @@ jobs:
           fi
           state="$(gh pr view "$PR" --repo "$REPO" --json state --jq '.state')"
           if [ "$state" != "OPEN" ]; then
-            echo "::error::El PR #$PR no está abierto (state=$state)."
+            echo "::error::PR #$PR is not open (state=$state)."
             exit 1
           fi
           echo "pr=$PR" >> "$GITHUB_OUTPUT"

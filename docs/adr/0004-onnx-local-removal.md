@@ -1,253 +1,253 @@
-# ADR 0004: Retirada de ONNX local; embeddings remotos como única vía AI
+# ADR 0004: Retire local ONNX; remote embeddings as the only AI path
 
-- **Status:** Accepted — implemented and shipped. La retirada se mergeó en #2072 (`e9b7217a`) y se publicó como **v3.0.0** (tag sobre `63d912ae`, 2026-10-20). El *Addendum 2026-10-19* al final registra el desenlace 6a, la decisión del umbral y el follow-up de shims.
-- **Date:** 2026-10-08 (revisado 2026-10-09: mecanismo de arbitraje del paso 6 y resolución de Q6 — precisión de mecanismo, la decisión (a) con refugio (c) no cambia; revisado 2026-10-11: corrección factual — el 0.75 de Tier 2 son dos números con roles opuestos — y registro de la condición 2 resuelta como migrar, #1975; revisado 2026-10-16: el marker de ruptura se mueve del paso 5 al paso 6 — leer *Enmienda 2026-10-16* en *Compatibilidad* —, `--clean-ai` queda atado a `--embedding-provider`, la etiqueta de recuperación y el canal de objeción pasan a ser concretas, #1998)
+- **Status:** Accepted — implemented and shipped. The removal was merged in #2072 (`e9b7217a`) and released as **v3.0.0** (tag over `63d912ae`, 2026-10-20). The *Addendum 2026-10-19* at the end records outcome 6a, the threshold decision and the shim follow-up.
+- **Date:** 2026-10-08 (revised 2026-10-09: step 6 arbitration mechanism and Q6 resolution — mechanism precision, decision (a) with shelter (c) does not change; revised 2026-10-11: factual correction — the 0.75 of Tier 2 is two numbers with opposite roles — and record of condition 2 resolved as migrate, #1975; revised 2026-10-16: the breaking marker moves from step 5 to step 6 — read *Amendment 2026-10-16* under *Compatibility* —, `--clean-ai` is bound to `--embedding-provider`, the recovery tag and the objection channel become concrete, #1998)
 - **Deciders:** Project owner
 - **Supersedes:** ADR 0003 §5 ("Local ONNX goes dormant, not deleted")
-- **Alcance de la supersesión:** el §5, más las afirmaciones del §Context de 0003 que quedaron obsoletas: "Port defined, never injected" es falso desde que `--extract-with-llm` inyecta un `dyn LlmPort` real en el Container (`webfang_cli/src/main.rs:721-759`, cableado en #1493). No es `resolve_remote_embedding` (`:687`): esa fn devuelve el `RemoteEmbeddingAdapter` del slot de embeddings, no un `LlmPort`. El resto (§1–4, 6, 7, trade-offs, alternativas) sigue vigente.
-- **Related issues:** #1915 (decisión), #1917 (primera revisión, cerrada por #1918), #1919 (re-scope), #1930 (revisión del mecanismo de arbitraje + Q6), #1975 (corrección 0.75 Tier 2 + condición 2 resuelta), #1997 (canal de objeción del paso 5, abierto), #1998 (enmienda del marker de ruptura), #1999 (aviso en ejecución + aviso de umbral + guía de migración)
-- **Working papers:** auditoría AI-inference fuera del repo (5 pasadas, HEAD `3ac5599`, 47 hallazgos FIN); los números clave van inline abajo para que este ADR se sostenga solo.
+- **Scope of the supersession:** §5, plus the claims in the 0003 §Context that became obsolete: "Port defined, never injected" has been false since `--extract-with-llm` injects a real `dyn LlmPort` into the Container (`webfang_cli/src/main.rs:721-759`, wired in #1493). It is not `resolve_remote_embedding` (`:687`): that function returns the `RemoteEmbeddingAdapter` from the embeddings slot, not an `LlmPort`. The rest (§1–4, 6, 7, trade-offs, alternatives) remains in force.
+- **Related issues:** #1915 (decision), #1917 (first review, closed by #1918), #1919 (re-scope), #1930 (arbitration mechanism review + Q6), #1975 (0.75 Tier 2 correction + condition 2 resolved), #1997 (step 5 objection channel, open), #1998 (breaking marker amendment), #1999 (run-time notice + threshold notice + migration guide)
+- **Working papers:** AI-inference audit outside the repo (5 passes, HEAD `3ac5599`, 47 FIN findings); the key numbers go inline below so this ADR stands on its own.
 
 ## Context
 
-ADR 0003 dejó ONNX dormido tras `--features ai` como fallback offline. La dormición es la peor de las tres opciones —**borrar, dormir, aislar**—: se paga el árbol en CI (7 invocaciones `--all-features` en 5 jobs —clippy:464, build+test:568,569, doc:870,874, mcp:1159, coverage:1496—; virgen `check -p webfang_ai --features ai` = 1m44s + 1.3 GB en máquina local, sin tests: techo, no cifra), `hf-hub` está fuera de `[features] ai` (`crates/webfang_ai/Cargo.toml:25` vs `:55`) así que **todo** build que incluya `webfang_ai` arrastra `reqwest` 0.12.28 (verificado: `cargo tree -p webfang_ai` sin features) —violación incondicional de la política `wreq`-only—, 390 MB de modelos, y código que se pudre sin dueño. Nota de base: la auditoría se corrió sobre `3ac5599`; este ADR se mergea sobre el `main` del momento, así que la distancia crece con cada commit — lo que fija el alcance es el SHA de auditoría, no cuántos commits faltan.
+ADR 0003 left ONNX dormant behind `--features ai` as an offline fallback. Dormancy is the worst of the three options —**delete, sleep, isolate**—: the tree is paid for in CI (7 `--all-features` invocations in 5 jobs —clippy:464, build+test:568,569, doc:870,874, mcp:1159, coverage:1496—; a virgin `check -p webfang_ai --features ai` = 1m44s + 1.3 GB on a local machine, without tests: a ceiling, not a figure), `hf-hub` is outside `[features] ai` (`crates/webfang_ai/Cargo.toml:25` vs `:55`) so **every** build that includes `webfang_ai` drags in `reqwest` 0.12.28 (verified: `cargo tree -p webfang_ai` without features) —an unconditional violation of the `wreq`-only policy—, 390 MB of models, and code that rots without an owner. Baseline note: the audit ran on `3ac5599`; this ADR is merged over `main` at the time, so the distance grows with every commit — what fixes the scope is the audit SHA, not how many commits are missing.
 
-**Corrección de premisa (revisión #1919): el remoto ya existe y es independiente de ONNX.** `RemoteEmbeddingAdapter` implementa `EmbeddingPort` (`remote_embedding.rs:454`, con `embed_batch`, `usage: Option` tolerante en `:73` y retry acotado), se resuelve con `--embedding-provider` / `WEBFANG_EMBEDDING_PROVIDER` (`options_spec/llm.rs:66-79`) y `--extract-with-llm` inyecta el puerto en el Container (`main.rs:721-759`) sin gate `ai`. El gap real es mucho más chico que el descrito antes: **embeddings remotos para el cleaner** —`SemanticCleanerImpl` se construye desde `InferenceEngine` y se erasa a `dyn InferenceEngine` (`main.rs:660-676`), sigue ONNX-only—. Este ADR se re-scopea en consecuencia: no es "cómo llegamos a remoto" sino **qué se borra, qué se rompe y cómo se deprecia**.
+**Premise correction (review #1919): the remote path already exists and is independent of ONNX.** `RemoteEmbeddingAdapter` implements `EmbeddingPort` (`remote_embedding.rs:454`, with `embed_batch`, tolerant `usage: Option` at `:73` and bounded retry), is resolved with `--embedding-provider` / `WEBFANG_EMBEDDING_PROVIDER` (`options_spec/llm.rs:66-79`) and `--extract-with-llm` injects the port into the Container (`main.rs:721-759`) without an `ai` gate. The real gap is much smaller than described before: **remote embeddings for the cleaner** —`SemanticCleanerImpl` is built from `InferenceEngine` and erased to `dyn InferenceEngine` (`main.rs:660-676`), still ONNX-only—. This ADR is re-scoped accordingly: it is not "how we get to remote" but **what gets deleted, what breaks and how it is deprecated**.
 
 ## Decision
 
-**Borrar ONNX del workspace**, con refugio externo solo con dueño y criterio de abandono (ver abajo). Secuencia obligatoria (el borrado es el último paso):
+**Delete ONNX from the workspace**, with external shelter only with an owner and an abandonment criterion (see below). Mandatory sequence (the deletion is the last step):
 
-1. MVP PRs 1–8 + **config de endpoint real** (las env vars de ADR 0003 §1 no existen en código —0 hits fuera del propio ADR—; la config real es `ProvidersConfig` + `AuthSource`: hacer existir el camino documentado antes de simplificarlo) + **B2** (allowlist CIDR para LAN — **Q6 resuelto, opción (b)**: `NetworkPolicy{mode, allow_cidrs, allow_hosts}` por provider, con link-local/unspecified/multicast/broadcast/reserved **siempre** bloqueadas aunque estén en la allowlist (FIN-017: sin esto un allowlist ingenuo abre `169.254.169.254`), y `100.64.0.0/10` bloqueado por defecto con opt-in explícito; la primera entrega es B1, `AuthSource::None`, que es independiente de Q6) + **C1–C3** (`--max-chars`, este ADR, docs regenerados con la lista explícita de Superficie afectada).
-2. **Tramo D**: reescribir `SemanticCleanerImpl` sobre el `EmbeddingPort` existente (el seam existe; lo pendiente es el cleaner, aún genérico sobre `InferenceEngine` en `:215`) + traslado + batch/bisección + caché + relativo opt-in. Los `chars_per_token`/`matryoshka` de los perfiles los consumen los pasos 2–3, así que la versión de schema de perfiles queda fijada aquí.
-3. Tier 2 con destino explícito (verificado: reimplementable sobre endpoint, solo consume texto→vectores; umbral 0.75 a recalibrar por modelo).
-4. Tramo propio **configuración fácil**: perfiles auto + `connect`/`doctor`/`show` + ajuste manual (o ADR hermano si crece).
-5. **Release de deprecación** (ver Compatibilidad): anuncia, no retira capacidad —los shims siguen funcionando—; con la etiqueta git de recuperación creada antes de publicarlo, ya hecha: **`onnx-tree/pre-step5`** (commit `38ab6a31`, ver *Reversibilidad*). Es un **minor sin marker de ruptura**: el anuncio lo hacen el aviso en ejecución y las release notes, no el semver (*Enmienda 2026-10-16*). El canal de objeción que el aviso nombra es **#1997**. Este paso no mejora `main`, la prepara: se declara así explícitamente.
-6. Desenlace según la *Condición de revisión* (abajo), con criterios distintos por rama: **6a borrado total** (si se cumplen el criterio técnico y la señal de objeción no registra dependencia activa) o **6b crate externo** (si hay reclamos o demanda real: con dueño nombrado, CI mínima y criterio de abandono —sin actividad ni releases en 6 meses se archiva—).
+1. MVP PRs 1–8 + **real endpoint config** (the env vars of ADR 0003 §1 do not exist in code —0 hits outside the ADR itself—; the real config is `ProvidersConfig` + `AuthSource`: make the documented path exist before simplifying it) + **B2** (CIDR allowlist for LAN — **Q6 resolved, option (b)**: `NetworkPolicy{mode, allow_cidrs, allow_hosts}` per provider, with link-local/unspecified/multicast/broadcast/reserved **always** blocked even when in the allowlist (FIN-017: without this a naive allowlist opens `169.254.169.254`), and `100.64.0.0/10` blocked by default with explicit opt-in; the first delivery is B1, `AuthSource::None`, which is independent of Q6) + **C1–C3** (`--max-chars`, this ADR, regenerated docs with the explicit list of Affected surface).
+2. **Tranche D**: rewrite `SemanticCleanerImpl` over the existing `EmbeddingPort` (the seam exists; what is pending is the cleaner, still generic over `InferenceEngine` at `:215`) + migration + batch/bisection + cache + opt-in relative. The `chars_per_token`/`matryoshka` of the profiles are consumed by steps 2–3, so the profile schema version is pinned here.
+3. Tier 2 with an explicit destination (verified: reimplementable over the endpoint, it only consumes text→vectors; threshold 0.75 to be recalibrated per model).
+4. Own tranche **easy configuration**: self profiles + `connect`/`doctor`/`show` + manual adjustment (or a sibling ADR if it grows).
+5. **Deprecation release** (see Compatibility): announces, does not remove capability —the shims keep working—; with the git recovery tag created before publishing it, already done: **`onnx-tree/pre-step5`** (commit `38ab6a31`, see *Reversibility*). It is a **minor without a breaking marker**: the announcement is made by the run-time notice and the release notes, not by semver (*Amendment 2026-10-16*). The objection channel the notice names is **#1997**. This step does not improve `main`, it prepares it: it is declared as such explicitly.
+6. Outcome per the *Review condition* (below), with distinct criteria per branch: **6a full deletion** (if the technical criterion is met and the objection signal records no active dependency) or **6b external crate** (if there are claims or real demand: with a named owner, minimal CI and an abandonment criterion —no activity or releases in 6 months means archived—).
 
-## Condiciones del owner (bloqueantes del paso 6)
+## Owner conditions (blocking step 6)
 
-1. **M2 funciona de verdad**: añadir la variante `AuthSource::None` (hoy solo Keyring/EncryptedFile/Env, `auth_source.rs:55-70`); el loopback ya está permitido (`is_permitted_loopback`, `ssrf_guard.rs:231`); B2 agrega la allowlist CIDR, no el loopback. Gate: el **criterio técnico** de la *Condición de revisión* —los *Criterios de aceptación de M2* (abajo) más la suite wiremock del PR-8 y el test de 401 con y sin credencial— y un **registro reproducible** archivado en el PR que habilita el paso 6 (comando + `--trace-file` + summary con backend/modelo/dim) ejecutado contra Ollama y vLLM reales. "Probado a mano" sin registro no cuenta; el registro es re-ejecutable por cualquiera. El `usage` que reportan Ollama y vLLM sigue sin verificar y es **opcional, nunca bloqueante**. LM Studio: best effort, sin garantía.
-2. **Tier 2 explícito**: migrar sobre endpoint o eliminar documentado. Nunca en silencio. **Resuelto 2026-10-11: migrar sobre endpoint**, con el paquete de egress completo (§Egress de Tier 2) — la eliminación documentada queda descartada porque degrada `--adaptive-selectors` a Tier 1 en silencio, exactamente lo que esta condición prohíbe.
-3. **Se asume la pérdida del zero-config offline-total**: M3 cubre sin-inferencia; `--clean-ai` sobrevive (des-gateado, ver Compatibilidad) pero exigirá endpoint del usuario. Se declara en el README.
-4. **Reescritura**: `SemanticCleanerImpl` (1096 LOC) sobre `EmbeddingPort`; `--max-tokens → --max-chars` con `chars_per_token` por perfil (default 3: mejor que 4, insuficiente para CJK —el respaldo real es el degradado por 400/413, nunca la estimación); 400/413 degrada con troceado/bisección.
-5. **Deprecación publicada**: el release del paso 5 salió al menos una minor antes del borrado.
+1. **M2 really works**: add the `AuthSource::None` variant (today only Keyring/EncryptedFile/Env, `auth_source.rs:55-70`); loopback is already allowed (`is_permitted_loopback`, `ssrf_guard.rs:231`); B2 adds the CIDR allowlist, not the loopback. Gate: the **technical criterion** of the *Review condition* —the *M2 acceptance criteria* (below) plus the PR-8 wiremock suite and the 401 test with and without credentials— and a **reproducible record** archived in the PR that enables step 6 (command + `--trace-file` + summary with backend/model/dim) run against real Ollama and vLLM. "Manually tested" without a record does not count; the record is re-runnable by anyone. The `usage` reported by Ollama and vLLM remains unverified and is **optional, never blocking**. LM Studio: best effort, no guarantee.
+2. **Explicit Tier 2**: migrate over the endpoint or document the removal. Never in silence. **Resolved 2026-10-11: migrate over the endpoint**, with the complete egress package (§Tier 2 Egress) —documented removal is discarded because it silently degrades `--adaptive-selectors` to Tier 1, exactly what this condition prohibits.
+3. **Loss of zero-config full offline is accepted**: M3 covers no-inference; `--clean-ai` survives (ungated, see Compatibility) but will require the user's endpoint. It is declared in the README.
+4. **Rewrite**: `SemanticCleanerImpl` (1096 LOC) over `EmbeddingPort`; `--max-tokens → --max-chars` with `chars_per_token` per profile (default 3: better than 4, insufficient for CJK —the real fallback is the degraded path on 400/413, never the estimate); 400/413 degrades with splitting/bisection.
+5. **Published deprecation**: the step 5 release came at least one minor before the deletion.
 
-## Compatibilidad (ruptura anunciada)
+## Compatibility (announced break)
 
-Superficie, toda verificada bajo gate `ai` hoy (`options_spec/ai.rs:77,102,127`):
+Surface, all verified under the `ai` gate today (`options_spec/ai.rs:77,102,127`):
 
-- **La feature `ai` desaparece sin shim.** Las features de Cargo resuelven en compilación: `cargo build --features ai` fallará en resolución, así que aquí sólo hay release notes.
-- **Flags que sobreviven, des-gateados.** `--clean-ai` (cambia de semántica: ONNX → endpoint remoto; es el flag del cleaner del paso 2, **no** un shim) y `--offline`. Para que vivan hay que quitarles el gate `ai` y pasarlos al build por defecto: un shim detrás de la feature que se borra no existe, en ningún lenguaje.
-- **Qué knob resuelve `--clean-ai` después del borrado: `--embedding-provider`** (env `WEBFANG_EMBEDDING_PROVIDER`, flag > env). Decidido 2026-10-16. Es el mismo knob que ya llena el slot de vault y que **hoy resuelve sin la feature `ai`** (`main.rs:980-987`), así que el camino ya existe y no hay que inventar uno. No es `--tier2-embedding-provider`: el §Egress de Tier 2 prohíbe que un slot de embeddings herede la resolución de otro, y el del inspector es explícito por diseño y exige su propio `--tier2-consent`. No es un flag nuevo: sería un shim más que deprecar dentro de la misma ventana en la que ya se retiran cinco. **Gap hoy:** `build_ai_cleaner` (`main.rs:873-978`) vive bajo `#[cfg(feature = "ai")]` y resuelve solo el puerto ONNX local, así que este knob es la especificación del paso 6, no una capacidad existente.
-- **Shims** (error útil de migración, ≥2 releases minor, también des-gateados): `--ai-model`, `--max-tokens` —que además se renombra a `--max-chars`, condición 4—, y las env `WEBFANG_MAX_TOKENS`, `AI_MODEL_ID`/`WEBFANG_AI_MODEL_ID`, `WEBFANG_AI_ENGINE`.
-- **Precedencia que los shims reemplazan**, para que el mensaje de migración sea exacto: `WEBFANG_AI_MODEL_ID` > `AI_MODEL_ID` legacy (`webfang_ai/.../compat.rs:34-38`); el flag de CLI gana al env (`webfang_cli/src/main.rs:602`).
+- **The `ai` feature disappears without a shim.** Cargo features resolve at compile time: `cargo build --features ai` will fail at resolution, so here there are only release notes.
+- **Flags that survive, ungated.** `--clean-ai` (changes semantics: ONNX → remote endpoint; it is the cleaner flag of step 2, **not** a shim) and `--offline`. For them to live, the `ai` gate must be removed and they must move to the default build: a shim behind the feature being deleted does not exist, in any language.
+- **Which knob resolves `--clean-ai` after the deletion: `--embedding-provider`** (env `WEBFANG_EMBEDDING_PROVIDER`, flag > env). Decided 2026-10-16. It is the same knob that already fills the vault slot and that **today resolves without the `ai` feature** (`main.rs:980-987`), so the path already exists and there is no need to invent one. It is not `--tier2-embedding-provider`: the §Tier 2 Egress prohibits an embeddings slot from inheriting another slot's resolution, and the inspector's is explicit by design and requires its own `--tier2-consent`. It is not a new flag: it would be one more shim to deprecate inside the same window in which five are already being retired. **Gap today:** `build_ai_cleaner` (`main.rs:873-978`) lives under `#[cfg(feature = "ai")]` and resolves only the local ONNX port, so this knob is the specification of step 6, not an existing capability.
+- **Shims** (useful migration error, ≥2 minor releases, also ungated): `--ai-model`, `--max-tokens` —which is also renamed to `--max-chars`, condition 4—, and the envs `WEBFANG_MAX_TOKENS`, `AI_MODEL_ID`/`WEBFANG_AI_MODEL_ID`, `WEBFANG_AI_ENGINE`.
+- **Precedence the shims replace**, so the migration message is exact: `WEBFANG_AI_MODEL_ID` > legacy `AI_MODEL_ID` (`webfang_ai/.../compat.rs:34-38`); the CLI flag wins over the env (`webfang_cli/src/main.rs:602`).
 
-`--offline` conserva su semántica (loopback permitido, remoto público → exit 78). Un release **minor** previo anuncia todo esto (aviso en ejecución + release notes —los work PRs no tocan `CHANGELOG.md`, lo escribe release-plz—); el borrado llega dos minors más adelante, y es **ese** commit el que lleva el marker de ruptura. Nunca `ConfigError` genérico ni silencio.
+`--offline` keeps its semantics (loopback allowed, public remote → exit 78). A **minor** release announces all of this beforehand (run-time notice + release notes —work PRs do not touch `CHANGELOG.md`, release-plz writes it—); the deletion arrives two minors later, and it is **that** commit that carries the breaking marker. Never a generic `ConfigError` nor silence.
 
-**Corrección 2026-10-21 (#2166): `--offline` rechaza TODOS los providers de embeddings, loopback incluido.** El párrafo anterior dice que "`--offline` conserva su semántica (loopback permitido, remoto público → exit 78)"; esa frase registra una promesa que la implementación **nunca** cumplió. El guard de `--offline` (la rama `offline` de `build_embedding_provider`, `crates/webfang_core/src/cli/llm_wire.rs`) se dispara **antes** de inspeccionar el endpoint, así que rechaza cualquier provider resuelto —uno remoto público o uno en `127.0.0.1`— con exit 78 (`EXIT_CONFIG`); la excepción de loopback que el paso 5 anunciaba se refería al modelo local ONNX, que el paso 6 eliminó, y sin ese camino `--offline` sólo sirve para corridas sin limpieza semántica. **Decisión del owner (2026-10-21): el guard no cambia; se corrigen los textos publicados** —el aviso por corrida, el mensaje del guard, la línea `allow_loopback` de `webfang doctor` y la guía de migración—, y se agrega una prueba que fija el caso loopback + `--offline` → exit 78 sin dial. La decisión original **no** se reescribe: el párrafo de arriba queda como el registro de lo que se anunció en su momento, y esta corrección es la que empieza a decir la verdad.
+**Correction 2026-10-21 (#2166): `--offline` rejects ALL embeddings providers, loopback included.** The previous paragraph says that "`--offline` keeps its semantics (loopback allowed, public remote → exit 78)"; that sentence records a promise the implementation **never** kept. The `--offline` guard (the `offline` branch of `build_embedding_provider`, `crates/webfang_core/src/cli/llm_wire.rs`) fires **before** inspecting the endpoint, so it rejects any resolved provider —a public remote one or one on `127.0.0.1`— with exit 78 (`EXIT_CONFIG`); the loopback exception that step 5 announced referred to the local ONNX model, which step 6 removed, and without that path `--offline` is only good for runs without semantic cleaning. **Owner decision (2026-10-21): the guard does not change; the published texts are corrected** —the per-run notice, the guard message, the `allow_loopback` line of `webfang doctor` and the migration guide—, and a test is added that pins the loopback + `--offline` → exit 78 without a dial. The original decision is **not** rewritten: the paragraph above stays as the record of what was announced at the time, and this correction is the one that starts telling the truth.
 
-### Enmienda 2026-10-16 — el marker de ruptura pertenece al paso 6 (#1998)
+### Amendment 2026-10-16 — the breaking marker belongs to step 6 (#1998)
 
-La redacción anterior de esta sección pedía el trailer `BREAKING CHANGE:` en el commit del release previo, "para que both el version bump y la sección ⚠️ se generen". En este repo el marker de ruptura —título `!` o footer `BREAKING CHANGE:`— **dispara el bump**, así que leído al pie de la letra el paso 5 salía como MAJOR (3.0.0) y no como minor. Eso contradecía la condición 5 del owner ("el release del paso 5 salió al menos una minor antes del borrado") y la *Reversibilidad*, que asume shims con ventana de ≥2 releases minor.
+The previous wording of this section asked for the `BREAKING CHANGE:` trailer in the commit of the prior release, "so that both the version bump and the ⚠️ section are generated". In this repo the breaking marker —title `!` or `BREAKING CHANGE:` footer— **triggers the bump**, so read literally step 5 came out as MAJOR (3.0.0) and not as a minor. That contradicted the owner's condition 5 ("the step 5 release came at least one minor before the deletion") and *Reversibility*, which assumes shims with a ≥2 minor release window.
 
-**Decisión:** el paso 5 es un minor **sin** marker; el marker viaja en el commit del paso 6, que es donde el cambio es real y donde corresponde la sección ⚠️. El costo es que la sección ⚠️ del CHANGELOG aparece un release después de la primera mención, no en él.
+**Decision:** step 5 is a minor **without** a marker; the marker travels in the step 6 commit, which is where the change is real and where the ⚠️ section belongs. The cost is that the ⚠️ section of the CHANGELOG appears one release after the first mention, not in it.
 
-**Salvedad, y no es cosmética:** la regla del bump viene de la política documentada en `AGENTS.md`, no de una medición en este repo — desde `v2.0.0` no existe ningún commit de ruptura en el historial (`git log v2.0.0..HEAD --grep='!:' -E` no devuelve nada), así que la regla nunca se ejecutó acá. Verificarla es un paso del release de deprecación: si al cortar el minor resultara un MAJOR, esta enmienda cae y el aviso se reescribe como announcement de 3.0.0.
+**Caveat, and it is not cosmetic:** the bump rule comes from the policy documented in `AGENTS.md`, not from a measurement in this repo —since `v2.0.0` there is no breaking commit in the history (`git log v2.0.0..HEAD --grep='!:' -E` returns nothing), so the rule never ran here. Verifying it is a step of the deprecation release: if cutting the minor turns out to be a MAJOR, this amendment falls and the notice is rewritten as a 3.0.0 announcement.
 
-## Umbral por defecto huérfano
+## Orphaned default threshold
 
-El 0.3 está calibrado para Granite y vive en cuatro sitios (`options_spec/ai.rs:37`, `threshold_config.rs:49`, `semantic_cleaner_impl.rs:124`, `relevance_scorer.rs:333`); retirado el único modelo calibrado, cualquier remoto retiene distinto con el mismo número. Mitigación obligatoria con **criterio de salida**: mientras el umbral sea el default y el modelo no esté calibrado, aviso una vez por corrida + `threshold_used` en el summary; la mitigación termina en el flip anunciado con tope de 2 releases minor —si no hay golden set para entonces, el owner decide (aviso permanente documentado o mantener 0.3 con riesgo firmado) y lo registra aquí. Sin salida con fecha, el huérfano se vuelve permanente.
+The 0.3 is calibrated for Granite and lives in four places (`options_spec/ai.rs:37`, `threshold_config.rs:49`, `semantic_cleaner_impl.rs:124`, `relevance_scorer.rs:333`); with the only calibrated model retired, any remote retains differently with the same number. Mandatory mitigation with an **exit criterion**: while the threshold is the default and the model is not calibrated, notice once per run + `threshold_used` in the summary; the mitigation ends at the announced flip with a cap of 2 minor releases —if there is no golden set by then, the owner decides (documented permanent notice or keeping 0.3 with signed risk) and records it here. Without a dated exit, the orphan becomes permanent.
 
-**Corrección 2026-10-21 (#2167): el 0.3 ya no vive en cuatro sitios.** El párrafo anterior los enumera (`options_spec/ai.rs:37`, `threshold_config.rs:49`, `semantic_cleaner_impl.rs:124`, `relevance_scorer.rs:333`): tres de esos ficheros都属于 al crate `webfang_ai`, que este mismo ADR borró en el paso 6, así que la lista describe un árbol que ya no existe — y la línea que sobrevive (`options_spec/ai.rs`) ya no es la del default. Los **cuatro sitios reales** del default son `domain/options_spec/ai.rs:47` (`DEFAULT_THRESHOLD`, la fuente única del valor), `domain/options_spec/ai.rs:76` (el default del spec, que es una cadena), `config.rs:59` y `application/crawl_options.rs:37` (los defaults de `Config` y `AiConfig`).
+**Correction 2026-10-21 (#2167): the 0.3 no longer lives in four places.** The previous paragraph enumerates them (`options_spec/ai.rs:37`, `threshold_config.rs:49`, `semantic_cleaner_impl.rs:124`, `relevance_scorer.rs:333`): three of those files belong to the `webfang_ai` crate, which this same ADR deleted in step 6, so the list describes a tree that no longer exists —and the surviving line (`options_spec/ai.rs`) is no longer the one with the default. The **four real places** of the default are `domain/options_spec/ai.rs:47` (`DEFAULT_THRESHOLD`, the single source of the value), `domain/options_spec/ai.rs:76` (the spec default, which is a string), `config.rs:59` and `application/crawl_options.rs:37` (the `Config` and `AiConfig` defaults).
 
-El razonamiento de esta sección no cambia por eso, y es lo que la sostiene: lo que importa es que el default **no está calibrado** para ningún provider vivo, y eso sigue siendo cierto. Lo que cambia es dónde vive el número. La decisión original **no** se reescribe: el párrafo de arriba queda como el registro de lo que se escribió en su momento.
+The reasoning of this section does not change because of that, and it is what sustains it: what matters is that the default is **not calibrated** for any living provider, and that remains true. What changes is where the number lives. The original decision is **not** rewritten: the paragraph above stays as the record of what was written at the time.
 
-**Corrección 2026-10-11 (#1975): el 0.75 de Tier 2 son dos números, no uno.** El texto anterior decía que "no es de similitud sino `ErrorHintConfig::semantic_threshold`" — incompleto. (1) `ErrorHintConfig::semantic_threshold = 0.75` (`extraction_quality.rs:29`, junto a `lexical_escalation_lower_bound: 0.70`) no gatea nada: su único consumidor es `semantic_drift_factor` (`structural_score.rs:56-64`), que lo usa como denominador de normalización `1 − (0.75 − t)/0.75` y devuelve 1.0 neutral cuando Tier 2 no corrió. (2) `AdaptiveSelectorOptions::semantic_threshold = 0.75` (`adaptive_engine/mod.rs:99`) sí es la puerta de similitud: decide Repaired/Degraded (`:532`) y se pasa como threshold del inspector (`webfang_cli/src/main.rs:588`), que además filtra por él. El "umbral 0.75 a recalibrar por modelo" del paso 3 refiere a (2); recalibrar (1) es desacoplar un denominador del hint — cambio distinto.
+**Correction 2026-10-11 (#1975): the 0.75 of Tier 2 is two numbers, not one.** The previous text said that "it is not similarity but `ErrorHintConfig::semantic_threshold`" — incomplete. (1) `ErrorHintConfig::semantic_threshold = 0.75` (`extraction_quality.rs:29`, next to `lexical_escalation_lower_bound: 0.70`) gates nothing: its only consumer is `semantic_drift_factor` (`structural_score.rs:56-64`), which uses it as the normalization denominator `1 − (0.75 − t)/0.75` and returns a neutral 1.0 when Tier 2 did not run. (2) `AdaptiveSelectorOptions::semantic_threshold = 0.75` (`adaptive_engine/mod.rs:99`) is the actual similarity gate: it decides Repaired/Degraded (`:532`) and is passed as the inspector's threshold (`webfang_cli/src/main.rs:588`), which also filters by it. The "threshold 0.75 to recalibrate per model" of step 3 refers to (2); recalibrating (1) is decoupling a hint denominator — a different change.
 
-## Condición de revisión
+## Review condition
 
-La decisión entre borrado total (6a) y refugio (6b) se arbitra por **dos señales verificables**, sin depender de procesos de discovery externos ni de telemetría.
+The decision between full deletion (6a) and shelter (6b) is arbitrated by **two verifiable signals**, without depending on external discovery processes or telemetry.
 
-**1. Criterio técnico (gate del paso 6).** Se evalúa al llegar al paso 5:
+**1. Technical criterion (gate of step 6).** Evaluated when step 5 is reached:
 
-- Los *Criterios de aceptación de M2* (abajo) pasan en verde contra **Ollama y vLLM reales**, no solo wiremock, en al menos un entorno documentado.
-- La suite wiremock del PR-8 (401 —con y sin credencial—, 429 con `Retry-After` en segundos y en fecha, 5xx, timeout, respuesta malformada, orden de batch, error de lectura de cuerpo, DNS) está verde.
-- Sobre el 429, la regla corregida: `Retry-After` se honra en **ambas** formas que permite RFC 9110 §10.2.3 — `delay-seconds` y fecha HTTP. Antes la fecha HTTP se descartaba en silencio y caía a backoff exponencial, con lo que el cliente reintentaba antes de lo que el servidor pedía; hoy la conversión es una función pura con `now` por parámetro, y una cabecera presente pero inservible emite un `warn!` estructurado en lugar de degradarse sin dejar rastro.
-- La costura de B2 entre la consulta de nombres y el veredicto de política está cubierta **con un resolver determinista**: `ValidatingResolver` recibe el lookup por un seam (`NameSource`, producción = `GaiNameSource`, el mismo `getaddrinfo` que antes se llamaba inline), de modo que `Resolve::resolve` se ejercita de punta a punta con un answer set fijo —admite un host declarado sobre red allowlisted, rechaza el no declarado con la clase `allow_hosts`, envenena el conjunto mixto con la clase SSRF, salta el scan con la validación desarmada y propaga un fallo de lookup sin cambiarlo—. Antes de esto ambas mitades se probaban por separado (`fail_closed_scan` con answer sets sintéticos, y `resolve` real solo con literales o con `localhost` denegado), así que un fallo en cómo `gai_lookup` las unía no habría sido observable. Una resolución de LAN real no es reproducible en CI (depende del resolver y el routing de la máquina), por eso el seam en vez de un E2E de red.
+- The *M2 acceptance criteria* (below) pass green against **real Ollama and vLLM**, not just wiremock, in at least one documented environment.
+- The PR-8 wiremock suite (401 —with and without credentials—, 429 with `Retry-After` in seconds and as a date, 5xx, timeout, malformed response, batch order, body read error, DNS) is green.
+- On 429, the corrected rule: `Retry-After` is honored in **both** forms allowed by RFC 9110 §10.2.3 — `delay-seconds` and an HTTP date. Previously the HTTP date was silently discarded and fell back to exponential backoff, so the client retried earlier than the server asked; today the conversion is a pure function with `now` as a parameter, and a header that is present but unusable emits a structured `warn!` instead of degrading without a trace.
+- The B2 seam between the name lookup and the policy verdict is covered **with a deterministic resolver**: `ValidatingResolver` receives the lookup through a seam (`NameSource`, production = `GaiNameSource`, the same `getaddrinfo` that was previously called inline), so `Resolve::resolve` is exercised end to end with a fixed answer set —accepts a declared host on an allowlisted network, rejects the undeclared one with the `allow_hosts` class, poisons the mixed set with the SSRF class, skips the scan with validation disarmed and propagates a lookup failure without changing it—. Before this, both halves were tested separately (`fail_closed_scan` with synthetic answer sets, and real `resolve` only with literals or with `localhost` denied), so a failure in how `gai_lookup` joined them would not have been observable. A real LAN resolution is not reproducible in CI (it depends on the machine's resolver and routing), hence the seam instead of a network E2E.
 
-Si ambos se cumplen, el paso 6 puede proceder, sujeto a la señal 2. Si alguno falla, se posterga un release minor y el gap se registra en este ADR.
+If both are met, step 6 may proceed, subject to signal 2. If either fails, a minor release is postponed and the gap is recorded in this ADR.
 
-**2. Señal de objeción (entre el paso 5 y el 6).** Es pasiva: no recolecta datos ni abre egress alguno.
+**2. Objection signal (between step 5 and step 6).** It is passive: it collects no data and opens no egress.
 
-- El release de deprecación publica el aviso (en ejecución y en el CHANGELOG, ver Compatibilidad) apuntando a un issue o discusión fija. **Fijado 2026-10-16: #1997** (`chore: canal de objeción — migración desde ONNX local`). Es una issue y no una discusión porque el repo tiene Discussions deshabilitadas (`has_discussions: false`), y **no** puede ser la issue que cierre el PR del aviso: `pr-validation.yml` exige que todo PR cierre una issue, y GitHub cerraría también el canal de objeción al mergear. El PR del aviso referencia #1997 con `Refs`, y cierra su propia issue de trabajo (#1999).
-- Tras **2 releases minor**: si ningún usuario reclama dependencia de ONNX, el paso 6 procede como borrado total; si hay reclamos, el crate pasa a refugio (c) "sin soporte" y los casos se registran aquí.
-- **Limitación aceptada:** la ausencia de reclamos **no prueba** ausencia de uso —hay usuarios que no leen avisos—. Por eso el borrado es reversible desde la etiqueta git del paso 5 (ver *Reversibilidad*), y esa asimetría es un riesgo que este ADR declara, no oculta.
+- The deprecation release publishes the notice (in the run and in the CHANGELOG, see Compatibility) pointing to a pinned issue or discussion. **Pinned 2026-10-16: #1997** (`chore: canal de objeción — migración desde ONNX local`). It is an issue and not a discussion because the repo has Discussions disabled (`has_discussions: false`), and it **cannot** be the issue that the notice PR closes: `pr-validation.yml` requires every PR to close an issue, and GitHub would also close the objection channel on merge. The notice PR references #1997 with `Refs`, and closes its own work issue (#1999).
+- After **2 minor releases**: if no user claims ONNX dependency, step 6 proceeds as full deletion; if there are claims, the crate moves to shelter (c) "unsupported" and the cases are recorded here.
+- **Accepted limitation:** the absence of claims **does not prove** absence of use —some users do not read notices—. That is why the deletion is reversible from the step 5 git tag (see *Reversibility*), and that asymmetry is a risk this ADR declares, not hides.
 
-**Entrevistas:** son **insumo no bloqueante**. Si existen al llegar al paso 5, informan la decisión; si no, el owner decide con las dos señales anteriores y lo registra aquí. Esta sección **supera** la línea del documento `10_DECISION_OWNER_Q1.md` que las declaraba arbitantes entre (a) y (c): ese archivo está gitignored y es registro histórico de una decisión en su momento, así que no se edita — la corrección queda en el documento normativo, que es donde la va a buscar quien lea después.
+**Interviews:** they are **non-blocking input**. If they exist when step 5 is reached, they inform the decision; if not, the owner decides with the two previous signals and records it here. This section **supersedes** the line of the `10_DECISION_OWNER_Q1.md` document that declared them arbiters between (a) and (c): that file is gitignored and is a historical record of a decision at the time, so it is not edited —the correction stays in the normative document, which is where whoever reads later will look.
 
-**Medición futura:** si alguna vez se quiere medir uso real, requiere su propio ADR —unidad de medida por usuario o por corrida única, destino declarado y consentimiento, conforme a M4—. Este ADR no instrumenta nada.
+**Future measurement:** if real usage is ever to be measured, it requires its own ADR —unit of measurement per user or per single run, declared destination and consent, per M4—. This ADR instruments nothing.
 
-**Excepción de mantenimiento:** si las señales muestran que M2-endpoint no es camino viable **y** hay demanda real de ONNX, el owner puede asignar dueño al crate externo y lo registra aquí. Es excepción explícita al "sin mantenimiento".
+**Maintenance exception:** if the signals show that M2-endpoint is not a viable path **and** there is real demand for ONNX, the owner may assign an owner to the external crate and records it here. It is an explicit exception to "unsupported".
 
-## Perfiles de modelo
+## Model profiles
 
-models.dev no basta (sin dim/batch/prefijos; `limit.output` ≠ dimensión —mistral 3072 vs 1024 real—; sin Granite-embedding; sin runtimes locales). Perfiles propios versionados: `id → {schema_version, dim, batch_max, query_prefix, passage_prefix, context, chars_per_token, matryoshka: bool}`, viviendo en el repo junto a `ProvidersConfig` (defaults) con overrides en el fichero de config del usuario; el mismo PR que toque el schema migra los perfiles existentes. models.dev solo refresco de precio (licencia MIT, con aviso). Reglas defensivas: `dimensions` **omitido por defecto** (vLLM no-Matryoshka lo rechaza con 400), `usage` siempre opcional. `NetworkPolicy`/`allow_cidrs` no existen como tipo (0 hits): B2 los crea.
+models.dev is not enough (no dim/batch/prefixes; `limit.output` ≠ dimension —mistral 3072 vs 1024 real—; no Granite-embedding; no local runtimes). Own versioned profiles: `id → {schema_version, dim, batch_max, query_prefix, passage_prefix, context, chars_per_token, matryoshka: bool}`, living in the repo next to `ProvidersConfig` (defaults) with overrides in the user's config file; the same PR that touches the schema migrates the existing profiles. models.dev only refreshes pricing (MIT license, with notice). Defensive rules: `dimensions` **omitted by default** (non-Matryoshka vLLM rejects it with 400), `usage` always optional. `NetworkPolicy`/`allow_cidrs` do not exist as a type (0 hits): B2 creates them.
 
-## Egress de Tier 2 (ruta nueva, explícita)
+## Tier 2 Egress (new path, explicit)
 
-El inspector pasa de local a enviar fragmentos del DOM a un tercero: entra en el consentimiento por hash provider+endpoint y en el contador de gasto. El slot de Tier 2 es explícito por diseño: sin `--tier2-embedding-provider` sirve el pool local, y **nunca** adopta por defecto el provider de embeddings del vault — la resolución por defecto del slot de vault no se hereda aquí (#1981, #1977). Observabilidad del salto (regla de hierro: sin traza no está terminado): los spans ya existen —`remote_embedding.rs:456-460` en `embed` (`provider_id`/`model`/`dim`) y `:482-487` en `embed_batch` (los tres más `count`=textos)— y hay que extenderlos con `CorrelationId` propagado + summary por corrida con tokens/retries/degradados.
+The inspector goes from local to sending DOM fragments to a third party: it enters the consent by provider+endpoint hash and the spend counter. The Tier 2 slot is explicit by design: without `--tier2-embedding-provider` the local pool is used, and it **never** adopts by default the vault's embeddings provider —the default resolution of the vault slot is not inherited here (#1981, #1977). Observability of the jump (iron rule: without a trace it is not done): the spans already exist —`remote_embedding.rs:456-460` in `embed` (`provider_id`/`model`/`dim`) and `:482-487` in `embed_batch` (the three plus `count`=texts)— and they must be extended with a propagated `CorrelationId` + a per-run summary with tokens/retries/degraded.
 
-## Migración de vaults
+## Vault migration
 
-Confirmado: no hay `model_id` en schema ni DTOs (0 hits en infraestructura+aplicación); si el perfil nuevo también da 384, la mezcla con vectores Granite es indetectable. El fail-closed extendido a `model_id` (`vault_search.rs:130-148`, mensaje actual conservado) **no puede dispararse** sobre los vaults que nunca tuvieron `model_id` —que son exactamente los afectados—; se permite abrirlos con aviso explícito ("legado", se recomienda reindexar), aceptando la indeterminación. Lo único que cierra de verdad es el **re-embedding**, cuyo coste con BYO-key lo paga el usuario: va a Consecuencias, no se esconde.
+Confirmed: there is no `model_id` in the schema or DTOs (0 hits in infrastructure+application); if the new profile also gives 384, mixing with Granite vectors is undetectable. The fail-closed extended to `model_id` (`vault_search.rs:130-148`, current message preserved) **cannot fire** on the vaults that never had a `model_id` —which are exactly the affected ones—; opening them is allowed with an explicit notice ("legacy", reindexing recommended), accepting the indeterminacy. The only thing that really closes it is **re-embedding**, whose cost with a BYO key is paid by the user: it goes to Consequences, it is not hidden.
 
-## Superficie afectada (entregable explícito de C1–C3, no "docs regenerados")
+## Affected surface (explicit deliverable of C1–C3, not "regenerated docs")
 
-- Gate de la feature: `cli/preflight.rs:1404` (`check_clean_ai_feature`) y `:1410` (`check_clean_ai_feature_with`) desaparecen con la feature, con sus tests.
-- Tests: `crates/webfang_ai/tests/` (9 targets, la mayoría ort-dependent: `ai_integration`, `batched_inference_smoke`, `session_pool_sizing`, `semantic_cleaner_pipeline`, …) se eliminan con la feature; `crates/webfang_core/tests/adaptive_selectors_gate_test.rs` sólo menciona el gate en un doc comment (`:12`), así que se ajusta esa línea en vez de reescribir el archivo; los snapshots insta de `--clean-ai` cambian y se revisan en el mismo PR.
-- Docs y política: `AGENTS.md` (matriz con `webfang_ai`, sección `AI feature`, `hf-hub`, `ort`), `scripts/check_dependency_direction.sh`, `docs/test-inventory.md`, `COMPATIBILITY-MATRIX.md`, `README.md` (secciones de modelos, feature `ai`, caché y crate).
-- Observabilidad: campos del salto remoto (arriba) + summary por corrida.
+- Feature gate: `cli/preflight.rs:1404` (`check_clean_ai_feature`) and `:1410` (`check_clean_ai_feature_with`) disappear with the feature, along with their tests.
+- Tests: `crates/webfang_ai/tests/` (9 targets, most ort-dependent: `ai_integration`, `batched_inference_smoke`, `session_pool_sizing`, `semantic_cleaner_pipeline`, …) are removed with the feature; `crates/webfang_core/tests/adaptive_selectors_gate_test.rs` only mentions the gate in a doc comment (`:12`), so that line is adjusted instead of rewriting the file; the insta snapshots of `--clean-ai` change and are reviewed in the same PR.
+- Docs and policy: `AGENTS.md` (matrix with `webfang_ai`, `AI feature` section, `hf-hub`, `ort`), `scripts/check_dependency_direction.sh`, `docs/test-inventory.md`, `COMPATIBILITY-MATRIX.md`, `README.md` (model sections, `ai` feature, cache and crate).
+- Observability: remote jump fields (above) + per-run summary.
 
-## Consecuencias
+## Consequences
 
-- Positivas: se cierra el árbol ONNX en CI; `wreq`-only en el build default —con qualifier: `--all-features` conserva `reqwest` vía `chromiumoxide` (`Cargo.toml:158`, feature `chromium` en `core/Cargo.toml:33`), así que el "real" vale para default, no para all-features—; M2 como camino principal cuando el criterio técnico se cumple y la señal de objeción no registra dependencia activa.
-- Negativas: se pierde offline-total con inferencia; coste por uso y **coste de re-embedding de vaults** pasan al usuario (BYO-key); latencia de red en el hot path; **la señal de objeción puede subestimar el uso real** —riesgo aceptado, mitigado por la reversibilidad desde la etiqueta git del paso 5—.
-- Neutras: M3 existe y es sólido; el borrado, si nadie usa el crate externo, es trivial.
+- Positive: the ONNX tree closes in CI; `wreq`-only in the default build —with a caveat: `--all-features` keeps `reqwest` via `chromiumoxide` (`Cargo.toml:158`, `chromium` feature in `core/Cargo.toml:33`), so the "real" claim holds for default, not for all-features—; M2 as the main path when the technical criterion is met and the objection signal records no active dependency.
+- Negative: full offline with inference is lost; cost per use and **vault re-embedding cost** pass to the user (BYO key); network latency in the hot path; **the objection signal may underestimate real usage** —accepted risk, mitigated by reversibility from the step 5 git tag—.
+- Neutral: M3 exists and is solid; the deletion, if nobody uses the external crate, is trivial.
 
-## Criterios de aceptación de M2 (condición 1, verificables)
+## M2 acceptance criteria (condition 1, verifiable)
 
-- Ollama `127.0.0.1:11434` sin key: `--clean-ai` funciona, 0 `Authorization` inventada.
-- vLLM en LAN con `allow_cidrs` (B2): funciona; `100.64.0.0/10` rechazado por defecto.
-- `--offline` + remoto: exit 78 —ya implementado (`EXIT_CONFIG`, `cli/error.rs:36`; `llm_wire.rs:141-147`): es guarda de regresión, no criterio nuevo.
-- Registro reproducible contra Ollama y vLLM reales archivado antes del paso 6.
-- Suite wiremock del PR-8 en verde **más test de 401 con y sin credencial**: con `AuthSource::None` un 401 de un provider sin credencial debe distinguirse de un 401 por credencial inválida. Ese test no existe todavía —es entregable de B1, no criterio preexistente—.
-- **Enmienda sobre "truncado de stream"** (ver *Condición de revisión* §1): el escenario, tal como estaba enumerado, no es expresable en el código y por eso no se puede cubrir. El adapter no tiene camino de lectura en streaming —usa `read_body_capped`, una lectura acotada a 16 MiB—, de modo que no existe un punto donde un stream pueda truncarse a mitad, y wiremock no ofrece ninguna primitiva para abortar un body en curso. El criterio verificable que lo sustituye es el **mapeo de error de lectura de cuerpo**: una lectura que falla se traduce a `SemanticError::Inference` con el mensaje en español que nombra el endpoint, y nunca es silencio ni `panic`.
+- Ollama `127.0.0.1:11434` without a key: `--clean-ai` works, 0 invented `Authorization`.
+- vLLM on a LAN with `allow_cidrs` (B2): works; `100.64.0.0/10` rejected by default.
+- `--offline` + remote: exit 78 —already implemented (`EXIT_CONFIG`, `cli/error.rs:36`; `llm_wire.rs:141-147`): it is a regression guard, not a new criterion.
+- Reproducible record against real Ollama and vLLM archived before step 6.
+- PR-8 wiremock suite green **plus the 401 test with and without credentials**: with `AuthSource::None`, a 401 from a provider without credentials must be distinguishable from a 401 due to invalid credentials. That test does not exist yet —it is a B1 deliverable, not a pre-existing criterion—.
+- **Amendment on "stream truncation"** (see *Review condition* §1): the scenario, as it was enumerated, is not expressible in the code and therefore cannot be covered. The adapter has no streaming read path —it uses `read_body_capped`, a read capped at 16 MiB—, so there is no point where a stream could be truncated midway, and wiremock offers no primitive to abort a body in progress. The verifiable criterion that replaces it is the **body read error mapping**: a read that fails is translated to `SemanticError::Inference` with the Spanish message naming the endpoint, and is never silence nor `panic`.
 
-## Reversibilidad
+## Reversibility
 
-Si el borrado falla, el árbol ONNX se recupera desde `onnx-tree/pre-step5` — etiqueta **no-`v*`**, creada el 2026-10-16 antes de publicar el release de deprecación, apuntando al commit `38ab6a31` (un commit después de `v2.11.0`), que es el último estado de `main` con la implementación ONNX completa. El nombre no-`v*` es deliberado: `release.yml:34-35` dispara con `tags: v*` y `RELEASE_TAG_NAME_RE` (`scripts/release-tag-trust.sh:50`) es `^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$`, así que esa etiqueta es inerte para el pipeline de release. El paso 5 no toca código ONNX, así que apuntar al commit previo al release no pierde nada. Qualifier: no es drop-in —si los pasos 1–4 tocaron `webfang_ai`, el tag devuelve código viejo que puede no calzar con el árbol; la etiqueta es punto de referencia para recuperación manual, no restore automático.
+If the deletion fails, the ONNX tree is recovered from `onnx-tree/pre-step5` — a **non-`v*`** tag, created on 2026-10-16 before publishing the deprecation release, pointing to commit `38ab6a31` (one commit after `v2.11.0`), which is the last state of `main` with the complete ONNX implementation. The non-`v*` name is deliberate: `release.yml:34-35` triggers on `tags: v*` and `RELEASE_TAG_NAME_RE` (`scripts/release-tag-trust.sh:50`) is `^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$`, so that tag is inert for the release pipeline. Step 5 does not touch ONNX code, so pointing to the pre-release commit loses nothing. Caveat: it is not drop-in —if steps 1–4 touched `webfang_ai`, the tag returns old code that may not fit the tree; the tag is a reference point for manual recovery, not an automatic restore.
 
 ## Alternatives rejected
 
-1. **Mantener dormido (ADR 0003 §5).** Cobra CI, arrastra `reqwest` incondicional y pudre código sin dueño a cambio de un fallback que nadie testea. Rechazada.
-2. **Aislar sin borrar (crate en el workspace).** Mantiene mantenimiento y matriz de features a cambio de nada una vez que M2 funciona. Solo aceptable como refugio externo con dueño y abandono definido. Rechazada como estado final.
-3. **Reescribir `webfang_ai`.** El crate es correcto; está mal posicionado como default. Rechazada (precedente ADR 0003).
+1. **Keep it dormant (ADR 0003 §5).** Costs CI, unconditionally drags in `reqwest` and rots ownerless code in exchange for a fallback nobody tests. Rejected.
+2. **Isolate without deleting (crate in the workspace).** Maintains upkeep and the feature matrix for nothing once M2 works. Only acceptable as external shelter with an owner and a defined abandonment. Rejected as a final state.
+3. **Rewrite `webfang_ai`.** The crate is correct; it is misplaced as the default. Rejected (precedent ADR 0003).
 
 ## References
 
-- `crates/webfang_core/src/domain/embedding_port.rs:40` — el seam existe
-- `crates/webfang_core/src/infrastructure/llm/remote_embedding.rs:454,73` — adapter remoto + `usage` opcional
-- `crates/webfang_core/src/domain/options_spec/llm.rs:66-79` — `--embedding-provider` existe
-- `crates/webfang_cli/src/main.rs:721-759,660-676,687` — inyección sin gate `ai`; cleaner aún ONNX-only
-- `crates/webfang_ai/src/infrastructure_ai/semantic_cleaner_impl.rs:215` — pendiente de reescribir
-- `crates/webfang_ai/Cargo.toml:25,55` — `hf-hub` fuera de `[features] ai`
-- `Cargo.toml:158`, `core/Cargo.toml:33` — `chromiumoxide` también arrastra `reqwest`
-- `crates/webfang_core/src/domain/auth_source.rs:55-70` — sin variante `None`
-- `crates/webfang_core/src/domain/ssrf_guard.rs:231` — loopback ya permitido
-- `crates/webfang_core/src/cli/error.rs:36`, `cli/llm_wire.rs:141-147` — `--offline` ya implementado
-- `crates/webfang_core/src/domain/extraction_quality.rs:29` — 0.75 del hint: denominador del drift factor, no gatea
-- `crates/webfang_core/src/application/adaptive_engine/mod.rs:99,532` + `crates/webfang_cli/src/main.rs:588` — 0.75 gate real de similitud Tier 2 (Repaired/Degraded + threshold del inspector)
-- `crates/webfang_core/src/application/structural_score.rs:56-64` — único consumidor del 0.75 del hint (normalización)
-- `crates/webfang_core/src/application/vault_search.rs:130-148` — fail-closed por dimensión
-- `docs/adr/0003-remote-inference-adapter.md:35` — env vars declaradas, nunca implementadas
-- `crates/webfang_core/src/cli/preflight.rs:1404,1410` — el gate de la feature que desaparece
-- `crates/webfang_core/src/domain/options_spec/ai.rs:77,102,127` — los tres flags bajo gate `ai` (y sus env: `WEBFANG_MAX_TOKENS`, `WEBFANG_OFFLINE`)
-- `crates/webfang_ai/src/infrastructure_ai/relevance_scorer.rs:333` — cuarto sitio del 0.3
-- `crates/webfang_core/src/infrastructure/llm/remote_embedding.rs:456-460,482-487` — spans del salto remoto
-- `crates/webfang_cli/src/main.rs:602` — precedencia `--ai-model` sobre env
-- Issues: #1915 (decisión), #1917 (primera revisión, cerrada por #1918), #1919 (re-scope)
+- `crates/webfang_core/src/domain/embedding_port.rs:40` — the seam exists
+- `crates/webfang_core/src/infrastructure/llm/remote_embedding.rs:454,73` — remote adapter + optional `usage`
+- `crates/webfang_core/src/domain/options_spec/llm.rs:66-79` — `--embedding-provider` exists
+- `crates/webfang_cli/src/main.rs:721-759,660-676,687` — injection without the `ai` gate; cleaner still ONNX-only
+- `crates/webfang_ai/src/infrastructure_ai/semantic_cleaner_impl.rs:215` — pending rewrite
+- `crates/webfang_ai/Cargo.toml:25,55` — `hf-hub` outside `[features] ai`
+- `Cargo.toml:158`, `core/Cargo.toml:33` — `chromiumoxide` also drags in `reqwest`
+- `crates/webfang_core/src/domain/auth_source.rs:55-70` — no `None` variant
+- `crates/webfang_core/src/domain/ssrf_guard.rs:231` — loopback already allowed
+- `crates/webfang_core/src/cli/error.rs:36`, `cli/llm_wire.rs:141-147` — `--offline` already implemented
+- `crates/webfang_core/src/domain/extraction_quality.rs:29` — the hint's 0.75: drift factor denominator, does not gate
+- `crates/webfang_core/src/application/adaptive_engine/mod.rs:99,532` + `crates/webfang_cli/src/main.rs:588` — the real 0.75 similarity gate for Tier 2 (Repaired/Degraded + inspector threshold)
+- `crates/webfang_core/src/application/structural_score.rs:56-64` — the only consumer of the hint's 0.75 (normalization)
+- `crates/webfang_core/src/application/vault_search.rs:130-148` — fail-closed by dimension
+- `docs/adr/0003-remote-inference-adapter.md:35` — declared env vars, never implemented
+- `crates/webfang_core/src/cli/preflight.rs:1404,1410` — the feature gate that disappears
+- `crates/webfang_core/src/domain/options_spec/ai.rs:77,102,127` — the three flags under the `ai` gate (and their envs: `WEBFANG_MAX_TOKENS`, `WEBFANG_OFFLINE`)
+- `crates/webfang_ai/src/infrastructure_ai/relevance_scorer.rs:333` — fourth place of the 0.3
+- `crates/webfang_core/src/infrastructure/llm/remote_embedding.rs:456-460,482-487` — remote jump spans
+- `crates/webfang_cli/src/main.rs:602` — `--ai-model` precedence over env
+- Issues: #1915 (decision), #1917 (first review, closed by #1918), #1919 (re-scope)
 
-**Corrección 2026-10-21 (#2167, #2168): algunas referencias ya no resuelven.** Esta lista es el inventario de la evidencia sobre la que se decidió, y queda como estaba; lo que se corrige es su estado actual. Los punteros al crate `webfang_ai` (`semantic_cleaner_impl.rs`, `relevance_scorer.rs`, `Cargo.toml`) apuntan a un árbol que este ADR borró en el paso 6: ya no resuelven. Dos de las referencias vivas se movieron por los slices que cerraron este ADR —las líneas de `options_spec/ai.rs` y de `cli/llm_wire.rs`— y sus citas por línea quedaron desfasadas; las ubicaciones actuales de los sitios del 0.3 están en la corrección del §Umbral por defecto huérfano, y la semántica vigente de `--offline` está en el §Compatibilidad y en su corrección fechada (#2166).
+**Correction 2026-10-21 (#2167, #2168): some references no longer resolve.** This list is the inventory of the evidence the decision was made on, and it stays as it was; what is corrected is its current state. The pointers to the `webfang_ai` crate (`semantic_cleaner_impl.rs`, `relevance_scorer.rs`, `Cargo.toml`) point to a tree this ADR deleted in step 6: they no longer resolve. Two of the live references moved due to the slices that closed this ADR —the lines of `options_spec/ai.rs` and of `cli/llm_wire.rs`— and their line citations became stale; the current locations of the 0.3 sites are in the correction of the *Orphaned default threshold* section, and the current semantics of `--offline` are in the *Compatibility* section and its dated correction (#2166).
 
-## Addendum 2026-10-19 — cierre del paso 6
+## Addendum 2026-10-19 — step 6 closure
 
-### Desenlace: 6a, borrado total
+### Outcome: 6a, full deletion
 
-La *Condición de revisión* arbitra 6a (borrado total) frente a 6b (refugio externo) por la señal 2. #1997 quedó abierta desde 2026-10-16 y al ejecutar el borrado tenía **0 comentarios**: no hay reclamo ni dependencia declarada de ONNX. Se ejecutó **6a** en #2072 (`e9b7217a`).
+The *Review condition* arbitrates 6a (full deletion) versus 6b (external shelter) by signal 2. #1997 was open since 2026-10-16 and when the deletion was executed it had **0 comments**: there is no claim or declared ONNX dependency. **6a** was executed in #2072 (`e9b7217a`).
 
-La limitación que este ADR ya declaraba sigue vigente y no se reescribe: la ausencia de reclamos **no prueba** ausencia de uso. La mitigación es la misma que el ADR fijó, la etiqueta `onnx-tree/pre-step5`, y no una garantía.
+The limitation this ADR already declared remains in force and is not rewritten: the absence of claims **does not prove** absence of use. The mitigation is the same one the ADR fixed, the `onnx-tree/pre-step5` tag, and not a guarantee.
 
-### Umbral por defecto huérfano: aviso permanente documentado
+### Orphaned default threshold: documented permanent notice
 
-El flip anunciado ocurrió y no existe golden set. De las dos salidas que esta sección deja al owner, se toma la primera: **aviso permanente documentado**.
+The announced flip happened and there is no golden set. Of the two exits this section leaves to the owner, the first is taken: **documented permanent notice**.
 
-- El aviso por corrida y `threshold_used` en el summary siguen emitiéndose; el valor no se mueve (0.3).
-- El riesgo —un endpoint remoto retiene distinto con el mismo número— queda declarado en la guía de migración, no sólo en este ADR.
-- **Salida con fecha:** al cortar **3.2.0**, el mismo release que retira los shims, el owner revisa la decisión. Si para entonces hay golden set, se recalibra; si no, renueva el aviso por otra ventana o firma el riesgo de mantener 0.3. Un solo punto de revisión para las dos ventanas abiertas, en vez de dos.
+- The per-run notice and `threshold_used` in the summary keep being emitted; the value does not move (0.3).
+- The risk —a remote endpoint retains differently with the same number— is declared in the migration guide, not only in this ADR.
+- **Dated exit:** when cutting **3.2.0**, the same release that retires the shims, the owner reviews the decision. If by then there is a golden set, it is recalibrated; if not, the notice is renewed for another window or the risk of keeping 0.3 is signed. A single review point for the two open windows, instead of two.
 
-**Corrección 2026-10-21 (#2167, #2168): el ancla 3.2.0 quedó inalcanzable y la revisión pasa a ser por condición.** `.github/support.json` declara 4.0 STABLE · 3.0 MAINTENANCE · 2.13 EOL, así que ninguna release futura puede cortar un 3.2.0: la fecha de revisión que se acaba de escribir no puede llegar, y con ella se cae la "salida con fecha" que esta sección exigía — el huérfano se volvería permanente por el mecanismo mismo que el ADR prohíbe.
+**Correction 2026-10-21 (#2167, #2168): the 3.2.0 anchor became unreachable and the review becomes condition-based.** `.github/support.json` declares 4.0 STABLE · 3.0 MAINTENANCE · 2.13 EOL, so no future release can cut a 3.2.0: the review date just written cannot arrive, and with it the "dated exit" that this section required falls —the orphan would become permanent through the very mechanism this ADR prohibits.
 
-La decisión de fondo **no cambia**: sigue siendo **aviso permanente documentado**. El aviso por corrida y `threshold_used` en el summary se emiten, el valor sigue en 0.3, y su riesgo —un endpoint remoto retiene distinto con el mismo número— queda declarado en la guía de migración, no sólo en este ADR. Lo que se corrige es el **disparador** de la revisión: pasa a ser **por condición**, con la condición que el propio ADR ya fijaba —**cuando exista un golden set** para el provider remoto en uso, se recalibra el umbral; mientras no exista, el aviso permanente y el 0.3 firmado se mantienen—, y el owner puede re-abrirla antes si aparece un motivo. La decisión original **no** se reescribe: el párrafo de arriba queda como el registro de lo que se anunció en su momento, y esta corrección es la que empieza a decir la verdad.
+The underlying decision **does not change**: it remains **documented permanent notice**. The per-run notice and `threshold_used` in the summary are emitted, the value stays at 0.3, and its risk —a remote endpoint retains differently with the same number— is declared in the migration guide, not only in this ADR. What is corrected is the **trigger** of the review: it becomes **condition-based**, with the condition the ADR already fixed —**when a golden set exists** for the remote provider in use, the threshold is recalibrated; while it does not exist, the permanent notice and the signed 0.3 are maintained—, and the owner may reopen it earlier if a reason appears. The original decision is **not** rewritten: the paragraph above stays as the record of what was announced at the time, and this correction is the one that starts telling the truth.
 
-Sin esa revisión el huérfano se vuelve permanente, que es exactamente lo que este ADR prohíbe.
+Without that review the orphan becomes permanent, which is exactly what this ADR prohibits.
 
-### Follow-up: la ventana de shims no cierra con este ADR
+### Follow-up: the shim window does not close with this ADR
 
-Este ADR cierra el **borrado**. Los shims (`--ai-model`, `--max-tokens`, `WEBFANG_MAX_TOKENS`, `AI_MODEL_ID` / `WEBFANG_AI_MODEL_ID`, `WEBFANG_AI_ENGINE`) siguen vivos y su retiro es un slice propio, con su marker de ruptura y su issue: **#2119** (2026-10-20).
+This ADR closes the **deletion**. The shims (`--ai-model`, `--max-tokens`, `WEBFANG_MAX_TOKENS`, `AI_MODEL_ID` / `WEBFANG_AI_MODEL_ID`, `WEBFANG_AI_ENGINE`) remain alive and their retirement is its own slice, with its breaking marker and its issue: **#2119** (2026-10-20).
 
-El ancla es **3.2.0**. La ventana del §Compatibilidad pedía "≥2 releases minor" desde el anuncio de v2.12.0: pasó 2.13.0 (minor) y 3.0.0 (major, el borrado). Contarlas como las dos releases de la ventana es la lectura que mantiene la promesa hecha al usuario sin estirarla a un tercer release.
+The anchor is **3.2.0**. The window of the *Compatibility* section asked for "≥2 minor releases" from the v2.12.0 announcement: 2.13.0 (minor) and 3.0.0 (major, the deletion) passed. Counting them as the two releases of the window is the reading that keeps the promise made to the user without stretching it to a third release.
 
-**Corrección 2026-10-21 (#2119, #2168): los shims se retiran y su ancla quedó inalcanzable.** El párrafo anterior dice que los shims "siguen vivos": su retiro es el slice **#2119** (`refactor(cli)!:`) — `--ai-model` y `--max-tokens` dejan de parsear (error estándar de clap, exit 64), sus envs se ignoran en silencio, y el aviso `onnx_deprecation` que los anunciaba se va con ellos. El ancla era **3.2.0** y **nunca llegó**: 4.0.0 se publicó antes de que ese minor existiera, de modo que la fecha de retiro era inalcanzable y la ventana se cierra **de forma anticipada**.
+**Correction 2026-10-21 (#2119, #2168): the shims are retired and their anchor became unreachable.** The previous paragraph says that the shims "remain alive": their retirement is the slice **#2119** (`refactor(cli)!:`) — `--ai-model` and `--max-tokens` stop parsing (standard clap error, exit 64), their envs are ignored silently, and the `onnx_deprecation` notice that announced them goes with them. The anchor was **3.2.0** and it **never arrived**: 4.0.0 was published before that minor existed, so the retirement date was unreachable and the window closes **early**.
 
-Lo que se cumple es la promesa del §Compatibilidad, que era "≥2 releases minor" desde el anuncio de v2.12.0: pasaron 2.13.0 (minor) y 3.0.0 (major, el borrado). El cierre anticipado no rompe esa promesa — la cuenta de releases que la sostenía ya estaba cerrada, y lo que se adelanta es la fecha de un ancla que el proceso de releases nunca iba a alcanzar. Por eso el ancla no se re-ancla a otra fecha: una fecha futura repetiría el mismo fallo cuando esa release se adelante, y lo que hace falta es un disparador que no dependa del calendario de releases.
+What is met is the promise of the *Compatibility* section, which was "≥2 minor releases" from the v2.12.0 announcement: 2.13.0 (minor) and 3.0.0 (major, the deletion) passed. The early closure does not break that promise —the count of releases that sustained it was already closed, and what is moved up is the date of an anchor the release process was never going to reach. That is why the anchor is not re-anchored to another date: a future date would repeat the same failure when that release comes early, and what is needed is a trigger that does not depend on the release calendar.
 
-La decisión original **no** se reescribe: el párrafo de arriba queda como el registro de lo que se anunció en su momento, y esta corrección es la que empieza a decir la verdad.
+The original decision is **not** rewritten: the paragraph above stays as the record of what was announced at the time, and this correction is the one that starts telling the truth.
 
-### Residuo del borrado (2026-10-20)
+### Deletion residue (2026-10-20)
 
-El paso 6 cerró cuando el motor dejó de existir, no cuando el árbol quedó prolijo. La auditoría local posterior al release encontró cuatro unidades de residuo; una ya se cerró y tres siguen abiertas:
+Step 6 closed when the engine stopped existing, not when the tree was tidy. The post-release local audit found four units of residue; one is already closed and three remain open:
 
-- **#2104 (cerrada, #2108)** — `SemanticError` conservaba seis variantes sin productor (`ModelLoad`, `Download`, `CacheValidation`, `OfflineMode`, `InvalidThreshold`, `InvalidCharsPerToken`) e `Inference` se renderizaba como "Error ejecutando inferencia ONNX". Retiradas.
-- **#2105 (abierta)** — `LocalEmbeddingPort` y `Tier2EmbeddingPort::Local` no se construyen en producción.
-- **#2106 (abierta)** — `show` y `doctor` todavía imprimen `granite-97m`, un modelo local retirado.
-- **#2107 (abierta)** — comentarios que afirman que la feature Cargo `ai` existe.
+- **#2104 (closed, #2108)** — `SemanticError` kept six variants without a producer (`ModelLoad`, `Download`, `CacheValidation`, `OfflineMode`, `InvalidThreshold`, `InvalidCharsPerToken`) and `Inference` rendered as "Error ejecutando inferencia ONNX". Retired.
+- **#2105 (open)** — `LocalEmbeddingPort` and `Tier2EmbeddingPort::Local` are not constructed in production.
+- **#2106 (open)** — `show` and `doctor` still print `granite-97m`, a retired local model.
+- **#2107 (open)** — comments asserting that the Cargo `ai` feature exists.
 
-**Corrección 2026-10-21 (#2168): el estado de esa lista cambió.** #2105 y #2106 se cerraron (sus slices aterrizaron: `Tier2EmbeddingPort` colapsado a un newtype, y `show`/`doctor` reportando el provider de embeddings efectivamente resuelto). #2107 se dividió: la mitad de comentarios se corrigió en #2122, y la parte que retiraba el flag `--enable-ai` de los dos binarios MCP es el slice #2123. La lista de arriba queda como el registro del 2026-10-20, que es lo que era; esta corrección es la que la actualiza.
+**Correction 2026-10-21 (#2168): the state of that list changed.** #2105 and #2106 were closed (their slices landed: `Tier2EmbeddingPort` collapsed to a newtype, and `show`/`doctor` reporting the embeddings provider actually resolved). #2107 was split: half of the comments were fixed in #2122, and the part that retired the `--enable-ai` flag from the two MCP binaries is the slice #2123. The list above stays as the record of 2026-10-20, which is what it was; this correction is the one that updates it.
 
-Ninguna es criterio de aceptación de este ADR, y por eso no bloquean su cierre. Se registran acá para que "ADR-0004 cerrado" no se lea como "no queda rastro de ONNX en el árbol".
+None of them is an acceptance criterion of this ADR, and that is why they do not block its closure. They are recorded here so that "ADR-0004 closed" is not read as "no trace of ONNX remains in the tree".
 
-### Nota de proceso: la revisión nativa no cubrió el paso 6
+### Process note: the native review did not cover step 6
 
-La revisión nativa quedó *exhausted* sobre este rango: `lens_context_budget_exceeded` con 20.706 y 15.927 líneas contra un diff de 14.534 — borrar un crate de ese tamaño desborda el presupuesto del lens. El veredicto vino de un verificador independiente (registro en L8 del feature doc de la unidad). Se anota para que una unidad de este tamaño no asuma cobertura del reviewer nativo: la ausencia de hallazgos ahí no es evidencia de ausencia de defectos.
+The native review was left *exhausted* over this range: `lens_context_budget_exceeded` with 20,706 and 15,927 lines against a diff of 14,534 —deleting a crate of that size overflows the lens budget. The verdict came from an independent verifier (recorded in L8 of the unit's feature doc). It is noted so that a unit of this size does not assume coverage by the native reviewer: the absence of findings there is not evidence of the absence of defects.
 
-### Corrección de la Enmienda 2026-10-16
+### Correction of Amendment 2026-10-16
 
-La salvedad de esa enmienda pedía verificar la regla del bump "al cortar el minor", porque desde `v2.0.0` ningún commit de ruptura la había ejecutado. Se verificó, y el resultado no es el que la enmienda preveía:
+The caveat of that amendment asked to verify the bump rule "when cutting the minor", because since `v2.0.0` no breaking commit had executed it. It was verified, and the result is not what the amendment foresaw:
 
-- El commit del paso 6 usó el título `feat!(ai):`, que **no** es Conventional Commits: el `!` va después del scope, `feat(ai)!:`.
-- Con esa forma release-plz no reconoce ni el tipo ni la ruptura y calcula un patch (2.13.1). Medido con `release-plz update` sobre el mismo árbol: `feat(ai):` → 2.14.0; `fix(cli)!:` o un footer `BREAKING CHANGE:` → 3.0.0.
-- **La enmienda no cae.** La regla del repo (un marker de ruptura produce major) se cumple; lo que estaba mal era la forma del marker, no la regla.
+- The step 6 commit used the title `feat!(ai):`, which is **not** Conventional Commits: the `!` goes after the scope, `feat(ai)!:`.
+- With that form release-plz recognizes neither the type nor the break and computes a patch (2.13.1). Measured with `release-plz update` over the same tree: `feat(ai):` → 2.14.0; `fix(cli)!:` or a `BREAKING CHANGE:` footer → 3.0.0.
+- **The amendment does not fall.** The repo rule (a breaking marker produces a major) is met; what was wrong was the form of the marker, not the rule.
 
-Corolario operativo: este repo squash-mergea, así que un footer `BREAKING CHANGE:` escrito en un commit de rama queda enterrado en el cuerpo del commit squash. El marker que sobrevive es el del **título del PR**.
+Operational corollary: this repo squash-merges, so a `BREAKING CHANGE:` footer written in a branch commit is buried in the body of the squash commit. The marker that survives is the one in the **PR title**.
 
-### Entrega
+### Delivery
 
-- **Implementación:** PR #2072 → `e9b7217a` (squash), 2026-10-19.
-- **Release:** **v3.0.0**, tag sobre `63d912ae` (2026-10-20). Es 3.0.0 y no 2.14.0 porque la retirada es una ruptura; el número llegó ahí por un commit de declaración explícito (#2077, `chore(release)!:` mergeado con `--merge`), no por el commit del borrado: el squash descarta el `!` del título del PR y release-plz ignora el footer `BREAKING CHANGE:` para el cálculo de versión, aunque git-cliff sí lo lea para agrupar el CHANGELOG. La clase de fallo quedó registrada en #2081 y cerrada en #2085.
-- **Ventana de soporte:** rotada en #2082 — 3.0 STABLE, 2.13 MAINTENANCE, 2.12 EOL.
+- **Implementation:** PR #2072 → `e9b7217a` (squash), 2026-10-19.
+- **Release:** **v3.0.0**, tag over `63d912ae` (2026-10-20). It is 3.0.0 and not 2.14.0 because the removal is a break; the number got there through an explicit declaration commit (#2077, `chore(release)!:` merged with `--merge`), not through the deletion commit: the squash discards the `!` from the PR title and release-plz ignores the `BREAKING CHANGE:` footer for the version calculation, although git-cliff does read it to group the CHANGELOG. The failure class was recorded in #2081 and closed in #2085.
+- **Support window:** rotated in #2082 — 3.0 STABLE, 2.13 MAINTENANCE, 2.12 EOL.
 
-### Desviación: el major salió sin `release/3.0` y sin RC
+### Deviation: the major shipped without `release/3.0` and without an RC
 
-Este addendum cuenta la entrega; también tiene que contar lo que **no** se hizo, porque el registro limpio de arriba sugiere un camino que no fue el que se recorrió.
+This addendum tells the delivery; it must also tell what was **not** done, because the clean record above suggests a path that was not the one taken.
 
-`AGENTS.md` pide dos cosas al cortar un MAJOR, y son de naturaleza distinta:
+`AGENTS.md` asks two things when cutting a MAJOR, and they are of a different nature:
 
-- **`release/X.Y` es regla dura, sin condición:** "MAJOR → always cuts `release/X.Y`". **No se cortó.** Es una desviación.
-- **El RC es discrecional, pero de este caso:** "`vX.Y.0-rc.N` ... only when the maintainer declares a stabilization window (state migrations, export format, major AI (embedding-provider) changes)". La retirada del proveedor de embeddings es exactamente uno de los casos listados, y nadie declaró ventana. No es una regla incumplida: es una decisión que no se tomó.
+- **`release/X.Y` is a hard rule, without conditions:** "MAJOR → always cuts `release/X.Y`". **It was not cut.** It is a deviation.
+- **The RC is discretionary, but this case is one of them:** "`vX.Y.0-rc.N` ... only when the maintainer declares a stabilization window (state migrations, export format, major AI (embedding-provider) changes)". The retirement of the embeddings provider is exactly one of the listed cases, and nobody declared a window. It is not a broken rule: it is a decision that was not taken.
 
-Por qué ocurrió, en orden:
+Why it happened, in order:
 
-1. `release-plz` estaba roto desde #2072 —`release-plz.toml` seguía nombrando el crate borrado—, así que no había ningún tag posible hasta #2077.
-2. El número 3.0.0 no salió del commit del borrado sino de un commit de declaración mergeado con `--merge` (#2077): el squash descarta el `!` y release-plz ignora el footer `BREAKING CHANGE:` para calcular versión (#2081).
-3. La rotación de `support.json` debe ocurrir inmediatamente después del tag: cualquier otra PR entre el tag y la rotación falla `Validate PR metadata`. Cortar `release/3.0` como paso previo exigía meter una PR exactamente en la ventana que no la admite.
+1. `release-plz` was broken since #2072 —`release-plz.toml` still named the deleted crate—, so there was no possible tag until #2077.
+2. The 3.0.0 number did not come from the deletion commit but from a declaration commit merged with `--merge` (#2077): the squash discards the `!` and release-plz ignores the `BREAKING CHANGE:` footer to compute the version (#2081).
+3. The `support.json` rotation must happen immediately after the tag: any other PR between the tag and the rotation fails `Validate PR metadata`. Cutting `release/3.0` as a prior step required inserting a PR exactly into the window that does not admit it.
 
-**Consecuencia real:** el major no tuvo *soak*. La primera build publicada de 3.0.0 fue la definitiva. Lo que sí se verificó antes de anunciarla: `Release-plz release` en verde y los 14 assets del GitHub Release presentes — evidencia de que la release se publicó completa, no de que el major fuera estable.
+**Real consequence:** the major had no *soak*. The first published build of 3.0.0 was the final one. What was verified before announcing it: `Release-plz release` green and the 14 assets of the GitHub Release present —evidence that the release was published completely, not that the major was stable.
 
-**Qué es reversible y qué no.** `release/3.0` todavía se puede cortar desde el tag si en algún momento hace falta una línea de mantenimiento para 3.0. Un `v3.0.0-rc.N` **no** se puede retrofitear: el soak sólo sirve antes de publicar.
+**What is reversible and what is not.** `release/3.0` can still be cut from the tag if a maintenance line for 3.0 is ever needed. A `v3.0.0-rc.N` **cannot** be backfilled: the soak only works before publishing.
 
-**Causa raíz del punto 2, cerrada:** #2085 hace que `merge-when-green.sh` se niegue a squash-ear cuando el título o un commit declara ruptura. La próxima declaración de major no depende de que quien mergea se acuerde de pasar `--merge`.
+**Root cause of point 2, closed:** #2085 makes `merge-when-green.sh` refuse to squash-merge when the title or a commit declares a break. The next major declaration does not depend on whoever merges remembering to pass `--merge`.
 
-## Glosario de referencias (IDs opacos)
+## Glossary of references (opaque IDs)
 
-Los IDs de trabajo (auditoría fuera del repo, gitignored) significan: Q1(a)=borrar, Q1(c)=refugio externo; B2=allowlist CIDR; C1–C3=docs y `--max-chars`; FIN-024=Tier 2 en silencio; PR-4/5/6=trazabilidad y contadores del MVP; M1–M4=modelos de producto; D6a=umbral relativo opt-in; Q4/Q6/Q7=preguntas al owner (golden set, alcance M2, default). Todo lo load-bearing está inline arriba; el glosario es solo índice.
+The work IDs (audit outside the repo, gitignored) mean: Q1(a)=delete, Q1(c)=external shelter; B2=CIDR allowlist; C1–C3=docs and `--max-chars`; FIN-024=silent Tier 2; PR-4/5/6=MVP traceability and counters; M1–M4=product models; D6a=opt-in relative threshold; Q4/Q6/Q7=questions to the owner (golden set, M2 scope, default). Everything load-bearing is inline above; the glossary is only an index.

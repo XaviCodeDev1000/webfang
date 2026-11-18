@@ -1,37 +1,37 @@
-# ADR 813: Backend óptimo para LLM extraction — OpenAI-compatible vs offline SLM (follow-up #789)
+# ADR 813: Optimal backend for LLM extraction — OpenAI-compatible vs offline SLM (follow-up #789)
 
-- **Status:** Proposed — la opción B quedó inviable con ADR-0004 paso 6 (v3.0.0). Ver la nota.
+- **Status:** Proposed — option B became unviable with ADR-0004 step 6 (v3.0.0). See the note.
 - **Date:** 2026-08-21
 - **Issue:** #813 (follow-up #789 / PR #806 `ca602a1`, #702, research `REPORT.md` §2 open question #2, `findings/F2.md` [9][12])
 - **Deciders:** Lead Rust Architect (bridge NotebookLM `Senior_Rust_Developer` 6b7f010b…)
-- **Scope:** Decisión documentada con tabla comparativa A/B/C; **fuera de scope** implementar el SLM si el benchmark lo recomienda (follow-up ODD propio).
+- **Scope:** Decision documented with an A/B/C comparison table; **out of scope** implementing the SLM if the benchmark recommends it (own follow-up ODD).
 
-> **Nota (2026-10-20).** La **opción B** de este documento —SLM local sobre ONNX— ya no es
-> implementable. ADR-0004 paso 6 retiró la feature Cargo `ai`, el crate `webfang_ai` y toda la
-> inferencia ONNX en v3.0.0 (#2072). Las referencias a `--features ai`, `ort`, `hf_hub` y
-> `webfang_ai` que aparecen más abajo describen el estado del 2026-08-21 y se conservan como
-> registro histórico; la comparación A/B/C sólo sigue siendo válida para A y C.
+> **Note (2026-10-20).** The **option B** of this document —local SLM over ONNX— is no
+> longer implementable. ADR-0004 step 6 retired the Cargo `ai` feature, the `webfang_ai`
+> crate and all ONNX inference in v3.0.0 (#2072). The references to `--features ai`, `ort`,
+> `hf_hub` and `webfang_ai` below describe the state of 2026-08-21 and are kept as a
+> historical record; the A/B/C comparison remains valid only for A and C.
 
-## 1. Contexto y problema (código real)
+## 1. Context and problem (real code)
 
-`#789` implementó el core LLM-First: trait `LlmPort: Send+Sync { send_completion(LlmRequest)->BoxFuture<Result<LlmResponse,ScraperError>> }` (`domain/llm_port.rs:53`), `OpenAiLlmClient` vía `wreq` Chrome145 POST `{base}/chat/completions` con `response_format=json_object` y `temperature=0.0` (`infrastructure/llm/client.rs:63`), `validation.rs` zero-dep (`type/required/properties/enum/items`, paths `$.a.b[0].c`, mensajes en español), y `LlmExtractionService` con pipeline **schema gate → SSRF gate → robots → fetch → cleaner.clean (HTML nunca al LLM) → chunk budget `max_tokens*8` → loop secuencial `send_completion` → merge dedupe `HashSet<String>` → `validate_record` → envelope** (`application/llm_extraction.rs:44-128`, `CHARS_PER_TOKEN=8`).
+`#789` implemented the LLM-First core: trait `LlmPort: Send+Sync { send_completion(LlmRequest)->BoxFuture<Result<LlmResponse,ScraperError>> }` (`domain/llm_port.rs:53`), `OpenAiLlmClient` via `wreq` Chrome145 POST `{base}/chat/completions` with `response_format=json_object` and `temperature=0.0` (`infrastructure/llm/client.rs:63`), `validation.rs` zero-dep (`type/required/properties/enum/items`, paths `$.a.b[0].c`), and `LlmExtractionService` with the pipeline **schema gate → SSRF gate → robots → fetch → cleaner.clean (never HTML to the LLM) → chunk budget `max_tokens*8` → sequential `send_completion` loop → merge dedupe `HashSet<String>` → `validate_record` → envelope** (`application/llm_extraction.rs:44-128`, `CHARS_PER_TOKEN=8`).
 
-DI real: `Container { llm_port: OnceCell<Arc<dyn LlmPort>> }` (`application/container.rs:117`, `L282 get().cloned()`, `L364 with_llm_port` at-most-once, lazy wiring `#759` para no bloquear handshake MCP), pero `LlmExtractionService` guarda `Option<Arc<dyn LlmPort>>` para tests (`None` → `ScraperError::Config("no hay proveedor LLM configurado")` honesto en español). `core/Cargo.toml` feature `ai=[]` marker vacío; peso ONNX/`ort`/`hf_hub` vive solo en `webfang_ai` (cache `~/.cache/huggingface/hub`, lazy-download, sin `include_bytes!`). `cargo build` sin `ai` no crece; `--features ai` documenta Granite 97M ~390MB / 311M ~1.25GB.
+Real DI: `Container { llm_port: OnceCell<Arc<dyn LlmPort>> }` (`application/container.rs:117`, `L282 get().cloned()`, `L364 with_llm_port` at-most-once, lazy wiring `#759` so as not to block the MCP handshake), but `LlmExtractionService` stores `Option<Arc<dyn LlmPort>>` for tests (`None` → honest `ScraperError::Config("no LLM provider configured")`). `core/Cargo.toml` feature `ai=[]` empty marker; the ONNX/`ort`/`hf_hub` weight lives only in `webfang_ai` (cache `~/.cache/huggingface/hub`, lazy-download, no `include_bytes!`). `cargo build` without `ai` does not grow; `--features ai` documents Granite 97M ~390MB / 311M ~1.25GB.
 
-La tool MCP `extract_structured` aún **no existe** en `webfang_mcp/src` en este checkout (`grep` 0 resultados, `cargo check --all-targets` verde) — el benchmark se valida a nivel `webfang_core`.
+The MCP tool `extract_structured` does **not exist** yet in `webfang_mcp/src` in this checkout (`grep` 0 results, `cargo check --all-targets` green) — the benchmark is validated at the `webfang_core` level.
 
-Tensión offline-first vs OpenAI-compatible: inferencia local es CPU-bound masiva (si se ejecuta en el executor Tokio → *thread starvation* → requiere `spawn_blocking` vía `CpuBridge`), mientras que `OpenAiLlmClient` es I/O puro `wreq`. La jerarquía de verdad es **compilador > código real > NotebookLM**; el mentor aporta teoría, `borrow checker` y `cargo check` deciden.
+Offline-first vs OpenAI-compatible tension: local inference is massively CPU-bound (if it runs on the Tokio executor → *thread starvation* → it needs `spawn_blocking` via `CpuBridge`), while `OpenAiLlmClient` is pure `wreq` I/O. The hierarchy of truth is **compiler > real code > NotebookLM**; the mentor contributes theory, the `borrow checker` and `cargo check` decide.
 
-Research reporta: SmolLM2-360M quantizado ~90MB extra, 70-85% JSON válido en schemas de entidad única sin post-procesamiento, vs GPT-4 11.97% inválido en schemas complejos → PARSE 82.3%→98.7% con refinamiento (`F2.md` [9][12]). C híbrida `generate_schema() → CSS/XPath` reutilizable costo cero recurrente (`F2.md` [4]) cubriría >80% casos estables.
+Research reports: quantized SmolLM2-360M ~90MB extra, 70-85% valid JSON in single-entity schemas without post-processing, vs GPT-4 11.97% invalid in complex schemas → PARSE 82.3%→98.7% with refinement (`F2.md` [9][12]). Hybrid C `generate_schema() → CSS/XPath` reusable at zero recurring cost (`F2.md` [4]) would cover >80% of stable cases.
 
-## 2. Benchmark acotado (sin implementar modelo)
+## 2. Bounded benchmark (no model implementation)
 
-**Objetivo:** medir las 3 opciones con los **mismos 3 fixtures** y decidir default/feature flags sin engordar binario base (`ai` o `llm-local` feature-gated, lazy `hf_hub`).
+**Goal:** measure the 3 options with the **same 3 fixtures** and decide default/feature flags without bloating the base binary (`ai` or `llm-local` feature-gated, lazy `hf_hub`).
 
-### 2.1 Fixtures (schemas que pasan `validate_schema`)
+### 2.1 Fixtures (schemas that pass `validate_schema`)
 
 ```json
-// A) Entidad única flat (producto) — valid_json_rate 70-85% esperado en SLM
+// A) Single flat entity (product) — valid_json_rate 70-85% expected on SLM
 {
   "type": "object",
   "properties": {
@@ -42,7 +42,7 @@ Research reporta: SmolLM2-360M quantizado ~90MB extra, 70-85% JSON válido en sc
   "required": ["name","price","currency"]
 }
 
-// B) Lista homogénea — array de objetos
+// B) Homogeneous list — array of objects
 {
   "type": "array",
   "items": {
@@ -55,8 +55,10 @@ Research reporta: SmolLM2-360M quantizado ~90MB extra, 70-85% JSON válido en sc
   }
 }
 
-// C) Anidado complejo 3 niveles (company → departments → employees)
-// Nota: validator zero-dep valida recursivamente `object.properties` pero en `array.items` solo valida `type` string simple (L `validation.rs`); profundidad 3 se valida superficialmente y el resto lo cubre PARSE-like refinement.
+// C) Complex nesting 3 levels deep (company → departments → employees)
+// Note: the zero-dep validator recurses over `object.properties` but in `array.items`
+// it only validates a simple `type` string (see `validation.rs`); depth 3 is validated
+// superficially and the rest is covered by PARSE-like refinement.
 {
   "type": "object",
   "properties": {
@@ -87,70 +89,70 @@ Research reporta: SmolLM2-360M quantizado ~90MB extra, 70-85% JSON válido en sc
 }
 ```
 
-### 2.2 Harness (determinístico, sin red real ni API keys)
+### 2.2 Harness (deterministic, no real network and no API keys)
 
-- **Ubicación:** `tests/behavioral/llm_benchmark.rs` (o `crates/webfang_core/benches/llm_bench.rs` si se mide `cargo bloat`); hereda `BehavioralTest` + `TempDir` + `wiremock`.
-- **Opción A (API externa):** `wiremock::MockServer` con `POST /chat/completions` → respuestas pregrabadas + corpus corrupto (11.97% JSON inválido, `finish_reason=length`). `WEBFANG_DISABLE_SSRF=1` para loopback. Mide `input_tokens:u32`/`output_tokens:u32` reales del `Usage`.
-- **Opción B (SLM local):** `StubLlm: LlmPort` determinístico con `spawn_blocking` (simula `ort` CPU) + `std::thread::sleep(120ms)` y `content.len()/8` como `output_tokens`; corpus 100 iteraciones validado contra `validate_record`.
-- **Opción C (híbrida):** stub `generate_schema()` → CSS/XPath sintético reutilizable; mide `<5ms` parseo nativo + 0 costo LLM.
-- **Métricas por fixture:** `valid_json_rate = valid / iterations *100`, `p50 latency ms` (sort latencies), `chunks`, `input/output_tokens`, `binario +MB` (`cargo build --features ai` vs base), `costo 1k req`.
-- **Observabilidad:** `tracing::info!(backend=%backend, model=%model, chunks, valid_rate, p50_ms, "benchmark tick")` + `#[instrument(fields(backend, model))]` en `extract`; `correlation_id` interno `skip` en snapshots via `redact_nondeterministic()` (filtra `p50_ms`, `tokens`).
-- **Invariantes Rust:** `!Send` `scraper::Html` nunca cruza `.await` — se limita a bloque síncrono o `spawn_blocking`; `LlmPort: Send+Sync` garantiza `BoxFuture +Send`.
+- **Location:** `tests/behavioral/llm_benchmark.rs` (or `crates/webfang_core/benches/llm_bench.rs` if `cargo bloat` is measured); inherits `BehavioralTest` + `TempDir` + `wiremock`.
+- **Option A (external API):** `wiremock::MockServer` with `POST /chat/completions` → pre-recorded responses + corrupt corpus (11.97% invalid JSON, `finish_reason=length`). `WEBFANG_DISABLE_SSRF=1` for loopback. Measures real `input_tokens:u32`/`output_tokens:u32` from `Usage`.
+- **Option B (local SLM):** deterministic `StubLlm: LlmPort` with `spawn_blocking` (simulates `ort` CPU) + `std::thread::sleep(120ms)` and `content.len()/8` as `output_tokens`; 100 iterations of corpus validated against `validate_record`.
+- **Option C (hybrid):** stub `generate_schema()` → synthetic reusable CSS/XPath; measures `<5ms` native parsing + 0 LLM cost.
+- **Metrics per fixture:** `valid_json_rate = valid / iterations *100`, `p50 latency ms` (sort latencies), `chunks`, `input/output_tokens`, `binary +MB` (`cargo build --features ai` vs base), `cost per 1k requests`.
+- **Observability:** `tracing::info!(backend=%backend, model=%model, chunks, valid_rate, p50_ms, "benchmark tick")` + `#[instrument(fields(backend, model))]` on `extract`; internal `correlation_id` `skip` in snapshots via `redact_nondeterministic()` (filters `p50_ms`, `tokens`).
+- **Rust invariants:** `!Send` `scraper::Html` never crosses `.await` — it is confined to a synchronous block or `spawn_blocking`; `LlmPort: Send+Sync` guarantees `BoxFuture +Send`.
 
-## 3. Tabla comparativa y recomendación
+## 3. Comparison table and recommendation
 
-| Dimensión | A: API externa (OpenAI/Ollama, ya existe) | B: SLM local SmolLM2-360M quant ~90MB | C: Híbrida `generate_schema() → CSS/XPath` |
+| Dimension | A: External API (OpenAI/Ollama, already exists) | B: Local SLM SmolLM2-360M quant ~90MB | C: Hybrid `generate_schema() → CSS/XPath` |
 |---|---:|---:|---:|
-| **Costo 1k req** | variable pago por uso (≈ $0.001-0.05/extract) | USD 0 (cómputo local) | USD 0 |
-| **Latencia p50** | 800-1500 ms (red) | 1200-3000 ms (CPU `spawn_blocking`) | **<5 ms** (parseo nativo) |
-| **valid_json_rate** | ~88% (GPT-4 nested, 11.97% inválido sin PARSE → 98.7% con refinement) | **70-85% solo entidad única** (cae en B/C) | **100%** (garantizado por parser) |
-| **Binario +MB** | +0 MB | +90MB modelo + `ort` (solo con `--features ai`) | +0 MB |
-| **Feature flag** | default siempre disponible | `ai` (lazy `hf_hub`) | `adaptive-selectors` (ya existe, cascade trace) |
-| **Offline** | no (requiere `LLM_API_URL`+`LLM_API_KEY`) | **sí** (offline-first) | **sí** |
+| **Cost per 1k requests** | variable pay-per-use (≈ $0.001-0.05/extract) | USD 0 (local compute) | USD 0 |
+| **p50 latency** | 800-1500 ms (network) | 1200-3000 ms (CPU `spawn_blocking`) | **<5 ms** (native parsing) |
+| **valid_json_rate** | ~88% (GPT-4 nested, 11.97% invalid without PARSE → 98.7% with refinement) | **70-85% single entity only** (drops on B/C) | **100%** (guaranteed by the parser) |
+| **Binary +MB** | +0 MB | +90MB model + `ort` (only with `--features ai`) | +0 MB |
+| **Feature flag** | always available by default | `ai` (lazy `hf_hub`) | `adaptive-selectors` (already exists, cascade trace) |
+| **Offline** | no (requires `LLM_API_URL`+`LLM_API_KEY`) | **yes** (offline-first) | **yes** |
 
-**Recomendación default (respetando `cargo build` sin `ai` no crece):**
+**Default recommendation (respecting that `cargo build` without `ai` does not grow):**
 
-> **Default = C híbrida como primera capa** (`generate_schema()` one-time → CSS/XPath reutilizable, latencia <5ms, 100% válido, 0 costo). **Fallback dinámico → A** vía `OpenAiLlmClient` (OpenAI/Ollama) cuando drift de selectores o schema no cubierto, con `ssrf_gate` estricto y `response_format=json_object`. **B (SLM) estrictamente opt-in** bajo `--features ai` con lazy `hf_hub` a `~/.cache/huggingface/hub` (no `include_bytes!`), solo si usuario necesita offline total y acepta 70-85% sin refinement.
+> **Default = hybrid C as the first layer** (`generate_schema()` one-time → reusable CSS/XPath, latency <5ms, 100% valid, 0 cost). **Dynamic fallback → A** via `OpenAiLlmClient` (OpenAI/Ollama) when selectors drift or the schema is not covered, with a strict `ssrf_gate` and `response_format=json_object`. **B (SLM) strictly opt-in** under `--features ai` with lazy `hf_hub` to `~/.cache/huggingface/hub` (no `include_bytes!`), only if the user needs full offline mode and accepts 70-85% without refinement.
 
-**Feature flags:** **Reusar `ai=[]` marker** (no crear `llm-local` separado). Justificación: `ai` ya aísla `ort`/`hf_hub`/`tokenizers` en `webfang_ai`; añadir `llm-local` duplicaría matriz y CI sin beneficio (90MB ya es el costo documentado de `ai`). El benchmark `cargo build --features ai` debe documentar `+MB` y `cargo build` base permanece ligero (DX). Si en follow-up se necesita Granite vs SmolLM2 separados, se introduce `ai-llm` como sub-feature, no ahora.
+**Feature flags:** **Reuse the `ai=[]` marker** (do not create a separate `llm-local`). Justification: `ai` already isolates `ort`/`hf_hub`/`tokenizers` in `webfang_ai`; adding `llm-local` would duplicate the matrix and CI with no benefit (90MB is already the documented cost of `ai`). The `cargo build --features ai` benchmark must document `+MB` and the base `cargo build` stays light (DX). If a follow-up needs Granite and SmolLM2 separately, introduce `ai-llm` as a sub-feature, not now.
 
-**Guía operativa (doc honesta):**
-- Offline sin LLM → `extract` retorna `Config("no hay proveedor LLM configurado")` en español (preservado).
-- Con API externa → configurar `LLM_API_URL` + `LLM_API_KEY` (o `OLLAMA_URL=http://localhost:11434/v1` con `LLM_API_KEY=dummy`).
-- Con SLM offline → `cargo build --features ai` + `WEBFANG_AI_MODEL_ID=HuggingFaceTB/SmolLM2-360M` (o `AI_MODEL_ID` heredada) → descarga lazy `hf_hub`.
+**Operational guide (honest doc):**
+- Offline without LLM → `extract` returns `Config("no LLM provider configured")` (honest error).
+- With external API → configure `LLM_API_URL` + `LLM_API_KEY` (or `OLLAMA_URL=http://localhost:11434/v1` with `LLM_API_KEY=dummy`).
+- With offline SLM → `cargo build --features ai` + `WEBFANG_AI_MODEL_ID=HuggingFaceTB/SmolLM2-360M` (or the inherited `AI_MODEL_ID`) → lazy `hf_hub` download.
 
-## 4. Mitigaciones y riesgos
+## 4. Mitigations and risks
 
 - **SSRF:** `ssrf_gate(&Url)` allow-list `http/https` + `is_forbidden_literal_host` (loopback/private/link-local/CGNAT/ULA); tests `WEBFANG_DISABLE_SSRF=1`.
-- **Token budget sin overlap:** `char_budget = max_tokens*8` validado antes del LLM (over-budget → `Validation`); sin `overlap_rate` hoy → riesgo de corte de registro en frontera de chunk (mitigar con PARSE-like refinement: re-inyectar `SchemaError` path `$.a.b[0].c` al LLM en retry acotado).
-- **Dedupe:** `HashSet<String>` sobre `record.to_string()` → sensible a orden de claves/espacios; documentar como limitación y recomendar normalización canónica en follow-up.
-- **Validation zero-dep:** sin `$ref`/`allOf`/`format`; fixture C profundo requiere post-validación Serde o refinement loop.
-- **`!Send` Html:** nunca retener `scraper::Html` (Rc interno) a través de `.await`; aislar en `spawn_blocking` o bloque síncrono antes de `send_completion`.
+- **Token budget without overlap:** `char_budget = max_tokens*8` validated before the LLM (over-budget → `Validation`); no `overlap_rate` today → risk of a record being cut at a chunk boundary (mitigate with PARSE-like refinement: re-inject the `SchemaError` path `$.a.b[0].c` to the LLM in a bounded retry).
+- **Dedupe:** `HashSet<String>` over `record.to_string()` → sensitive to key order/spacing; document as a limitation and recommend canonical normalization in a follow-up.
+- **Zero-dep validation:** no `$ref`/`allOf`/`format`; deep fixture C requires post-validation with Serde or a refinement loop.
+- **`!Send` Html:** never hold `scraper::Html` (internal Rc) across `.await`; isolate it in `spawn_blocking` or a synchronous block before `send_completion`.
 
-## 5. Tests (ningún test contra red real ni keys en repo)
+## 5. Tests (no test against a real network or keys in the repo)
 
-- `wiremock` para A (200/429/503/length), `StubLlm` con `spawn_blocking` para B, stub `generate_schema` para C.
-- 3 fixtures × 100 iteraciones → `valid_json_rate` + `p50` + `insta::assert_snapshot!(redact_nondeterministic(...))`.
-- Honest error: `LlmExtractionService::new(..., None)` → `extract` == `Config` español; `ssrf_gate("http://127.0.0.1")` bloqueado vs `WEBFANG_DISABLE_SSRF=1` permite wiremock.
+- `wiremock` for A (200/429/503/length), `StubLlm` with `spawn_blocking` for B, `generate_schema` stub for C.
+- 3 fixtures × 100 iterations → `valid_json_rate` + `p50` + `insta::assert_snapshot!(redact_nondeterministic(...))`.
+- Honest error: `LlmExtractionService::new(..., None)` → `extract` == `Config`; `ssrf_gate("http://127.0.0.1")` blocked vs `WEBFANG_DISABLE_SSRF=1` allows wiremock.
 
-## 6. Fuera de scope de esta issue
+## 6. Out of scope for this issue
 
-Implementar el SLM bundled si el benchmark lo recomienda (va en follow-up con ODD propia, incluyendo `cargo bloat` y `ort` session sharing `Arc<Mutex<Session>>` `#648`).
+Implement the bundled SLM if the benchmark recommends it (goes in a follow-up with its own ODD, including `cargo bloat` and `ort` session sharing `Arc<Mutex<Session>>` `#648`).
 
-## 7. Bitácora de auditoría (3 rondas con NotebookLM `Senior_Rust_Developer`)
+## 7. Audit log (3 rounds with NotebookLM `Senior_Rust_Developer`)
 
-| Ronda | Propuesta NotebookLM | Realidad código local | Ajuste aplicado |
+| Round | NotebookLM proposal | Local code reality | Adjustment applied |
 |---|---|---|---|
-| R1 | Tensión IO vs CPU, `Container Option`, harness mock `usize` tokens + overlap | `container.rs:117 OnceCell` no Option; `LlmResponse u32`; `CHARS_PER_TOKEN=8` sin overlap; `cargo check` verde | Corregir tipos a `u32`, `OnceCell::new()`/`get().cloned()`, documentar sin overlap |
-| R2 | Harness `spawn_blocking` + fixtures flat/array/nested + reusar `ai` vs `llm-local` | `LlmExtractionService Option` (no OnceCell), `ChatMessage` solo Serialize, `validation.rs` sin recursión array profunda, `adaptive-selectors` no es LLM | Distinguir Service Option vs Container OnceCell; schemas corregidos `Clone Serialize`; notar limitación validator; `ai=[]` marker reusado |
-| R3 | `docs/llm-backend-decision.md` ADR completo + `OnceCell` vs `Option` invariantes + `!Send` Html + PARSE refinement | `extract_structured` MCP no existe aún (grep 0); `core ai=[]` vacío peso solo en `webfang_ai` | ADR con tabla, harness en `tests/behavioral`, observabilidad `redact_nondeterministic`, decisión default C→A fallback, B opt-in `ai` lazy `hf_hub` |
+| R1 | IO vs CPU tension, `Container Option`, harness mock `usize` tokens + overlap | `container.rs:117 OnceCell` not Option; `LlmResponse u32`; `CHARS_PER_TOKEN=8` without overlap; `cargo check` green | Correct types to `u32`, `OnceCell::new()`/`get().cloned()`, document no overlap |
+| R2 | Harness `spawn_blocking` + flat/array/nested fixtures + reuse `ai` vs `llm-local` | `LlmExtractionService Option` (not OnceCell), `ChatMessage` Serialize only, `validation.rs` without deep array recursion, `adaptive-selectors` is not LLM | Distinguish Service Option vs Container OnceCell; corrected schemas `Clone Serialize`; note validator limitation; `ai=[]` marker reused |
+| R3 | `docs/llm-backend-decision.md` full ADR + `OnceCell` vs `Option` invariants + `!Send` Html + PARSE refinement | `extract_structured` MCP does not exist yet (grep 0); empty `core ai=[]`, weight only in `webfang_ai` | ADR with table, harness in `tests/behavioral`, observability `redact_nondeterministic`, default decision C→A fallback, B opt-in `ai` lazy `hf_hub` |
 
-## 8. Criterio de aceptación verificado
+## 8. Verified acceptance criteria
 
-- `cargo build` sin `ai` no crece (core marker vacío, ONNX solo en `webfang_ai`).
-- `cargo build --features ai` documenta costo Granite/SmolLM ~90MB-1.25GB lazy.
-- `extract` sin config → honest error español `Config("no hay proveedor LLM configurado")`.
-- Doc presente en `docs/llm-backend-decision.md` con tabla, fixtures, valid_rate, p50, +MB, recomendación y flags.
+- `cargo build` without `ai` does not grow (empty core marker, ONNX only in `webfang_ai`).
+- `cargo build --features ai` documents the Granite/SmolLM cost ~90MB-1.25GB lazy.
+- `extract` without config → honest error `Config("no LLM provider configured")`.
+- Doc present in `docs/llm-backend-decision.md` with table, fixtures, valid_rate, p50, +MB, recommendation and flags.
 
 ---
-*Generado vía bridge `OMAR-DEV` notebook `Senior_Rust_Developer` (6b7f010b-7122-4757-a96e-b4fade1043a0), conversaciones `ea00fcdf-2614-4e31-ab0c-bf03b80e621a` (R1-R3), notas `88e9c42d/65a15f7e/2d0aceba`, `gh issue 813`.*
+*Generated via the `OMAR-DEV` bridge notebook `Senior_Rust_Developer` (6b7f010b-7122-4757-a96e-b4fade1043a0), conversations `ea00fcdf-2614-4e31-ab0c-bf03b80e621a` (R1-R3), notes `88e9c42d/65a15f7e/2d0aceba`, `gh issue 813`.*

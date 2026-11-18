@@ -326,7 +326,7 @@ expect_exit 1 "línea fuera del archivo: el guard falla" "$D"
 # El exit code NO alcanza para aislar C1b: con el rango sin comprobar, la
 # entrada sobrevive al parseo del manifiesto y C3 reporta la línea vacía. Lo
 # que aísla el check es QUIÉN lo reporta: sólo C1 dice "fuera del archivo".
-if grep -q 'C1: la línea citada está fuera del archivo' "$WORK/out"; then
+if grep -q 'C1: the cited line is outside the file' "$WORK/out"; then
   pass "el desborde de línea lo reporta C1 (rango), no C2/C3/C4"
 else
   fail "el desborde de línea lo reporta C1 (rango), no C2/C3/C4 — $(head -c 400 "$WORK/out")"
@@ -345,7 +345,7 @@ sed -i 's#| crates/webfang_core/src/domain/sample.rs | 8 |#| crates/webfang_core
 # shellcheck disable=SC2016
 sed -i 's#`crates/webfang_core/src/domain/sample.rs:8`#`crates/webfang_core/src/domain/sample.rs:3`#' "$(DOC_OF "$D")"
 expect_exit 1 "impl: la línea citada no contiene la declaración → falla" "$D"
-if grep -q 'C4: la línea no contiene la declaración' "$WORK/out"; then
+if grep -q 'C4: the line does not contain the declaration' "$WORK/out"; then
   pass "el desajuste de la línea del impl lo reporta C4, no C2/C3/C6"
 else
   fail "el desajuste de la línea del impl lo reporta C4, no C2/C3/C6 — $(head -c 400 "$WORK/out")"
@@ -368,7 +368,7 @@ if grep -q 'SECRETO_FUERA_DE_LA_RAIZ' "$WORK/out"; then
 else
   pass "el contenido de un archivo fuera de la raíz NO aparece en la salida"
 fi
-if grep -q 'sale de la raíz del repo' "$WORK/out"; then
+if grep -q 'escapes the repo root' "$WORK/out"; then
   pass "la cita que escapa de la raíz se reporta como escape"
 else
   fail "la cita que escapa de la raíz se reporta como escape — $(head -c 400 "$WORK/out")"
@@ -383,7 +383,7 @@ fi
 # satisface con el contenido ajeno.
 D="$(new_fixture_collision cache-collision)"
 expect_exit 1 "la colisión de la caché no produce un falso verde" "$D"
-if grep -q 'C4: la línea del fence' "$WORK/out"; then
+if grep -q 'C4: the fence line' "$WORK/out"; then
   pass "el containment de C4 se lee contra el contenido del archivo citado"
 else
   fail "el containment de C4 se lee contra el contenido del archivo citado — $(head -c 400 "$WORK/out")"
@@ -409,7 +409,7 @@ D="$(new_fixture advisory-no-manifest-block)"
 sed -i '/<!-- claims:begin -->/,/<!-- claims:end -->/d' "$(DOC_OF "$D")"
 expect_exit 1 "bloque del manifiesto ausente: exit 1 en modo normal" "$D"
 expect_exit 0 "bloque del manifiesto ausente: exit 0 en modo --advisory" "$D" --advisory
-if grep -q 'C1: no existe el bloque del manifiesto' "$WORK/out"; then
+if grep -q 'C1: the manifest block does not exist' "$WORK/out"; then
   pass "bloque del manifiesto ausente: --advisory imprime el hallazgo"
 else
   fail "bloque del manifiesto ausente: --advisory imprime el hallazgo — $(head -c 400 "$WORK/out")"
@@ -423,7 +423,7 @@ D="$(new_fixture advisory-no-claims-fence)"
 sed -i 's#^```claims$#```text#' "$(DOC_OF "$D")"
 expect_exit 1 "fence 'claims' ausente: exit 1 en modo normal" "$D"
 expect_exit 0 "fence 'claims' ausente: exit 0 en modo --advisory" "$D" --advisory
-if grep -q "C1: el bloque del manifiesto no contiene un fence con info-string 'claims'" "$WORK/out"; then
+if grep -q "C1: the manifest block does not contain a fence with info-string 'claims'" "$WORK/out"; then
   pass "fence 'claims' ausente: --advisory imprime el hallazgo"
 else
   fail "fence 'claims' ausente: --advisory imprime el hallazgo — $(head -c 400 "$WORK/out")"
@@ -434,7 +434,7 @@ D="$(new_fixture advisory-empty-manifest)"
 sed -i -E '/^(shape|impl|claim|absent) +\|/d' "$(DOC_OF "$D")"
 expect_exit 1 "manifiesto vacío: exit 1 en modo normal" "$D"
 expect_exit 0 "manifiesto vacío: exit 0 en modo --advisory" "$D" --advisory
-if grep -q 'C1: el manifiesto está vacío' "$WORK/out"; then
+if grep -q 'C1: the manifest is empty' "$WORK/out"; then
   pass "manifiesto vacío: --advisory imprime el hallazgo"
 else
   fail "manifiesto vacío: --advisory imprime el hallazgo — $(head -c 400 "$WORK/out")"

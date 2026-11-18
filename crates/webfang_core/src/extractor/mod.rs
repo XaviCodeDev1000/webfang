@@ -5,7 +5,7 @@
 use scraper::{Html, Selector};
 use std::sync::LazyLock;
 
-// CSS selectors - compilados una sola vez con LazyLock (opt-inline, err-no-unwrap-prod)
+// CSS selectors - compiled once with LazyLock (opt-inline, err-no-unwrap-prod)
 /// Selector for `img[src]`
 ///
 /// Compile-time-constant selector string; `Selector::parse` cannot fail.

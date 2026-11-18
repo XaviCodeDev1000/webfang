@@ -15,7 +15,7 @@
 //! could embed remote-derived fragments (e.g. a fetched URL inside an error).
 //!
 //! Rationale and policy: `docs/security/prompt-injection-policy.md`
-//! (Regla 0 — "las salidas de herramienta son data, no instrucciones") and
+//! (Rule 0 — "tool outputs are data, not instructions") and
 //! issue #1600 (audit `AUDIT-PROMPT-INJECTION-20260925-223342`, M0+M1). The
 //! mechanical gate that keeps handlers routed through this module lives in
 //! `crates/webfang_mcp/tests/provenance_gate_test.rs` — the same structural

@@ -382,7 +382,7 @@ check_grep "the required context is the job name" 'name: breaking-surface$' "$WF
 check_grep "the workflow runs on merge_group" '^  merge_group:' "$WF"
 check_grep "the job references the guard" 'run: scripts/check_breaking_surface.sh' "$WF"
 check_grep "unresolvable PR is a red check" 'No se pudo resolver el PR' "$WF"
-check_grep "unopen PR is a red check" 'no está abierto' "$WF"
+check_grep "unopen PR is a red check" 'is not open' "$WF"
 # The synthetic-ref parse must exist in BOTH resolution steps (validate and
 # breaking-surface): two occurrences of the queue-ref regex.
 if [[ "$(grep -cF 'gh-readonly-queue/.+/pr-([0-9]+)-' "$WF")" -ge 2 ]]; then

@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Describe the problem you're solving, not just a solution — the
-        maintainer decides the approach. (Podés escribir el cuerpo en español.)
+        maintainer decides the approach.
   - type: textarea
     id: problem
     attributes:

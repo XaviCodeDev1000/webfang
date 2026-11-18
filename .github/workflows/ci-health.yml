@@ -1,67 +1,70 @@
-# CI Health Observer (auditoría webfang W-01..W-08) — SHIPS DORMANT.
+# CI Health Observer (webfang audit W-01..W-08) — SHIPS DORMANT.
 #
-# Workflow SEPARADO y solo-observador: NO toca ci.yml, bug-discovery.yml ni
-# benches.yml. No compila, no testea, solo lee el estado de los otros
-# workflows vía API y abre/actualiza/cierra tracking issues idempotentes.
+# SEPARATE and observer-only workflow: it does NOT touch ci.yml, bug-discovery.yml
+# or benches.yml. It does not compile, it does not test, it only reads the state
+# of the other workflows via the API and opens/updates/closes tracking issues
+# idempotently.
 #
-# Por qué existe (auditoría 2026-09-18):
-#   W-01: el job `notify` de ci.yml usa `if: failure()` / `if: success()` a
-#     nivel de step (su propio estado), nunca abre el tracking issue
-#     "Scheduled CI failed on main" aunque el schedule lleve 10+ semanas rojo.
-#     Ese es un título HISTÓRICO y ya retirado: ver RETIRED_TITLE_CI abajo.
-#   W-02: `CI Gate` no incluye miri* en su `needs:` → verde con 3 jobs en
-#     failure. Este observer mira los JOBS reales, no el gate.
-#   W-03/W-04: Bug Discovery recoge un test #[ignore] "kept RED by design"
-#     (rojo permanente) y no crea issues. Este observer lo clasifica como
-#     falso-positivo-conocido y lo reporta sin ruido.
-#   W-05: Benches muere con exit 143/SIGTERM durante la compilación (la causa
-#     entonces era el crate de IA, eliminado en ADR-0004 paso 6).
-#   W-08: 0 watchers → sin este observer nadie se entera.
+# Why it exists (audit 2026-09-18):
+#   W-01: the `notify` job of ci.yml uses `if: failure()` / `if: success()` at
+#     step level (its own state), it never opens the tracking issue
+#     "Scheduled CI failed on main" even if the schedule has been red for 10+
+#     weeks. That is a HISTORICAL title, already retired: see RETIRED_TITLE_CI below.
+#   W-02: `CI Gate` does not include miri* in its `needs:` → green with 3 jobs in
+#     failure. This observer looks at the REAL jobs, not at the gate.
+#   W-03/W-04: Bug Discovery picks up an #[ignore] test "kept RED by design"
+#     (permanently red) and does not create issues. This observer classifies it as
+#     a known false positive and reports it without noise.
+#   W-05: Benches dies with exit 143/SIGTERM during compilation (the cause at the
+#     time was the AI crate, removed in ADR-0004 step 6).
+#   W-08: 0 watchers → without this observer nobody finds out.
 #
-# Diseño:
-#   - Trigger `workflow_run` (completed) sobre CI, Production Bug Discovery y
-#     Benches + `schedule` diario 07:00 UTC como red de seguridad (si el
-#     evento workflow_run se pierde) + `workflow_dispatch` manual.
-#   - Alcance (#1714): sólo se observa CI de la LÍNEA PRINCIPAL. La condición
-#     que decide está en el `if:` del job `observe` y se evalúa contra el
-#     ORIGEN y la RAMA de la CORRIDA OBSERVADA, nunca contra los de este
-#     workflow. Antes era:
+# Design:
+#   - `workflow_run` (completed) trigger over CI, Production Bug Discovery and
+#     Benches + a daily `schedule` at 07:00 UTC as a safety net (if the
+#     workflow_run event is lost) + manual `workflow_dispatch`.
+#   - Scope (#1714): only CI of the MAIN LINE is observed. The condition that
+#     decides is in the `if:` of the `observe` job and is evaluated against the
+#     ORIGIN and the BRANCH of the OBSERVED RUN, never against those of this
+#     workflow. It used to be:
 #
 #       github.ref == main || github.ref == develop || event_name == workflow_run
 #
-#     y las dos primeras cláusulas NO filtraban nada en la ruta `workflow_run`:
-#     en ese evento GITHUB_REF es la rama por defecto del repo, así que la
-#     primera ya era cierta para TODA corrida observada — 11 de las últimas 20
-#     observadas eran `pull_request` de feature branches, y 9 issues históricas
-#     de este observer salieron de ahí (#1657, #1660, #1663, #1671, #1675,
-#     #1685, #1686, #1699, #1705). La tercera cláusula (la que la issue
-#     señalaba) era redundante en el caso bueno; la que de verdad dejaba pasar
-#     todo era la primera. Por eso el filtro nuevo NO puede mirar `github.ref`
-#     en esa ruta: tiene que mirar el payload.
+#     and the first two clauses did NOT filter anything on the `workflow_run` path:
+#     in that event GITHUB_REF is the repo's default branch, so the first one was
+#     already true for EVERY observed run — 11 of the last 20 observed ones were
+#     `pull_request` from feature branches, and 9 historical issues of this
+#     observer came from there (#1657, #1660, #1663, #1671, #1675,
+#     #1685, #1686, #1699, #1705). The third clause (the one the issue pointed at)
+#     was redundant in the good case; the one that really let everything through
+#     was the first. That is why the new filter CANNOT look at `github.ref`
+#     on that path: it has to look at the payload.
 #
-#     Predicado de alcance (una sola fuente de verdad por ruta):
-#       evento workflow_run -> en alcance <=> head_branch ∈ {main, develop}
+#     Scope predicate (a single source of truth per path):
+#       workflow_run event -> in scope <=> head_branch ∈ {main, develop}
 #                                         ∧ event ≠ pull_request
-#       cualquier otro      -> en alcance <=> github.ref ∈ {main, develop}
-#     Un PR mergeado dispara el `push` a su rama destino, así que la cobertura
-#     de la línea principal NO se pierde: lo que se pierde es la duplicación de
-#     un rojo que GitHub ya muestra en la pestaña del PR (y que, si el PR está
-#     rojo, tampoco sobrevive al merge a main). El barrido diario tiene su
-#     propia copia del predicado, dentro de `reconcile_one` — se evalúa sobre
-#     la corrida QUE EL BARRIDO LEE, no sobre la que lo disparó.
-#   - Idempotente: UNA issue por CLAVE (títulos abajo), un comentario por run
-#     fallido, auto-cierre al volver a verde. El ORIGEN sigue dentro del
-#     título (#1712: dos causas distintas no pueden caer en la misma issue y
-#     taparse), pero el CIERRE matchea un SUBTÍTULO del título
-#     ("CI failed on main"), de modo que una corrida verde CUALQUIERA retira
-#     TODOS los trackers con clave CI — los de cada origen y los que
-#     quedaron bajo el título retirado (#2162, #1980). Con el título
-#     constante anterior (`Scheduled ...` para todo) cualquier verde cerraba
-#     cualquier rojo.
-#   - El ORIGEN del run es parte de la clave, no una línea del cuerpo. Es lo
-#     único que impide que dos causas distintas caigan en la misma issue y se
-#     tapen entre sí; por eso se lee del payload y no se supone.
-#   - Etiquetas: `ci-health` + `automated`. Nunca toca issues sin `ci-health`.
+#       anything else      -> in scope <=> github.ref ∈ {main, develop}
+#     A merged PR triggers the `push` to its target branch, so the coverage
+#     of the main line is NOT lost: what is lost is the duplication of
+#     a red that GitHub already shows in the PR tab (and that, if the PR is
+#     red, does not survive the merge to main either). The daily sweep has its
+#     own copy of the predicate, inside `reconcile_one` — it is evaluated over
+#     the run THAT THE SWEEP READS, not over the one that triggered it.
+#   - Idempotent: ONE issue per KEY (titles below), one comment per failed
+#     run, auto-close on returning to green. The ORIGIN stays inside the
+#     title (#1712: two distinct causes cannot fall into the same issue and
+#     mask each other), but the CLOSING matches a SUBTITLE of the title
+#     ("CI failed on main"), so that ANY green run retires
+#     ALL trackers with a CI key — those of each origin and those
+#     left under the retired title (#2162, #1980). With the previous
+#     constant title (`Scheduled ...` for everything) any green closed
+#     any red.
+#   - The ORIGIN of the run is part of the key, not a line of the body. It is
+#     the only thing that prevents two distinct causes from falling into the
+#     same issue and masking each other; that is why it is read from the
+#     payload and not assumed.
+#   - Labels: `ci-health` + `automated`. It never touches issues without
+#     `ci-health`.
 #
 # Convention: repo pins actions by tag, so this file follows tags, not SHAs.
 
@@ -72,7 +75,7 @@ on:
     workflows: ["CI", "Production Bug Discovery", "Benches"]
     types: [completed]
   schedule:
-    - cron: "0 7 * * *" # Diario 07:00 UTC, tras Bug Discovery (06:00)
+    - cron: "0 7 * * *" # Daily 07:00 UTC, after Bug Discovery (06:00)
   workflow_dispatch:
     inputs:
       backfill:
@@ -98,52 +101,52 @@ env:
   LABEL: ci-health
   LABEL_AUTO: automated
   LABEL_KNOWN_FP: known-false-positive
-  # Test marcado "kept RED by design / never run in CI" (W-03).
+  # Test marked "kept RED by design / never run in CI" (W-03).
   KNOWN_RED_TEST: sitemap_entry_max_pages_truncates_many_url_fixture
-  # El título NO es decoración: es la CLAVE de lookup. Cada abrir, comentar y
-  # CERRAR hace `gh issue list --search "<título> in:title"`, así que la clave
-  # decide qué issue se abre y — sobre todo — qué issue cierra un run verde.
-  # Un título constante que decía "Scheduled" para un rojo de `push` (y para
-  # los runs de `pull_request` en ramas de feature, que son la mayoría) era una
-  # mentira, y convertía cada verde en un cierre cruzado (#1712).
+  # The title is NOT decoration: it is the LOOKUP KEY. Every open, comment and
+  # CLOSE runs `gh issue list --search "<title> in:title"`, so the key
+  # decides which issue is opened and — above all — which issue a green run closes.
+  # A constant title that said "Scheduled" for a `push` red (and for
+  # the `pull_request` runs on feature branches, which are the majority) was a
+  # lie, and turned every green into a cross-closing (#1712).
   #
-  # {origin} se sustituye en runtime en el paso "Classify run origin". El
-  # espacio a ambos lados del placeholder NO es decorativo: la búsqueda real
-  # `in:title` trata cada palabra como un término (AND), y el origen tiene que
-  # caer como término PROPIO para que `(push)` no pueda encontrar `(schedule)`.
-  # Orígenes con nombre: push | schedule | pull_request | workflow_dispatch.
-  # Cualquier otro valor de la API cae en `other`: conjunto cerrado y acotado,
-  # para que la clave no crezca con cada evento que GitHub añada, y para que un
-  # origen inesperado siga siendo visible en un título en vez de diluirse.
+  # {origin} is substituted at runtime in the "Classify run origin" step. The
+  # space on both sides of the placeholder is NOT decorative: the real
+  # `in:title` search treats each word as a term (AND), and the origin has to
+  # land as its OWN term so that `(push)` cannot match `(schedule)`.
+  # Named origins: push | schedule | pull_request | workflow_dispatch.
+  # Any other value from the API falls into `other`: a closed and bounded set,
+  # so that the key does not grow with every event GitHub adds, and so that an
+  # unexpected origin stays visible in a title instead of diluting.
   TITLE_CI: "CI failed on main ({origin}) [ci-health]"
-  # ── CLAVE DE CIERRE: un SUBTÍTULO del título (#2162, #1980) ───────────────
-  # "CI failed on main" es un subtítulo de las DOS claves con clave CI:
-  #   - "CI failed on main ({origin}) [ci-health]"  (la que abre este observer)
-  #   - "Scheduled CI failed on main [ci-health]"    (la clave RETIRADA)
-  # Por eso el CIERRE usa esta clave y no el título completo: UNA sola
-  # implementación (close_mine en scripts/ci-health-close.sh) retira TODOS los
-  # trackers con clave CI, sin un segundo camino de cierre y sin una corrida
-  # `workflow_dispatch` verde a mano para desencolar un tracker.
+  # ── CLOSING KEY: a SUBTITLE of the title (#2162, #1980) ───────────────────
+  # "CI failed on main" is a subtitle of BOTH keys with a CI key:
+  #   - "CI failed on main ({origin}) [ci-health]"  (the one this observer opens)
+  #   - "Scheduled CI failed on main [ci-health]"    (the RETIRED key)
+  # That is why the CLOSING uses this key and not the full title: a SINGLE
+  # implementation (close_mine in scripts/ci-health-close.sh) retires ALL the
+  # trackers with a CI key, with no second closing path and no manual green
+  # `workflow_dispatch` run to unqueue a tracker.
   #
-  # El ORIGEN sigue en el TÍTULO porque es lo que distingue dos causas
-  # mientras están rojas (#1712); no está en la clave de cierre porque un
-  # verde de la línea principal dice que la línea está verde, venga del
-  # origen que venga. La búsqueda real `in:title` ANDa palabras, y "CI failed
-  # on main" es un subconjunto de las palabras de los dos títulos: por eso
-  # los encuentra a los dos.
+  # The ORIGIN stays in the TITLE because it is what distinguishes two causes
+  # while they are red (#1712); it is not in the closing key because a
+  # green run of the main line says the line is green, whatever the
+  # origin. The real `in:title` search ANDs words, and "CI failed
+  # on main" is a subset of the words of both titles: that is why
+  # it finds both.
   CI_CLOSE_KEY: "CI failed on main"
-  # ── Clave RETIRADA (#1712 paso 3, REVISADA por #2162, #1980) ──────────────
-  # Antes: TITLE_CI = "Scheduled CI failed on main [ci-health]", constante.
-  # Ese título ya no se abre. Se conserva la constante porque es la clave
-  # histórica de los trackers abiertos antes de la migración, y el paso
-  # "Reconcile" la DETECTA.
-  # REVISADA: la decisión anterior ("detect, never close") convertía a #1980
-  # en un dead end — nada podía cerrar un tracker abierto bajo esa clave. La
-  # clave de cierre de arriba ("CI failed on main") es un subtítulo de este
-  # título, así que la MISMA implementación de cierre los retira con la
-  # próxima corrida verde de CI. Lo que queda por hacer es detectar y
-  # avisar: si un tracker sigue abierto bajo la clave retirada, es que
-  # todavía no corrió un CI verde desde que se abrió.
+  # ── RETIRED key (#1712 step 3, REVISED by #2162, #1980) ───────────────────
+  # Before: TITLE_CI = "Scheduled CI failed on main [ci-health]", constant.
+  # That title is no longer opened. The constant is kept because it is the
+  # historical key of the trackers opened before the migration, and the
+  # "Reconcile" step DETECTS it.
+  # REVISED: the previous decision ("detect, never close") turned #1980
+  # into a dead end — nothing could close a tracker open under that key. The
+  # closing key above ("CI failed on main") is a subtitle of this
+  # title, so the SAME closing implementation retires them with the
+  # next green CI run. What remains to be done is to detect and
+  # warn: if a tracker is still open under the retired key, it means
+  # no green CI has run since it was opened.
   RETIRED_TITLE_CI: "Scheduled CI failed on main [ci-health]"
   TITLE_DISCOVERY: "Bug Discovery findings [ci-health]"
   TITLE_BENCH: "Benches nightly failing [ci-health]"
@@ -154,33 +157,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      actions: read # listar runs y jobs de los workflows observados
-      issues: write # abrir/comentar/cerrar SOLO issues con label ci-health
+      actions: read # list runs and jobs of the observed workflows
+      issues: write # open/comment/close ONLY issues with the ci-health label
       contents: read
     # ── SCOPE GATE (#1714) ───────────────────────────────────────────────────
-    # Predicado (única fuente de verdad de la ruta evento):
+    # Predicate (single source of truth for the event path):
     #   workflow_run -> head_branch ∈ {main, develop} ∧ event ≠ pull_request
-    #   otro evento  -> github.ref ∈ {refs/heads/main, refs/heads/develop}
-    # En la ruta workflow_run `github.ref` es la rama por defecto del repo
-    # (GitHub la pone ahí para este evento), así que un gate basado en
-    # `github.ref` deja pasar TODA corrida observada: por eso el predicado
-    # mira el payload de la corrida observada, no el de este workflow.
+    #   other event  -> github.ref ∈ {refs/heads/main, refs/heads/develop}
+    # On the workflow_run path `github.ref` is the repo's default branch
+    # (GitHub puts it there for this event), so a gate based on
+    # `github.ref` lets EVERY observed run through: that is why the predicate
+    # looks at the payload of the observed run, not at this workflow's.
     #
-    # DECIDIDO: el job se reporta `skipped`, no `success`.
-    #   - `skipped`: el job no arranca. Es el significado nativo de "esta
-    #     corrida no es de tu alcance", el conclusion del workflow queda
-    #     neutro (nunca un verde falso sobre trabajo hecho) y el filtro es UN
-    #     booleano auditable en un solo lugar: un paso nuevo que se añada
-    #     después sigue debajo del gate, así que no puede reintroducir el
-    #     ruido por descuido.
-    #   - `success` (aceptar el evento y salir temprano en un paso) se
-    #     descartó a propósito: obligaría a que CADA paso posterior quedara
-    #     condicionado al output del paso que se niega a actuar, y el "no
-    #     hice nada" se volvería indistinguible de "revisé y no encontré nada"
-    #     — que es exactamente el modo de fallo que escondió #1712 y #1633.
-    #     El coste de `skipped` es que no queda log del descarte; se acepta
-    #     porque el skip es visible en la UI del workflow y el barrido diario
-    #     (schedule) no pasa por acá.
+    # DECIDED: the job reports `skipped`, not `success`.
+    #   - `skipped`: the job does not start. It is the native meaning of "this
+    #     run is not in your scope", the workflow conclusion stays
+    #     neutral (never a false green over work done) and the filter is ONE
+    #     auditable boolean in a single place: a new step added
+    #     afterwards stays below the gate, so it cannot reintroduce the
+    #     noise by accident.
+    #   - `success` (accepting the event and exiting early in a step) was
+    #     rejected on purpose: it would force EVERY later step to be
+    #     conditioned on the output of the step that refuses to act, and the "I
+    #     did nothing" would become indistinguishable from "I checked and found nothing"
+    #     — which is exactly the failure mode that hid #1712 and #1633.
+    #     The cost of `skipped` is that no log of the rejection remains; it is
+    #     accepted because the skip is visible in the workflow UI and the daily
+    #     sweep (schedule) does not go through here.
     if: >-
       ${{
         (
@@ -511,20 +514,20 @@ jobs:
             #             the retired-title ones (#2162, #1980). For the
             #             others it is the same title they open under.
             open_key="$1"; close_key="$2"; concl="$3"; rid="$4"; wname="$5"; context="$6"; run_event="$7"
-            # SCOPE GATE, sweep path (#1714) — el mismo predicado del `if:` del
-            # job, aplicado a la corrida SOBRE LA QUE el sweep va a actuar. El
-            # sweep no causó esa corrida, así que tiene que releer su `event`
-            # y no suponerlo: `gh run list --branch main` devuelve la última
-            # corrida de CI cuyo head_branch sea `main`, y eso incluye las
-            # corridas de `pull_request` de un PR abierto desde una rama
-            # llamada `main` (caso normal en un fork). Sin este guard el
-            # barrido reintroduce por la puerta de atrás lo que el gate de
-            # arriba acaba de cerrar. Se aplica a las TRES fuentes, no sólo a
-            # CI: la regla es "una corrida de PR no genera issue de este
-            # observer", y no depende de qué workflow la produjo.
+            # SCOPE GATE, sweep path (#1714) — the same predicate as the job's
+            # `if:`, applied to the run THAT the sweep is going to act on. The
+            # sweep did not cause that run, so it has to re-read its `event`
+            # and not assume it: `gh run list --branch main` returns the latest
+            # CI run whose head_branch is `main`, and that includes the
+            # `pull_request` runs of a PR opened from a branch
+            # called `main` (the normal case in a fork). Without this guard the
+            # sweep reintroduces through the back door what the gate
+            # above just closed. It applies to the THREE sources, not only to
+            # CI: the rule is "a PR run does not generate an issue from this
+            # observer", and it does not depend on which workflow produced it.
             #
-            # Cierra también por el mismo motivo: un verde de PR no es la
-            # señal verde de la línea principal.
+            # It also closes for the same reason: a PR green is not the
+            # main line's green signal.
             if [ "$run_event" = "pull_request" ]; then
               echo "$wname: latest run on $BRANCH is a pull_request run — out of scope, no issue opened and none closed (#1714)."
               return 0

@@ -1,6 +1,9 @@
 # Error Classification Matrix
 
 **Status:** Closed contract (2026-08-21). Every cell below is a final, human-approved decision.
+**Amendment 2026-11-18:** language rule unified to English only (owner decision, tracked in
+`odd/tasks/english-only-messages.md`). The "Spanish message" / "Spanish text" wording in the
+MCP projection table is removed. No exit code, error class or mapping changed.
 **Contract ID:** `261bdb66-197e-420f-a73b-66c0e889102d`
 **Source roadmap:** Stabilization Sprint 1-2 — Error classification (P0-err), Gate 1.
 
@@ -237,8 +240,8 @@ every consumer of `ErrorClass` at the `ScraperError` layer.
     
     | Situation | CLI | MCP |
     | :--- | :--- | :--- |
-    | Unroutable request (bad params, unknown tool, forbidden target) | exit 64 usage / 69 unavailable, Spanish message on stderr | JSON-RPC error: `-32602` invalid params, `-32601` method not found |
-    | The tool ran and failed (network, WAF, robots, budget, empty result) | per-class exit above | `result.isError: true` + Spanish text — deliberately **not** a protocol error, so the caller actually sees the message |
+    | Unroutable request (bad params, unknown tool, forbidden target) | exit 64 usage / 69 unavailable, message on stderr | JSON-RPC error: `-32602` invalid params, `-32601` method not found |
+    | The tool ran and failed (network, WAF, robots, budget, empty result) | per-class exit above | `result.isError: true` + text — deliberately **not** a protocol error, so the caller actually sees the message |
     | Request shape the transport rejects (bad `Accept`, bad `Content-Type`, non-2.0 body, no session) | n/a | HTTP 406/415/422 from rmcp, before JSON-RPC exists |
     | Server cannot serve at all (container construction) | exit 78 config | process refuses to start; typed stderr + exit code (#1123) |
     

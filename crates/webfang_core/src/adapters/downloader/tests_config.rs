@@ -1,5 +1,5 @@
-//! Tests de config/creación del Downloader.
-//! Split desde `adapters/downloader/mod.rs` bajo la regla ~500 (#2584, Ola 1).
+//! Tests for Downloader config/creation.
+//! Split from `adapters/downloader/mod.rs` under the ~500 rule (#2584, Ola 1).
 
 use super::*;
 use crate::domain::config::ScraperConfig;

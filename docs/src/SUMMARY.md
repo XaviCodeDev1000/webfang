@@ -11,6 +11,6 @@
 - [Troubleshooting](troubleshooting.md)
 - [State Recovery Runbook](state-recovery-runbook.md)
 - [CLI Reference](cli-reference.md)
-- [Migración desde ONNX local](ai-onnx-migration.md)
+- [Migration from local ONNX](ai-onnx-migration.md)
 - [MCP Error Contract](mcp-error-contract.md)
 - [MCP Public Surface Policy](mcp-public-surface-policy.md)

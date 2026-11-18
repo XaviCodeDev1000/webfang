@@ -81,7 +81,9 @@ What the compiler **cannot** catch; the rest comes from the harness or the table
   error instead (`infrastructure::stream`). Banned in production: `.lock().expect(..)`/`.unwrap()`
   (one panic → process-wide outage) and `if let Ok(..) = mutex.lock()` (silently drops work).
   `MockClock` keeps its `expect`: a poisoned test clock is a test bug, not runtime state.
-- **User-facing errors in Spanish; tracing fields and logs in English.**
+- **English only — every repository-facing artifact** (code, comments, docs, commits,
+  errors, logs, tracing). Spanish still in the tree is a migration, not a precedent:
+  never add new Spanish.
 - **HTTP: always `wreq`, never `reqwest`** — TLS fingerprint impersonation for WAF evasion.
 - **Do not unify conflicting dependencies** (dashmap 5/6, selectors 0.35/0.37/0.38): they are
   deliberate, three different crates need three different versions.
@@ -165,7 +167,7 @@ a chain of wrappers: `DomainError`, `InfraError`, `CrawlError` and `DownloadErro
 - `HttpError` is a **domain** enum (`domain/http_error.rs`), not an `InfraError` variant.
   `WafError` is **not an error type** — it is a `FetchBehavior` variant
   (`application/crawler/crawl_task.rs`). `ParseError` does not exist here.
-- A new variant enters through `From` towards `ScraperError`; its user-facing message is Spanish.
+- A new variant enters through `From` towards `ScraperError`; its user-facing message is in English.
   Full matrix and exit-code rules: `docs/error-classification-matrix.md`.
 
 ### Fetch guard chain (MANDATORY ORDER)
@@ -558,7 +560,7 @@ cargo check && cargo clippy --all-targets --all-features -- -D warnings \
 - [ ] `bash scripts/ci_fast_gate.sh` GREEN; coverage report read (every `NOT covered` job you touched run by hand)
 - [ ] Full pre-commit gate above; `cargo nextest run` (at least the affected module)
 - [ ] `git diff --stat main...HEAD` reviewed: only expected files changed
-- [ ] Spanish user-facing errors; new public items documented; `CHANGELOG.md` untouched
+- [ ] English only; new public items documented; `CHANGELOG.md` untouched
 - [ ] One `type:*` label + linked issue **with** `status:approved` + conventional branch
 - [ ] Worktree branch matches the directory; no `checkout`/`switch`/`stash` this session
 

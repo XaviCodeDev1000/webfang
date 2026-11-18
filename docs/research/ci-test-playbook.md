@@ -1,267 +1,265 @@
-# Playbook CI / Tests / PRs — aprendido de 7 repos Rust de élite
+# CI / Tests / PRs Playbook — learned from 7 elite Rust repos
 
-> Fecha: 2026-09-08. Motivación: auditoría interna — 2744 fns de test, 19 jobs en
-> `ci.yml`, ~33 min de wall-clock para un merge verde, fricción de merge alta
-> (`strict: true` sin merge queue). Este doc es la guía de adaptación: qué copiar,
-> qué adaptar y qué NO copiar de cada repo.
+> Date: 2026-09-08. Motivation: internal audit — 2744 test functions, 19 jobs in
+> `ci.yml`, ~33 min of wall-clock for a green merge, high merge friction
+> (`strict: true` with no merge queue). This doc is the adaptation guide: what to copy,
+> what to adapt and what NOT to copy from each repo.
 >
-> Cómo se obtuvo cada dato: `gh api repos/<repo>/contents/.github/workflows/<file>`
-> (YAML crudo) + `gh run list` (wall-clocks reales) + `raw.githubusercontent.com`
-> (CONTRIBUTING, PR templates, scripts CI). Red caótica ese día: `api.github.com`
-> intermitente, DeepWiki MCP y JINA API caídos — se trabajó con `gh` + raw.
+> How each piece of data was obtained: `gh api repos/<repo>/contents/.github/workflows/<file>`
+> (raw YAML) + `gh run list` (real wall-clocks) + `raw.githubusercontent.com`
+> (CONTRIBUTING, PR templates, CI scripts). Chaotic network that day: `api.github.com`
+> intermittent, DeepWiki MCP and JINA API down — worked with `gh` + raw.
 
-## 0. Baseline nuestro (el "antes")
+## 0. Our baseline (the "before")
 
-| Métrica | Valor (2026-09-08) |
+| Metric | Value (2026-09-08) |
 | ------- | ------------------ |
-| Wall-clock PR verde (main, run 34274635094) | **~33 min (1999 s)** |
-| Jobs en `ci.yml` | 19 |
-| Job más caro | Coverage **1610 s** (~27 min) |
-| 2.º más caro | Tests AI integration **1163 s** (~19 min, **required**) |
+| Green PR wall-clock (main, run 34274635094) | **~33 min (1999 s)** |
+| Jobs in `ci.yml` | 19 |
+| Most expensive job | Coverage **1610 s** (~27 min) |
+| 2nd most expensive | Tests AI integration **1163 s** (~19 min, **required**) |
 | Required checks (branch protection) | `Validate PR metadata`, `cargo-mutants (PR diff)`, `CI Gate`, `Tests (AI integration)` |
-| `strict` (exige estar al día con main) | **true** — cada merge a main invalida los PRs abiertos y re-dispara 33 min |
-| Merge queue | **No existe** (`auto_merge: true` suelto) |
-| Tests | ~2744 fns (`#[test]`/`#[tokio::test]`/`#[rstest]` en `crates/`+`tests/`) |
-| Mutants en PR | **hard gate** (`mutants-pr`, required) |
+| `strict` (requires being up to date with main) | **true** — every merge to main invalidates open PRs and re-triggers 33 min |
+| Merge queue | **Does not exist** (loose `auto_merge: true`) |
+| Tests | ~2744 functions (`#[test]`/`#[tokio::test]`/`#[rstest]` in `crates/`+`tests/`) |
+| Mutants on PR | **hard gate** (`mutants-pr`, required) |
 
-## 1. Wall-clocks comparados (runs verdes reales, `gh run list`)
+## 1. Compared wall-clocks (real green runs, `gh run list`)
 
-| Repo | PR (push/PR event) | Cola/main | Jobs CI ppal | Nota |
+| Repo | PR (push/PR event) | Queue/main | Main CI jobs | Note |
 | ---- | ------------------- | --------- | ------------ | ---- |
-| wasmtime | **8–9 min** | 25–34 min (merge queue) | 35 | FAST_MATRIX en PR, FULL en queue |
-| rust-analyzer | **7–8 min** (red rápido: 2 min) | 11–13 min (queue) | 12 | `conclusion` agregador |
-| ripgrep | **9–10 min** | 10–11 min (schedule) | 5 | matriz 18 configs en ubuntu+cross |
+| wasmtime | **8–9 min** | 25–34 min (merge queue) | 35 | FAST_MATRIX on PR, FULL in queue |
+| rust-analyzer | **7–8 min** (fast red: 2 min) | 11–13 min (queue) | 12 | `conclusion` aggregator |
+| ripgrep | **9–10 min** | 10–11 min (schedule) | 5 | matrix 18 configs on ubuntu+cross |
 | ruff | 11–16 min | 11 min (main) | 31 | nextest + `determine_changes` |
-| typst | 15–17 min | 4–5 min* | 7 | *push a rama; matriz 3 plataformas |
-| tokio | 20–28 min (red rápido: 2 min) | — | 46 | gate `basics` |
-| bevy | ~24 min | 21–29 min (queue) | 18 | 595 PRs abiertos, merge queue |
-| **webfang** | **~33 min** | — (sin queue) | 19 | required incluye mutants + AI 19 min |
+| typst | 15–17 min | 4–5 min* | 7 | *push to branch; matrix 3 platforms |
+| tokio | 20–28 min (fast red: 2 min) | — | 46 | `basics` gate |
+| bevy | ~24 min | 21–29 min (queue) | 18 | 595 open PRs, merge queue |
+| **webfang** | **~33 min** | — (no queue) | 19 | required includes mutants + AI 19 min |
 
-Conclusión: **nadie** pone mutants ni integration de 19 min como required en PR.
-Todos separan *gate rápido de PR* de *verificación pesada en queue/main/schedule*.
+Conclusion: **nobody** puts mutants or a 19-min integration as required on a PR.
+Everyone separates the *fast PR gate* from *heavy verification in queue/main/schedule*.
 
-## 2. Patrones universales (los 7 coinciden — copiar sin dudar)
+## 2. Universal patterns (all 7 agree — copy without hesitation)
 
-1. **Un solo check agregador como required.** wasmtime (`ci-status`, `if: always()`),
-   ruff (`required-checks-passed`, acepta `skipped`), rust-analyzer (`conclusion`,
-   con comentario explícito de la trampa `skipped == success`), typst (`tests`,
-   citando el truco de branch protection). Nosotros ya tenemos `CI Gate` — bien,
-   pero debe agregar un SET PEQUEÑO, no todo.
-2. **Fuzz = solo compila en PR.** ripgrep (`cargo check` en `fuzz/`), typst
-   (`cargo fuzz build --dev`), tokio (`check-fuzzing`). Correr fuzz en PR no lo
-   hace nadie.
-3. **Miri acotado, nunca la suite entera en PR.** typst: UN target
-   (`cargo miri test -p typst-library test_miri`). tokio: splits lib/test/doc.
-   wasmtime: opt-in por token `prtest:miri`.
-4. **`cancel-in-progress` en PRs** (todos). Ya lo tenemos.
-5. **Pinned action SHAs + `rust-cache`/`Swatinem` con `save-if: main-only`**
-   (ruff). Abarata y estabiliza.
-6. **Los checks caros informan, no bloquean.** ruff: fuzz, ecosystem, benches,
-   codspeed fuera del required. bevy: miri y validaciones fuera del camino
-   crítico.
+1. **A single aggregator check as required.** wasmtime (`ci-status`, `if: always()`),
+   ruff (`required-checks-passed`, accepts `skipped`), rust-analyzer (`conclusion`,
+   with an explicit comment about the `skipped == success` trap), typst (`tests`,
+   citing the branch protection trick). We already have `CI Gate` — good, but it must
+   aggregate a SMALL SET, not everything.
+2. **Fuzz = compiles only on PR.** ripgrep (`cargo check` in `fuzz/`), typst
+   (`cargo fuzz build --dev`), tokio (`check-fuzzing`). Nobody runs fuzz on a PR.
+3. **Bounded Miri, never the whole suite on a PR.** typst: ONE target
+   (`cargo miri test -p typst-library test_miri`). tokio: lib/test/doc splits.
+   wasmtime: opt-in by `prtest:miri` token.
+4. **`cancel-in-progress` on PRs** (all of them). We already have it.
+5. **Pinned action SHAs + `rust-cache`/`Swatinem` with `save-if: main-only`**
+   (ruff). Cheap and stabilizing.
+6. **Expensive checks report, they do not block.** ruff: fuzz, ecosystem, benches,
+   codspeed out of required. bevy: miri and validations out of the critical path.
 
-## 3. Técnicas por repo (qué → evidencia → adaptación → esfuerzo)
+## 3. Techniques per repo (what → evidence → adaptation → effort)
 
-### 3.1 wasmtime — tiering total (PRIORIDAD 1 para nosotros)
+### 3.1 wasmtime — total tiering (PRIORITY 1 for us)
 
-- **FAST_MATRIX vs FULL_MATRIX** (`ci/build-test-matrix.js`, 440 líneas):
-  PR corre **1 job** (Linux x86_64); la merge queue y main corren la matriz
-  completa. Resultado medido: PR 8–9 min, queue 25–34 min.
-- **Opt-in por commit-token**: `prtest:full`, `prtest:miri`, `prtest:capi`,
-  `prtest:debug`, `prtest:platform-checks` en el mensaje del commit activan
-  suites pesadas a demanda. Auto-trigger por path (`fuzz/` → nightly,
+- **FAST_MATRIX vs FULL_MATRIX** (`ci/build-test-matrix.js`, 440 lines):
+  PR runs **1 job** (Linux x86_64); the merge queue and main run the full
+  matrix. Measured result: PR 8–9 min, queue 25–34 min.
+- **Opt-in by commit token**: `prtest:full`, `prtest:miri`, `prtest:capi`,
+  `prtest:debug`, `prtest:platform-checks` in the commit message trigger
+  heavy suites on demand. Auto-trigger by path (`fuzz/` → nightly,
   `Cargo.lock` → audit, `gc` → gc-zeal, `cranelift/codegen/src/isa/<x>` →
-  config de esa ISA).
-- **Sharding por crates**: 3 buckets genéricos (round-robin sobre
-  `cargo metadata`) + buckets singleton para los crates lentos + sub-buckets
-  por `--test` para el crate dominante. Build de deps duplicado, ejecución
-  paralelizada (compensa en targets lentos).
-- **Triage horario** (`triage.yml`): labeler por paths + `subscribe-to-label`
-  (@-menciona suscriptores) + `label-messager` (respuestas enlatadas).
-- **`file-issue-on-error`**: un build pesado (dispatch/schedule) que falla
-  **abre un issue automáticamente**. Los fallos del tier pesado nunca se
-  pierden en silencio.
-- **Merge queue nativa** (`merge_group` en `main.yml`; colas visibles como
-  `gh-readonly-queue/...` en `gh run list`).
-- Adaptación: `scripts/build-test-matrix.{js,py}` propio con
-  `FAST = [unit+clippy+fmt]` / `FULL = todo`; tokens `citest:full|miri|ai`;
-  mover coverage+AI-integration+mutants-weekly al tier queue/main/schedule.
-  Esfuerzo: **M**.
+  that ISA's config).
+- **Sharding by crates**: 3 generic buckets (round-robin over
+  `cargo metadata`) + singleton buckets for the slow crates + sub-buckets
+  by `--test` for the dominant crate. Duplicated dependency build, parallelized
+  execution (pays off on slow targets).
+- **Hourly triage** (`triage.yml`): path labeler + `subscribe-to-label`
+  (@-mentions subscribers) + `label-messager` (canned replies).
+- **`file-issue-on-error`**: a heavy build (dispatch/schedule) that fails
+  **automatically opens an issue**. Failures in the heavy tier are never
+  lost in silence.
+- **Native merge queue** (`merge_group` in `main.yml`; queues visible as
+  `gh-readonly-queue/...` in `gh run list`).
+- Adaptation: own `scripts/build-test-matrix.{js,py}` with
+  `FAST = [unit+clippy+fmt]` / `FULL = everything`; tokens `citest:full|miri|ai`;
+  move coverage+AI-integration+mutants-weekly to the queue/main/schedule tier.
+  Effort: **M**.
 
-### 3.2 ruff — miles de tests sin dolor (PRIORIDAD 1)
+### 3.2 ruff — thousands of tests without pain (PRIORITY 1)
 
-- **`determine_changes`** (`ci.yaml`): merge-base real (`git fetch --unshallow`
-  + `git diff MERGE_BASE...HEAD -- <pathspecs>`) con flags por área
-  (parser/linter/formatter/code/fuzz/ty/playground/benchmarks/release). Cada
-  job pesado lleva `if: <flag> || main`. Los docs-only no compilan nada.
-- **Escape hatch por label**: `no-test` / `no-build` en el PR salta jobs.
-  (Disciplina: solo el maintainer la pone.)
-- **nextest perfil `ci`** (`.config/nextest.toml`): `slow-timeout 1s`
-  (marca lentos), `terminate-after 60s` (guillotina deadlocks),
-  `fail-fast = false`, resumen final de lentos. Recomendado oficialmente en su
+- **`determine_changes`** (`ci.yaml`): real merge-base (`git fetch --unshallow`
+  + `git diff MERGE_BASE...HEAD -- <pathspecs>`) with per-area flags
+  (parser/linter/formatter/code/fuzz/ty/playground/benchmarks/release). Each
+  heavy job carries `if: <flag> || main`. Docs-only compiles nothing.
+- **Escape hatch by label**: `no-test` / `no-build` on the PR skips jobs.
+  (Discipline: only the maintainer sets it.)
+- **nextest profile `ci`** (`.config/nextest.toml`): `slow-timeout 1s`
+  (flags slow ones), `terminate-after 60s` (guillotines deadlocks),
+  `fail-fast = false`, final summary of slow ones. Officially recommended in its
   CONTRIBUTING (`cargo nextest run`).
-- **insta anti-sprawl**: `cargo insta test --unreferenced reject` — un snapshot
-  huérfano **falla el CI**. Nuestro `.snap.new` gitignored + review manual es
-  compatible; nos falta el reject automático.
-- **Dogfooding como tier**: `ty` se chequea a sí mismo sobre su propio repo en
-  CI. Equivalente nuestro: `webfang` scrapeando fixtures propias versionadas.
-- **codspeed**: benches con gate de regresión (instrumented + walltime).
-  Nuestro `benches.yml` existe — evaluar si gatea o solo informa.
-- **Runners grandes + mold + `line-tables-only`**: `depot-ubuntu-22.04-16`,
-  `setup-mold`, `CARGO_PROFILE_DEV_DEBUG=line-tables-only` (backtraces sin el
-  coste de debuginfo full). Ya tenemos `DEBUG=0`+no-incremental en mutants;
-  generalizar.
-- **Required mínimo**: 11 jobs (`fmt, clippy, hawk, test-linux, test-wasm,
-  msrv, shellcheck, scripts, prek, docs, python-package`). Todo lo demás
-  informa.
-- Adaptación: `determine_changes` con áreas `core/ai/mcp/cli/docs/ci`;
-  perfil nextest `ci` propio; `--unreferenced reject`; required = agregador
-  sobre ~6 jobs. Esfuerzo: **S–M**.
+- **insta anti-sprawl**: `cargo insta test --unreferenced reject` — an orphan
+  snapshot **fails CI**. Our gitignored `.snap.new` + manual review is
+  compatible; we lack the automatic reject.
+- **Dogfooding as a tier**: `ty` checks itself against its own repo in
+  CI. Our equivalent: `webfang` scraping its own versioned fixtures.
+- **codspeed**: benches with a regression gate (instrumented + walltime).
+  Our `benches.yml` exists — evaluate whether it gates or only reports.
+- **Large runners + mold + `line-tables-only`**: `depot-ubuntu-22.04-16`,
+  `setup-mold`, `CARGO_PROFILE_DEV_DEBUG=line-tables-only` (backtraces without
+  the cost of full debuginfo). We already have `DEBUG=0`+no-incremental in
+  mutants; generalize.
+- **Minimum required**: 11 jobs (`fmt, clippy, hawk, test-linux, test-wasm,
+  msrv, shellcheck, scripts, prek, docs, python-package`). Everything else
+  reports.
+- Adaptation: `determine_changes` with areas `core/ai/mcp/cli/docs/ci`;
+  own nextest `ci` profile; `--unreferenced reject`; required = aggregator
+  over ~6 jobs. Effort: **S–M**.
 
-### 3.3 tokio — matriz de features sin explosión (PRIORIDAD 2)
+### 3.3 tokio — feature matrix without explosion (PRIORITY 2)
 
-- **Gate `basics`**: agregador tonto (`needs: [clippy, fmt, docs, minrust]`,
-  `run: exit 0`) del que **todo** cuelga (`needs: basics`). Rojo en 2 min
-  medidos (run 34258764834). El fail-fast más barato posible.
-- **loom fuera del CI de PR**: workflow `loom.yml` separado; en PR solo corre
-  con label `R-loom-blocking`, siempre en push a master. Patrón generalizable:
-  *herramienta pesada = workflow separado + label opt-in + siempre en main*.
-- **MSRV como política, no como matriz**: documentado (≥6 meses, sube solo en
-  minor) + un job `minrust`. Nada de combinatoria.
-- Extras copiables: `check-spelling` (typos), `semver-checks`, `check-readme`
-  (docs sincronizados), LTS documentado.
-- Adaptación: nuestro `feature-matrix` (265 s) pasa a: job `basics` requerido
-  + matriz completa solo en queue/main; loom-style para nuestros tests
-  de concurrencia si aparecen. Esfuerzo: **S**.
+- **`basics` gate**: dumb aggregator (`needs: [clippy, fmt, docs, minrust]`,
+  `run: exit 0`) that **everything** hangs off (`needs: basics`). Red in 2
+  measured minutes (run 34258764834). The cheapest possible fail-fast.
+- **loom outside the PR CI**: separate `loom.yml` workflow; on a PR it runs only
+  with the `R-loom-blocking` label, always on push to master. Generalizable
+  pattern: *heavy tool = separate workflow + opt-in label + always on main*.
+- **MSRV as a policy, not as a matrix**: documented (≥6 months, bumps only on
+  minor) + one `minrust` job. No combinatorics.
+- Copyable extras: `check-spelling` (typos), `semver-checks`, `check-readme`
+  (synced docs), documented LTS.
+- Adaptation: our `feature-matrix` (265 s) becomes: required `basics` job
+  + full matrix only in queue/main; loom-style for our concurrency tests if they
+  appear. Effort: **S**.
 
-### 3.4 typst — cultura snapshot lean (PRIORIDAD 2)
+### 3.4 typst — lean snapshot culture (PRIORITY 2)
 
-- **Un required**: job `tests` agregador (truco
-  `orgs/community/discussions/4324`). Un solo nombre en branch protection.
-- **Harness `testit`**: `suite/` (inputs `.typ`, N tests por archivo vía
-  `--- nombre attrs ---`) + `ref/` (referencias) + **`hashed references`**
-  (32 bytes por test, anti-bloat) + `store/` (output vivo, gitignored, con
-  auto-regen desde el commit que fijó el hash). Reporte HTML con diffs al
-  fallar. Flags `--stages eval,paged,html` (velocidad en dev) y `--update`
-  (bless explícito).
-- **Política "assertions > reference images"** + tope 20 KiB por imagen ref
-  (atributo `large` como excepción vergonzante).
-- **`checks` anti-enmascaramiento**: clippy por crate con
-  `--no-default-features` (la unificación de features oculta errores) +
-  `git diff --exit-code` (docs generados frescos).
-- **Cultura PR** (CONTRIBUTING): PRs pequeños, discutir diseño ANTES en
-  issue/Discord, CI verde antes de la primera review, **cerrar PRs
-  estancados** esperando al contribuidor, política no-AI explícita.
-- Adaptación: pensar nuestro corpus behavioral como `suite/` con stages
-  (fast: parse-only vs full: network-mock); tope de tamaño a snapshots;
-  `git diff --exit-code` para generados; política de cierre de PRs propios
-  viejos. Esfuerzo: **M** (harness) / **S** (políticas).
+- **One required**: aggregator `tests` job (trick
+  `orgs/community/discussions/4324`). A single name in branch protection.
+- **`testit` harness**: `suite/` (inputs `.typ`, N tests per file via
+  `--- name attrs ---`) + `ref/` (references) + **`hashed references`**
+  (32 bytes per test, anti-bloat) + `store/` (live output, gitignored, with
+  auto-regen from the commit that pinned the hash). HTML report with diffs on
+  failure. Flags `--stages eval,paged,html` (speed in dev) and `--update`
+  (explicit bless).
+- **Policy "assertions > reference images"** + a 20 KiB cap per reference image
+  (the `large` attribute as a shameful exception).
+- **`checks` anti-masking**: clippy per crate with
+  `--no-default-features` (feature unification hides errors) +
+  `git diff --exit-code` (fresh generated docs).
+- **PR culture** (CONTRIBUTING): small PRs, discuss design BEFORE in an
+  issue/Discord, green CI before the first review, **close stalled PRs**
+  waiting on the contributor, explicit no-AI policy.
+- Adaptation: think of our behavioral corpus as a `suite/` with stages
+  (fast: parse-only vs full: network-mock); size cap on snapshots;
+  `git diff --exit-code` for generated files; policy for closing our own
+  old PRs. Effort: **M** (harness) / **S** (policies).
 
-### 3.5 ripgrep — eficiencia single-maintainer (PRIORIDAD 1 en espíritu)
+### 3.5 ripgrep — single-maintainer efficiency (PRIORITY 1 in spirit)
 
-- **Matriz 18 configs, 9–10 min**: todo en `ubuntu-latest` con binario `cross`
-  **pineado** (compilar cross cuesta; el binario no). Solo mac/win nativos
-  puntuales. Comentarios de coste explícitos ("esto casi duplica el runtime,
-  se salta en cross").
-- **`rgtest!(r<issue>)`**: cada regression test lleva el número de issue en el
-  nombre (`tests/regression.rs`, 1744 líneas). Trazabilidad total sin
-  herramienta extra.
-- **5 jobs, 271 líneas**: test, wasm, rustfmt, docs, fuzz(build-only).
-  Permisos mínimos documentados en el propio YAML.
-- Adaptación: fijar `cross` si ampliamos targets; nombrar regression tests
-  `r<issue>`; podar `ci.yml` con tijera de "¿qué confianza aporta este job por
-  minuto?". Esfuerzo: **S**.
+- **Matrix 18 configs, 9–10 min**: everything on `ubuntu-latest` with a
+  **pinned** `cross` binary (compiling cross is expensive; the binary is not).
+  Only occasional native mac/win. Explicit cost comments ("this almost doubles
+  the runtime, skipped on cross").
+- **`rgtest!(r<issue>)`**: every regression test carries the issue number in its
+  name (`tests/regression.rs`, 1744 lines). Total traceability with no extra
+  tooling.
+- **5 jobs, 271 lines**: test, wasm, rustfmt, docs, fuzz (build-only).
+  Minimal permissions documented in the YAML itself.
+- Adaptation: pin `cross` if we expand targets; name regression tests
+  `r<issue>`; prune `ci.yml` with the scissors of "what confidence does this job
+  add per minute?". Effort: **S**.
 
-### 3.6 bevy — escala de PRs (copiar selectivo, PRIORIDAD 3)
+### 3.6 bevy — PR scale (selective copy, PRIORITY 3)
 
-- **Merge queue nativa** + taxonomía de **60 labels**
-  (`C-*` categoría, `A-*` área, `P-*` prioridad, `O-*` OS, `S-*` estado,
-  `D-*` dificultad, `M-*`, `X-Needs-SME`). `S-Ready-For-Final-Review` =
-  señal de merge; `S-Needs-Triage` = inbox.
-- **Bots por label** (`action-on-PR-labeled.yml`, vía `pull_request_target`
-  sin checkout de código no confiable): exigir migration-guide / release-note
-  según label. Patrón copiable para "este PR toca X → exige Y".
-- **CI-as-code**: crate `tools/ci` (`cargo run -p ci -- lints`); cachés
-  precalentadas por schedule (`update-caches.yml`); composite actions propias.
-- **NO copiar**: el volumen de proceso (595 PRs, áreas, SMEs) es para una org.
-  De bevy nos quedamos con: merge queue + 6–8 labels + un bot de checklist.
-  Esfuerzo: **S–M**.
+- **Native merge queue** + a **60-label** taxonomy
+  (`C-*` category, `A-*` area, `P-*` priority, `O-*` OS, `S-*` status,
+  `D-*` difficulty, `M-*`, `X-Needs-SME`). `S-Ready-For-Final-Review` =
+  merge signal; `S-Needs-Triage` = inbox.
+- **Bots per label** (`action-on-PR-labeled.yml`, via `pull_request_target`
+  without checking out untrusted code): require migration-guide / release-note
+  depending on the label. Copyable pattern for "this PR touches X → require Y".
+- **CI-as-code**: `tools/ci` crate (`cargo run -p ci -- lints`); caches
+  pre-warmed by schedule (`update-caches.yml`); own composite actions.
+- **DO NOT copy**: the process volume (595 PRs, areas, SMEs) is for an org.
+  From bevy we keep: merge queue + 6–8 labels + a checklist bot.
+  Effort: **S–M**.
 
-### 3.7 rust-analyzer — QA y triage (PRIORIDAD 2–3)
+### 3.7 rust-analyzer — QA and triage (PRIORITY 2–3)
 
-- **`conclusion` con la trampa documentada**: `skipped == success` para GitHub,
-  por eso `if: !cancelled()` + chequeo manual con `jq`, + aviso en mayúsculas
-  de añadir cada job nuevo al `needs`. Copiar el comentario, no solo el código.
-- **`cargo codegen --check`**: generados frescos como job (nuestro equivalente:
-  `git diff --exit-code` tras regenerar).
-- **`analysis-stats`**: telemetría de rendimiento EN CI (tiempos del
-  analizador). Equivalente nuestro: assert de presupuesto en benches críticos.
-- **`cancel-if-matrix-failed`**: cancela la matriz si un eje falla.
-- **Feature freeze como herramienta de backlog** (CONTRIBUTING avisa freeze de
-  assists). Nuestro `FREEZE_FEATURES` ya existe (Gate 0) — alinear narrativa.
-- PRs verdes en **7–8 min**, rojos en **2 min**. Esfuerzo: **S**.
+- **`conclusion` with the documented trap**: `skipped == success` for GitHub,
+  hence `if: !cancelled()` + manual check with `jq`, + an uppercase warning to
+  add every new job to `needs`. Copy the comment, not just the code.
+- **`cargo codegen --check`**: fresh generated files as a job (our equivalent:
+  `git diff --exit-code` after regenerating).
+- **`analysis-stats`**: performance telemetry IN CI (analyzer timings).
+  Our equivalent: budget assertion on critical benches.
+- **`cancel-if-matrix-failed`**: cancels the matrix if an axis fails.
+- **Feature freeze as a backlog tool** (CONTRIBUTING announces a freeze on
+  assists). Our `FREEZE_FEATURES` already exists (Gate 0) — align the narrative.
+- Green PRs in **7–8 min**, red ones in **2 min**. Effort: **S**.
 
-## 4. Lo que NO copiamos
+## 4. What we do NOT copy
 
-- La escala de proceso de bevy (áreas, SMEs, 60 labels, revisión por capas).
-- Matrices exóticas (QEMU/SDE/wasm-tier3 de wasmtime/tokio) hasta tener usuarios
-  que las pidan.
-- `ty`/`mdtest`/ecosystem-infra de ruff (conformance sobre corpus externo) —
-  idea a futuro, no fase 1.
-- Daily fuzz / OSS-Fuzz en PR (todos lo sacan del path de merge).
+- bevy's process scale (areas, SMEs, 60 labels, layered review).
+- Exotic matrices (wasmtime/tokio QEMU/SDE/wasm-tier3) until we have users
+  asking for them.
+- `ty`/`mdtest`/ruff's ecosystem-infra (conformance over an external corpus) —
+  a future idea, not phase 1.
+- Daily fuzz / OSS-Fuzz on a PR (everyone removes it from the merge path).
 
-## 5. Backlog de adaptación (fases)
+## 5. Adaptation backlog (phases)
 
-**Fase 0 — quick wins S (una tarde, sin rediseño):**
-1. Perfil nextest `ci` (`slow-timeout`, `terminate-after`, resumen de lentos).
-2. `cargo insta test --unreferenced reject` en el job de snapshots.
-3. `save-if: main` en cachés + `mold`/`line-tables-only` generalizado.
-4. Nomenclatura `r<issue>` para nuevos regression tests.
-5. Comentario anti-trampa `skipped==success` en nuestro `CI Gate` (estilo ra).
+**Phase 0 — S quick wins (one afternoon, no redesign):**
+1. nextest `ci` profile (`slow-timeout`, `terminate-after`, slow summary).
+2. `cargo insta test --unreferenced reject` in the snapshot job.
+3. `save-if: main` in caches + generalized `mold`/`line-tables-only`.
+4. `r<issue>` naming for new regression tests.
+5. Anti-trap `skipped==success` comment in our `CI Gate` (ra style).
 
-**Fase 1 — tiers (el gran corte, M):**
-6. `determine_changes` por áreas (`core/ai/mcp/cli/docs/ci`) + label `no-test`.
-7. FAST en PR (fmt, clippy, check, unit-rápidos); FULL (coverage, AI-integration,
-   feature-matrix, mutants-weekly, miri, sanitizers, benches-gate) en
+**Phase 1 — tiers (the big cut, M):**
+6. `determine_changes` by area (`core/ai/mcp/cli/docs/ci`) + `no-test` label.
+7. FAST on PR (fmt, clippy, check, fast units); FULL (coverage, AI-integration,
+   feature-matrix, mutants-weekly, miri, sanitizers, benches-gate) in
    merge queue / main / schedule.
-8. Sacar `cargo-mutants` y `Tests (AI integration)` de required; required =
-   agregador sobre ~6 jobs rápidos.
-9. Tokens `citest:full|miri|ai` para opt-in puntual.
+8. Remove `cargo-mutants` and `Tests (AI integration)` from required; required =
+   aggregator over ~6 fast jobs.
+9. Tokens `citest:full|miri|ai` for targeted opt-in.
 
-**Fase 2 — merge queue (S–M, desbloquea `strict` sin dolor):**
-10. Activar merge queue nativa + `merge_group` en workflows; quitar la
-    necesidad de "update branch" manual (el script `merge-when-green.sh`
-    sigue valiendo como espera activa).
-11. `file-issue-on-error` para los tiers schedule/dispatch.
+**Phase 2 — merge queue (S–M, unlocks `strict` painlessly):**
+10. Enable native merge queue + `merge_group` in workflows; remove the
+    need for manual "update branch" (the `merge-when-green.sh` script
+    still works as an active wait).
+11. `file-issue-on-error` for the schedule/dispatch tiers.
 
-**Fase 3 — pirámide de tests (M, la auditoría pendiente):**
-12. Clasificar los 2744 tests (unit / integration-mock / behavioral-corpus /
-    lentos-redundantes) y fijar presupuesto por nivel.
-13. Corpus file-driven con stages (idea `testit`), tope de tamaño a snapshots,
-    política assertions-first.
-14. `cargo codegen --check` / `git diff --exit-code` para generados.
+**Phase 3 — test pyramid (M, the pending audit):**
+12. Classify the 2744 tests (unit / integration-mock / behavioral-corpus /
+    slow-redundant) and set a budget per level.
+13. File-driven corpus with stages (`testit` idea), size cap on snapshots,
+    assertions-first policy.
+14. `cargo codegen --check` / `git diff --exit-code` for generated files.
 
-**Fase 4 — cultura PR/issues (continuo, S):**
-15. 6–8 labels (`needs-triage`, `ready`, áreas…) + bot de checklist por label
-    (estilo bevy, vía `pull_request_target`).
-16. Guía CONTRIBUTING: PRs pequeños, diseño-antes, CI-verde-antes-de-review,
-    cierre de PRs estancados.
-17. Triage programado ligero (labeler por paths).
+**Phase 4 — PR/issue culture (continuous, S):**
+15. 6–8 labels (`needs-triage`, `ready`, areas…) + a per-label checklist bot
+    (bevy style, via `pull_request_target`).
+16. CONTRIBUTING guide: small PRs, design-first, green-CI-before-review,
+    closing stalled PRs.
+17. Light scheduled triage (path labeler).
 
-## 6. Reproducir este estudio
+## 6. Reproduce this study
 
 ```bash
-# Inventario de workflows
+# Workflow inventory
 gh api repos/<owner>/<repo>/contents/.github/workflows --jq '.[].name'
-# CI crudo
+# Raw CI
 gh api repos/<owner>/<repo>/contents/.github/workflows/<file> --jq '.content' | base64 -d
-# Wall-clocks (reintentar: la red a api.github.com es intermitente)
+# Wall-clocks (retry: the network to api.github.com is intermittent)
 gh run list -R <owner>/<repo> --workflow=<file> --limit 8 \
   --json databaseId,event,headBranch,createdAt,updatedAt,conclusion
-# Labels / merged recents / dir listing
+# Labels / recent merged / dir listing
 gh label list -R <owner>/<repo> --limit 60 --json name
 gh pr list -R <owner>/<repo> --state merged --limit 5 --json number,title,mergedAt
 gh api repos/<owner>/<repo>/contents/<dir> --jq '.[].name'
-# Archivos sueltos sin API (canal fiable cuando gh falla):
-curl -s "https://raw.githubusercontent.com/<owner>/<repo>/<rama>/<path>"
+# Loose files without the API (reliable channel when gh fails):
+curl -s "https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>"
 ```

@@ -245,7 +245,7 @@ pub struct DocumentChunk<S = Draft> {
     /// (#2429 AC2), half-open `[start, end)`. `None` when the chunk has no
     /// locator information (e.g. built from `ScrapedContent` directly, or the
     /// CPU path): the offsets are against the chunker's input text, and the
-    /// raw-HTML mapping is the deferred Opción 3 of the chunk-locators ADR.
+    /// raw-HTML mapping is the deferred Option 3 of the chunk-locators ADR.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chunk_spans: Option<Vec<ByteSpan>>,
     /// W3C TraceContext correlation ID for distributed tracing

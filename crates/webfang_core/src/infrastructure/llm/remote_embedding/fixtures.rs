@@ -17,9 +17,9 @@ pub(super) const LAN_PORT: u16 = 8000;
 pub(super) const LOOPBACK_HOST: &str = "127.0.0.1";
 pub(super) const LOOPBACK_PORT: u16 = 9;
 
-/// Regla de actualización de fixtures (patrón `fixtures/llm`): los
-/// fixtures viven fuera del código; si un vendor deriva el wire shape,
-/// el fixture se actualiza primero en commit separado con justificación.
+/// Fixture update rule (pattern `fixtures/llm`): fixtures live outside the
+/// code; if a vendor drifts the wire shape, the fixture is updated first in a
+/// separate commit with justification.
 pub(super) fn load_fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(format!("../../fixtures/remote_embedding/{name}"));

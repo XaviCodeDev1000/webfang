@@ -6,7 +6,7 @@
 # (test_ignored_guard.sh, test_concurrency_lints.sh). It proves, on mktemp
 # fixtures and fully offline (no repo state is read beyond the gate script
 # itself), that the dependency-direction gate:
-#   - passes a clean five-crate baseline (post-ADR-0004 paso 6: the
+#   - passes a clean five-crate baseline (post-ADR-0004 step 6: the
 #     webfang_ai crate is gone);
 #   - FAILS on a deliberately introduced forbidden edge (negative control);
 #   - accepts the [dev-dependencies] tier into webfang_test_utils from any
@@ -178,7 +178,7 @@ finish_case "clean baseline passes"
 
 # Case 2: negative control (#1825 acceptance criterion) — a deliberately
 # introduced forbidden edge FAILS the gate. The pair changed with ADR-0004
-# paso 6 (webfang_ai no longer exists): webfang_core -> webfang_mcp keeps the
+# step 6 (webfang_ai no longer exists): webfang_core -> webfang_mcp keeps the
 # probe symmetric (core has no allowed edge at all).
 reset_fixture
 overlay_manifest webfang_core $'[dependencies]\nwebfang_mcp = { workspace = true }'
@@ -263,7 +263,7 @@ reset_fixture
 expect_gate ok "OK: inter-crate dependency direction matches policy" "healthy workspace passes with the OK marker"
 finish_case "control: healthy workspace passes"
 
-# Case 14: the webfang_ai ghost (removed in ADR-0004 paso 6) is not
+# Case 14: the webfang_ai ghost (removed in ADR-0004 step 6) is not
 # invisible: a surviving webfang_ai edge is reported, never silently OK.
 reset_fixture
 add_crate webfang_ai

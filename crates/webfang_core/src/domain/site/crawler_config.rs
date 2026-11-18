@@ -58,7 +58,7 @@ impl SitemapConfig {
     /// # Errors
     ///
     /// Returns [`ScraperError::InvalidUrl`](crate::ScraperError::InvalidUrl)
-    /// (mensaje en español) when the explicit URL is not a valid http(s) URL.
+    /// (user-facing message) when the explicit URL is not a valid http(s) URL.
     pub(crate) fn resolve(
         use_sitemap: bool,
         sitemap_url: Option<&str>,

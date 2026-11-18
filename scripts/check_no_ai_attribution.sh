@@ -150,27 +150,27 @@ scan_messages() {
 
   total="${#offences[@]}"
   if [ "$total" -eq 0 ]; then
-    echo "OK: ningún commit lleva atribución de AI."
+    echo "OK: no commit carries AI attribution."
     return 0
   fi
 
-  echo "::error::AGENTS.md prohíbe 'Co-Authored-By' y atribución de AI en commits."
-  echo "::error::$total commit(s) afectado(s):"
+  echo "::error::AGENTS.md prohibits 'Co-Authored-By' and AI attribution in commits."
+  echo "::error::$total affected commit(s):"
   local o
   for o in "${offences[@]}"; do
     echo "::error::  - $o"
   done
   cat >&2 <<'NOTE'
 
-Qué hacer: reescribir el/los commit(s) sin el trailer.
+What to do: rewrite the commit(s) without the trailer.
 
-  git rebase -i <base>     # marca el commit con `reword` y quita las líneas
+  git rebase -i <base>     # mark the commit with `reword` and remove the lines
                            #   `Generated with …` / `Co-Authored-By: <AI>`
 
-La co-autoría de automatización (release-plz-tu-repo[bot], github-actions[bot],
-renovate[bot], dependabot[bot]) SÍ está permitida, y sólo con el nombre
-completo. Un humano o una herramienta de AI nombrados como co-autores, no.
-Añadir un actor nuevo a ALLOWED_CO_AUTHORS es una decisión explícita, no un
+Automation co-authorship (release-plz-tu-repo[bot], github-actions[bot],
+renovate[bot], dependabot[bot]) IS allowed, and only with the full name.
+A human or an AI tool named as a co-author is not.
+Adding a new actor to ALLOWED_CO_AUTHORS is an explicit decision, not a
 default.
 
 NOTE
@@ -184,10 +184,10 @@ if [ "${1:-}" = "--fixture" ]; then
   # NUL-separated messages, for the test harness. Keeps the scanner free of
   # API and network concerns.
   FIXTURE="${2:?--fixture requires a file}"
-  [ -r "$FIXTURE" ] || { echo "::error::fixture no legible: $FIXTURE" >&2; exit 1; }
+  [ -r "$FIXTURE" ] || { echo "::error::fixture not readable: $FIXTURE" >&2; exit 1; }
   mapfile -d '' -t MESSAGES < "$FIXTURE"
   if [ "${#MESSAGES[@]}" -eq 0 ]; then
-    echo "::error::el fixture no contiene ningún mensaje." >&2
+    echo "::error::the fixture contains no messages." >&2
     exit 1
   fi
   scan_messages "${MESSAGES[@]}"
@@ -205,8 +205,8 @@ fi
 # commit, and PRs in this repository carry a handful of them. A single
 # transient `gh api` failure used to come back as an empty message (the
 # `|| true` swallowed the cause) and hard-red the gate for a healthy PR —
-# measured on run 41125376595, where commit ad68339e was rejected with "No
-# se pudo leer el mensaje del commit" and a rerun with identical inputs
+# measured on run 41125376595, where commit ad68339e was rejected with "Could
+# not read the commit message" and a rerun with identical inputs
 # passed. The reads now retry ONLY the transient class with bounded
 # exponential backoff; a permanent 4xx fails on the first attempt, and a
 # sustained failure still fails closed — with the HTTP status in the final
@@ -264,18 +264,18 @@ mapfile -t SHAS < <(
   gh_api_retry "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate --jq '.[].sha' || true
 )
 if [ "${#SHAS[@]}" -eq 0 ]; then
-  echo "::error::No se pudo leer ningún commit del PR $PR_NUMBER en $REPO: $(cat "$RETRY_ERR_FILE")" >&2
+  echo "::error::Could not read any commit of PR $PR_NUMBER in $REPO: $(cat "$RETRY_ERR_FILE")" >&2
   exit 1
 fi
 
 MESSAGES=()
 for sha in "${SHAS[@]}"; do
   if ! msg="$(gh_api_retry "repos/$REPO/commits/$sha" --jq '.commit.message')"; then
-    echo "::error::No se pudo leer el mensaje del commit $sha tras 3 intentos: $(cat "$RETRY_ERR_FILE")" >&2
+    echo "::error::Could not read the commit message of $sha after 3 attempts: $(cat "$RETRY_ERR_FILE")" >&2
     exit 1
   fi
   if [ -z "$msg" ]; then
-    echo "::error::El mensaje del commit $sha llegó vacío (lectura exitosa pero sin contenido)." >&2
+    echo "::error::The commit message of $sha arrived empty (successful read but no content)." >&2
     exit 1
   fi
   MESSAGES+=("$msg")

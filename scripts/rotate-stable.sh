@@ -63,13 +63,13 @@ cd "$(git rev-parse --show-toplevel)"
 
 usage() {
   cat <<'EOF'
-uso: rotate-stable.sh X.Y [--pending-publication]
+usage: rotate-stable.sh X.Y [--pending-publication]
 
-  X.Y                        la línea de soporte a rotar
-  --pending-publication      rota ANTES de que exista el tag: la premisa es
-                             que la versión del workspace de este checkout es
-                             X.Y.0 (la que el Release PR prepara y de la que
-                             se cortará el tag)
+  X.Y                        the support line to rotate
+  --pending-publication      rotates BEFORE the tag exists: the premise is
+                             that the workspace version of this checkout is
+                             X.Y.0 (the one the Release PR prepares and the one
+                             the tag will be cut from)
 EOF
 }
 
@@ -85,20 +85,20 @@ if [[ "${1:-}" == "--pending-publication" ]]; then
   MODE="pending"
   shift
 fi
-NEW_MINOR="${1:?usage: rotate-stable.sh X.Y (recién publicada)}"
+NEW_MINOR="${1:?usage: rotate-stable.sh X.Y (just published)}"
 shift
 if [[ "${1:-}" == "--pending-publication" ]]; then
   MODE="pending"
   shift
 fi
 if [[ $# -gt 0 ]]; then
-  echo "argumento inesperado: $1" >&2
+  echo "unexpected argument: $1" >&2
   usage >&2
   exit 2
 fi
 SUPPORT_JSON=".github/support.json"
-[[ -f "$SUPPORT_JSON" ]] || { echo "$SUPPORT_JSON no existe" >&2; exit 1; }
-[[ "$NEW_MINOR" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "línea inválida '$NEW_MINOR': se espera X.Y" >&2; exit 1; }
+[[ -f "$SUPPORT_JSON" ]] || { echo "$SUPPORT_JSON does not exist" >&2; exit 1; }
+[[ "$NEW_MINOR" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "invalid line '$NEW_MINOR': X.Y expected" >&2; exit 1; }
 NOW="$(date -Iseconds)"
 
 # read_workspace_version: [workspace.package] version of THIS checkout, read
@@ -116,11 +116,11 @@ if [[ "$MODE" == "pending" ]]; then
   # version its tag will be cut from.
   WS_VERSION="$(read_workspace_version)"
   if [[ -z "$WS_VERSION" ]]; then
-    echo "no se pudo leer la versión del workspace de este checkout: la rotación pendiente se niega, no se adivina" >&2
+    echo "could not read the workspace version of this checkout: the pending rotation is refused, not guessed" >&2
     exit 1
   fi
   if [[ "$WS_VERSION" != "${NEW_MINOR}.0" ]]; then
-    echo "la versión del workspace de este checkout es $WS_VERSION y la rotación pendiente es de ${NEW_MINOR}.0: la rotación se niega" >&2
+    echo "the workspace version of this checkout is $WS_VERSION and the pending rotation is for ${NEW_MINOR}.0: the rotation is refused" >&2
     exit 1
   fi
 fi
@@ -133,13 +133,13 @@ if [[ -n "$EXISTS" ]]; then
       # Already rotated: release-plz regenerates the Release PR branch on every
       # push to main, so the flow can meet its own work. Nothing is written —
       # not even a timestamp.
-      echo "OK: la línea $NEW_MINOR ya es STABLE: la rotación ya está declarada, no se escribe nada."
+      echo "OK: line $NEW_MINOR is already STABLE: the rotation is already declared, nothing is written."
       exit 0
     fi
-    echo "línea $NEW_MINOR ya declarada en estado $EXISTING_STATE: rotar sobre una línea ya declarada no se hace" >&2
+    echo "line $NEW_MINOR already declared in state $EXISTING_STATE: rotating over an already-declared line is not done" >&2
     exit 1
   fi
-  echo "línea $NEW_MINOR ya registrada — no reintentar con el mismo argumento" >&2
+  echo "line $NEW_MINOR already registered — do not retry with the same argument" >&2
   exit 1
 fi
 
@@ -149,12 +149,12 @@ fi
 # version, checked above.)
 if [[ "$MODE" != "pending" ]]; then
   git rev-parse --verify --quiet "refs/tags/v${NEW_MINOR}.0" >/dev/null || {
-    echo "v${NEW_MINOR}.0 no está publicado: la rotación presupone que la minor ya salió" >&2; exit 1; }
+    echo "v${NEW_MINOR}.0 is not published: the rotation assumes the minor already shipped" >&2; exit 1; }
 fi
 
 CURRENT_STABLE="$(jq -r '.lines[] | select(.state=="STABLE") | .minor // empty' "$SUPPORT_JSON")"
 [[ -n "$CURRENT_STABLE" ]] || {
-  echo "no hay ninguna línea STABLE declarada que degradar — sanear support.json primero" >&2; exit 1; }
+  echo "no STABLE line is declared to demote — fix support.json first" >&2; exit 1; }
 
 # Published minors strictly between the declared STABLE and the requested one
 # that support.json does not know about. Rotating here would leave the chain
@@ -195,8 +195,8 @@ GAP="$(printf '%s\n' "$PUBLISHED_MINORS" | awk \
     BEGIN { dn = split(declared, d, " ") }
     gt($0, s) && gt(n, $0) && !is_declared($0) { print }')"
 if [[ -n "$GAP" ]]; then
-  echo "líneas publicadas sin declarar entre $CURRENT_STABLE y $NEW_MINOR: $(echo "$GAP" | tr '\n' ' ')" >&2
-  echo "rotar por encima de ellas dejaría la cadena rota en silencio; registrarlas (o marcarlas EOL) es una decisión de gobernanza con issue aprobada detrás" >&2
+  echo "published lines not declared between $CURRENT_STABLE and $NEW_MINOR: $(echo "$GAP" | tr '\n' ' ')" >&2
+  echo "rotating above them would leave the chain silently broken; registering them (or marking them EOL) is a governance decision with an approved issue behind it" >&2
   exit 1
 fi
 
@@ -221,4 +221,4 @@ if [[ "$MODE" == "pending" ]]; then
   # and the renderer is the single writer of SUPPORT.md.
   bash scripts/render-support-md.sh >/dev/null
 fi
-echo "OK: $NEW_MINOR es STABLE; anterior STABLE a MAINTENANCE."
+echo "OK: $NEW_MINOR is STABLE; previous STABLE to MAINTENANCE."
