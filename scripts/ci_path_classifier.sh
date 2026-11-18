@@ -93,7 +93,7 @@ shopt -s lastpipe
 #   ai_changed
 #     Heuristic (filename-only, may over-match): AI-model/inference markers
 #     anywhere (ai_integration, clean_ai, onnx, granite, embedding). The
-#     `webfang_ai` crate is gone (ADR-0004 paso 6), so the marker set is what
+#     `webfang_ai` crate is gone (ADR-0004 step 6), so the marker set is what
 #     survives of it: the semantic-cleaning surface now lives in
 #     crates/webfang_core (EmbeddingPort, remote embedding adapter). Content
 #     check is deliberately NOT done here; the AI lane treats a match as "run

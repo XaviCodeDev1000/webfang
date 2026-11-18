@@ -4,7 +4,7 @@ set -euo pipefail
 # Loops 5 CI-required combos + 1 pairwise spot-check (local/nightly).
 #
 # The `ai` and `ai+persistence` combos were retired with the `ai` feature and
-# the `webfang_ai` crate (ADR-0004 paso 6); COMPATIBILITY-MATRIX.md records
+# the `webfang_ai` crate (ADR-0004 step 6); COMPATIBILITY-MATRIX.md records
 # the surviving matrix: 5 required combos + 1 pairwise.
 # Usage: bash scripts/check_compatibility.sh --ci-required | --all | --self-test | --help
 # Each combo verifies: compile | start | --help | crawl | resume | failure-path
@@ -223,7 +223,7 @@ failure_path_check() {
   #   65: --output-vectors <path> without --clean-ai (data-format error,
   #       #703). ONE answer for every build: the local inference stack that
   #       used to make a build unable to produce vectors AT ALL is gone
-  #       (ADR-0004 paso 6), so the gate asks the same question on every
+  #       (ADR-0004 step 6), so the gate asks the same question on every
   #       build — "did the operator ask for vectors without asking for the
   #       thing that produces them?" — and answers 65. The retired
   #       build-capability arm (78) described a build that no longer exists,
@@ -264,7 +264,7 @@ failure_path_check() {
 
 # The exit code `--output-vectors <path>` must produce, for EVERY combo.
 #
-# Since ADR-0004 paso 6 there is exactly ONE contract, and it does not depend
+# Since ADR-0004 step 6 there is exactly ONE contract, and it does not depend
 # on the build: the local inference stack that used to make a build unable to
 # produce vectors AT ALL is gone, so the gate asks every build the same
 # question — "did the operator ask for vectors without asking for the thing
@@ -322,7 +322,7 @@ self_test() {
   decode_core_feature_args mcp,persistence,chromium
   self_test_eq "decode mcp,persistence,chromium" "--features mcp,persistence,chromium" "${CORE_FEATURE_ARGS[*]-}"
 
-  # Exit contract: ONE answer for every combo since ADR-0004 paso 6. The list
+  # Exit contract: ONE answer for every combo since ADR-0004 step 6. The list
   # includes an UNSEEN combination (not one of the matrix's combos) on
   # purpose: the contract is asserted per combination, not per list entry.
   for combo in default --no-default-features chromium mcp mcp,chromium full mcp,persistence,chromium; do
