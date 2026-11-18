@@ -330,9 +330,11 @@ expect_rc "10.1 --simulate exits 0 on a legal plan" 0 "$RC" "$ERRF"
 
 sim_total() { printf '%s\n' "$1" | awk -F'\t' -v p="$2" '$1=="plan" && $2==p{print $3; exit}'; }
 
-# real cut, same semantics: destination = header + moved lines; source loses them
+# real cut, same semantics: destination = header + moved lines; source loses
+# them. The header is REAL lines (a split adds a module header), so head
+# -n "$HEADER" /dev/null -- which produces none -- cannot stand in for it.
 {
-  head -n "$HEADER" /dev/null
+  for ((h = 0; h < HEADER; h++)); do printf '// header line\n'; done
   sed -n "${FROM},${TO}p" "$SOURCE"
 } > "$DEST"
 sed -i "${FROM},${TO}d" "$SOURCE"
