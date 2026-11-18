@@ -34,6 +34,12 @@
 #  16. the suggested §5 classification is a MEASURED predicate: exception (the
 #      baseline's exceptions map), tests-mayoria (inline > 50%), funcion-gigante
 #      (allow(too_many_lines)), revisar otherwise.
+#  17. --glue delivers §4.3's "más cabeceras": destination = header + moved +
+#      glue, source = total - moved + glue; glue on a file the plan does not
+#      touch is a defect.
+#  18. the harness watches its own house: no early-exit grep after a pipe in
+#      the four family scripts, the local-gate wiring is enforced on live code
+#      lines only, and a broken python3 fails with a named cause.
 #
 # HERMETIC BY DESIGN. The tool is exercised as a COPY inside a sandbox tree (its
 # ROOT is derived from its own location), so this harness never writes to the
@@ -484,6 +490,70 @@ write_code "$SB/crates/webfang_x/src/r.rs" 512
 write_baseline "crates/webfang_x/src/r.rs:512" "exc:crates/webfang_x/src/r.rs"
 run_pre --format "crates/webfang_x/src/r.rs"
 expect_match "16.5 a declared exception says exception" "$OUT" "^clasificacion	exception"
+
+# --- 17. --glue: §4.3's "más cabeceras" completes the move model ---------------
+# NEGATION: a simulator that cannot model the glue FORCES criterion drift —
+# the v3 criterion "Reproduce server.rs 2012→360" got amended to a weaker
+# form before the tool grew this parameter. With glue the verbatim criterion
+# is reachable: glue is the non-moved lines a real split adds to a file
+# (import blocks, re-exports), destination or source.
+
+new_sandbox c22
+write_code "$SB/crates/webfang_x/src/s1.rs" 600
+run_pre --simulate "src/z1.rs:11-40:header=2" --glue "src/z1.rs=5" --format "crates/webfang_x/src/s1.rs"
+expect_rc "17.1 a legal plan with glue exits 0" 0 "$RC" "$ERRF"
+expect_eq "17.2 dest = header + moved + glue" "$(sim_total "$OUT" src/z1.rs)" "37"
+expect_eq "17.3 the source is untouched by a destination's glue" "$(sim_total "$OUT" src/s1.rs)" "570"
+
+new_sandbox c23
+write_code "$SB/crates/webfang_x/src/s2.rs" 600
+run_pre --simulate "src/z2.rs:11-40" --glue "src/s2.rs=29" --format "crates/webfang_x/src/s2.rs"
+expect_rc "17.4 glue on the SOURCE exits 0" 0 "$RC" "$ERRF"
+expect_eq "17.5 source gets its glue (the server.rs 2012→360 shape)" "$(sim_total "$OUT" src/s2.rs)" "599"
+
+new_sandbox c24
+write_code "$SB/crates/webfang_x/src/s3.rs" 600
+run_pre --simulate "src/z3.rs:11-40" --glue "src/untouched.rs=5" --format "crates/webfang_x/src/s3.rs"
+expect_rc "17.6 glue on a file the plan does not touch is a defect (rc=4)" 4 "$RC" "$ERRF"
+run_pre --simulate "src/z3.rs:11-40" --glue "src/z3.rs=-3" --format "crates/webfang_x/src/s3.rs"
+expect_rc "17.7 negative glue is a defect (rc=4)" 4 "$RC" "$ERRF"
+
+# --- 18. the harness watches its own house -------------------------------------
+# 18.1 the lesson of §8 (issue #2925): the file-size family carries no pipe
+# into an early-exit grep. 18.2 the local-gate wiring is ENFORCED, not just
+# declared: ci_fast_gate.sh must name both scripts (a mutation test proved
+# that nothing else goes red when it is removed). 18.3 a missing python3
+# fails with a NAMED cause, never a bare traceback.
+
+# the dangerous form: a pipe into grep whose option cluster contains -q
+# (early exit). Plain -E consumes the whole pipe and is safe. Comments are
+# stripped first: prose that MENTIONS the pattern is not a pipeline.
+LINT_PAT='\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]*q[A-Za-z]*|--quiet)'
+for f in check_file_size.sh test_file_size.sh file_size_preflight.sh test_file_size_preflight.sh; do
+  LINT_HITS="$(sed 's/#.*$//' "$REPO_ROOT/scripts/$f" | grep -cE "$LINT_PAT")" || LINT_HITS=0
+  expect_eq "18.1 no early-exit grep after a pipe in $f" "${LINT_HITS:-0}" "0"
+done
+
+# count only LIVE code lines: a commented-out wiring line must stop counting
+# (the mutation test proved that text-level counting misses the commented form)
+GATE_HITS="$(sed 's/[[:space:]]*#.*$//' "$REPO_ROOT/scripts/ci_fast_gate.sh" | grep -c 'file_size_preflight.sh')" || GATE_HITS=0
+HARNESS_HITS="$(sed 's/[[:space:]]*#.*$//' "$REPO_ROOT/scripts/ci_fast_gate.sh" | grep -c 'test_file_size_preflight.sh')" || HARNESS_HITS=0
+if [ "${GATE_HITS:-0}" -ge 1 ] && [ "${HARNESS_HITS:-0}" -ge 1 ]; then
+  ok "18.2 ci_fast_gate.sh runs the preflight and its harness (local wiring enforced)"
+else
+  bad "18.2 ci_fast_gate.sh runs the preflight and its harness" "preflight=$GATE_HITS harness=$HARNESS_HITS (el cableado local se quitó o quedó comentado y nada lo nota)"
+fi
+
+new_sandbox c25
+write_code "$SB/crates/webfang_x/src/s4.rs" 600
+mkdir -p "$SB/fakebin"
+printf '#!/usr/bin/env bash\nexit 127\n' > "$SB/fakebin/python3"
+chmod +x "$SB/fakebin/python3"
+OUT="$(cd "$SB" && PATH="$SB/fakebin:$PATH" bash scripts/file_size_preflight.sh --format "crates/webfang_x/src/s4.rs" 2>"$WORK/err18")"
+RC=$?
+ERRF="$WORK/err18"
+expect_rc "18.3 a broken python3 fails named (rc=1)" 1 "$RC" "$ERRF"
+expect_match "18.4 ... naming python3, never a bare traceback" "$(cat "$ERRF" 2>/dev/null)" "python3"
 
 # --- summary ------------------------------------------------------------------
 

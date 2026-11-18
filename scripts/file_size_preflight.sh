@@ -62,6 +62,8 @@ Uso: bash scripts/file_size_preflight.sh [modo]
   (sin argumentos)      el bloque de presupuesto P (lo que corre ci.yml: --budget)
   --format <ruta>       el bloque de medición de un archivo (ruta repo-relativa, como la usa el guard)
   --simulate <plan>...  con --format <fuente>: calcula el corte; plan <dest>:<FROM>-<TO>[:header=<N>]
+  --glue <archivo>=<N>  con --simulate: líneas NO movidas que el split añade a ese archivo
+                        (imports, re-exports; el archivo es la fuente o un destino del plan)
   --corpus-literal      la expresión find del guard, byte a byte
   --help                esta ayuda
 
@@ -126,6 +128,7 @@ corpus_contains() {
 # ("path<TAB>reason").
 baseline_read() {
   local raw status
+  local py3_rc=0
   raw="$(python3 -I - "$BASELINE" "$WORK/gf.tsv" "$WORK/exc.tsv" <<'PY'
 import json
 import sys
@@ -173,7 +176,10 @@ with open(oe, "w") as out:
         out.write("%s\t%s\n" % (key, exc[key]))
 emit("OK", str(limit))
 PY
-)"
+)" || py3_rc=$?
+  if [ "$py3_rc" -ne 0 ] && [ -z "$raw" ]; then
+    die_tool "python3 falló silenciosamente (rc=$py3_rc): el preflight no inventa una medición sin su lector (fail-closed)"
+  fi
   status="${raw%%$'\t'*}"
   case "$status" in
     OK) BASELINE_LIMIT="${raw#*$'\t'}" ;;
@@ -264,25 +270,25 @@ for raw_line in lines:
                 if k < m and L[k] == "r":
                     k += 1
                     is_raw = True
-                if k < m and L[k] == '"':
-                    if is_raw:
-                        # r"..." (0 hashes) or r#*"..."#* : the hash run sits
-                        # BEFORE the opening quote; no escapes; the closing
-                        # mark is '"' plus the same run.
-                        hh = 0
-                        while k + hh < m and L[k + hh] == "#":
-                            hh += 1
-                        if k + hh < m and L[k + hh] == '"':
-                            state = RAW
-                            raw_hashes = hh
-                            buf.append(" " * (k + hh + 1 - i))
-                            i = k + hh + 1
-                            continue
-                    else:
-                        state = STR
-                        buf.append(" " * (k + 1 - i))
-                        i = k + 1
+                if is_raw and k < m:
+                    # r"..." (0 hashes) or r#*"..."#* : the hash run sits
+                    # BETWEEN the r and the quote (r#"{ ... }"# — the JSON-in-
+                    # raw-string shape). No escapes inside; the closing mark
+                    # is '"' plus the same run. Multi-line: RAW persists.
+                    hh = 0
+                    while k + hh < m and L[k + hh] == "#":
+                        hh += 1
+                    if k + hh < m and L[k + hh] == '"':
+                        state = RAW
+                        raw_hashes = hh
+                        buf.append(" " * (k + hh + 1 - i))
+                        i = k + hh + 1
                         continue
+                elif k < m and L[k] == '"':
+                    state = STR  # b"..." : escapes apply
+                    buf.append(" " * (k + 1 - i))
+                    i = k + 1
+                    continue
                 buf.append(c)
                 i += 1
                 continue
@@ -407,6 +413,22 @@ if not spans:
     print("SPANS\t\t0")
     sys.exit(0)
 
+# a bare #[test]/#[cfg(test)] item OUTSIDE the mod spans (depth 0) means the
+# inline-test figure would UNDERCOUNT: the span covers what it covers and the
+# rest is tests too. A determinate-but-wrong number is worse than none: the
+# span goes indeterminate with the first offender's line.
+outside_attr_re = re.compile(r"^\s*(#\[\s*cfg\s*\(\s*test|\#\[test\])")
+last_end = spans[-1][1]
+for idx in range(last_end + 1, len(row_code)):
+    if row_start[idx] != 0:
+        continue
+    if outside_attr_re.match(row_code[idx]):
+        print(
+            "INDETERMINATE\tla línea %d tiene un test #[test]/#[cfg(test)] FUERA de los mod spans (terminan en %d): el total de tests inline sería un subconteo"
+            % (idx + 1, last_end + 1)
+        )
+        sys.exit(0)
+
 pairs = " ".join("%d:%d" % (s + 1, e + 1) for (s, e) in spans)
 total = sum(e - s + 1 for (s, e) in spans)
 print("SPANS\t%s\t%d" % (pairs, total))
@@ -438,6 +460,7 @@ range_cmd() {
 MODE="budget"
 FORMAT_PATH=""
 PLAN_ARGS=()
+GLUE_ARGS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -456,6 +479,11 @@ while [ $# -gt 0 ]; do
         shift
       done
       [ "${#PLAN_ARGS[@]}" -gt 0 ] || usage_error "--simulate requiere al menos un plan <dest>:<FROM>-<TO>[:header=<N>]"
+      ;;
+    --glue)
+      [ $# -ge 2 ] || usage_error "--glue requiere <archivo>=<N> (líneas no movidas que el split añade a ese archivo)"
+      GLUE_ARGS+=("$2")
+      shift 2
       ;;
     --corpus-literal)
       MODE="corpus"
@@ -493,6 +521,7 @@ case "$MODE" in
 
   format | simulate)
     [ -n "$FORMAT_PATH" ] || usage_error "el modo necesita --format <ruta> (la fuente de la medición y de los rangos)"
+    command -v python3 >/dev/null 2>&1 || die_tool "python3 no está disponible: el lector del baseline y el lexer del preflight lo necesitan (instalalo o corré en una estación con python3)"
     extract_corpus
     baseline_read
     load_baseline_maps
@@ -649,6 +678,25 @@ case "$MODE" in
       PLAN_MOVED["$DEST"]="$MOVED"
     done
 
+    # --- glue (§4.3 "más cabeceras"): the non-moved lines a real split adds --
+    # (import blocks, re-exports). It may target a plan destination or the
+    # source itself — the server.rs split added 29 lines of glue to the
+    # source, which is exactly the delta a pure-move model cannot see.
+    declare -A GLUE=()
+    for gspec in "${GLUE_ARGS[@]}"; do
+      if [[ ! "$gspec" =~ ^([^=]+)=([0-9]+)$ ]]; then
+        DEFECTS+=("glue malformado: '$gspec' (formato <archivo>=<N>, N ≥ 0)")
+        continue
+      fi
+      GKEY="${BASH_REMATCH[1]}"
+      GVAL="${BASH_REMATCH[2]}"
+      if [ "$GKEY" != "$SRC_KEY" ] && [[ ! " ${PLAN_ORDER[*]} " == *" $GKEY "* ]]; then
+        DEFECTS+=("glue sobre un archivo que el plan no toca: '$GKEY' (el plan mueve hacia ${#PLAN_ORDER[@]} destino(s) y la fuente '$SRC_KEY')")
+        continue
+      fi
+      GLUE["$GKEY"]="$GVAL"
+    done
+
     # plan rows: per destination, then the source once
     TOTAL_MOVED=0
     for dest in "${PLAN_ORDER[@]}"; do
@@ -663,9 +711,10 @@ case "$MODE" in
       else
         DEST_CUR=0
       fi
-      DEST_FINAL=$((DEST_CUR + HEADER + MOVED))
+      DEST_FINAL=$((DEST_CUR + HEADER + MOVED + ${GLUE["$dest"]:-0}))
       NOTE="cabecera $HEADER + $MOVED movidas"
       [ -n "${PLAN_CLIPPED[$dest]:-}" ] && NOTE="$NOTE (recortado a EOF)"
+      [ -n "${GLUE["$dest"]:-}" ] && NOTE="$NOTE + glue ${GLUE[$dest]}"
       if [ -n "${GF["$DEST_REL"]:-}" ]; then
         CAP="${GF["$DEST_REL"]}"
         CAP_DESC="su baseline ($CAP)"
@@ -683,8 +732,8 @@ case "$MODE" in
       fi
     done
 
-    SRC_FINAL=$((TOTAL - TOTAL_MOVED))
-    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lineas" "$TOTAL líneas - $TOTAL_MOVED movidas"
+    SRC_FINAL=$((TOTAL - TOTAL_MOVED + ${GLUE["$SRC_KEY"]:-0}))
+    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lineas" "$TOTAL líneas - $TOTAL_MOVED movidas${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
 
     if [ "${#PLAN_ORDER[@]}" -gt 0 ]; then
       PRS=$(((2 * TOTAL_MOVED + DIFF_BUDGET - 1) / DIFF_BUDGET))
