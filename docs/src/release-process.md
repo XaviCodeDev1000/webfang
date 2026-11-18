@@ -188,9 +188,25 @@ without a matching baseline, `Repo guards` is red on `main` and on **every** PR 
 repair lands on everyone instead of on the release.
 
 The re-freeze therefore travels in the release PR itself, before the merge, next to the §7
-re-approval. It is allowed to be that boring because the check accepts an **ancestor** baseline and
-not only an identical one (#2903): the snapshot may legitimately predate the merge commit that
-carries it.
+re-approval. The check accepts an **ancestor** baseline and not only an identical one (#2903), so the
+snapshot does not have to be re-measured again on the merge commit.
+
+### Freeze the squash's commit, never the branch tip
+
+The obvious choice is wrong and takes a while to notice. `--write` freezes whatever `git rev-parse
+HEAD` returns, and on a Release PR that is the branch tip — a commit the queue will **squash away**.
+It is not in `main`'s history and never will be, so the ancestry check passes exactly once, on the
+squash commit, and then fails on the first PR that touches any other file:
+
+```text
+head_sha … no es HEAD, ancestro ni equivalente en árbol a …: el baseline fue medido sobre otro árbol
+```
+
+Freeze a commit that is already on `main` instead — the release commit the bump landed as — and the
+ancestry check keeps holding for every branch afterwards, because that commit is permanent history.
+The counter-argument is that a PR-merge commit does not exist while the PR is open. Both shapes
+appear, so read the `head_sha` in the diff and ask whether that commit is in `main` before approving
+it.
 
 ### Order it after `release-plz`
 
