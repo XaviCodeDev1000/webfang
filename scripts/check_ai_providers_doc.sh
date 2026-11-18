@@ -2,49 +2,49 @@
 # ============================================================================
 # AI-PROVIDERS DOC DRIFT GUARD — docs/architecture/ai-providers-design.md
 # ============================================================================
-# Qué protege: `docs/architecture/ai-providers-design.md` es una spec NORMATIVA
-# (13 archivos de código la citan) que vive FUERA del libro mdBook
-# (`docs/book.toml` → `src = "src"`), así que ningún gate la leía. Consecuencia
-# medida: una firma que NO compilaba —`AuthSource::resolve()` documentada como
-# `Result<ApiKey, AuthError>` cuando la real es `Result<Option<ApiKey>,
-# AuthError>`— sobrevivió meses (#2136). El doc se corrigió a mano (#2027/#2137);
-# lo que faltaba era el mecanismo que note el próximo.
+# What it protects: `docs/architecture/ai-providers-design.md` is a NORMATIVE spec
+# (13 code files cite it) that lives OUTSIDE the mdBook book
+# (`docs/book.toml` → `src = "src"`), so no gate read it. Measured consequence:
+# a signature that did NOT compile —`AuthSource::resolve()` documented as
+# `Result<ApiKey, AuthError>` when the real one is `Result<Option<ApiKey,
+# AuthError>`— survived for months (#2136). The doc was fixed by hand (#2027/#2137);
+# what was missing was the mechanism that notices the next one.
 #
-# Este guard es el LECTOR: el doc se audita contra el árbol de código, no
-# contra su propia prosa. El manifiesto vive DENTRO del doc
-# (`<!-- claims:begin -->` … `<!-- claims:end -->`), porque el doc es la fuente
-# de verdad de sus propias afirmaciones y el guard sólo lo lee. Es el mismo
-# modelo que el guard de los pines de versión: documento con literales + fuente
-# de verdad + check fail-closed.
+# This guard is the READER: the doc is audited against the code tree, not
+# against its own prose. The manifest lives INSIDE the doc
+# (`<!-- claims:begin -->` … `<!-- claims:end -->`), because the doc is the source
+# of truth of its own claims and the guard only reads it. It is the same
+# model as the version-pins guard: document with literals + source
+# of truth + fail-closed check.
 #
-# Checks (TODOS fail-closed):
-#   C1 manifest   bloque presente, campos parseables y no vacíos, archivos
-#                 existentes, líneas dentro del archivo
-#   C2 claim      la línea citada (trimmed) contiene la subcadena esperada,
-#                 coincidencia literal (no regex)
-#   C3 shape      los miembros del tipo declarado == los miembros esperados, en
-#                 AMBOS sentidos (variantes para enum, campos para struct)
-#   C4 impl       el fence del doc que contiene la declaración está contenido en
-#                 el archivo citado (containment, no igualdad de conjunto)
-#   C5 absent     el símbolo NO aparece en el archivo (o en todo `crates/`)
-#   C6 cobertura  toda cita `archivo:línea` de la PROSA del doc está registrada
-#                 en el manifiesto — una cita sin claim verificable es drift
-#   C7 §          todo `§N` / `§Na` del doc Y del código que lo cita resuelve a
-#                 una sección numerada (`### N.`) o a un ítem letra (`- **(a)**`)
+# Checks (ALL fail-closed):
+#   C1 manifest   block present, parseable and non-empty fields, existing files,
+#                 lines within the file
+#   C2 claim      the cited line (trimmed) contains the expected substring,
+#                 literal match (not regex)
+#   C3 shape      the members of the declared type == the expected members, in
+#                 BOTH directions (variants for enum, fields for struct)
+#   C4 impl       the doc fence containing the declaration is contained in
+#                 the cited file (containment, not set equality)
+#   C5 absent     the symbol does NOT appear in the file (or in all of `crates/`)
+#   C6 coverage   every `file:line` citation in the PROSE of the doc is registered
+#                 in the manifest — a citation without a verifiable claim is drift
+#   C7 §          every `§N` / `§Na` in the doc AND in the code that cites it resolves to
+#                 a numbered section (`### N.`) or a lettered item (`- **(a)**`)
 #
-# Normalización de rutas (S5), en orden: (a) contra la raíz del repo, (b) contra
-# `crates/webfang_core/src/`, (c) por basename único bajo `crates/`. Si no
-# resuelve o es ambigua → drift. Nunca se adivina.
+# Path normalization (S5), in order: (a) against the repo root, (b) against
+# `crates/webfang_core/src/`, (c) by unique basename under `crates/`. If it
+# does not resolve or is ambiguous → drift. It is never guessed.
 #
-# AISLAMIENTO DE RUTAS: toda ruta que el guard LEE queda confinada a la raíz
-# del repo. Sin ese aislamiento, una cita como `../../etc/passwd` resolvería a
-# un archivo real FUERA del árbol y el guard imprimiría su contenido en el log
-# de CI (diagnóstico C2/C3). La ruta se normaliza contra su base y la que sale
-# se reporta como drift SIN leerse.
+# PATH ISOLATION: every path the guard READS is confined to the repo
+# root. Without that isolation, a citation like `../../etc/passwd` would resolve to
+# a real file OUTSIDE the tree and the guard would print its content in the
+# CI log (C2/C3 diagnostic). The path is normalized against its base and the one
+# that escapes is reported as drift WITHOUT being read.
 #
-# Uso: scripts/check_ai_providers_doc.sh [--root DIR] [--advisory]
-# Salida: 0 limpio · 1 drift (fail-closed). `--advisory` NUNCA falla por drift
-# ni por estructura ausente: imprime el hallazgo y sale con 0. Un error de
+# Usage: scripts/check_ai_providers_doc.sh [--root DIR] [--advisory]
+# Output: 0 clean · 1 drift (fail-closed). `--advisory` NEVER fails on drift
+# or on absent structure: it prints the finding and exits 0. An invocation
 # invocación (flag desconocido, `--root` que no existe) sigue fallando: no es
 # un hallazgo, es una llamada mal formada.
 # ============================================================================
@@ -55,15 +55,15 @@ CORE_SRC_REL="crates/webfang_core/src"
 
 usage() {
   cat >&2 <<'EOF'
-Uso: scripts/check_ai_providers_doc.sh [--root DIR] [--advisory]
+Usage: scripts/check_ai_providers_doc.sh [--root DIR] [--advisory]
 
-  --root DIR   raíz del repo (default: la raíz derivada de BASH_SOURCE)
-  --advisory   imprime los mismos hallazgos y sale SIEMPRE con 0
+  --root DIR   repo root (default: the root derived from BASH_SOURCE)
+  --advisory   prints the same findings and ALWAYS exits 0
 
-Salida: 0 limpio · 1 drift (fail-closed). Con --advisory, el drift y la
-estructura ausente (doc, bloque del manifiesto, fence 'claims', manifiesto
-vacío) salen con 0 y el hallazgo se imprime igual. Un error de invocación
-sigue saliendo con 1.
+Output: 0 clean · 1 drift (fail-closed). With --advisory, drift and
+absent structure (doc, manifest block, 'claims' fence, empty
+manifest) exit 0 and the finding is printed anyway. An invocation error
+still exits 1.
 EOF
 }
 
@@ -103,7 +103,7 @@ if [[ -z "$ROOT" ]]; then
   ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 if [[ ! -d "$ROOT" ]]; then
-  printf '::error file=%s,line=1::la raíz %s no existe\n' "$DOC_REL" "$ROOT" >&2
+  printf '::error file=%s,line=1::the root %s does not exist\n' "$DOC_REL" "$ROOT" >&2
   exit 1
 fi
 ROOT="$(cd "$ROOT" && pwd)"
@@ -122,7 +122,7 @@ else
   # Los backticks son literales: es el nombre de la herramienta, no una
   # sustitución de comandos.
   # shellcheck disable=SC2016
-  printf 'aviso: `realpath` no está disponible — el aislamiento de rutas sólo es léxico (un symlink que apunte fuera de la raíz no se detecta)\n' >&2
+  printf 'warning: `realpath` is not available — path isolation is only lexical (a symlink pointing outside the root is not detected)\n' >&2
 fi
 
 TMPD="$(mktemp -d)"
@@ -142,7 +142,7 @@ report() { # file line message
 # estructura ausente todavía salía con 1.
 abort_finding() { # línea motivo
   report "$DOC_REL" "$1" "$2"
-  printf '::error::guard de drift doc↔código: %d hallazgo(s) en %s\n' "$FINDINGS" "$DOC_REL" >&2
+  printf '::error::doc↔code drift guard: %d finding(s) in %s\n' "$FINDINGS" "$DOC_REL" >&2
   if [[ $ADVISORY -eq 1 ]]; then
     exit 0
   fi
@@ -227,7 +227,7 @@ canon_under_root() { # rel → 1 si escapa
 # es el que puede filtrar contenido de fuera del árbol.
 motivo_ruta() { # rc → texto
   if [[ "$1" -eq 2 ]]; then
-    printf 'sale de la raíz del repo — el guard no lee ningún archivo fuera de ella'
+    printf 'escapes the repo root — the guard does not read any file outside it'
   else
     printf 'no existe, o el basename es ambiguo bajo crates/'
   fi
@@ -350,7 +350,7 @@ extract_members() { # archivo línea tipo → imprime un miembro por línea
 # ─── doc ─────────────────────────────────────────────────────────────────────
 DOC="$ROOT/$DOC_REL"
 if [[ ! -f "$DOC" ]]; then
-  abort_finding 1 "no existe el doc normativo $DOC_REL bajo la raíz $ROOT"
+  abort_finding 1 "the normative doc $DOC_REL does not exist under the root $ROOT"
 fi
 mapfile -t DOC_LINES <"$DOC"
 
@@ -393,7 +393,7 @@ for i in "${!DOC_LINES[@]}"; do
 done
 
 if [[ $begin_idx -lt 0 || $end_idx -lt 0 || $end_idx -le $begin_idx ]]; then
-  abort_finding 1 "C1: no existe el bloque del manifiesto (<!-- claims:begin --> … <!-- claims:end -->)"
+  abort_finding 1 "C1: the manifest block does not exist (<!-- claims:begin --> … <!-- claims:end -->)"
 fi
 
 CLAIMS_FENCE_RE='^```claims[[:space:]]*$'
@@ -406,7 +406,7 @@ for ((i = begin_idx + 1; i < end_idx; i++)); do
 done
 
 if [[ $claims_start -lt 0 ]]; then
-  abort_finding $((begin_idx + 1)) "C1: el bloque del manifiesto no contiene un fence con info-string 'claims'"
+  abort_finding $((begin_idx + 1)) "C1: the manifest block does not contain a fence with info-string 'claims'"
 fi
 
 # ─── parsing del manifiesto ─────────────────────────────────────────────────
@@ -478,13 +478,13 @@ while [[ $i -lt $end_idx ]]; do
     esac
   done
   if [[ $empty -eq 1 ]]; then
-    report "$DOC_REL" "$i" "C1: la entrada '$kind' tiene un campo vacío"
+    report "$DOC_REL" "$i" "C1: the entry '$kind' has an empty field"
     continue
   fi
 
   if [[ "$kind" == "absent" ]]; then
     if [[ "$lineno" != "-" ]]; then
-      report "$DOC_REL" "$i" "C1: la entrada 'absent' debe llevar '-' en el campo de línea (lleva '$lineno')"
+      report "$DOC_REL" "$i" "C1: the 'absent' entry must carry '-' in the line field (it carries '$lineno')"
       continue
     fi
     M_KIND+=("$kind"); M_FILE+=("$file"); M_LINE+=("$lineno")
@@ -493,7 +493,7 @@ while [[ $i -lt $end_idx ]]; do
   fi
 
   if [[ ! "$lineno" =~ ^[0-9]+$ ]] || [[ "$lineno" -lt 1 ]]; then
-    report "$DOC_REL" "$i" "C1: la línea citada '$lineno' no es un número de línea válido"
+    report "$DOC_REL" "$i" "C1: the cited line '$lineno' is not a valid line number"
     continue
   fi
 
@@ -507,7 +507,7 @@ while [[ $i -lt $end_idx ]]; do
 
   total="$(awk 'END{print NR}' "$ROOT/$res")"
   if [[ "$lineno" -gt "$total" ]]; then
-    report "$res" "$lineno" "C1: la línea citada está fuera del archivo ($res tiene $total líneas)"
+    report "$res" "$lineno" "C1: the cited line is outside the file ($res has $total lines)"
     continue
   fi
 
@@ -517,7 +517,7 @@ while [[ $i -lt $end_idx ]]; do
 done
 
 if [[ ${#M_KIND[@]} -eq 0 ]]; then
-  abort_finding $((claims_start + 1)) "C1: el manifiesto está vacío — el doc no declara ninguna afirmación verificable"
+  abort_finding $((claims_start + 1)) "C1: the manifest is empty — the doc declares no verifiable claim"
 fi
 
 # ─── C2 / C3 / C4 / C5 ───────────────────────────────────────────────────────
@@ -557,7 +557,7 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
       trimmed="${line#"${line%%[![:space:]]*}"}"
       trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
       if [[ "$trimmed" != *"$f4"* ]]; then
-        report "$res" "$lineno" "C2: la línea no contiene '$f4' (contenido: '$trimmed')"
+        report "$res" "$lineno" "C2: the line does not contain '$f4' (content: '$trimmed')"
       fi
       ;;
     shape)
@@ -567,7 +567,7 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
       trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
       decl_n="$(norm "$f4")"
       if [[ "$trimmed" != *"$decl_n"* ]]; then
-        report "$res" "$lineno" "C3: la línea no declara '$f4' (contenido: '$trimmed')"
+        report "$res" "$lineno" "C3: the line does not declare '$f4' (content: '$trimmed')"
         continue
       fi
       if [[ ! "$f4" =~ (enum|struct)[[:space:]]+([A-Za-z_][A-Za-z0-9_]*) ]]; then
@@ -581,10 +581,10 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
       missing="$(comm -23 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"))"
       extra="$(comm -13 <(printf '%s\n' "$expected") <(printf '%s\n' "$actual"))"
       if [[ -n "$missing" ]]; then
-        report "$res" "$lineno" "C3: '$tname' no declara el(s) miembro(s) $(printf '%s' "$missing" | tr '\n' ' ')— el manifiesto los espera"
+        report "$res" "$lineno" "C3: '$tname' does not declare the member(s) $(printf '%s' "$missing" | tr '\n' ' ')— the manifest expects them"
       fi
       if [[ -n "$extra" ]]; then
-        report "$res" "$lineno" "C3: '$tname' declara el(s) miembro(s) $(printf '%s' "$extra" | tr '\n' ' ')— el manifiesto no los declara"
+        report "$res" "$lineno" "C3: '$tname' declares the member(s) $(printf '%s' "$extra" | tr '\n' ' ')— the manifest does not declare them"
       fi
       ;;
     impl)
@@ -593,12 +593,12 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
       line="$(sed -n "${lineno}p" "$ROOT/$res")"
       code_n="$(norm "$line")"
       if [[ "$code_n" != *"$decl_n"* ]]; then
-        report "$res" "$lineno" "C4: la línea no contiene la declaración '$f4' (contenido: '$code_n')"
+        report "$res" "$lineno" "C4: the line does not contain the declaration '$f4' (content: '$code_n')"
         continue
       fi
       fence=""
       if ! fence="$(find_fence_for_decl "$decl_n")"; then
-        report "$res" "$lineno" "C4: ningún fence del doc contiene la declaración '$f4'"
+        report "$res" "$lineno" "C4: no fence of the doc contains the declaration '$f4'"
         continue
       fi
       norm_file "$res"
@@ -608,7 +608,7 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
         dn="$(norm "$dline")"
         [[ -z "$dn" ]] && continue
         if ! grep -qF -- "$dn" "$nf"; then
-          report "$res" "$lineno" "C4: la línea del fence '$dn' no está en $res"
+          report "$res" "$lineno" "C4: the fence line '$dn' is not in $res"
         fi
       done
       ;;
@@ -617,7 +617,7 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
       sym="$f4"
       if [[ "$mfile" == "*" ]]; then
         if [[ ! -d "$ROOT/crates" ]]; then
-          report "$DOC_REL" "$at" "C5: no existe crates/ — no se puede verificar la ausencia de '$sym'"
+          report "$DOC_REL" "$at" "C5: crates/ does not exist — the absence of '$sym' cannot be verified"
           continue
         fi
         # El doc afirma "cero ocurrencias en `crates/`": se busca en TODO el
@@ -636,7 +636,7 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
       if [[ -n "$hit" ]]; then
         where="${hit%%:*}"
         where="${where#"$ROOT"/}"
-        report "$where" 1 "C5: el símbolo '$sym' aparece en el código, pero el manifiesto declara su ausencia"
+        report "$where" 1 "C5: the symbol '$sym' appears in the code, but the manifest declares its absence"
       fi
       ;;
   esac
@@ -658,15 +658,15 @@ check_citation() { # ruta línea fin-rango línea-del-doc
   rc=0
   res="$(resolve_path "$p")" || rc=$?
   if [[ $rc -ne 0 ]]; then
-    report "$DOC_REL" "$dln" "C6: no se pudo resolver la ruta '$p' de una cita del doc ($(motivo_ruta "$rc"))"
+    report "$DOC_REL" "$dln" "C6: the path '$p' of a doc citation could not be resolved ($(motivo_ruta "$rc"))"
     return
   fi
   if ! is_covered "$res:$ln"; then
-    report "$DOC_REL" "$dln" "C6: la cita '$p:$ln' no está registrada en el manifiesto"
+    report "$DOC_REL" "$dln" "C6: the citation '$p:$ln' is not registered in the manifest"
   fi
   if [[ -n "$lnend" && "$lnend" != "$ln" ]]; then
     if ! is_covered "$res:$lnend"; then
-      report "$DOC_REL" "$dln" "C6: el extremo '$p:$lnend' del rango no está registrado en el manifiesto"
+      report "$DOC_REL" "$dln" "C6: the end '$p:$lnend' of the range is not registered in the manifest"
     fi
   fi
 }
@@ -732,11 +732,11 @@ check_sec_one() { # número-letra archivo línea token
   n="${nl%%[a-z]*}"
   l="${nl#"$n"}"
   if [[ -z "${SEC_OK[$n]:-}" ]]; then
-    report "$f" "$ln" "C7: la referencia '$tok' no resuelve a ninguna sección numerada del doc (§$n)"
+    report "$f" "$ln" "C7: the reference '$tok' does not resolve to any numbered section of the doc (§$n)"
     return
   fi
   if [[ -n "$l" && -z "${ITEM_OK["$n$l"]:-}" ]]; then
-    report "$f" "$ln" "C7: la referencia '$tok' no resuelve a ningún ítem letra de la sección §$n"
+    report "$f" "$ln" "C7: the reference '$tok' does not resolve to any lettered item of section §$n"
   fi
 }
 
@@ -785,7 +785,7 @@ done < <(grep -rlF --include='*.rs' "ai-providers-design.md" "$ROOT/crates" 2>/d
 
 # ─── resultado ───────────────────────────────────────────────────────────────
 if [[ $FINDINGS -gt 0 ]]; then
-  printf '::error::guard de drift doc↔código: %d hallazgo(s) en %s\n' "$FINDINGS" "$DOC_REL" >&2
+  printf '::error::doc↔code drift guard: %d finding(s) in %s\n' "$FINDINGS" "$DOC_REL" >&2
   if [[ $ADVISORY -eq 1 ]]; then
     exit 0
   fi
