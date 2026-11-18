@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.2.1] - 2026-11-18
+
+
+### 🔧 Fixed
+
+- Close ADR-0021 egress gaps with no_proxy and CONNECT proof ([#2920](https://github.com/XaviCodeDev1000/webfang/pull/2920))
+
+### 🔧 Other
+
+- Make English the only language across code, docs and CI ([#2922](https://github.com/XaviCodeDev1000/webfang/pull/2922))
+
+### 🧪 Testing
+
+- Prove explicit AI egress proxy behavior end to end ([#2913](https://github.com/XaviCodeDev1000/webfang/pull/2913))
 ## [9.2.0] - 2026-11-17
 
 
