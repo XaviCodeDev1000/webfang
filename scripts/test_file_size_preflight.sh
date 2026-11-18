@@ -197,7 +197,10 @@ expect_match "1.3 --help names the unit 'lineas' (wc -l)" "$OUT" "lineas"
 # commit later, and only the drift is ever noticed. One corpus, one owner.
 
 new_sandbox c2
+# the \$ROOT below is the guard's own literal text, not an expansion
+# shellcheck disable=SC2016
 GUARD_FIND="$(sed -n 's/^ *if ! \(find "\$ROOT\/crates" .*\) -print0 \\$/\1/p' "$GUARD" | head -1)"
+# shellcheck disable=SC2016
 GUARD_CORPUS="$(printf '%s' "$GUARD_FIND" | sed 's/find "\$ROOT\/crates"/find crates/')"
 if [ -z "$GUARD_CORPUS" ]; then
   bad "2.0 el harness extrae el find del guard" "no match en $GUARD"

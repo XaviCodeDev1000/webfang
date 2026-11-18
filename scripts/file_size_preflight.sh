@@ -90,8 +90,12 @@ emit4() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }
 # guard whose line changed shape is a tool failure, never a re-implementation.
 extract_corpus() {
   [ -f "$GUARD" ] || die_tool "no encuentro el guard $GUARD: el corpus del preflight vive en el guard y no se re-implementa"
+  # the sed programs below keep \$ROOT literal ON PURPOSE: it is the guard's
+  # own text being extracted, not an expansion.
+  # shellcheck disable=SC2016
   EXEC_FIND="$(sed -n 's/^ *if ! \(find "\$ROOT\/crates" .*-print0\) \\$/\1/p' "$GUARD" | head -1)"
   [ -n "${EXEC_FIND:-}" ] || die_tool "no pude extraer la expresión find de $GUARD (cambió de forma): el corpus no se re-implementa, actualizá la extracción junto con el guard"
+  # shellcheck disable=SC2016
   CORPUS_LITERAL="$(printf '%s' "$EXEC_FIND" | sed 's/find "\$ROOT\/crates"/find crates/; s/ -print0$//')"
 }
 
