@@ -43,7 +43,9 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
 |----|-------|-------|-------|--------|--------|
 | A1 | S1, S3 | Fase A — Governance text: `AGENTS.md` (3 sites: § Project rules, § Error stratification, pre-PR checklist) + `README.md` § Architecture rules | inline | done | `2e8befd9` |
 | A2 | S2, S3 | Fase A — Comments and doc-comments in 25 files under `crates/**/src/**`; literals and assertions untouched and still deferred to Fase C | inline | done | `693f49c1` |
-| A3 | S2, S3 | Fase A — `docs/**` prose (14 files) + root `REPORTE.md`, `COMPATIBILITY-MATRIX.md`. Files that quote exact CLI strings move with their code (Fase C) | inline | pending | — |
+| A3a | S2, S3 | Fase A — `docs/src/SUMMARY.md` chapter title | inline | done | pending |
+| A3b | S2, S3 | Fase A — pure-prose docs: `architecture/ai-providers-design.md` (149), `adr/0004-onnx-local-removal.md` (106), `research/ci-test-playbook.md` (42), `security/prompt-injection-policy.md` (37), `adr/README.md` (33), `llm-backend-decision.md` (29), `research/missing-docs-audit.md` (20), `src/ai-onnx-migration.md` (18) | inline | pending | — |
+| A3c | S2, S3 | Fase C-coupled docs that quote CLI output verbatim: `src/troubleshooting.md`, `ssrf-layers.md`, `src/cli-reference.md`, `src/state-recovery-runbook.md`, `adr/0018-…`, root `REPORTE.md`, `COMPATIBILITY-MATRIX.md` | inline | pending | — |
 | B1 | S1, S3 | Fase B — `.github/ISSUE_TEMPLATE/*.yml` (4) + `.github/support.json` `eol_reason` strings. Gated by `AGENTS.md` "Ask first: Modifying CI/CD (`.github/`)" | inline | blocked | — |
 | B2 | S2, S3 | Fase B — `scripts/*.sh` (57 files, ~1070 lines): `# STYLE:` comments + error strings, each `test_*.sh` assertion moving with its script | inline | pending | — |
 | B3 | S1, S3 | Fase B — `typos.toml`: prune the Spanish allowlist. Must run after the Spanish text it allowlists is gone, otherwise `typos` fails | inline | pending | — |
@@ -139,3 +141,13 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
   - Lesson for Fase C: the detector is not a scoping tool. Scope by `typos` plus an
     accented-character scan plus a full read of each file, and treat message + assertion +
     snapshot as one unit.
+
+- **L10 (2026-11-18)** — A3 split after reading the small files. Five of the six smallest
+  docs (`src/troubleshooting.md`, `ssrf-layers.md`, `src/cli-reference.md`,
+  `src/state-recovery-runbook.md`, `adr/0018-…`) are **verbatim quotes of CLI output**
+  (`"SSRF detectado: la IP … está prohibida …"`, `"URL inválida: {0}"`, `--help` text). They
+  are documentation of the strings, so they must move with the code in Fase C, not before:
+  translating them now would document output that does not exist yet. Only
+  `src/SUMMARY.md` was pure prose, and it is done. The remaining A3b prose block is ~534
+  lines across 8 files; the largest are `architecture/ai-providers-design.md` (149) and
+  `adr/0004-onnx-local-removal.md` (106).
