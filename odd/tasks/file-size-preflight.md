@@ -341,8 +341,9 @@ L22 (2026-11-18, round 3 — §6 dogfooding with the command --budget emits):
 `gh pr view 2901 --json additions,deletions -q '.additions+.deletions'` → **2246** ✓;
 2896 → **3018** ✓; 2856 → **3933** ✓; 2893 → **5101** ✓ — the four sample figures
 reproduce EXACTLY with the tool's own command. #2926 measured **1519 add+del** at round 3
-(pre-push; its base SHA was not recorded — L24(b) and L27(b) carry the anchored series and the
-reproducible command; under P=3000: no warning). The P constant carries its sample in the
+(NOT REPRODUCIBLE against any measured base — origin unknown, the round-4 explanation
+"pre-push against an old base" withdrawn 2026-11-19; L24(b) and L27(b) carry the loop evidence;
+under P=3000: no warning). The P constant carries its sample in the
 preflight's DIFF_BUDGET header comment (`grep -n 'DIFF_BUDGET' scripts/file_size_preflight.sh`)
 and in the --budget output.
 
@@ -375,8 +376,11 @@ while IFS= read -r -d '' f; do bash scripts/file_size_preflight.sh --format "$f"
 counts (246/302 and 254) were WRONG — the reproducible scan is the figure. (b) **The size
 of #2926 = 1704 add+del on both bases**: `gh pr view 2926 ...` (vs main 0f1f74c0, after the
 push of everything) = 1704; git diff vs merge-base 0f1f74c0 = 1704. The earlier 1519 was a
-pre-push measurement against an old base. The final figure goes to the close (it changes with
-the translation). (c) The "296" column DOES NOT EXIST in the tool's output: it was a transcription
+figure NOT REPRODUCIBLE against any measured base — origin unknown (the round-4/5 explanation
+"pre-push measurement against an old base" was itself unproven and is withdrawn 2026-11-19: the
+loop over `git rev-list --reverse 0f1f74c0..HEAD` against both `0f1f74c0` and the pre-merge base
+`aba0e9cf` yields 1704..2125 post-merge and 2311..4979 pre-merge, never 1519). The final figure
+goes to the close (it changes with the translation). (c) The "296" column DOES NOT EXIST in the tool's output: it was a transcription
 artifact of mine when compacting the round-3 paste; the full --glue output (10 lines,
 untruncated) contains no 296. Recorded as a report defect, not a tool defect.
 
