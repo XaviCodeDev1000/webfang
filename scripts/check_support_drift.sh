@@ -144,10 +144,10 @@ duplicate_minors() {
 check_duplicate_minors() {
   local dup
   if ! dup="$(duplicate_minors)"; then
-    err "$SUPPORT_JSON no se pudo leer para verificar la unicidad de .minor (fail closed)."
+    err "$SUPPORT_JSON could not be read to verify .minor uniqueness (fail closed)."
     return
   fi
-  [[ -z "$dup" ]] || err "minor declarada más de una vez: $(echo "$dup" | tr '\n' ' ') (cada minor declara exactamente una línea de soporte)."
+  [[ -z "$dup" ]] || err "minor declared more than once: $(echo "$dup" | tr '\n' ' ') (each minor declares exactly one support line)."
 }
 
 # ─── Declared scope: is the file internally coherent, and is its projection
@@ -155,11 +155,11 @@ check_duplicate_minors() {
 
 check_declared() {
   if [[ ! -f "$SUPPORT_JSON" ]]; then
-    err "$SUPPORT_JSON no existe; la declaración de líneas soportadas es obligatoria."
+    err "$SUPPORT_JSON does not exist; declaring the supported lines is mandatory."
     return
   fi
   if ! jq -e '.schema_version == 1 and (.lines | type == "array")' "$SUPPORT_JSON" >/dev/null 2>&1; then
-    err "$SUPPORT_JSON no es un support.json válido (schema_version == 1 y .lines como array)."
+    err "$SUPPORT_JSON is not a valid support.json (schema_version == 1 and .lines as an array)."
     return
   fi
 
@@ -169,18 +169,18 @@ check_declared() {
   live="$(jq '[.lines[] | select(.state == "STABLE" or .state == "MAINTENANCE")] | length' "$SUPPORT_JSON")"
 
   bad_state="$(jq -r '.lines[] | select(.state != "STABLE" and .state != "MAINTENANCE" and .state != "EOL") | .minor' "$SUPPORT_JSON")"
-  [[ -z "$bad_state" ]] || err "estado desconocido en las líneas: $(echo "$bad_state" | tr '\n' ' ') (permitidos: STABLE, MAINTENANCE, EOL)."
+  [[ -z "$bad_state" ]] || err "unknown state in the lines: $(echo "$bad_state" | tr '\n' ' ') (allowed: STABLE, MAINTENANCE, EOL)."
 
   # Support window is structural, not a calendar: at most two live lines. And
   # exactly one STABLE, not "at most one": a declaration where everything is
   # EOL is internally consistent and would sail through this scope while
   # stating that nothing is supported at all (#1676 review R4-NO-ACTIVE-STABLE).
-  [[ "$n_stable" -eq 1 ]] || err "hay $n_stable líneas STABLE; se requiere exactamente una (la minor vigente)."
-  [[ "$n_maint" -le 1 ]] || err "hay $n_maint líneas MAINTENANCE; la política admite como máximo una."
-  [[ "$live" -le 2 ]] || err "hay $live líneas vivas; el máximo estructural es 2 (STABLE + MAINTENANCE)."
+  [[ "$n_stable" -eq 1 ]] || err "there are $n_stable STABLE lines; exactly one is required (the current minor)."
+  [[ "$n_maint" -le 1 ]] || err "there are $n_maint MAINTENANCE lines; the policy allows at most one."
+  [[ "$live" -le 2 ]] || err "there are $live live lines; the structural maximum is 2 (STABLE + MAINTENANCE)."
 
   bad_minor="$(jq -r '.lines[] | select((.minor // "") | test("^[0-9]+\\.[0-9]+$") | not) | (.minor // "(null)")' "$SUPPORT_JSON")"
-  [[ -z "$bad_minor" ]] || err "campo .minor inválido (se espera X.Y): $(echo "$bad_minor" | tr '\n' ' ')."
+  [[ -z "$bad_minor" ]] || err "invalid .minor field (X.Y expected): $(echo "$bad_minor" | tr '\n' ' ')."
 
   # A minor is declared EXACTLY ONCE. The counts above say how many lines are
   # STABLE/MAINTENANCE, not how many lines there are: a declaration naming
@@ -201,7 +201,7 @@ check_declared() {
         or (($e.latest // "") | startswith(($e.minor // "") + ".") | not)
       )
     | "\($e.minor)=\($e.latest // "(null)")"' "$SUPPORT_JSON")"
-  [[ -z "$bad_latest" ]] || err "campo .latest inválido (se espera X.Y.Z del árbol declarado, empieza por su propia minor): $(echo "$bad_latest" | tr '\n' ' ')."
+  [[ -z "$bad_latest" ]] || err "invalid .latest field (X.Y.Z of the declared tree expected, starts with its own minor): $(echo "$bad_latest" | tr '\n' ' ')."
 
   # `accepts` stays machine-checkable on purpose: it IS the routing table an
   # agent reads to decide whether a backport is allowed. Check it, do not prose.
@@ -213,12 +213,12 @@ check_declared() {
         or (.state == "EOL"       and ((.accepts // []) | length) > 0)
       )
     | "\(.minor)[\(.state)]=\((.accepts // null) | tostring)"' "$SUPPORT_JSON")"
-  [[ -z "$bad_accepts" ]] || err "accepts incoherente con el estado (STABLE=bugfix+security, MAINTENANCE=security, EOL=sin accepts): $(echo "$bad_accepts" | tr '\n' ' ')."
+  [[ -z "$bad_accepts" ]] || err "accepts inconsistent with the state (STABLE=bugfix+security, MAINTENANCE=security, EOL=no accepts): $(echo "$bad_accepts" | tr '\n' ' ')."
 
   if [[ ! -x "$RENDERER" ]]; then
-    err "$RENDERER no existe o no es ejecutable; no se puede verificar la proyección renderizada."
+    err "$RENDERER does not exist or is not executable; the rendered projection cannot be verified."
   elif ! "$RENDERER" --check; then
-    err "SUPPORT.md no coincide con el render de $SUPPORT_JSON (corré $RENDERER y commiteá ambos archivos juntos)."
+    err "SUPPORT.md does not match the render of $SUPPORT_JSON (run $RENDERER and commit both files together)."
   fi
 }
 
@@ -375,7 +375,7 @@ unparseable_tags() {
 
 check_published() {
   if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
-    err "clone shallow: no hay tags que verificar. Traé los tags (fetch-depth: 0) antes de correr este scope — un guard que no puede ver no puede aprobar."
+    err "shallow clone: there are no tags to verify. Fetch the tags (fetch-depth: 0) before running this scope — a guard that cannot see cannot approve."
     return
   fi
   local unparseable rc_unparseable=0
@@ -384,7 +384,7 @@ check_published() {
   # the producer hands the minors over already sorted in version order.
   local declared
   if ! declared="$(declared_minors)"; then
-    err "$SUPPORT_JSON ilegible o inválido: no se pudo leer la lista de minors declaradas (fail closed — un productor que devolviera una lista vacía aprobaría una declaración que nadie puede leer)."
+    err "$SUPPORT_JSON unreadable or invalid: the list of declared minors could not be read (fail closed — a producer returning an empty list would approve a declaration nobody can read)."
     return
   fi
 
@@ -399,14 +399,14 @@ check_published() {
   # meant to judge.
   unparseable="$(unparseable_tags)" || rc_unparseable=$?
   if [[ "$rc_unparseable" -gt 1 ]]; then
-    err "no se pudo computar el reporte de tags con formato inesperado (grep salió con $rc_unparseable); fail closed."
+    err "the tag report could not be computed with an unexpected format (grep exited with $rc_unparseable); fail closed."
     return
   fi
-  [[ -z "$unparseable" ]] || err "tags v* con formato inesperado (se espera vX.Y.Z; un candidato vX.Y.Z-rc.N no es una publicación y no se reporta): $(echo "$unparseable" | tr '\n' ' ')."
+  [[ -z "$unparseable" ]] || err "v* tags with an unexpected format (vX.Y.Z expected; an vX.Y.Z-rc.N candidate is not a publication and is not reported): $(echo "$unparseable" | tr '\n' ' ')."
 
   local minors
   if ! minors="$(published_minors)" || [[ -z "$minors" ]]; then
-    err "no se encontró ningún tag vX.Y.Z; no hay contra qué verificar la declaración (fail closed)."
+    err "no vX.Y.Z tag was found; there is nothing to verify the declaration against (fail closed)."
     return
   fi
 
@@ -456,12 +456,12 @@ check_published() {
   fi
 
   if [[ -z "$stable" ]]; then
-    err "no hay ninguna línea STABLE declarada, pero la minor publicada más reciente es $newest."
+    err "no STABLE line is declared, but the most recently published minor is $newest."
   elif [[ "$stable" != "$newest" ]]; then
     if [[ -n "$PENDING_ROTATION" ]]; then
-      note "rotación pendiente: la línea STABLE declarada $stable es la sucesora inmediata de la minor publicada más reciente $newest; el tag v$stable.0 todavía no existe."
+      note "pending rotation: the declared STABLE line $stable is the immediate successor of the most recently published minor $newest; the tag v$stable.0 does not exist yet."
     else
-      err "línea STABLE declarada: $stable; minor publicada más reciente: $newest. La ventana de soporte exige que la STABLE sea la minor vigente (publicar vX.(Y+1).0 rota la anterior a MAINTENANCE)."
+      err "declared STABLE line: $stable; most recently published minor: $newest. The support window requires the STABLE to be the current minor (publishing vX.(Y+1).0 rotates the previous one to MAINTENANCE)."
     fi
   fi
 
@@ -484,7 +484,7 @@ check_published() {
     { if (\$0 != \"\" && !is_declared(\$0)) print }
   ")"
   UNREGISTERED="$unregistered"
-  [[ -z "$unregistered" ]] || err "minors publicadas sin declarar en support.json: $(echo "$unregistered" | tr '\n' ' ') (registralas o marcalas EOL; crearlas es decisión del mantenedor con issue aprobada)."
+  [[ -z "$unregistered" ]] || err "published minors not declared in support.json: $(echo "$unregistered" | tr '\n' ' ') (register them or mark them EOL; creating them is the maintainer's decision with an approved issue)."
 
   # Every declared `latest` is a factual claim (B1, #2060): it must be the
   # NEWEST published patch of its own line, not merely an existing tag. The
@@ -517,20 +517,20 @@ check_published() {
       continue
     fi
     if [[ -n "$newest_line" ]] && pending_publication "$m" "$l" "$newest_line"; then
-      pending_latest+="v$m declara v$l: publicación pendiente (el parche published más nuevo de esa minor es v$newest_line)"$'\n'
+      pending_latest+="v$m declares v$l: pending publication (the newest published patch of that minor is v$newest_line)"$'\n'
       continue
     fi
     if [[ -n "$newest_line" ]]; then
-      stale_latest+="v$m: declarado v$l, el parche published más nuevo es v$newest_line"$'\n'
+      stale_latest+="v$m: declared v$l, the newest published patch is v$newest_line"$'\n'
     else
-      stale_latest+="v$m: declarado v$l, sin ningún parche X.Y.Z publicado"$'\n'
+      stale_latest+="v$m: declared v$l, with no X.Y.Z patch published"$'\n'
     fi
   done < <(jq -r '.lines[] | "\(.minor)\t\(.latest // "(null)")"' "$SUPPORT_JSON" 2>/dev/null)
   # The trailing separator is part of the message: `tr` turns every newline
   # into a space, so the accumulated trailing newline yields the space before
   # the closing period. Stripping it would change the annotation's bytes and
   # the pre-R2-1 gate's output would no longer match byte for byte.
-  [[ -z "$stale_latest" ]] || err "líneas cuyo .latest no es el parche published más nuevo de su minor (sin tag o desactualizado): $(printf '%s' "$stale_latest" | tr '\n' ' ')."
+  [[ -z "$stale_latest" ]] || err "lines whose .latest is not the newest published patch of their minor (no tag or outdated): $(printf '%s' "$stale_latest" | tr '\n' ' ')."
   if [[ -n "$pending_latest" ]]; then
     local p
     while IFS= read -r p; do
@@ -555,9 +555,9 @@ check_published() {
       expected_prev="$(echo "$tracked" | grep -B1 -x -F "$stable" | head -n 1 || true)"
     fi
     if [[ -z "$expected_prev" ]]; then
-      err "línea MAINTENANCE declarada: $maint, pero $stable es la minor publicada más reciente (no hay minor publicada anterior que sostenerla)."
+      err "declared MAINTENANCE line: $maint, but $stable is the most recently published minor (there is no earlier published minor to support it)."
     elif [[ "$maint" != "$expected_prev" ]]; then
-      err "línea MAINTENANCE declarada: $maint; la minor publicada inmediatamente anterior a $stable es $expected_prev."
+      err "declared MAINTENANCE line: $maint; the minor published immediately before $stable is $expected_prev."
     fi
   fi
 }
@@ -604,7 +604,7 @@ esac
 
 if [[ "$ERRORS" -gt 0 ]]; then
   write_summary
-  echo "::error title=$ANNOTATION_TITLE::support.json está en desuso o no verifiable ($ERRORS problema(s)). La declaración de líneas soportadas deriva de los tags publicados y debe coincidir con ellos." >&2
+  echo "::error title=$ANNOTATION_TITLE::support.json is deprecated or not verifiable ($ERRORS problem(s)). The declaration of supported lines derives from the published tags and must match them." >&2
   exit 1
 fi
 echo "OK: soporte declarado coherente (scope=$SCOPE)."
