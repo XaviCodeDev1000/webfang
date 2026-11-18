@@ -406,14 +406,16 @@ impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::Default
         // Stage 3b: the redirect stop always carries the DESTINATION policy.
         // Allowing a private CIDR for the proxy hop never opens literal
         // redirects into that CIDR (ADR-0021 Decision 2).
-        let builder = builder.redirect(redirect_policy_with_policy(
-            dest.allow_loopback,
-            dest.network_policy.clone(),
-        ));
-        // #2500 pin: ambient HTTP_PROXY/HTTPS_PROXY/ALL_PROXY stay ignored on
-        // every client. The explicit config-only declaration is attached
-        // AFTER `.no_proxy()`, so the environment never participates in
-        // routing (ADR-0021 Decision 1).
+        let builder = builder
+            .redirect(redirect_policy_with_policy(
+                dest.allow_loopback,
+                dest.network_policy.clone(),
+            ))
+            // #2500 pin: ambient HTTP_PROXY/HTTPS_PROXY/ALL_PROXY stay
+            // ignored on every client. The explicit config-only declaration
+            // is attached AFTER this call, so the environment never
+            // participates in routing (ADR-0021 Decision 1/2).
+            .no_proxy();
         let builder = match profile.via_proxy {
             // The matcher was built once at `ValidatedProxy` construction from
             // the validated origin; infallible here by construction. The
