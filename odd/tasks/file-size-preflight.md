@@ -11,29 +11,32 @@ no longer holds it).
 
 ## Specs
 
-S1 (deliverables — §11 F1a, verbatim): "Cuatro archivos nuevos: scripts/file_size_preflight.sh (lee
-hard_limit, importa el corpus del guard, emite el bloque con unidad y comando por línea, clasifica por
-predicado, constante P); --simulate (destino ← rangos, sin parser de Rust);
-scripts/test_file_size_preflight.sh; filas en ci_fast_gate_coverage.tsv para el guard y para el
-preflight." And the §11 closing line: "Todo script nuevo se da de alta en el gate en el mismo PR."
+S1 (deliverables — §11 F1a, quoted from the original Spanish criterion, translated): "Four new
+files: scripts/file_size_preflight.sh (reads hard_limit, imports the guard's corpus, emits the block
+with unit and command per line, classifies by predicate, the P constant); --simulate (destination ←
+ranges, no Rust parser); scripts/test_file_size_preflight.sh; entries in ci_fast_gate_coverage.tsv
+for the guard and for the preflight." And the §11 closing line: "Every new script is registered in
+the gate in the same PR."
 Derived concrete surface: `scripts/file_size_preflight.sh` (new) · `scripts/test_file_size_preflight.sh`
 (new, already RED) · `.github/workflows/ci.yml` (2 steps in repo-guards) · `scripts/ci_fast_gate.sh`
 (run_guard + triggered lane_ci) · `scripts/ci_fast_gate_coverage.tsv` (note on the repo-guards row).
 
-S2 (the block — §4.1 verbatim): the preflight "usa el corpus del guard (no lo re-implementa) y emite:
-total, producción, tests, churn, funciones largas, allow, blast radius, solape con PRs abiertos
-(ci_pr_overlap.sh) y una clasificación sugerida de §5". Citation rule (§6 verbatim): "todo número
-lleva su unidad y el comando que lo produce en la misma línea, no en una nota al pie". Key
-`funciones` reserved and empty (§11: "Clave de funciones reservada y vacía si el parser la tolera").
+S2 (the block — §4.1, quoted from the original Spanish criterion, translated): the preflight "uses
+the guard's corpus (it does not re-implement it) and emits: total, production, tests, churn, long
+functions, allow, blast radius, overlap with open PRs (ci_pr_overlap.sh) and a suggested §5
+classification". Citation rule (§6, translated the same way): "every number carries its unit and the
+command that produces it on the same line, not in a footnote". Key `functions` reserved and empty
+(§11's "reserved empty functions key, if the parser tolerates it"; the key was `funciones` until the
+v3.3 rename).
 
 S3 (corpus): `--corpus-literal` prints the guard's `find` expression byte for byte (harness 2.1:
 "--corpus-literal == the guard's find, byte for byte"); the expression is EXTRACTED from the text of
 `scripts/check_file_size.sh` at runtime and the extraction fails with a named cause if the guard
 changes shape (fail-closed). One corpus, one owner: the guard.
 
-S4 (--simulate): §4.3 verbatim: "--simulate toma el plan (destino ← rangos) y calcula el tamaño
-resultante de cada archivo con wc -l total, más cabeceras. Rechaza si algún destino no grandfathered
-supera 500." Plan `<dest>:<FROM>-<TO>[:header=<N>]`; plan keys relative to the parent directory of
+S4 (--simulate): §4.3, quoted from the original Spanish criterion, translated: "--simulate takes
+the plan (destination ← ranges) and computes the resulting size of every file with total wc -l, plus
+headers. It rejects if any non-grandfathered destination exceeds 500." Plan `<dest>:<FROM>-<TO>[:header=<N>]`; plan keys relative to the parent directory of
 the source file's directory (for corpus files: the crate directory). rc: 0 legal ·
 3 ratchet violation (non-grandfathered destination > hard_limit; grandfathered destination > its
 baseline; source ≤ hard_limit not grandfathered → the message points at `--remove`/consolidation) ·
@@ -41,12 +44,12 @@ baseline; source ≤ hard_limit not grandfathered → the message points at `--r
 1 tool failure. The block and `prs` are EMITTED before the verdict: `prs` uses moved clamped to EOF
 (harness 13.6: range 1-3000 over a 900-line file → prs=1).
 
-S5 (the P constant — §6 verbatim): "Aviso en 3000 líneas (add+del); no bloquea. Es una elección de
-política, no un valor derivado... Constante en el preflight [F1a] con esta muestra en un comentario,
-comparador > estricto, y solo cambia a la baja". Sample (the four diffs measured by the 2026-11-17
+S5 (the P constant — §6, quoted from the original Spanish criterion, translated): "Warning at 3000
+lines (add+del); it does not block. It is a policy election, not a derived value... Constant in the
+preflight [F1a] with this sample in a comment, strict > comparator, and it only moves down". Sample (the four diffs measured by the 2026-11-17
 review): 2246 (#2901), 3018 (#2896), 3933 (#2856), 5101 (#2893) — each with its
-`gh pr view <pr> --json additions,deletions` command in the `--budget` output. Formula (§6): "≈ ceil(2 ×
-líneas movidas ÷ P)".
+`gh pr view <pr> --json additions,deletions` command in the `--budget` output. Formula (§6, translated the same way): "≈ ceil(2 ×
+moved lines ÷ P)".
 
 S6 (lexer): the inline-tests span is LEXED, not brace-counted: braces inside strings,
 chars, comments and lifetimes do not move it (harness 7.x, adversarial fixture); an unbalanced file
@@ -60,12 +63,12 @@ are different facts); missing path → rc=1 with a named cause (3.x); path outsi
 tool exercised as a COPY in mktemp sandboxes; `--negation` fails on a correct tree
 ("A harness that cannot fail proves nothing (#2056)").
 
-S8 (predicate classification): suggested `clasificacion` line — `exception` if the file is in
+S8 (predicate classification): suggested `classification` line — `exception` if the file is in
 the baseline's `exceptions` map (documental signal; does NOT waive the limit); `tests-majority` if the
 inline tests exceed 50% of the total; `giant-function` if the file contains
 `allow(clippy::too_many_lines)`. [COVERAGE DECLARATION (owner review, L18): classify by predicate →
 exception, tests-majority, giant-function (the allow attribute, a greppable signal — §5's
-too_many_lines signal needs clippy and lives in the reserved `funciones` key; NO function parser).
+too_many_lines signal needs clippy and lives in the reserved `functions` key; NO function parser).
 NOT classified by predicate (a human call per §5's Signals column) → glued modules, cohesive
 declarative, high risk, architectural → they land on `needs-review`. No classifications are
 fabricated to reach six. **Precedence documented (code, the elif chain in
@@ -87,15 +90,15 @@ reader (the guard's single-reader pattern), fail-closed named statuses (MISSING_
 BAD_JSON, MISSING_HARD_LIMIT, GRANDFATHERED_NOT_OBJECT, ...). The parser does not waive: `exceptions` is
 a classification signal, never a waiver of the limit or the net-zero. [Decision — see L5.]
 
-S11 (acceptance — §11 F1a verbatim): "Reproduce server.rs 2012→360; --simulate rechaza un plan con
-un destino no grandfathered sobre hard_limit; el harness clasifica un fixture de cada tipo de §5;
-test_ci_gate_structure.sh verde. Los archivos nuevos fuera de crates/ requieren la aprobación de
-AGENTS.md (Ask first)." Reconciliation: "Reproduce server.rs 2012→360" — **MET VERBATIM** with
+S11 (acceptance — §11 F1a, quoted from the original Spanish criterion, translated): "Reproduce
+server.rs 2012→360; --simulate rejects a plan with a non-grandfathered destination over hard_limit;
+the harness classifies one fixture of each §5 type; test_ci_gate_structure.sh green. New files
+outside crates/ require AGENTS.md approval (Ask first)." Reconciliation: "Reproduce server.rs 2012→360" — **MET VERBATIM** with
 `--glue` (§4.3's "plus headers" reading): 2012 − 1681 (runs of the real diff) + 29 glue =
 360 exact; see L19. The rest: spot checks on the real repo (total == wc -l, reproducible churn,
 classification of `crates/webfang_mcp/src/mcp_server/params.rs` = exception). Ask-first: APPROVED
-by the owner (paste 2026-11-18: "Mi recomendación es sí, con --simulate en el mismo PR" +
-"esto es el plan de esta mision"; the approval is also recorded in the PR body).
+by the owner (paste 2026-11-18, translated: "My recommendation is yes, with --simulate in the same
+PR" + "this is the plan of this mission"; the approval is also recorded in the PR body).
 
 ## Tasks
 
@@ -129,13 +132,14 @@ policy v3).
 
 L1 (2026-11-18): verbatim request: "vamos a terminar la mision que esta en
 /home/xavi/Projects/Rust/webfang-worktrees/feat-file-size-preflight". Plan pasted by the owner:
-the v3 synthesis ("Actualicé el documento a v3 con todo lo que reportó M0, salvo una cosa que aún tiene
-que cerrar el maintainer. Mi recomendación es abrir F1a ahora, con --simulate en el mismo PR.") +
-the full v3 policy ("esto es el plan de esta mision").
+the v3 synthesis (translated: "I updated the document to v3 with everything M0 reported, except one
+thing the maintainer still has to close. My recommendation is to open F1a now, with --simulate in the
+same PR.") + the full v3 policy ("this is the plan of this mission").
 
 L2 (2026-11-18): state at open: branch at aba0e9cf with NO own commits; harness
-`scripts/test_file_size_preflight.sh` untracked (RED confirmed: rc=1, "falta
-...file_size_preflight.sh -- F1a todavia no esta escrito"); no mission doc. FF-merge to 0d2c16c2.
+`scripts/test_file_size_preflight.sh` untracked (RED confirmed: rc=1, "missing
+...file_size_preflight.sh -- F1a not written yet"; that day's message was Spanish, translated here);
+no mission doc. FF-merge to 0d2c16c2.
 M0 re-measured at F1a open (as §11 orders): jq over the baseline → hard_limit=500, grandfathered=86,
 exceptions=4 (`crates/webfang_mcp/src/mcp_server/params.rs`, `crates/webfang_mcp/src/mcp_server/provenance.rs`,
 `crates/webfang_core/src/infrastructure/platform/windows_console.rs`, `crates/webfang_mcp/src/mcp_server/handlers/ai.rs`)
@@ -143,11 +147,11 @@ exceptions=4 (`crates/webfang_mcp/src/mcp_server/params.rs`, `crates/webfang_mcp
 confirmed by full reading (the repo-guards row did not name the guard).
 
 L3: the .tsv reconciliation: the schema (test_ci_gate_structure.sh, #2559) is ONE ROW PER
-gate.needs JOB — "filas en el .tsv para el guard y para el preflight" (§11) is met by declaring the
+gate.needs JOB — "entries in the .tsv for the guard and for the preflight" (§11, translated) is met by declaring the
 pair in the note of the existing repo-guards row, and harness 15.3 pins that the scripts never
 become rows of their own (a per-script row would break test_ci_gate_structure.sh).
 
-L4: the classification reconciliation: "el harness clasifica un fixture de cada tipo de §5" (§11) —
+L4: the classification reconciliation: "the harness classifies one fixture of each §5 type" (§11, translated) —
 the signals of glued modules, cohesive declarative, high risk and architectural are semantic
 (§5's Signals column), not measurable by an offline script; the harness pins one fixture per
 MECHANICAL type (exception, tests-majority, giant-function) + the `needs-review` fallback. The
@@ -166,7 +170,7 @@ MODE="format" and overwrote "simulate": the simulated flow died after the block 
 formatting (rc=0 with no plan rows or verdicts) — --format no longer clobbers a simulate.
 (b) The lexer entered the CHR state while consuming a complete inline char literal, and the
 state machine got trapped eating the line until the next quote (the adversarial fixture reported
-"profundidad de llaves 1") — char literals are consumed inline without changing state and the
+"brace depth 1" — that day's tool message was Spanish, translated here) — char literals are consumed inline without changing state and the
 CHR state became unreachable, removed. (c) `r#"{"#`: the hashes go BEFORE the opening
 quote; the scanner looked for the quote directly and fell into a plain string. Harness 56/58.
 
@@ -207,8 +211,8 @@ pre-split content in a sandbox: simulated source **331** = 2012 − 1681 (the EX
 component); real 360 = 331 + **29 glue lines** the same commit added
 (numstat): 2012 − 1681 + 29 = 360, exact reconciliation with a measured decomposition. prs =
 ceil(2×1681/3000) = **2**; real = 1 PR → real BELOW the estimate (§6 only demands a re-plan if
-the real exceeds it by >1). And the tool REFUSED the plan with rc=3: `child_8.rs quedaría en
-943 > hard_limit (500)` — the same call the real split made (the 943 test lines were spread
+the real exceeds it by >1). And the tool REFUSED the plan with rc=3: `child_8.rs would stay at
+943 > hard_limit (500)` (that day's message was Spanish, translated here) — the same call the real split made (the 943 test lines were spread
 across 6 child files). The sandbox stayed unwritten (only server.rs). Harness 10.x keeps
 covering the simulate==real-cut equality line by line over fixtures.
 
@@ -288,7 +292,8 @@ fixtures; the semantic ones (glued modules, cohesive declarative, high risk, arc
 are a maintainer decision → `needs-review`. No classifications are fabricated to reach six.
 
 L19 (2026-11-18, round 3 — --glue delivers §4.3 and the criterion returns to verbatim): the
-owner pointed out that §4.3 already said "con wc -l total, MÁS CABECERAS": the tool was
+owner pointed out that §4.3 already said "with total wc -l, PLUS HEADERS" (the original criterion
+was Spanish, translated): the tool was
 incomplete and the policy had been adjusted to cover it. Implemented `--glue <file>=<N>`: lines NOT
 moved that the split adds to the source or to a plan destination (imports, re-exports); glue
 on a file the plan does not touch or a negative N → defect rc=4 (17.6/17.7); the destination sums
@@ -351,7 +356,7 @@ revisar, tests-mayoria, funcion-gigante, exception, na, in_corpus, the block key
 (add+del)) — changing them is an interface change and that decision is the owner's (closed
 list presented). Expectation 3.2 was updated IN THE SAME COMMIT as the strings it asserts.
 The remaining Spanish in the preflight were CITATIONS of the Spanish normative text (§5 type
-names and §4.3's "más cabeceras"). Then: the origin/main merge (bcd4b345, 78 files, 0
+names and §4.3's "plus headers"). Then: the origin/main merge (bcd4b345, 78 files, 0
 text conflicts — #2922 touched ci.yml and ci_fast_gate.sh in regions disjoint from mine).
 Post-merge re-measure: ratchet OK, harness 73/73, structure 24 assertions, .tsv grep=1,
 AGENTS.md now **647/40933** → margin **+3 lines / +27 bytes** (the sweep grew the router:
