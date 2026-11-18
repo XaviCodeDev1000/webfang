@@ -524,6 +524,14 @@ jobs:
       # retry is worse than no retry — it buys false confidence.
       - name: Release reconcile semantics harness
         run: bash scripts/test_release_reconcile.sh
+      # Semantics harness for the release-branch prune (#2918): proves on
+      # mktemp fixtures and a fake gh that a branch owned by an OPEN PR survives
+      # even when old, that the 24h floor closes release-plz's push→PR race,
+      # that a failed listing is fail-closed with zero deletions, and that 250
+      # branches across pages are all considered (the 191-branch case). Offline,
+      # no real branch touched.
+      - name: Release branch prune semantics harness
+        run: bash scripts/test_prune_release_branches.sh
       # Release provenance L1 acceptance matrix (I.1–I.16): proves the gate
       # enforces identity (annotated bot tag), version match, lineage (main ancestor),
       # publish TOCTOU, and ruleset — with fail-closed on every drift/mismatch.

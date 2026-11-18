@@ -1,0 +1,82 @@
+# Release branch cleanup — the backstop for branches release-plz cannot delete.
+#
+# THE PROBLEM, measured 2026-11-18 (webfang#2918)
+#   release-plz REGENERATES the Release PR on every push to `main`, and every
+#   regeneration creates a NEW branch with a fresh timestamp. The PR it
+#   supersedes is left CLOSED and UNMERGED, and its branch is never deleted:
+#   `delete_branch_on_merge: true` acts on merged PRs only.
+#
+#     267 PRs with head `chore/release-*`
+#       = 62 merged (branch auto-deleted)
+#       + 205 closed unmerged (branch orphaned)
+#     191 of those branches were still alive out of 200 remote branches.
+#
+#   This workflow is the BACKSTOP, not the primary mechanism. The primary path
+#   is the merge that deletes its own branch; this only removes what that path
+#   structurally cannot reach.
+#
+# WHY IT IS A DAILY SWEEP AND NOT A JOB IN release-plz.yml
+#   The orphan is created by the NEXT release-plz run, not by the one that
+#   merged. Putting the prune inside release-plz would make it depend on the
+#   same trigger that creates the mess, and a run that fails before the prune
+#   step would leave the branch behind. An independent schedule has no such
+#   coupling — the same shape, and the same reason, as release-reconcile.yml.
+#
+# WHY secrets.GITHUB_TOKEN AND NOT THE RELEASE-PLZ APP TOKEN
+#   The App token exists because tag and pull_request events created with
+#   GITHUB_TOKEN are suppressed by GitHub (v2.1.1, #1228). Here suppression is
+#   the desired behavior: deleting a branch must not start CI. So the default
+#   token is both sufficient (contents:write deletes the ref, pull-requests:read
+#   resolves the open heads) and strictly narrower.
+#
+# THE PREDICATE LIVES IN scripts/prune-release-branches.sh, NOT HERE
+#   A bash block embedded in YAML is not testable. The script carries the
+#   three-part predicate (strict name pattern, no open PR, minimum age) and its
+#   own semantics harness, scripts/test_prune_release_branches.sh, which
+#   mutation-checks each half of the rule. The nightly lane in ci.yml runs it.
+
+name: Release branch cleanup
+
+on:
+  schedule:
+    # Daily, off the hour and clear of the other scheduled workflows
+    # (release-reconcile 06:23, ci-health 07:00, benches 04:30).
+    - cron: "7 8 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List the orphaned branches without deleting them"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  # Two sweeps racing would both resolve the same candidates and then fight
+  # over the same refs. Queue instead: a delayed prune is harmless, a
+  # half-applied one is not.
+  group: release-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune orphaned release branches
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'XaviCodeDev1000/webfang' }}
+    timeout-minutes: 10
+    permissions:
+      contents: write # delete the branch refs
+      pull-requests: read # resolve which heads an open PR still owns
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          # Only the script is needed; no history, no tags, no git auth.
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prune release branches with no open pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Unset on `schedule`, so the expression resolves to "false" there.
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: bash scripts/prune-release-branches.sh

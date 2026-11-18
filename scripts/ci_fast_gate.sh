@@ -716,6 +716,16 @@ EOF
   else
     skip_step "release pins harnesses" "no release pins files changed"
   fi
+  # Release-branch prune (#2918): the orphaned `chore/release-*` sweep. Same
+  # class as the release-pins harnesses — a predicate whose wrong half is
+  # invisible (deleting an open PR's head branch closes the PR, and a sweep that
+  # reads only page one looks green while deleting a fifth of the problem).
+  # Hermetic: mktemp fixtures and a fake gh, no network, no real branch.
+  if grep -Eq '^(scripts/(prune-release-branches|test_prune_release_branches)\.sh|\.github/workflows/(release-branch-cleanup|ci)\.yml)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "release branch prune semantics (offline)" bash scripts/test_prune_release_branches.sh
+  else
+    skip_step "release branch prune harness" "no release branch prune files changed"
+  fi
   # Release-commits filter (release-plz.toml): the same class as the release
   # pins harnesses above — the thing that decides whether a commit may cut a
   # release is a TOML string that nothing compiles, and its failure is silent.
