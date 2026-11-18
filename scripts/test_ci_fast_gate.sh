@@ -391,7 +391,8 @@ make_fixture() {
     test_warn_lock_only_release.sh \
     test_mcp_surface_wiring.sh test_merge_when_green_breaking.sh \
     test_ci_merge_when_green.sh test_apply_tag_ruleset.sh test_ci_metrics.sh \
-    test_ci_mutant_shards.sh test_file_size.sh test_bug_discovery_report.sh \
+    test_ci_mutant_shards.sh test_file_size.sh test_file_size_preflight.sh \
+    test_bug_discovery_report.sh \
     test_docs_claims.sh test_docs_claims_wiring.sh \
     test_agents_doc.sh test_agents_doc_wiring.sh; do
     mkdir -p "$dir/scripts/$(dirname "$harness")"
@@ -713,6 +714,28 @@ printf '# touched\n' >>"$D/scripts/ordinary.sh"
 run_gate "$D" --base-ref HEAD --head-ref HEAD
 has "$GATE_OUT" "PASS: bash syntax (changed scripts)" \
   "B51: the control .sh file still goes through the syntax step"
+
+# ── 7b. every harness lane_ci runs must be stubbed in the B52 fixture ────────
+# NEGATION (F1a, PR #2926): wiring a NEW semantics harness into lane_ci (the
+# file-size preflight's) without adding it to make_fixture's no-op list made
+# B52/B53 fail on a missing script — a reason that has nothing to do with the
+# lane shape those cases test (see the make_fixture comment). The stub list is
+# hand-maintained, so this check pins it: every `run_step`-invoked harness in
+# lane_ci must have a stub, or this harness goes red BEFORE the lane-shape
+# cases can fail for the wrong reason.
+FIXTURE_STUBS="$(sed -n '/^  for harness in/,/; do$/p' "$REPO_ROOT/scripts/test_ci_fast_gate.sh" \
+  | grep -oE '[A-Za-z0-9_/.-]+\.sh' | while read -r p; do basename "$p"; done | sort -u)"
+LANE_CI_HARNESSES="$(awk '/^lane_ci\(\)/{f=1;next} f && /^}/{f=0} f && /run_step /{ if (match($0, /[A-Za-z0-9_\/.-]+\.sh/)) print substr($0, RSTART, RLENGTH) }' "$REPO_ROOT/scripts/ci_fast_gate.sh" \
+  | while read -r p; do basename "$p"; done | sort -u)"
+MISSING_STUBS=""
+while IFS= read -r h; do
+  printf '%s\n' "$FIXTURE_STUBS" | grep -qxF "$h" || MISSING_STUBS="$MISSING_STUBS $h"
+done <<< "$LANE_CI_HARNESSES"
+if [ -z "$MISSING_STUBS" ]; then
+  ok "every lane_ci harness is stubbed in the B52 fixture ($(printf '%s\n' "$LANE_CI_HARNESSES" | wc -l) harnesses)"
+else
+  bad "lane_ci harnesses missing from the B52 fixture stub list:$MISSING_STUBS"
+fi
 
 # ── 8. B52: the FULL lane runs the CI lane's semantics harnesses ────────────
 # NEGATION: pre-fix `all=true` ran `lane_full`, which never ran the CI lane's
