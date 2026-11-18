@@ -42,6 +42,7 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
 | ID | Specs | Scope | Route | Status | Commit |
 |----|-------|-------|-------|--------|--------|
 | A1 | S1, S3 | Fase A — Governance text: `AGENTS.md` (3 sites: § Project rules, § Error stratification, pre-PR checklist) + `README.md` § Architecture rules | inline | done | `2e8befd9` |
+| A1b | S1, S3 | Fase A — Governance hardening: broaden the `AGENTS.md` rule to every repository-facing artifact, and remove the competing "Spanish message" rule in `docs/error-classification-matrix.md` with an amendment note | inline | done | `8347f463` |
 | A2 | S2, S3 | Fase A — Comments and doc-comments in 25 files under `crates/**/src/**`; literals and assertions untouched and still deferred to Fase C | inline | done | `693f49c1` |
 | A3a | S2, S3 | Fase A — `docs/src/SUMMARY.md` chapter title | inline | done | pending |
 | A3b | S2, S3 | Fase A — pure-prose docs: `architecture/ai-providers-design.md` (149), `adr/0004-onnx-local-removal.md` (106), `research/ci-test-playbook.md` (42), `security/prompt-injection-policy.md` (37), `adr/README.md` (33), `llm-backend-decision.md` (29), `research/missing-docs-audit.md` (20), `src/ai-onnx-migration.md` (18) | inline | pending | — |
@@ -151,3 +152,18 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
   `src/SUMMARY.md` was pure prose, and it is done. The remaining A3b prose block is ~534
   lines across 8 files; the largest are `architecture/ai-providers-design.md` (149) and
   `adr/0004-onnx-local-removal.md` (106).
+
+- **L11 (2026-11-18)** — A1b, governance hardening. The owner's point: `AGENTS.md` is the
+  cause of every agent's behavior, so a narrow rule is not enough. Two gaps were closed:
+  - The A1 wording ("user-facing messages, errors, logs and tracing fields") did not cover
+    comments, docs or commit messages, so an agent could keep writing Spanish comments
+    without breaking it. The rule now covers **every repository-facing artifact** and states
+    that the Spanish strings still in the tree are a migration in progress, not a precedent.
+  - `AGENTS.md` delegates error semantics to `docs/error-classification-matrix.md` ("Full
+    matrix and exit-code rules"). That document is a **closed contract** and still said
+    "Spanish message on stderr" (twice, in the MCP projection table). It was the competing
+    normative source that would have kept agents emitting Spanish errors. Both cells now read
+    "message"/"text", and an amendment note was added under the Status line: no exit code,
+    class or mapping changed.
+  - Verified: no other agent-instruction surface mentions Spanish (`.kilo/`, `.github/`,
+    `.agents/skills/`, `README.md`, root Markdown).
