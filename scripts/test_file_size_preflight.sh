@@ -137,7 +137,7 @@ new_sandbox() {
   cp "$BASELINE" "$SB/scripts/quality-baselines.json"
 }
 
-# write_baseline <ruta:conteo>... [exc:ruta ...] -- UN mapa grandfathered;
+# write_baseline <path:count>... [exc:path ...] -- a grandfathered map;
 # exc:path adds the entry to the exceptions map (the guard's parser tolerates it:
 # it only validates grandfathered and hard_limit).
 write_baseline() {
@@ -147,7 +147,7 @@ out, specs = sys.argv[1], sys.argv[2:]
 gf, exc = {}, {}
 for s in specs:
     if s.startswith("exc:"):
-        exc[s[4:]] = "mantainer: declarativo cohesivo (fixture)"
+        exc[s[4:]] = "maintainer: cohesive declarative (fixture)"
     else:
         path, count = s.rsplit(":", 1)
         gf[path] = int(count)
@@ -168,7 +168,7 @@ write_code() {
   done
 }
 
-# append_test_mod <archivo> <n>: #[cfg(test)] + mod tests { ... } => n+4 lines
+# append_test_mod <file> <n>: #[cfg(test)] + mod tests { ... } => n+4 lines
 append_test_mod() {
   local f="$1" n="$2" i
   {
@@ -447,6 +447,14 @@ run_pre --simulate "src/big.rs:1-600" --format "crates/webfang_x/src/g.rs"
 expect_rc "11.1 a destination over hard_limit is rejected (rc=3)" 3 "$RC" "$ERRF"
 expect_match "11.2 ... naming the destination and the limit" "$OUT$(cat "$ERRF" 2>/dev/null)" "hard_limit|500"
 
+new_sandbox c11b
+write_code "$SB/crates/webfang_x/src/g2.rs" 600
+write_code "$SB/crates/webfang_x/src/d2.rs" 100
+write_baseline "crates/webfang_x/src/d2.rs:150"
+run_pre --simulate "src/d2.rs:1-100" --format "crates/webfang_x/src/g2.rs"
+expect_rc "11.4 a grandfathered DESTINATION over its own cap is rejected (rc=3)" 3 "$RC" "$ERRF"
+expect_match "11.5 ... naming its own baseline cap" "$OUT$(cat "$ERRF" 2>/dev/null)" "its baseline \(150\)"
+
 new_sandbox c12
 write_code "$SB/crates/webfang_x/src/h.rs" 540
 write_baseline "crates/webfang_x/src/h.rs:540"
@@ -682,6 +690,25 @@ expect_match "19.4 ... and the English no-arguments mode line" "$OUT" "^\s*\(no 
 expect_match "19.5 budget_diff carries P with unit and comparator" "$BUDGET_OUT" "^budget_diff	3000	\(add\+del\)	warning at diff strictly > 3000"
 expect_match "19.6 a sample row carries its gh command" "$BUDGET_OUT" "^sample	2246	\(add\+del\)	gh pr view 2901"
 expect_match "19.7 the reserved functions row is emitted" "$FORMAT_OUT" "^functions		-	reserved"
+# 19.8: the closed list also covers the SOURCE, not only the fixtures' output: a key added in
+# a branch no fixture exercises (an emit* first argument) turns this red too.
+SOURCE_KEYS="$(grep -oE 'emit[0-9]? +"[a-z_]+"' "$PRE" | sed -E 's/emit[0-9]? +"([a-z_]+)"/\1/' | sort -u)"
+BAD_SOURCE_KEYS="$(printf '%s\n' "$SOURCE_KEYS" | grep -cvE "$CLOSED_KEYS")" || BAD_SOURCE_KEYS=0
+expect_eq "19.8 every emit* first argument in the source is in the closed list" "${BAD_SOURCE_KEYS:-0}" "0"
+expect_match "19.9 the source key set is fed and matches the emitted set" "$SOURCE_KEYS" "(classification|functions|sample|budget_diff)"
+expect_eq "19.10 the source key set equals the emitted key set" "$(printf '%s\n' "$SOURCE_KEYS" | sort)" "$(printf '%s\n' "$KEYS" | sort)"
+
+new_sandbox c27
+for i in $(seq 1 4); do echo "fn f$i() {"; done > "$SB/crates/webfang_x/src/u6.rs"
+run_pre --format "crates/webfang_x/src/u6.rs"
+expect_match "19.11 an unclosed-brace file names the brace-depth cause in English" "$OUT" "^inline_tests_note	the file ends in an unclosed state \(brace depth [0-9]+\)"
+new_sandbox c28
+printf 'fn f() {
+}
+}
+' > "$SB/crates/webfang_x/src/u7.rs"
+run_pre --format "crates/webfang_x/src/u7.rs"
+expect_match "19.12 an extra-brace file names the opener cause in English" "$OUT" "^inline_tests_note	closing brace without an opener"
 
 # --- summary ------------------------------------------------------------------
 

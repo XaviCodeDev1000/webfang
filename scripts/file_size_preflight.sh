@@ -322,7 +322,7 @@ for raw_line in lines:
             elif c == "}":
                 depth -= 1
                 if depth < 0:
-                    reason = "llave de cierre sin apertura"
+                    reason = "closing brace without an opener"
             buf.append(c)
             i += 1
         elif state == LC:
@@ -383,7 +383,7 @@ for raw_line in lines:
 
 if depth != 0 or state in (BC, STR, RAW) or reason is not None:
     reason = reason or "the file ends in an unclosed state (%s)" % STATE_NAMES.get(
-        state, "profundidad de llaves %d" % depth
+        state, "brace depth %d" % depth
     )
     print("INDETERMINATE\t%s" % reason)
     sys.exit(0)
@@ -640,8 +640,9 @@ case "$MODE" in
     [ "$MODE" = "format" ] && exit 0
 
     # --- simulate: plan arithmetic first, then the verdict -------------------
-    # Policy 4.3: "--simulate toma el plan (destino ← rangos) y calcula el
-    # resulting size of each file with wc -l total, plus headers."
+    # Policy 4.3 (the original criterion is Spanish, translated): "--simulate takes the plan
+    # (destination <- ranges) and computes the resulting size of every file with total wc -l,
+    # plus headers."
     PARENT="$(dirname "$ABSPATH")"
     BASE_DIR="$(dirname "$PARENT")"
     [ "$BASE_DIR" = "$PARENT" ] && BASE_DIR="$PARENT"  # a root-level file
@@ -738,7 +739,7 @@ case "$MODE" in
       [ -n "${GLUE["$dest"]:-}" ] && NOTE="$NOTE + glue ${GLUE[$dest]}"
       if [ -n "${GF["$DEST_REL"]:-}" ]; then
         CAP="${GF["$DEST_REL"]}"
-        CAP_DESC="su baseline ($CAP)"
+        CAP_DESC="its baseline ($CAP)"
       else
         CAP="$BASELINE_LIMIT"
         CAP_DESC="hard_limit ($CAP)"

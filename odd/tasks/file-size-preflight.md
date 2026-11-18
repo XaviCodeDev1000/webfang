@@ -64,7 +64,7 @@ tool exercised as a COPY in mktemp sandboxes; `--negation` fails on a correct tr
 ("A harness that cannot fail proves nothing (#2056)").
 
 S8 (predicate classification): suggested `classification` line — `exception` if the file is in
-the baseline's `exceptions` map (documental signal; does NOT waive the limit); `tests-majority` if the
+the baseline's `exceptions` map (documentation-only signal; does NOT waive the limit); `tests-majority` if the
 inline tests exceed 50% of the total; `giant-function` if the file contains
 `allow(clippy::too_many_lines)`. [COVERAGE DECLARATION (owner review, L18): classify by predicate →
 exception, tests-majority, giant-function (the allow attribute, a greppable signal — §5's
@@ -130,8 +130,8 @@ policy v3).
 
 ## Log
 
-L1 (2026-11-18): verbatim request: "vamos a terminar la mision que esta en
-/home/xavi/Projects/Rust/webfang-worktrees/feat-file-size-preflight". Plan pasted by the owner:
+L1 (2026-11-18): verbatim request (owner's paste, translated): "we are going to finish the
+mission that is in /home/xavi/Projects/Rust/webfang-worktrees/feat-file-size-preflight". Plan pasted by the owner:
 the v3 synthesis (translated: "I updated the document to v3 with everything M0 reported, except one
 thing the maintainer still has to close. My recommendation is to open F1a now, with --simulate in the
 same PR.") + the full v3 policy ("this is the plan of this mission").
