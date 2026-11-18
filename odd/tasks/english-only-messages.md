@@ -5,6 +5,10 @@ in-scope Spanish text of the repository to English. Branch `feat/english-only-me
 Delivery: `ask-on-risk` (breaking-surface decision belongs to the maintainer).
 Test runner: `cargo nextest run` + `cargo insta review` + `bash scripts/ci_fast_gate.sh`.
 
+**Sequencing (owner decision, L7): easiest first, runtime-risk last.** Fase A carries no
+runtime risk (rule text, comments, prose). Fase B touches tooling and scripts. Fase C is the
+breaking surface (CLI and domain error strings) and is deferred to a later session.
+
 ## Specs
 
 - **S1 — Remove the convention.** Owner: *"Quiero eliminar esta convencion y utilizar
@@ -37,16 +41,18 @@ Test runner: `cargo nextest run` + `cargo insta review` + `bash scripts/ci_fast_
 
 | ID | Specs | Scope | Route | Status | Commit |
 |----|-------|-------|-------|--------|--------|
-| T1 | S1, S3 | Fase 0 — Governance: `AGENTS.md` (3 sites), `README.md`, `typos.toml`, `.github/ISSUE_TEMPLATE/*.yml` (4), `.github/support.json` `eol_reason` strings | inline | pending | — |
-| T2 | S2, S3 | `webfang_core/domain/` — `auth_source.rs` (94), `keyring_store.rs` (51), `local_secret_store.rs` (29), `proxy_config.rs`, `options_spec/`, `error.rs`, `value_objects.rs`, `ssrf_guard.rs`, `http_error.rs`, `body_cap.rs`, plus inline `#[cfg(test)]` assertions | inline | pending | — |
-| T3 | S2, S3 | `webfang_core/infrastructure/` — `llm/provider.rs` (48), `wizard/identity.rs` (44), `llm/remote_embedding.rs` (35), `persistence/sqlite.rs` (22), `semantic_cleaner.rs`, `downloader/**`; `obsidian/metadata.rs` stopword list is **not** prose and needs its own decision | inline | pending | — |
-| T4 | S2, S3 | `webfang_core/application/` + `webfang_core/cli/` — `cli/args/crawler.rs` (20), `cli/commands/connect.rs` (22), `cli/commands/blocks.rs` (15), `cli/preflight/normalization.rs`, `cli/error.rs`, `crawler/collector.rs` (17) | inline | pending | — |
-| T5 | S2, S3 | `webfang_mcp/**` (56 files) — `bin/mcp_server_http.rs`, `mcp_server/handlers/export/**`, `mcp_server/provenance.rs`, unit tests inside `src/` | inline | pending | — |
-| T6 | S2, S3 | `webfang_cli/**`, `webfang_test_utils/**` (own prose only), `webfang_benchmark/src/error.rs` (update the exemption comment; its text is already English) | inline | pending | — |
-| T7 | S2, S3 | Integration tests + snapshots — 23 files under `crates/*/tests/` (194 Spanish lines) and 34 `.snap` files (29 core, 5 mcp) via `cargo insta review` | inline | pending | — |
-| T8 | S2, S3 | `scripts/*.sh` (57 files, ~1070 lines) — remove `# STYLE:` comments and translate error strings, keeping each `test_*.sh` assertion with its script | inline | pending | — |
-| T9 | S2, S3 | `docs/**` (14 files) + `SUPPORT.md` (regenerate from `.github/support.json`) + root `REPORTE.md`, `COMPATIBILITY-MATRIX.md` | inline | pending | — |
-| T10 | S2, S3, S4 | Final verification: `bash scripts/ci_fast_gate.sh`, full pre-commit gate, `cargo nextest run`, `typos`, coverage report; report the breaking surface to the maintainer | inline | pending | — |
+| A1 | S1, S3 | Fase A — Governance text: `AGENTS.md` (3 sites: § Project rules, § Error stratification, pre-PR checklist) + `README.md` § Architecture rules | inline | done | pending |
+| A2 | S2, S3 | Fase A — Comments and doc-comments in `crates/**/src/**` (353 comment lines); literals and assertions untouched | inline | pending | — |
+| A3 | S2, S3 | Fase A — `docs/**` prose (14 files) + root `REPORTE.md`, `COMPATIBILITY-MATRIX.md`. Files that quote exact CLI strings move with their code (Fase C) | inline | pending | — |
+| B1 | S1, S3 | Fase B — `.github/ISSUE_TEMPLATE/*.yml` (4) + `.github/support.json` `eol_reason` strings. Gated by `AGENTS.md` "Ask first: Modifying CI/CD (`.github/`)" | inline | blocked | — |
+| B2 | S2, S3 | Fase B — `scripts/*.sh` (57 files, ~1070 lines): `# STYLE:` comments + error strings, each `test_*.sh` assertion moving with its script | inline | pending | — |
+| B3 | S1, S3 | Fase B — `typos.toml`: prune the Spanish allowlist. Must run after the Spanish text it allowlists is gone, otherwise `typos` fails | inline | pending | — |
+| C1 | S2, S3 | Fase C — `webfang_core/domain/` error strings (highest breaking risk) | inline | pending | — |
+| C2 | S2, S3 | Fase C — `webfang_core/cli/` + `application/` error strings | inline | pending | — |
+| C3 | S2, S3 | Fase C — `webfang_mcp/**` strings | inline | pending | — |
+| C4 | S2, S3 | Fase C — 23 integration test files + 34 `.snap` via `cargo insta review` | inline | pending | — |
+| C5 | S2, S3 | Fase C — `obsidian/metadata.rs` stopword list: product decision, not a translation | inline | blocked | — |
+| C6 | S2, S3, S4 | Fase C — final verification + breaking-surface report to the maintainer | inline | pending | — |
 
 ## Log
 
@@ -79,13 +85,13 @@ Test runner: `cargo nextest run` + `cargo insta review` + `bash scripts/ci_fast_
   - `crates/webfang_core/src/infrastructure/obsidian/metadata.rs` holds a Spanish
     **stopword list** (`"el", "la", "los", "las", …`). That is feature data, not UI copy;
     translating it changes `search_obsidian` behavior for Spanish content. It requires a
-    product decision, not a translation (T3).
+    product decision, not a translation (C5).
   - `crates/webfang_test_utils/src/lib.rs` contains simulated OS error text in fixtures
     (Windows paths). It is fake foreign data, not a message of ours: do not translate.
   - No CI job enforces Spanish. The real enforcement is the test assertions plus the
     `typos` allowlist, so S1 must remove the allowlist as well as the rule text.
   - `webfang_benchmark/src/error.rs` documents its own exemption from the rule; its text
-    is already English and only the comment needs updating (T6).
+    is already English and only the comment needs updating (B2/A2).
 
 - **L5 (2026-11-18)** — Environment. Worktree `~/Projects/Rust/webfang-worktrees/feat-english-only-messages`
   (directory name satisfies the identity proxy: `basename` = branch with `/` → `-`).
@@ -95,5 +101,18 @@ Test runner: `cargo nextest run` + `cargo insta review` + `bash scripts/ci_fast_
   worktree and `head` = `f3b64026b340`. Base commit `f3b64026`; `main` has since
   advanced to `98d4d9e2` (one commit, `test(ai)` #2913), which does not overlap this scope.
 
-- **L6 (2026-11-18)** — Next step: T1 (Fase 0, governance) as the first work unit,
-  because every later slice depends on the rule no longer saying the opposite.
+- **L6 (2026-11-18)** — First sequence drafted as T1–T10 by layer.
+
+- **L7 (2026-11-18)** — Owner re-sequenced by risk, verbatim:
+  > empezamos con lo mas facil de hacer, dejamos lo complicado por ejemplo "los strings de
+  > error del CLI" para el final o otra sesion
+
+  The T1–T10 list was rewritten as A/B/C: Fase A (rule text, comments, prose) has no
+  runtime risk; Fase B (scripts, `.github`, `typos`) touches tooling; Fase C (CLI and
+  domain error strings, tests, snapshots) is the breaking surface and moves to the end or
+  to another session. `typos.toml` (old T1) moved to B3 because pruning the allowlist
+  before the Spanish text is gone would break the `typos` check.
+
+- **L8 (2026-11-18)** — A1 executed: `AGENTS.md` lines 84, 168 and 561 and `README.md`
+  line 511 now state English-only. No code, no test and no snapshot touched, so no build
+  or suite run applies to this unit; the change is prose-only.
