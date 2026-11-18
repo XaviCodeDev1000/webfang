@@ -1,5 +1,5 @@
-//! Tests extraídos del hub `server.rs` por tema (PR 1 de #2584, movimiento puro).
-//! Los cuerpos son verbatim del módulo de tests inline original.
+//! Tests extracted from the `server.rs` hub by topic (PR 1 of #2584, pure move).
+//! Bodies are verbatim from the original inline test module.
 
 use super::{
     plaintext_bind_warning, require_auth_for_external_bind, require_auth_or_explicit_anonymous,

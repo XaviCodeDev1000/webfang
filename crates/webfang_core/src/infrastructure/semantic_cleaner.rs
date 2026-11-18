@@ -1,8 +1,8 @@
-//! Semantic cleaner implementation — Infrastructure layer (ADR-0004 paso 6).
+//! Semantic cleaner implementation — Infrastructure layer (ADR-0004 step 6).
 //!
 //! Implements the sealed [`SemanticCleaner`] domain trait on top of an erased
 //! [`EmbeddingPort`], replacing the ONNX-tied implementation that lived in
-//! `webfram_ai` (deleted in ADR-0004 paso 6). The cleaner itself holds no
+//! `webfram_ai` (deleted in ADR-0004 step 6). The cleaner itself holds no
 //! inference concerns: it extracts text, chunks by paragraph, embeds through
 //! the port, and filters by relevance — the port decides whether the backend
 //! is a remote OpenAI-compatible endpoint or any future local stack.
@@ -30,9 +30,9 @@ use crate::error::SemanticError;
 /// Threshold at which filtering is reported as aggressive (>50 % discarded).
 const AGGRESSIVE_FILTER_RATIO: f64 = 0.5;
 
-/// Semantic cleaner over an erased [`EmbeddingPort`] (ADR-0004 paso 6).
+/// Semantic cleaner over an erased [`EmbeddingPort`] (ADR-0004 step 6).
 ///
-/// Clonable: the cloned cleaner shares the same port `Arc`.
+/// Cloneable: the cloned cleaner shares the same port `Arc`.
 #[derive(Clone)]
 pub struct SemanticCleanerImpl {
     embedding_port: std::sync::Arc<dyn EmbeddingPort>,
@@ -601,12 +601,12 @@ mod tests {
         assert_eq!(port.batch_calls(), 1);
     }
 
-    // ADR-0004 bisection: a batch failure (p. ej. HTTP 413 por payload grande)
-    // se recupera troceando la tanda hasta aislar el contenido defectuoso.
+    // ADR-0004 bisection: a batch failure (e.g. HTTP 413 from a large payload)
+    // is recovered by splitting the batch until the offending content is isolated.
     #[tokio::test]
     async fn embed_bisects_batch_on_failure() {
-        // Falla sólo cuando el batch trae más de un contenido: simula un 413
-        // por payload grande que desaparece al trocear.
+        // Fails only when the batch carries more than one item: simulates a
+        // 413 from a large payload that disappears once split.
         let port = Arc::new(FakeEmbeddingPort::failing_batches_larger_than(1));
         let contents = vec!["uno".to_string(), "dos".to_string()];
 
@@ -623,8 +623,8 @@ mod tests {
         );
     }
 
-    // Si ni siquiera un contenido aislado se puede embedder, el error se
-    // propaga: nunca silencio.
+    // If even an isolated item cannot be embedded, the error propagates:
+    // never silence.
     #[tokio::test]
     async fn embed_propagates_when_every_item_fails() {
         let port = Arc::new(FakeEmbeddingPort::failing_batches_larger_than(0));

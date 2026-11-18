@@ -65,11 +65,11 @@ pub use url_filter::{extract_domain, is_allowed, is_excluded, is_internal_link, 
 
 #[deprecated(
     since = "0.5.0",
-    note = "Tipos de progreso migrados a webfang_core::domain::entities::progress. Este shim será removido."
+    note = "Progress types migrated to webfang_core::domain::entities::progress. This shim will be removed."
 )]
-/// Re-export de tipos de progreso desde el dominio para retrocompatibilidad.
+/// Re-export of progress types from the domain for backward compatibility.
 ///
-/// La ubicación canónica es ahora `webfang_core::domain::entities::progress`.
+/// The canonical location is now `webfang_core::domain::entities::progress`.
 pub mod progress_types {
     pub use crate::domain::entities::progress::*;
 }

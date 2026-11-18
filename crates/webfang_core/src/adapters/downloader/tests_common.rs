@@ -1,4 +1,4 @@
-//! Base compartida de los tests del downloader.
+//! Shared base for the downloader tests.
 
 use super::*;
 

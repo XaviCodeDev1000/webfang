@@ -1,5 +1,5 @@
-//! Tests extraídos del hub `server.rs` por tema (PR 1 de #2584, movimiento puro).
-//! Los cuerpos son verbatim del módulo de tests inline original.
+//! Tests extracted from the `server.rs` hub by topic (PR 1 of #2584, pure move).
+//! Bodies are verbatim from the original inline test module.
 
 use super::session_cap::{
     creates_session, SessionCap, MCP_SESSION_ID_HEADER, SESSION_CAP_USER_MESSAGE,

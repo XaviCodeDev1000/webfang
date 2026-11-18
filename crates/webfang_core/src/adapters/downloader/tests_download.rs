@@ -1,5 +1,5 @@
-//! Tests de descarga (wiremock: dedup, retries, redirect SSRF, streaming).
-//! Split desde `adapters/downloader/mod.rs` bajo la regla ~500 (#2584, Ola 1).
+//! Download tests (wiremock: dedup, retries, redirect SSRF, streaming).
+//! Split from `adapters/downloader/mod.rs` under the ~500 rule (#2584, Ola 1).
 
 use super::tests_common::vu;
 use super::*;

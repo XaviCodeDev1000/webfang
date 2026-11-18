@@ -1,10 +1,10 @@
-//! Tests de `waf_engine`: Domain types + InspectionContext API.
+//! Tests for `waf_engine`: domain types + InspectionContext API.
 //!
-//! Extraido del `mod tests` inline de `waf_engine.rs` (PR 1 de la mision Ola 1,
-//! paraguas #2584) por seam del propio archivo: movimiento mecanico verbatim
-//! (dedent -4), sin cambios semanticos ni renombres. `waf_engine.rs` esta
-//! grandfathered en `scripts/quality-baselines.json` y el ratchet es descendente,
-//! asi que el descenso del baseline viaja en el mismo PR que este corte.
+//! Extracted from the inline `mod tests` of `waf_engine.rs` (PR 1 of the Ola 1
+//! mission, umbrella #2584) along the file's own seam: verbatim mechanical move
+//! (dedent -4), no semantic changes and no renames. `waf_engine.rs` is
+//! grandfathered in `scripts/quality-baselines.json` and the ratchet is
+//! downward-only, so the baseline decrease travels in the same PR as this split.
 
 use super::*;
 use crate::domain::waf::{fixtures, EvidenceSource, InspectionContext, WafTier, WafVerdict};
