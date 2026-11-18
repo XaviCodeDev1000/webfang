@@ -327,3 +327,69 @@ L22 (2026-11-18, ronda 3 — dogfooding §6 con el comando emitido por --budget)
 reproducen EXACTAS con el comando que el propio tool imprime. #2926 mide **1519 add+del**
 (bajo P=3000: sin aviso). La constante P lleva su muestra en el comentario del encabezado del
 preflight (DIFF_BUDGET, líneas 22-27) y en la salida de --budget.
+
+L23 (2026-11-18, ronda 4 — decisión (a) del owner EJECUTADA): alcance medido antes de tocar.
+Regla literal (AGENTS.md de origin/main, líneas 84-86): "English only — every repository-facing
+artifact (code, comments, docs, commits, errors, logs, tracing). Spanish still in the tree is a
+migration, not a precedent: never add new Spanish." Sin gate de idioma: 0 menciones en ci.yml,
+sin scripts de idioma en scripts/ (verificado con comando, no a ojo). Inventario por archivo:
+file_size_preflight.sh 32 líneas (mías → traducidas), test_file_size_preflight.sh 8 (mías →
+traducidas), ci_fast_gate.sh 2 (preexistentes, commit ae5fc4ba — migración #2922, NO tocadas),
+check_file_size.sh 18 (preexistentes, migración — NO tocadas), misión (171 — registro de
+decisión con citas verbatim del owner, NO traducida), cuerpo del PR (normativo, NO traducido
+sin autorización). Traducción MECÁNICA (commit aparte, sin cambio de comportamiento): solo
+texto libre; **tokens de contrato sin tocar** (lineas, commits, attrs, PRs, indeterminado,
+revisar, tests-mayoria, funcion-gigante, exception, na, in_corpus, las claves del bloque y
+(add+del)) — cambiarlos es un cambio de interfaz y esa decisión es del owner (lista cerrada
+presentada). La expectativa 3.2 se actualizó EN EL MISMO COMMIT que las cadenas que aserta.
+El español restante en el preflight son CITAS del texto normativo español (nombres de tipos §5
+y "más cabeceras" de §4.3). Después: merge de origin/main (bcd4b345, 78 archivos, 0
+conflictos de texto — #2922 tocó ci.yml y ci_fast_gate.sh en regiones disjuntas de las mías).
+Re-medición post-merge: ratchet OK, harness 73/73, structure 24 assertions, .tsv grep=1,
+AGENTS.md ahora **647/40933** → margen **+3 líneas / +27 bytes** (el sweep engrosó el router:
+F0 debe ser net-zero o negativo).
+
+L24 (2026-11-18, ronda 4 — conciliaciones numéricas que el owner detectó): (a) **562 = 240 +
+318 + 4**, producido por el comando reproducible (el tool por cada archivo del corpus, sin
+driver en /tmp): `eval "$(bash scripts/file_size_preflight.sh --corpus-literal) -print0" |
+while IFS= read -r -d '' f; do bash scripts/file_size_preflight.sh --format "$f"; done | awk
+-F'\t' ...` → con mod tests 240, sin mod tests 318, indeterminados 4. Mis conteos manuales
+anteriores (246/302 y 254) eran ERRÓNEOS — el escaneo reproducible es la cifra. (b) **Tamaño
+de #2926 = 1704 add+del en ambas bases**: `gh pr view 2926 ...` (vs main 0f1f74c0, después del
+push de TODO) = 1704; git diff vs merge-base 0f1f74c0 = 1704. El 1519 anterior fue medición
+pre-push contra base vieja. La cifra final va al cierre (cambiará con la traducción). (c) La
+columna "296" NO EXISTE en la salida del tool: fue un artefacto de transcripción mío al
+compactar el paste de la ronda 3; la salida completa de --glue (10 líneas, sin truncar) no
+contiene 296. Registrado como defecto de reporte, no de herramienta.
+
+L25 (2026-11-18, ronda 4 — bordes de --glue y fixtures de raw strings, test-first): RED
+confirmado (solo 17.11 fallaba: el duplicado sobrescribía en silencio) → implementado el
+rechazo. Checks nuevos: 17.6b (el typo NOMINA el destino), 17.9 (valor no entero → rc=4),
+17.10 (valor vacío → rc=4), 17.11 (glue duplicado → rc=4, decisión: se RECHAZA, no se suma —
+sumar en silencio escondería un typo), 17.12 (el glue CUENTA para el cap: 40+450+20=510 > 500
+→ rc=3 nombrando hard_limit), 17.13 (**fixture CONGELADO de #2830**: archivo uniforme de 2012
+líneas + los 8 rangos reales + glue 29 → fuente 360 exacto, SIN `git show` — el comentario
+cita el hash 74ba3cb3 y los comandos que produjeron los datos; shallow clone safe; el rc=3
+del hijo de 943 queda como test negativo). Fixtures de lexer 7.4-7.7 que FALLAN con el código
+pre-fix: 7.4 r#" JSON multilínea (el 7 pasaba por accidente), 7.5 r## con "# interior, 7.6 br#
+con comilla interior, 7.7 #[test] desnudo tras el span → indeterminado + clasificacion
+revisar. **Mutación del lexer** (ramas raw deshabilitadas en sandbox): 7.4b/7.5/7.6 ROJAS
+(10 fallos). Los 4 indeterminados reales clasifican: 3 en revisar (client.rs, ssrf_guard.rs,
+chromiumoxide tests.rs) y 1 en funcion-gigante (extraction.rs, por el predicado allow) —
+NUNCA tests-mayoria con span indeterminado. ssrf_guard.rs CONFIRMADO entre los 4 con causa
+nombrada (línea 453; §10 lo daba por cerrado y el tool lo dice con datos).
+
+L26 (2026-11-18, ronda 4 — M4 y mapa de exit codes): **M4** (quitar TODA invocación del
+harness de ci.yml + ci_fast_gate.sh): test_ci_gate_structure.sh VERDE (no mira pasos),
+test_guard_coverage.sh (#2056) ciego a mi harness (sus 8 violaciones en sandbox eran ruido de
+otros guards sin contexto; ninguna nombra test_file_size_preflight.sh — el preflight no es
+check_*.sh, está fuera de su alcance), y el harness es circular por diseño. **Hallazgo
+confirmado: nada fallaba** → §8 cambio de herramienta: check 7 en test_ci_gate_structure.sh —
+todo scripts/*.sh nombrado en una NOTA de fila de datos del .tsv debe estar cableado en
+ci.yml; árbol real: 24 assertions, 5 scripts verificados; M4 en sandbox: ROJO nombrando
+scripts/test_file_size_preflight.sh. **Propuesta de mapa de exit codes al owner** (decisión
+pendiente): recomendación = mapa POR HERRAMIENTA, cada uno documentado en --help y testeado —
+preflight: 0 ok / 1 fallo de herramienta / 2 uso / 3 rechazo de ratchet / 4 defecto de plan
+(ya así, con 13 checks que lo fijan); done (F1b): 0 ok / 1 defecto / 2 parked / ≥3 uso o
+entorno. Un "≥3 = uso/entorno" GLOBAL rompería el 3/4 del preflight, ya consumido por el
+harness y citado por la política.
