@@ -81,7 +81,10 @@ What the compiler **cannot** catch; the rest comes from the harness or the table
   error instead (`infrastructure::stream`). Banned in production: `.lock().expect(..)`/`.unwrap()`
   (one panic → process-wide outage) and `if let Ok(..) = mutex.lock()` (silently drops work).
   `MockClock` keeps its `expect`: a poisoned test clock is a test bug, not runtime state.
-- **English only — user-facing messages, errors, logs and tracing fields.**
+- **English only — every repository-facing artifact.** Code, comments, docs, commit
+  messages, user-facing messages, errors, logs and tracing fields. The Spanish strings
+  still in the tree are a migration in progress (`odd/tasks/english-only-messages.md`),
+  not a precedent: never add new Spanish.
 - **HTTP: always `wreq`, never `reqwest`** — TLS fingerprint impersonation for WAF evasion.
 - **Do not unify conflicting dependencies** (dashmap 5/6, selectors 0.35/0.37/0.38): they are
   deliberate, three different crates need three different versions.
@@ -558,7 +561,7 @@ cargo check && cargo clippy --all-targets --all-features -- -D warnings \
 - [ ] `bash scripts/ci_fast_gate.sh` GREEN; coverage report read (every `NOT covered` job you touched run by hand)
 - [ ] Full pre-commit gate above; `cargo nextest run` (at least the affected module)
 - [ ] `git diff --stat main...HEAD` reviewed: only expected files changed
-- [ ] English user-facing errors; new public items documented; `CHANGELOG.md` untouched
+- [ ] English only in code, comments, docs and user-facing text; new public items documented; `CHANGELOG.md` untouched
 - [ ] One `type:*` label + linked issue **with** `status:approved` + conventional branch
 - [ ] Worktree branch matches the directory; no `checkout`/`switch`/`stash` this session
 
