@@ -239,3 +239,25 @@ aparte para auditar los demás harnesses (`scripts/test_*.sh`) que usen el mismo
 entradas grandes. La política v3 vive como cuerpo de este PR; su texto completo queda
 espejado en Engram (topic `file-size-policy-v3`) y enlazado desde aquí hasta que F0 decida su
 casa definitiva (SKILL o ADR, per AGENTS.md).
+
+L17 (2026-11-18, revisión del owner — ronda 2 sobre el PR #2926): cuatro vigilancias
+resueltas y dos confirmaciones. (1) **Criterio server.rs enmendado en la política** (enmienda
+c del body): dice ahora "componente de movimiento" — el simulador de cortes no puede predecir
+el glue; el diff del propio split lo mide. (2) **Canónica declarada**: el cuerpo del PR hasta
+que F0 decida la casa; el espejo Engram (#3151, topic file-size-policy-v3) queda sincronizado
+con cada edición; la copia local del owner se sincroniza desde la canónica. (3) **Wording del
+.tsv enmendado** (enmienda b): "la nota de la fila repo-guards que nombra los cuatro archivos"
+reemplaza "filas" — el esquema es una fila por job (#2559). (4) **2.2 verificado
+content-based**: extrae por contenido (`grep -o "find crates …"` sobre el texto de AGENTS.md),
+NO por número de línea; la cita AGENTS.md:155 era solo ubicación en el informe. Semántica de
+`head -1`: gana la PRIMERA expresión documentada; una expresión distinta más arriba rompe el
+lock y fuerza la sincronización humana (fail-closed). (5) **Margen de AGENTS.md para F0**
+(fact verificado en el árbol): budget `agents_doc` = 650 líneas / 40 960 bytes
+(scripts/quality-baselines.json, enforced por scripts/check_agents_doc.sh); AGENTS.md mide hoy
+645 / 40 819 → margen **+5 líneas / +141 bytes**. Cualquier edición de router en F0 debe ser
+net-zero o negativa, o recortar runbook hacia Engram (obs #370) ANTES de tocar; subir el
+presupuesto es edición manual de maintainer. (6) **Label verificado con precedentes**: el
+mapa (scripts/auto_label_type.sh --map) da feat→type:feature, y el PR hermano del ratchet
+#2569 (`feat(ci): file-size ratchet…`, misma regla ~500) llevó `type:feature` — el de #2926
+quedó correcto. F1b listado como siguiente fase; no requiere política nueva: el preflight ya
+cita sus discriminadores.
