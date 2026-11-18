@@ -41,8 +41,8 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
 
 | ID | Specs | Scope | Route | Status | Commit |
 |----|-------|-------|-------|--------|--------|
-| A1 | S1, S3 | Fase A — Governance text: `AGENTS.md` (3 sites: § Project rules, § Error stratification, pre-PR checklist) + `README.md` § Architecture rules | inline | done | pending |
-| A2 | S2, S3 | Fase A — Comments and doc-comments in `crates/**/src/**` (353 comment lines); literals and assertions untouched | inline | pending | — |
+| A1 | S1, S3 | Fase A — Governance text: `AGENTS.md` (3 sites: § Project rules, § Error stratification, pre-PR checklist) + `README.md` § Architecture rules | inline | done | `2e8befd9` |
+| A2 | S2, S3 | Fase A — Comments and doc-comments in 25 files under `crates/**/src/**`; literals and assertions untouched and still deferred to Fase C | inline | done | `693f49c1` |
 | A3 | S2, S3 | Fase A — `docs/**` prose (14 files) + root `REPORTE.md`, `COMPATIBILITY-MATRIX.md`. Files that quote exact CLI strings move with their code (Fase C) | inline | pending | — |
 | B1 | S1, S3 | Fase B — `.github/ISSUE_TEMPLATE/*.yml` (4) + `.github/support.json` `eol_reason` strings. Gated by `AGENTS.md` "Ask first: Modifying CI/CD (`.github/`)" | inline | blocked | — |
 | B2 | S2, S3 | Fase B — `scripts/*.sh` (57 files, ~1070 lines): `# STYLE:` comments + error strings, each `test_*.sh` assertion moving with its script | inline | pending | — |
@@ -116,3 +116,26 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
 - **L8 (2026-11-18)** — A1 executed: `AGENTS.md` lines 84, 168 and 561 and `README.md`
   line 511 now state English-only. No code, no test and no snapshot touched, so no build
   or suite run applies to this unit; the change is prose-only.
+
+- **L9 (2026-11-18)** — A2 executed (`693f49c1`, 25 files). The translation was safe, but
+  the classification behind it was wrong, and the record is corrected:
+  - The high-precision detector (accented characters plus Spanish function words) missed
+    Spanish text that carries none of its markers: `produccion`, `paso`, `Clonable`,
+    `patrón:`, `desafío`, `Límite`, `inválida`. `typos` surfaced two of them, and only
+    because the files became changed files.
+  - Consequence: several files classified as pure-comment also hold Spanish **literals** —
+    `crawler_config.rs` (`"URL de sitemap inválida …"`), `semantic_cleaner.rs`
+    (`"el endpoint de embeddings devolvió el estado 413"`), `tests_context.rs` (`"patrón:"`),
+    `tests_inspect.rs` (`"desafío"`), `tests_session_cap.rs` (`"Límite"`). Those are error
+    and message surface, so they stay deferred to Fase C per L7. The comment commits do not
+    make those files clean, and A2 must not be read as "comments done repo-wide".
+  - `tests_panic.rs` and `provenance.rs` legitimately mention Spanish characters (`ñ`, `é`)
+    because they test unicode handling; that prose stays.
+  - Verification for A2 was proportionate to a comment-only change: `cargo fmt --all --check`
+    (parses every file) and `typos` on the changed files. No build or suite was run; the
+    target dir was cold (`seed: cold reason=no-seed`) and a BoringSSL build is not justified
+    by comments and one `deprecated(note)` string. The `deprecated(note)` string is asserted
+    nowhere (checked by search).
+  - Lesson for Fase C: the detector is not a scoping tool. Scope by `typos` plus an
+    accented-character scan plus a full read of each file, and treat message + assertion +
+    snapshot as one unit.
