@@ -81,8 +81,8 @@ señal de clasificación, nunca exención del límite ni del net-zero. [Decisió
 S11 (aceptación — §11 F1a verbatim): "Reproduce server.rs 2012→360; --simulate rechaza un plan con
 un destino no grandfathered sobre hard_limit; el harness clasifica un fixture de cada tipo de §5;
 test_ci_gate_structure.sh verde. Los archivos nuevos fuera de crates/ requieren la aprobación de
-AGENTS.md (Ask first)." Reconciliación: "Reproduce server.rs 2012→360" se ejercita como 10.x
-(--simulate == corte real línea a línea sobre fixtures) + spot check en el repo real (total ==
+AGENTS.md (Ask first)." Reconciliación: "Reproduce server.rs 2012→360" REPRODUCIDO con los datos
+reales del split #2830 (commit `74ba3cb3`): ver L12. Además: spot checks en el repo real (total ==
 wc -l, churn reproducible, clasificación de `crates/webfang_mcp/src/mcp_server/params.rs` =
 exception). Ask-first: APROBADO por el owner (paste 2026-11-18: "Mi recomendación es sí, con
 --simulate en el mismo PR" + "esto es el plan de esta mision").
@@ -187,3 +187,55 @@ v3 (texto del owner del 2026-11-18). Gates del PR: issue vinculado con `Closes p
 #2584` + `status:approved` antes de abrir; label `type:*` (auto por el título `feat(ci):...`);
 rama `feat/file-size-preflight` convencional ✓; sin atribución de IA ✓ (4 commits work-unit
 ya convencionales).
+
+L12 (2026-11-18, revisión del owner): REPRODUCCIÓN REAL de "server.rs 2012→360" — el split es
+#2830 (commit `74ba3cb3`). Datos: pre-split `git show 74ba3cb3^:…server.rs | wc -l` = **2012**;
+post-split `git show 74ba3cb3:…server.rs | wc -l` = **360** (hoy en main: 360). El diff del
+commit borra **1681** líneas en 8 runs contiguos (parseados del diff con numeración old-file)
+y añade 29. Plan = los 8 runs reales (`child_1.rs:9-9 … child_8.rs:1070-2012`) sobre el
+contenido pre-split en sandbox: fuente simulada **331** = 2012 − 1681 (componente de
+movimiento EXACTO); real 360 = 331 + **29 líneas de glue** que el mismo commit añadió
+(numstat): 2012 − 1681 + 29 = 360, reconciliación exacta con descomposición medida. prs =
+ceil(2×1681/3000) = **2**; real = 1 PR → real POR DEBAJO de la estimación (§6 solo exige
+re-plan si el real supera en >1). Y el tool RECHAZÓ el plan con rc=3: `child_8.rs quedaría en
+943 > hard_limit (500)` — lo mismo que el split real decidió (los 943 de tests se repartieron
+en 6 archivos de hijo). El sandbox quedó sin escribir (solo server.rs). Harness 10.x sigue
+cubriendo la igualdad simulate==corte-real línea a línea sobre fixtures.
+
+L13 (2026-11-18, revisión del owner — completar criterios): (a) el .tsv ahora DECLARA los
+scripts: `grep -cE 'file[_-]size' scripts/ci_fast_gate_coverage.tsv` = 1 (era 0, el hueco de
+M0) y la nota de la fila repo-guards nombra los CUATRO archivos (check_file_size.sh,
+file_size_preflight.sh, test_file_size.sh, test_file_size_preflight.sh) con su lugar (guard y
+preflight en code/full, harnesses en ci/full); sigue sin fila propia por script (15.3, #2559).
+(b) La clave `funciones` reservada y vacía quedó AÑADIDA al baseline
+(`file_size_rust.funciones = {}`, casa de F3): el parser del guard la tolera (validate solo
+lee hard_limit y grandfathered) — guard GREEN y `test_file_size.sh` GREEN tras la edición;
+el bloque del preflight además emite su línea `funciones` vacía (§4.1, funciones largas =
+clippy, no disponible offline). [La interpretación previa —solo la línea del bloque— estaba
+incompleta; la clave del baseline era la parte que faltaba.]
+
+L14 (2026-11-18, revisión del owner — acoplamiento con el corpus): nuevo check **2.2, el
+lock de tres vías**: AGENTS.md:155 documenta el corpus (`find crates -name '*.rs' -not -path
+'*/tests/*'`), el guard lo posee, el preflight lo importa — el harness extrae la expresión de
+AGENTS.md y la compara byte a byte con `--corpus-literal`. Si el guard cambia su find sin
+mover AGENTS.md (o al revés), el harness FALLA: un corpus que la documentación no describe es
+un corpus que nadie puede auditar. Harness 59/59.
+
+L15 (2026-11-18, revisión del owner — informe del lexer): el lexer ocupa **211 líneas**
+(python embebido, líneas 203-413 de 719 del preflight). Lo que el harness prueba de los casos
+adversos: 7.1-7.3 (llaves en strings `"{"`, char literals `'{'`, raw strings `r#"{"#`,
+comentarios de línea y bloque, lifetimes `'static` NO mueven el span — fixture adversario
+medido como span 2..9 en un archivo de 9 líneas), 8.1-8.3 (archivo sin balancear → span
+`indeterminado` + nota con la causa, nunca inventado). Límites declarados: atributos de una
+línea y `mod ... {` con llave en la misma línea (shapes reales del repo); un span multi-línea
+raro degradaría a indeterminado, no a un número falso. Y `--simulate` NO depende del lexer
+para sus veredictos: la aritmética de planes usa los totales `wc -l`; un span indeterminado
+no bloquea simular. Si el lexer creciera más, la alternativa es que --simulate funcione sin
+él (hoy ya funciona así para los veredictos).
+
+L16 (2026-11-18, revisión del owner — política y lección): la lección `grep -q` + `pipefail`
+se añadió como fila a la tabla de §8 de la política v3 (el cuerpo de ESTE PR) y se abre issue
+aparte para auditar los demás harnesses (`scripts/test_*.sh`) que usen el mismo patrón con
+entradas grandes. La política v3 vive como cuerpo de este PR; su texto completo queda
+espejado en Engram (topic `file-size-policy-v3`) y enlazado desde aquí hasta que F0 decida su
+casa definitiva (SKILL o ADR, per AGENTS.md).
