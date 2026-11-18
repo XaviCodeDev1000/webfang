@@ -458,3 +458,23 @@ mover el 2 del preflight = 1 check; mover 3/4 = 14 checks + citas de política. 
 comando registrado. **Pendiente del owner**: tokens de contrato (los 5 españoles), alcance
 de la regla (misión/commits/title/body — la cola usa el título), mapa de exit codes (§5 del
 owner + colisión del 2). F1b espera.
+
+L28 (2026-11-18, ronda 6 — CI rojo en #2926, clase A): run 44380676224 sobre el HEAD actual
+(6b18556d — no era rojo viejo): Repo guards / "Fast gate semantics harness" falló con
+`FAIL B52/B53: the FULL lane failed (rc=1): failed steps: - file size preflight semantics
+(offline)`; CI Gate falló por agregación. Clasificación: clase A (nuestro diff) — reproducido
+local con `bash scripts/test_ci_fast_gate.sh` (mismo B52/B53). Causa raíz: el fixture B52 de
+test_ci_fast_gate.sh stubbea como NO-OP todos los harnesses de lane_ci ("the case under test
+is the LANE SHAPE, not the harnesses' own semantics") y su lista era anterior al wiring del
+preflight — `bash scripts/test_file_size_preflight.sh` en el fixture = archivo inexistente.
+§1.3 verificado: main está rojo en OTRO job (Tests windows-latest, el test flaky
+jitter_pacing — clase D, no nuestro; Repo guards pasa en main). §8 test-first: check de
+deriva nuevo en test_ci_fast_gate.sh — extrae los harnesses que lane_ci invoca y exige su
+stub en make_fixture (RED: solo test_file_size_preflight.sh; el check mismo llevaba un awk
+substr sin RLENGTH que arrastraba `--offline` — corregido antes de GREEN); luego el stub
+junto a test_file_size.sh (GREEN: rc=0). Lección: la lista de stubs era prosa manual dentro
+del fixture builder y nada la verificaba contra el wiring real. Entorno: /tmp lleno otra vez
+(109089 artefactos webfang-*, 7.6G; el glob de 109k argumentos hace fallar `rm -rf` en
+silencio — limpieza con `find /tmp -maxdepth 1 -name 'webfang*' -exec rm -rf {} +`).
+Arreglos en `75526e6f`. Batería: shellcheck clean, harness 90/90, structure 27/10, ratchet
+OK, gate local 27/0.
