@@ -382,7 +382,7 @@ for raw_line in lines:
         state = CODE
 
 if depth != 0 or state in (BC, STR, RAW) or reason is not None:
-    reason = reason or "el archivo termina en un estado no cerrado (%s)" % STATE_NAMES.get(
+    reason = reason or "the file ends in an unclosed state (%s)" % STATE_NAMES.get(
         state, "profundidad de llaves %d" % depth
     )
     print("INDETERMINATE\t%s" % reason)
@@ -413,21 +413,38 @@ if not spans:
     print("SPANS\t\t0")
     sys.exit(0)
 
-# a bare #[test]/#[cfg(test)] item OUTSIDE the mod spans (depth 0) means the
-# inline-test figure would UNDERCOUNT: the span covers what it covers and the
-# rest is tests too. A determinate-but-wrong number is worse than none: the
-# span goes indeterminate with the first offender's line.
-outside_attr_re = re.compile(r"^\s*(#\[\s*cfg\s*\(\s*test|\#\[test\])")
+# a bare #[test] FUNCTION outside the mod spans (depth 0) means the inline-test
+# figure would UNDERCOUNT: the fn's lines are tests the span never covered. A
+# determinate-but-wrong number is worse than none: the span goes indeterminate
+# with the offender's line. cfg(test) attrs gating a declared `mod` or a `use`
+# do NOT undercount this file (the tests live elsewhere / nothing is added
+# here), so only fn-shaped items fire the guard.
+test_attr_re = re.compile(r"^\s*#\[\s*test\s*\]$")
+cfg_test_attr_re = re.compile(r"^\s*#\[\s*cfg\s*\(\s*[^)]*test[^)]*\)\s*\]$")
+fn_re = re.compile(r"^\s*(pub(\s*\([a-zA-Z ]+\))?\s+)?(async\s+)?fn\b")
 last_end = spans[-1][1]
-for idx in range(last_end + 1, len(row_code)):
-    if row_start[idx] != 0:
-        continue
-    if outside_attr_re.match(row_code[idx]):
-        print(
-            "INDETERMINATE\tline %d has a #[test]/#[cfg(test)] test OUTSIDE the mod spans (they end at %d): the inline-tests total would undercount"
-            % (idx + 1, last_end + 1)
-        )
-        sys.exit(0)
+idx = last_end + 1
+while idx < len(row_code):
+    if row_start[idx] == 0:
+        code = row_code[idx]
+        if test_attr_re.match(code):
+            print(
+                "INDETERMINATE\tline %d has a bare #[test] fn OUTSIDE the mod spans (they end at %d): the inline-tests total would undercount"
+                % (idx + 1, last_end + 1)
+            )
+            sys.exit(0)
+        if cfg_test_attr_re.match(code):
+            j = idx + 1
+            while j < len(row_code) and (attr_re.match(row_code[j]) or not row_code[j].strip()):
+                j += 1
+            if j < len(row_code) and fn_re.match(row_code[j]):
+                print(
+                    "INDETERMINATE\tline %d has a #[cfg(test)] fn OUTSIDE the mod spans (they end at %d): the inline-tests total would undercount"
+                    % (idx + 1, last_end + 1)
+                )
+                sys.exit(0)
+            idx = j  # mod/use items: no undercount here, keep scanning
+    idx += 1
 
 pairs = " ".join("%d:%d" % (s + 1, e + 1) for (s, e) in spans)
 total = sum(e - s + 1 for (s, e) in spans)
@@ -511,12 +528,12 @@ case "$MODE" in
     ;;
 
   budget)
-    emit4 "presupuesto_diff" "$DIFF_BUDGET" "(add+del)" "aviso en diff estricto > $DIFF_BUDGET (add+del); no bloquea; solo cambia a la baja"
+    emit4 "presupuesto_diff" "$DIFF_BUDGET" "(add+del)" "warning at diff strictly > $DIFF_BUDGET (add+del); does not block; moves down only"
     emit4 "muestra" "2246" "(add+del)" "gh pr view 2901 --json additions,deletions -q '.additions+.deletions'"
     emit4 "muestra" "3018" "(add+del)" "gh pr view 2896 --json additions,deletions -q '.additions+.deletions'"
     emit4 "muestra" "3933" "(add+del)" "gh pr view 2856 --json additions,deletions -q '.additions+.deletions'"
     emit4 "muestra" "5101" "(add+del)" "gh pr view 2893 --json additions,deletions -q '.additions+.deletions'"
-    emit4 "prs" "0" "PRs" "ceil(2*moved/$DIFF_BUDGET); moved=0 sin plan"
+    emit4 "prs" "0" "PRs" "ceil(2*moved/$DIFF_BUDGET); moved=0 with no plan"
     ;;
 
   format | simulate)
@@ -589,18 +606,18 @@ case "$MODE" in
       emit4 "churn_commits" "$CHURN" "commits" "git -C '$ROOT' rev-list --count HEAD -- '$REL'"
     else
       emit4 "churn_commits" "indeterminado" "-" "-"
-      emit2 "churn_commits_note" "no es un repo git o no tiene HEAD: 0 y no-puedo-saber son hechos distintos"
+      emit2 "churn_commits_note" "not a git repo or no HEAD: 0 and cannot-know are different facts"
     fi
 
     ALLOW_N="$(grep -c 'allow(clippy::too_many_lines)' "$ABSPATH" 2>/dev/null)" || true
     ALLOW_N="${ALLOW_N:-0}"
     emit4 "allow" "$ALLOW_N" "attrs" "grep -c 'allow(clippy::too_many_lines)' '$REL'"
 
-    emit4 "funciones" "" "-" "reservada (F1a): requiere clippy/rustc, no disponible en el preflight offline"
+    emit4 "funciones" "" "-" "reserved (F1a): needs clippy/rustc, not available in the offline preflight"
     emit4 "blast_radius" "indeterminado" "-" "-"
-    emit2 "blast_radius_note" "codegraph explore / codedb callers sobre '$REL' (herramientas de inteligencia; el preflight es offline)"
+    emit2 "blast_radius_note" "codegraph explore / codedb callers on '$REL' (intelligence tools; the preflight is offline)"
     emit4 "overlap_prs" "indeterminado" "-" "-"
-    emit2 "overlap_prs_note" "gh pr list --state open y scripts/ci_pr_overlap.sh <N1> <N2>; el preflight es offline"
+    emit2 "overlap_prs_note" "gh pr list --state open and scripts/ci_pr_overlap.sh <N1> <N2>; the preflight is offline"
 
     # the suggested §5 classification: MEASURED predicates only. The semantic
     # §5 signals (módulos pegados, declarativo cohesivo, alto riesgo,
@@ -716,8 +733,8 @@ case "$MODE" in
         DEST_CUR=0
       fi
       DEST_FINAL=$((DEST_CUR + HEADER + MOVED + ${GLUE["$dest"]:-0}))
-      NOTE="cabecera $HEADER + $MOVED movidas"
-      [ -n "${PLAN_CLIPPED[$dest]:-}" ] && NOTE="$NOTE (recortado a EOF)"
+      NOTE="header $HEADER + $MOVED moved"
+      [ -n "${PLAN_CLIPPED[$dest]:-}" ] && NOTE="$NOTE (clamped to EOF)"
       [ -n "${GLUE["$dest"]:-}" ] && NOTE="$NOTE + glue ${GLUE[$dest]}"
       if [ -n "${GF["$DEST_REL"]:-}" ]; then
         CAP="${GF["$DEST_REL"]}"
@@ -753,10 +770,10 @@ case "$MODE" in
     fi
 
     for notice in "${NOTICES[@]}"; do
-      printf 'aviso: %s\n' "$notice" >&2
+      printf 'notice: %s\n' "$notice" >&2
     done
     for defect in "${DEFECTS[@]}"; do
-      printf 'defecto: %s\n' "$defect" >&2
+      printf 'defect: %s\n' "$defect" >&2
     done
     for violation in "${VIOLATIONS[@]}"; do
       printf 'violation: %s\n' "$violation" >&2
