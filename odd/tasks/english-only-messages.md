@@ -47,9 +47,9 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
 | A3a | S2, S3 | Fase A — `docs/src/SUMMARY.md` chapter title | inline | done | `c3062f7e` |
 | A3b | S2, S3 | Fase A — pure-prose docs: `architecture/ai-providers-design.md` (149), `adr/0004-onnx-local-removal.md` (106), `research/ci-test-playbook.md` (42), `security/prompt-injection-policy.md` (37), `adr/README.md` (33), `llm-backend-decision.md` (29), `research/missing-docs-audit.md` (20), `src/ai-onnx-migration.md` (18) | inline | done | `03c7c5fa` |
 | A3c | S2, S3 | Fase C-coupled docs that quote CLI output verbatim: `src/troubleshooting.md`, `ssrf-layers.md`, `src/cli-reference.md`, `src/state-recovery-runbook.md`, `adr/0018-…`, root `REPORTE.md`, `COMPATIBILITY-MATRIX.md` | inline | pending | — |
-| B1 | S1, S3 | Fase B — `.github/ISSUE_TEMPLATE/*.yml` (4) + `.github/support.json` `eol_reason` strings. Gated by `AGENTS.md` "Ask first: Modifying CI/CD (`.github/`)" | inline | blocked | — |
-| B2 | S2, S3 | Fase B — `scripts/*.sh` (57 files, ~1070 lines): `# STYLE:` comments + error strings, each `test_*.sh` assertion moving with its script | inline | pending | — |
-| B3 | S1, S3 | Fase B — `typos.toml`: prune the Spanish allowlist. Must run after the Spanish text it allowlists is gone, otherwise `typos` fails | inline | pending | — |
+| B1 | S1, S3 | Fase B — `.github/` complete: ISSUE_TEMPLATE (4), `support.json` `eol_reason` + `render-support-md.sh` + regenerated `SUPPORT.md`, and 7 workflows (`ci-health`, `pr-validation`, `ci`, `release`, `cut-patch-tag`, `docs`, `bug-discovery`) | inline | done | `cb0d177e`, `6b2f9a52`, `7d8f0218` |
+| B2 | S2, S3 | Fase B — `scripts/*.sh`: `# STYLE:` comments + error strings, each `test_*.sh` assertion moving with its script. Done: 14 comment-only scripts, the `check_no_ai_attribution` pair, the `check_support_drift` pair, the `rotate-stable` pair. Remaining ~1543 lines; largest are the claims-gate pair `check_ai_providers_doc.sh` (140) + `test_ai_providers_doc.sh` (284) | inline | in_progress | `3b20140d`, `05a44ca0`, `bc6c3bbd`, `e3a48a4d` |
+| B3 | S1, S3 | Fase B — `typos.toml`: prune the Spanish allowlist (50 entries). Must run LAST: pruning before the Spanish text it allowlists is gone makes `typos` fail | inline | pending | — |
 | C1 | S2, S3 | Fase C — `webfang_core/domain/` error strings (highest breaking risk) | inline | pending | — |
 | C2 | S2, S3 | Fase C — `webfang_core/cli/` + `application/` error strings | inline | pending | — |
 | C3 | S2, S3 | Fase C — `webfang_mcp/**` strings | inline | pending | — |
@@ -165,6 +165,29 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
     reports 2 (`label-messager`, `SME`), both legitimate proper nouns. `typos` is not wired
     into any `.github/workflows/*.yml`, so it is not a CI gate here.
   - No Markdown build was run; the claims gate is the real check for this batch.
+
+- **L13 (2026-11-18)** — Fase B started, owner-authorized with the constraint *"no hagas
+  cambios a ciegas"*. Method applied: recon first (classify comment-only vs mixed, map every
+  cross-file assertion), then change each coupled pair together and run its own test.
+  - `3b20140d` — 14 comment-only scripts. Most hits were `ADR-0004 paso 6` (Spanish for "step 6") and `ítem`.
+  - `05a44ca0` — `check_no_ai_attribution.sh` + `test_no_ai_attribution.sh`; suite: 33 passed, 0 failed.
+  - `cb0d177e` — `.github` issue templates + `support.json` `eol_reason` + `render-support-md.sh` +
+    regenerated `SUPPORT.md` (`--check` green). Verified `eol_reason` is **not** rendered into
+    `SUPPORT.md`, so the two halves are independent.
+  - `bc6c3bbd` — `check_support_drift.sh` + `test_support_drift.sh`. The test carries 13 exact
+    `grep -qF` assertions coupled to gate strings; all were updated in the same change.
+    Suite: 69 ok, 0 fail.
+  - `e3a48a4d` — `rotate-stable.sh` + `test_rotate_stable.sh`, plus the last coupled grep
+    (`test_support_drift.sh:716`, which asserts `rotate-stable.sh`'s output). Suites: 25 ok / 0
+    fail and 69 ok / 0 fail.
+  - `6b2f9a52` — 6 workflows (`docs`, `cut-patch-tag`, `bug-discovery`, `release`, `pr-validation`,
+    `ci`). All re-parsed with `yaml.safe_load`.
+  - `7d8f0218` — `ci-health.yml` (615 lines, dormant). Verified that **only comments** changed:
+    the 3 lines with trailing comments keep their code byte-identical.
+  - Detector lesson, third occurrence: the high-precision pattern missed `argumento inesperado`,
+    `no existe`, `solo ramas`, `versión X.Y.Z` and `tag ya existe`; they were found by reading the
+    files. The detector is a triage aid, never a license to bulk-edit.
+  - Remaining in B: ~1543 lines across the script harnesses. B3 stays last by construction.
 
 - **L10 (2026-11-18)** — A3 split after reading the small files. Five of the six smallest
   docs (`src/troubleshooting.md`, `ssrf-layers.md`, `src/cli-reference.md`,
