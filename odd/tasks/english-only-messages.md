@@ -189,6 +189,21 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
     files. The detector is a triage aid, never a license to bulk-edit.
   - Remaining in B: ~1543 lines across the script harnesses. B3 stays last by construction.
 
+- **L14 (2026-11-18)** — Claims-gate pair, the most delicate slice of B: it is wired in
+  `ci.yml:755` and in the fast gate, so a silent break would red the required `CI Gate`.
+  - `943f14e8` — the gate's ~40 findings messages plus the 7 exact `grep -q` patterns the
+    test asserts on them. Test: **49 ok, 0 fail**.
+  - `878e31a5` — the gate's remaining 77 comment lines. Test re-run: **49 ok, 0 fail**.
+  - `scripts/check_ai_providers_doc.sh` is now at **0 Spanish lines**.
+  - `scripts/test_ai_providers_doc.sh` keeps **277 Spanish lines**, all of them test
+    labels/echos (`pass`/`fail`/`echo "== … =="`), not assertions. They are
+    developer-facing output and move in their own slice.
+  - Coupling map, for the record — the test asserts exactly these gate strings: `C1: the
+    cited line is outside the file`, `C4: the line does not contain the declaration`,
+    `escapes the repo root`, `C4: the fence line`, `C1: the manifest block does not exist`,
+    `C1: the manifest block does not contain a fence with info-string 'claims'`,
+    `C1: the manifest is empty`.
+
 - **L10 (2026-11-18)** — A3 split after reading the small files. Five of the six smallest
   docs (`src/troubleshooting.md`, `ssrf-layers.md`, `src/cli-reference.md`,
   `src/state-recovery-runbook.md`, `adr/0018-…`) are **verbatim quotes of CLI output**
