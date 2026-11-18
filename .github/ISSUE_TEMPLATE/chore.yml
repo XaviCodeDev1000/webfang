@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Small operational task, not a product change — no use case to argue,
-        so keep it brief. (Podés escribir el cuerpo en español.)
+        so keep it brief.
   - type: textarea
     id: task
     attributes:

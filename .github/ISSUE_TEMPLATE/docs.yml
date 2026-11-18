@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Point to the exact doc and what's off. (Podés escribir el cuerpo en español.)
+        Point to the exact doc and what's off.
   - type: input
     id: location
     attributes:
