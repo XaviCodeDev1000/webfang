@@ -150,6 +150,44 @@ def resolve_head_sha(root: Path, explicit: str | None) -> str:
     return git(root, "rev-parse", "HEAD") or ""
 
 
+# Refs that survive a squash merge. The queue uses SQUASH (.github/merge-queue.json),
+# so the tip of a Release PR is NOT in the history of main and never will be: freezing
+# it passes the ancestry check exactly once, on the squash commit, and then fails on the
+# first PR that touches any other file. Measured on #2909/#2914: the branch tip 4efcaf66
+# was orphaned the moment the queue squashed it, and every later PR read as
+# "el baseline fue medido sobre otro árbol" with no drift behind it.
+DURABLE_REFS = ("main", "origin/main")
+
+
+def durable_anchor(root: Path, sha: str) -> str | None:
+    """Devuelve el primer ref durable del que `sha` es ancestro, o None."""
+    for ref in DURABLE_REFS:
+        rc, _ = git_rc(root, "merge-base", "--is-ancestor", sha, ref)
+        if rc == 0:
+            return ref
+    return None
+
+
+def freeze_hazard(root: Path, sha: str) -> str | None:
+    """Diagnóstico de un SHA congelado que el próximo squash va a dejar huérfano.
+
+    Devuelve None cuando el ancla es durable. Un SHA sin ref durable es aceptable
+    SOLO en una rama cuyo tip todavía no está en main (el PR de release antes del
+    squash): ahí el operador lo re-ancla a mano, con --allow-unmerged-anchor, y el
+    gate lo vuelve a verificar en cada PR posterior.
+    """
+    if durable_anchor(root, sha):
+        return None
+    rc, _ = git_rc(root, "rev-parse", "--verify", "--quiet", sha)
+    if rc != 0:
+        return f"head_sha {sha[:12]} no es un objeto de este repositorio"
+    return (
+        f"head_sha {sha[:12]} no es ancestro de {' ni '.join(DURABLE_REFS)}: "
+        "el próximo squash lo dejará huérfano y el baseline fallará en el primer PR "
+        "que toque otro archivo"
+    )
+
+
 def get_path(obj: object, dotted: str) -> object:
     cur = obj
     for part in dotted.split("."):
@@ -517,7 +555,12 @@ def verify(root: Path, evidence_path: Path, prd_path: Path,
             drift.append(f"decisions.{key}: {ev.get('decisions', {}).get(key)!r} -> {value!r}")
 
     if drift:
-        msg = ("DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba: "
+        # The pointer names the document and its section, and copies no command:
+        # instructions in a message would be a second copy that rots. The reader
+        # lands on the procedure itself (docs/src/release-process.md).
+        msg = ("DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba "
+               "(ver docs/src/release-process.md, «Re-freezing the evidence baseline "
+               "on a Release PR»): "
                + " | ".join(drift))
         if train_marker.is_file():
             errors.append(msg)
@@ -541,6 +584,12 @@ def main() -> int:
     ap.add_argument("--prd", type=Path, default=None)
     ap.add_argument("--marker", type=Path, default=None)
     ap.add_argument("--json", action="store_true", help="--check: imprime resumen JSON")
+    ap.add_argument(
+        "--allow-unmerged-anchor", action="store_true",
+        help="--write: acepta un head_sha que todavía no está en main (rama de un PR de "
+             "release antes del squash). Sin este flag el freeze se niega, porque ese ancla "
+             "se rompe en el PR siguiente",
+    )
     args = ap.parse_args()
 
     import os
@@ -552,6 +601,21 @@ def main() -> int:
         if not head_sha:
             print("::error:: no se pudo determinar head_sha (git o --head-sha)", file=sys.stderr)
             return 1
+        hazard = freeze_hazard(root, head_sha)
+        # Un árbol sin .git no puede probar ancestría: el guard de --check ya lo
+        # reporta como "medido sobre otro árbol" en los fixtures sin repo, así que
+        # --write no es el lugar para bloquearlo.
+        has_git = (root / ".git").exists()
+        if hazard and has_git and not args.allow_unmerged_anchor:
+            print(f"::error:: {hazard}", file=sys.stderr)
+            print(
+                "  congelá el commit del release que YA está en main, o pasá "
+                "--allow-unmerged-anchor y re-anclá después del squash",
+                file=sys.stderr,
+            )
+            return 1
+        if hazard:
+            print(f"NOTE: {hazard} (aceptado por --allow-unmerged-anchor)", file=sys.stderr)
         data = collect(root, head_sha)
         args.write.parent.mkdir(parents=True, exist_ok=True)
         args.write.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -156,6 +156,90 @@ If the metadata check is red after the issue was approved, re-run the failed job
 #2788 and #2791 were manual re-runs (same `triggering_actor`, event `pull_request`), not label
 events.
 
+## Re-freezing the evidence baseline on a Release PR
+
+`Repo guards` runs `scripts/check_migration_evidence.sh`, which re-derives a small set of
+decision facts — the workspace version, the toolchain channel, the support lines, the edition —
+from `Cargo.toml`, `rust-toolchain.toml`, `.github/support.json` and `README.md`, and compares them
+with the frozen snapshot in the active evidence directory. A release bumps the version and rotates
+the support lines, so that comparison fails by construction. While `TRAIN_OPEN` exists in that
+directory the drift is **blocking**, not a `NOTE`:
+
+```text
+DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba: workspace_version: '…' -> '…' | …
+```
+
+That is the guard doing its job, and the fix is one command on the release branch:
+
+```bash
+python3 scripts/audit_migration_baseline.py --write evidence/<train>/baseline.json
+bash scripts/check_migration_evidence.sh
+bash scripts/test_migration_evidence.sh      # the denial harness, #2056
+```
+
+### Why it cannot be a separate PR
+
+The guard compares the snapshot against the **live** tree. Only the release branch carries the
+bumped manifest, so measuring anywhere else re-freezes the previous version and the release breaks
+it again: the guard answers `el baseline fue medido sobre otro árbol` and fails closed.
+
+Landing the re-freeze afterwards is not a style preference either. Once the bump is on `main`
+without a matching baseline, `Repo guards` is red on `main` and on **every** PR based on it, so the
+repair lands on everyone instead of on the release.
+
+The re-freeze therefore travels in the release PR itself, before the merge, next to the §7
+re-approval. The check accepts an **ancestor** baseline and not only an identical one (#2903), so the
+snapshot does not have to be re-measured again on the merge commit.
+
+### Freeze the squash's commit, never the branch tip
+
+The obvious choice is wrong and takes a while to notice. `--write` freezes whatever `git rev-parse
+HEAD` returns, and on a Release PR that is the branch tip — a commit the queue will **squash away**.
+It is not in `main`'s history and never will be, so the ancestry check passes exactly once, on the
+squash commit, and then fails on the first PR that touches any other file:
+
+```text
+head_sha … no es HEAD, ancestro ni equivalente en árbol a …: el baseline fue medido sobre otro árbol
+```
+
+Freeze a commit that is already on `main` instead — the release commit the bump landed as — and the
+ancestry check keeps holding for every branch afterwards, because that commit is permanent history.
+The counter-argument is that a PR-merge commit does not exist while the PR is open. Both shapes
+appear, so read the `head_sha` in the diff and ask whether that commit is in `main` before approving
+it.
+
+### Order it after `release-plz`
+
+`release-plz` re-creates the release PR when `main` moves — #2905 and #2909 carried the same red, and
+the first was closed when the second appeared. A re-freeze measured on a tree that is about to be
+replaced is work lost, so commit it **late, while `main` is quiet**, and redo it on the current
+branch rather than resurrecting the closed one. Push by hand: automating this was considered and
+declined in #2911, because it removes the human re-approval by construction.
+
+### Who re-approves §7
+
+The **reviewer of the release PR**, reading the `baseline.json` diff in that PR.
+
+The rows in §7 render from the baseline through `{{BASELINE.decisions.*}}` placeholders —
+`major_target`, `backport_line`, the Miri wording, the `TRAIN_OPEN` rule — so the document carries no
+second copy to edit, and nothing it says can drift from the snapshot. `baseline.json` also keeps
+**no machine-verifiable approval record**: no signature, no approver field, no hash of a review.
+CI therefore proves that the snapshot matches the tree, and cannot prove that a human read it.
+Re-approving §7 is that second act, and it stays human on purpose (#2911).
+
+### What to look at in the diff
+
+Decision facts moving is the expected outcome: `workspace_version`, `support.stable`,
+`support.maintenance`, `support.eol_first`, `decisions.backport_line`, `decisions.eol_on_release`.
+
+The `counts.*` block is F0 evidence, not a gate, and it re-measures on every write — noise here.
+Anything else changing means the branch is not a plain release and has to be understood before it
+is approved.
+
+A helper that prints these commands, a freshness pre-check, per-release baseline files and GPG
+signing of the snapshot were all considered and declined; #2911 records the reasons, including why
+each of the first three would have weakened a fail-closed guard in exchange for convenience.
+
 ## `set-version` is not a release flow
 
 `release-plz set-version` exists to correct a version that was not set as expected (for
