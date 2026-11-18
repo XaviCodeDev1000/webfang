@@ -64,10 +64,10 @@ jobs:
           set -euo pipefail
           case "$INPUT_BRANCH" in
             support/*) ;;
-            *) echo "::error::solo ramas support/*" >&2; exit 1 ;;
+            *) echo "::error::only support/* branches" >&2; exit 1 ;;
           esac
-          [[ "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::versión X.Y.Z" >&2; exit 1; }
-          git rev-parse "v$INPUT_VERSION" >/dev/null 2>&1 && { echo "::error::tag ya existe" >&2; exit 1; }
+          [[ "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version X.Y.Z" >&2; exit 1; }
+          git rev-parse "v$INPUT_VERSION" >/dev/null 2>&1 && { echo "::error::tag already exists" >&2; exit 1; }
           CARGO_VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/version = "(.*)"/\1/')"
           [[ "$CARGO_VERSION" == "$INPUT_VERSION" ]] || {
             echo "::error::bump el commit primero: Cargo.toml=${CARGO_VERSION}, pedido=$INPUT_VERSION" >&2; exit 1; }
@@ -114,7 +114,7 @@ jobs:
           # expected_sha too, but it would burn a whole release pipeline run to
           # do it.
           if [[ -z "$TAG" || -z "$EXPECTED_SHA" ]]; then
-            echo "::error::el job 'tag' no propagó TAG/EXPECTED_SHA (tag='${TAG}', expected_sha='${EXPECTED_SHA}') — no se despacha" >&2
+            echo "::error::the 'tag' job did not propagate TAG/EXPECTED_SHA (tag='${TAG}', expected_sha='${EXPECTED_SHA}') — not dispatching" >&2
             exit 1
           fi
           # Dispatch via workflow_dispatch WITHOUT --ref. release.yml's preflight

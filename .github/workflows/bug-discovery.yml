@@ -100,7 +100,7 @@ jobs:
         # asserts the real bound (see #1469, W-03).
         # The ONNX-era exclusions (the 311m RSS measurement, the real-corpus
         # paragraph-loss measurement and the engine measurement campaign) went
-        # away with the removal of the local ONNX stack (ADR-0004 paso 6), so
+        # away with the removal of the local ONNX stack (ADR-0004 step 6), so
         # their filter terms and their env knobs are gone with them. The
         # remaining suite fits the dedicated nextest profile `discovery`
         # (slow-timeout 600s, global 45m).

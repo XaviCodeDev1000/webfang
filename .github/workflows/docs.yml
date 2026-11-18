@@ -213,7 +213,7 @@ jobs:
           set -euo pipefail
           SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
           if ! [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
-            echo "::error::no se pudo derivar SOURCE_DATE_EPOCH del commit '$GITHUB_SHA'" >&2
+            echo "::error::could not derive SOURCE_DATE_EPOCH from commit '$GITHUB_SHA'" >&2
             exit 1
           fi
           export SOURCE_DATE_EPOCH
