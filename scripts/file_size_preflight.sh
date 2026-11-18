@@ -10,8 +10,8 @@
 #
 # WHAT IT EMITS (--format, TAB separated, one fact per line): every number
 # carries value, unit and the command that reproduces it ON THE SAME LINE
-# (policy 6: "todo número lleva su unidad y el comando que lo produce en la
-# misma línea"). Indeterminable facts say "indeterminado" and carry a note:
+# (policy 6: every number carries its unit and the command that produces it
+# on the same line). Indeterminable facts say "indeterminado" and carry a note:
 # "0 commits" and "cannot know" are different facts. The inline-tests span is
 # LEXED (strings, chars, comments and lifetimes do not move it), never
 # brace-counted; an unbalanced file reports its span as indeterminate instead
@@ -60,14 +60,14 @@ usage() {
 Uso: bash scripts/file_size_preflight.sh [modo]
 
   (sin argumentos)      el bloque de presupuesto P (lo que corre ci.yml: --budget)
-  --format <ruta>       el bloque de medición de un archivo (ruta repo-relativa, como la usa el guard)
-  --simulate <plan>...  con --format <fuente>: calcula el corte; plan <dest>:<FROM>-<TO>[:header=<N>]
-  --glue <archivo>=<N>  con --simulate: líneas NO movidas que el split añade a ese archivo
-                        (imports, re-exports; el archivo es la fuente o un destino del plan)
-  --corpus-literal      la expresión find del guard, byte a byte
-  --help                esta ayuda
+  --format <path>       the measurement block for one file (repo-relative path, as the guard spells it)
+  --simulate <plan>...  with --format <source>: computes the cut; plan <dest>:<FROM>-<TO>[:header=<N>]
+  --glue <file>=<N>     with --simulate: NON-moved lines the split adds to that file
+                        (imports, re-exports; the file is the source or a plan destination)
+  --corpus-literal      the guard's find expression, byte for byte
+  --help                this help
 
-Modos: --format --simulate --corpus-literal --budget; las unidades son lineas.
+Modes: --format --simulate --corpus-literal --budget; units are lineas/commits/attrs/PRs.
 USAGE
 }
 
@@ -91,12 +91,12 @@ emit4() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }
 # (the same line the harness extracts), so the two tools can never drift. A
 # guard whose line changed shape is a tool failure, never a re-implementation.
 extract_corpus() {
-  [ -f "$GUARD" ] || die_tool "no encuentro el guard $GUARD: el corpus del preflight vive en el guard y no se re-implementa"
+  [ -f "$GUARD" ] || die_tool "guard $GUARD not found: the preflight's corpus lives in the guard and is never re-implemented"
   # the sed programs below keep \$ROOT literal ON PURPOSE: it is the guard's
   # own text being extracted, not an expansion.
   # shellcheck disable=SC2016
   EXEC_FIND="$(sed -n 's/^ *if ! \(find "\$ROOT\/crates" .*-print0\) \\$/\1/p' "$GUARD" | head -1)"
-  [ -n "${EXEC_FIND:-}" ] || die_tool "no pude extraer la expresión find de $GUARD (cambió de forma): el corpus no se re-implementa, actualizá la extracción junto con el guard"
+  [ -n "${EXEC_FIND:-}" ] || die_tool "could not extract the find expression from $GUARD (its shape changed): the corpus is never re-implemented; update the extraction together with the guard"
   # shellcheck disable=SC2016
   CORPUS_LITERAL="$(printf '%s' "$EXEC_FIND" | sed 's/find "\$ROOT\/crates"/find crates/; s/ -print0$//')"
 }
@@ -107,7 +107,7 @@ CORPUS_READY=0
 # that fails is a tool failure (fail-closed), never "not in corpus".
 ensure_corpus() {
   [ "$CORPUS_READY" -eq 1 ] && return 0
-  eval "$EXEC_FIND" > "$WORK/corpus.nul" 2>/dev/null || die_tool "find falló sobre crates/: el corpus no se puede medir (fail-closed)"
+  eval "$EXEC_FIND" > "$WORK/corpus.nul" 2>/dev/null || die_tool "find failed over crates/: the corpus cannot be measured (fail-closed)"
   CORPUS_READY=1
 }
 
@@ -178,15 +178,15 @@ emit("OK", str(limit))
 PY
 )" || py3_rc=$?
   if [ "$py3_rc" -ne 0 ] && [ -z "$raw" ]; then
-    die_tool "python3 falló silenciosamente (rc=$py3_rc): el preflight no inventa una medición sin su lector (fail-closed)"
+    die_tool "python3 failed silently (rc=$py3_rc): the preflight never invents a measurement without its reader (fail-closed)"
   fi
   status="${raw%%$'\t'*}"
   case "$status" in
     OK) BASELINE_LIMIT="${raw#*$'\t'}" ;;
-    MISSING_FILE) die_tool "no existe el baseline $BASELINE" ;;
-    UNREADABLE) die_tool "no se puede leer el baseline $BASELINE: ${raw#*$'\t'}" ;;
-    BAD_JSON) die_tool "el baseline $BASELINE no es JSON válido: ${raw#*$'\t'}" ;;
-    *) die_tool "el baseline $BASELINE no se puede leer ($status): ${raw#*$'\t'}" ;;
+    MISSING_FILE) die_tool "baseline file not found: $BASELINE" ;;
+    UNREADABLE) die_tool "cannot read the baseline $BASELINE: ${raw#*$'\t'}" ;;
+    BAD_JSON) die_tool "the baseline $BASELINE is not valid JSON: ${raw#*$'\t'}" ;;
+    *) die_tool "the baseline $BASELINE cannot be read ($status): ${raw#*$'\t'}" ;;
   esac
 }
 
@@ -402,7 +402,7 @@ for idx, code in enumerate(row_code):
             end = j
             break
     if end is None:
-        print("INDETERMINATE\tel mod de la línea %d abre llaves que nunca se cierran" % (idx + 1))
+        print("INDETERMINATE\tthe mod on line %d opens braces that never close" % (idx + 1))
         sys.exit(0)
     a = idx
     while a - 1 >= 0 and attr_re.match(row_code[a - 1]):
@@ -424,7 +424,7 @@ for idx in range(last_end + 1, len(row_code)):
         continue
     if outside_attr_re.match(row_code[idx]):
         print(
-            "INDETERMINATE\tla línea %d tiene un test #[test]/#[cfg(test)] FUERA de los mod spans (terminan en %d): el total de tests inline sería un subconteo"
+            "INDETERMINATE\tline %d has a #[test]/#[cfg(test)] test OUTSIDE the mod spans (they end at %d): the inline-tests total would undercount"
             % (idx + 1, last_end + 1)
         )
         sys.exit(0)
@@ -465,7 +465,7 @@ GLUE_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --format)
-      [ $# -ge 2 ] || usage_error "--format requiere la ruta a medir"
+      [ $# -ge 2 ] || usage_error "--format requires the path to measure"
       FORMAT_PATH="$2"
       # --format is the SOURCE for --simulate; it must not clobber the mode
       [ "$MODE" = "simulate" ] || MODE="format"
@@ -478,10 +478,10 @@ while [ $# -gt 0 ]; do
         PLAN_ARGS+=("$1")
         shift
       done
-      [ "${#PLAN_ARGS[@]}" -gt 0 ] || usage_error "--simulate requiere al menos un plan <dest>:<FROM>-<TO>[:header=<N>]"
+      [ "${#PLAN_ARGS[@]}" -gt 0 ] || usage_error "--simulate requires at least one plan <dest>:<FROM>-<TO>[:header=<N>]"
       ;;
     --glue)
-      [ $# -ge 2 ] || usage_error "--glue requiere <archivo>=<N> (líneas no movidas que el split añade a ese archivo)"
+      [ $# -ge 2 ] || usage_error "--glue requires <file>=<N> (non-moved lines the split adds to that file)"
       GLUE_ARGS+=("$2")
       shift 2
       ;;
@@ -498,7 +498,7 @@ while [ $# -gt 0 ]; do
       exit 0
       ;;
     *)
-      usage_error "argumento desconocido: '$1'"
+      usage_error "unknown argument: '$1'"
       ;;
   esac
 done
@@ -520,8 +520,8 @@ case "$MODE" in
     ;;
 
   format | simulate)
-    [ -n "$FORMAT_PATH" ] || usage_error "el modo necesita --format <ruta> (la fuente de la medición y de los rangos)"
-    command -v python3 >/dev/null 2>&1 || die_tool "python3 no está disponible: el lector del baseline y el lexer del preflight lo necesitan (instalalo o corré en una estación con python3)"
+    [ -n "$FORMAT_PATH" ] || usage_error "the mode needs --format <path> (the source of the measurement and of the ranges)"
+    command -v python3 >/dev/null 2>&1 || die_tool "python3 is not available: the baseline reader and the preflight lexer need it (install it or run on a station that has python3)"
     extract_corpus
     baseline_read
     load_baseline_maps
@@ -530,8 +530,8 @@ case "$MODE" in
     # path under ROOT is accepted as-is.
     FORMAT_PATH="${FORMAT_PATH#"$ROOT"/}"
     ABSPATH="$ROOT/$FORMAT_PATH"
-    [ -f "$ABSPATH" ] || die_tool "el archivo no existe: $FORMAT_PATH (¿es la ruta repo-relativa que usa el guard?)"
-    [ -r "$ABSPATH" ] || die_tool "el archivo no se puede leer: $FORMAT_PATH"
+    [ -f "$ABSPATH" ] || die_tool "file not found: $FORMAT_PATH (is it the repo-relative path the guard uses?)"
+    [ -r "$ABSPATH" ] || die_tool "file cannot be read: $FORMAT_PATH"
     REL="$FORMAT_PATH"
 
     if corpus_contains "$REL"; then
@@ -558,7 +558,7 @@ case "$MODE" in
     if [ "$LEX_TAG" = "INDETERMINATE" ]; then
       emit4 "production" "indeterminado" "-" "-"
       emit4 "inline_tests" "indeterminado" "-" "-"
-      emit2 "inline_tests_note" "$PAIRS: el span no se inventa, medí el archivo reparado"
+      emit2 "inline_tests_note" "$PAIRS: the span is not invented; re-measure the repaired file"
     else
       SPAN_RANGES=()
       GAP_RANGES=()
@@ -607,17 +607,17 @@ case "$MODE" in
     # arquitectónico) are maintainer calls per §5's own Señal column.
     if [ "$IN_CORPUS" -eq 0 ]; then
       emit2 "clasificacion" "na"
-      emit2 "clasificacion_note" "fuera del corpus del ratchet (el find del guard); sin clasificación §5"
+      emit2 "clasificacion_note" "outside the ratchet's corpus (the guard's find); no §5 classification"
     elif [ -n "${EXC["$REL"]:-}" ]; then
       emit2 "clasificacion" "exception"
-      emit2 "clasificacion_note" "declarada en el mapa exceptions del baseline; no exonera del límite ni del net-zero"
+      emit2 "clasificacion_note" "declared in the baseline's exceptions map; does not waive the limit or the net-zero"
     elif [ -n "$INLINE_N" ] && [ "$((2 * INLINE_N))" -gt "$TOTAL" ]; then
       emit2 "clasificacion" "tests-mayoria"
     elif [ "$ALLOW_N" -gt 0 ]; then
       emit2 "clasificacion" "funcion-gigante"
     else
       emit2 "clasificacion" "revisar"
-      emit2 "clasificacion_note" "señales §5 no mecánicas (módulos pegados, declarativo cohesivo, alto riesgo, arquitectónico): decisión de revisión"
+      emit2 "clasificacion_note" "non-mechanical §5 signals (módulos pegados, declarativo cohesivo, alto riesgo, arquitectónico — cited from §5): a review decision"
     fi
 
     [ "$MODE" = "format" ] && exit 0
@@ -637,7 +637,7 @@ case "$MODE" in
 
     for plan in "${PLAN_ARGS[@]}"; do
       if [[ ! "$plan" =~ ^([^:]+):([0-9]+)-([0-9]+)(:header=([0-9]+))?$ ]]; then
-        DEFECTS+=("plan malformado: '$plan' (formato <dest>:<FROM>-<TO>[:header=<N>])")
+        DEFECTS+=("malformed plan: '$plan' (format <dest>:<FROM>-<TO>[:header=<N>])")
         continue
       fi
       DEST="${BASH_REMATCH[1]}"
@@ -645,18 +645,18 @@ case "$MODE" in
       TO="${BASH_REMATCH[3]}"
       HEADER="${BASH_REMATCH[5]:-0}"
       if [ "$FROM" -eq 0 ] || [ "$FROM" -gt "$TO" ]; then
-        DEFECTS+=("rango invertido en '$plan': las líneas son 1-based y FROM ≤ TO")
+        DEFECTS+=("inverted range in '$plan': lines are 1-based and FROM <= TO")
         continue
       fi
       if [ "$DEST" = "$SRC_KEY" ]; then
-        DEFECTS+=("destino == fuente en '$plan': mover líneas de un archivo a sí mismo no es un corte")
+        DEFECTS+=("destination == source in '$plan': moving lines from a file to itself is not a cut")
         continue
       fi
       # overlap on the RAW ranges, pairwise against the accepted plans
       overlap=0
       for other in "${PLAN_ORDER[@]}"; do
         if [ "$FROM" -le "${PLAN_TO[$other]}" ] && [ "${PLAN_FROM[$other]}" -le "$TO" ]; then
-          DEFECTS+=("rangos solapados: '$plan' contra el plan de '$other' (mismo archivo fuente)")
+          DEFECTS+=("overlapping ranges: '$plan' against the plan of '$other' (same source file)")
           overlap=1
           break
         fi
@@ -673,7 +673,7 @@ case "$MODE" in
         MOVED=$((TOTAL - FROM + 1))
         [ "$MOVED" -lt 0 ] && MOVED=0
         PLAN_CLIPPED["$DEST"]=1
-        DEFECTS+=("rango pasado EOF en '$plan': la fuente mide $TOTAL líneas")
+        DEFECTS+=("range past EOF in '$plan': the source measures $TOTAL lines")
       fi
       PLAN_MOVED["$DEST"]="$MOVED"
     done
@@ -685,13 +685,13 @@ case "$MODE" in
     declare -A GLUE=()
     for gspec in "${GLUE_ARGS[@]}"; do
       if [[ ! "$gspec" =~ ^([^=]+)=([0-9]+)$ ]]; then
-        DEFECTS+=("glue malformado: '$gspec' (formato <archivo>=<N>, N ≥ 0)")
+        DEFECTS+=("malformed glue: '$gspec' (format <file>=<N>, N >= 0)")
         continue
       fi
       GKEY="${BASH_REMATCH[1]}"
       GVAL="${BASH_REMATCH[2]}"
       if [ "$GKEY" != "$SRC_KEY" ] && [[ ! " ${PLAN_ORDER[*]} " == *" $GKEY "* ]]; then
-        DEFECTS+=("glue sobre un archivo que el plan no toca: '$GKEY' (el plan mueve hacia ${#PLAN_ORDER[@]} destino(s) y la fuente '$SRC_KEY')")
+        DEFECTS+=("glue on a file the plan does not touch: '$GKEY' (the plan moves to ${#PLAN_ORDER[@]} destination(s) and the source '$SRC_KEY')")
         continue
       fi
       GLUE["$GKEY"]="$GVAL"
@@ -725,15 +725,15 @@ case "$MODE" in
       emit4 "plan" "$dest" "$DEST_FINAL" "lineas" "$NOTE"
       if [ "$DEST_FINAL" -gt "$CAP" ]; then
         if [ -n "${GF["$DEST_REL"]:-}" ]; then
-          VIOLATIONS+=("el destino '$dest' quedaría en $DEST_FINAL > $CAP_DESC: grandfathered no puede crecer")
+          VIOLATIONS+=("destination '$dest' would land at $DEST_FINAL > $CAP_DESC: grandfathered files cannot grow")
         else
-          VIOLATIONS+=("el destino '$dest' quedaría en $DEST_FINAL > $CAP_DESC y no está grandfathered: dividí el plan en extracciones más chicas")
+          VIOLATIONS+=("destination '$dest' would land at $DEST_FINAL > $CAP_DESC and is not grandfathered: split the plan into smaller extractions")
         fi
       fi
     done
 
     SRC_FINAL=$((TOTAL - TOTAL_MOVED + ${GLUE["$SRC_KEY"]:-0}))
-    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lineas" "$TOTAL líneas - $TOTAL_MOVED movidas${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
+    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lineas" "$TOTAL lines - $TOTAL_MOVED moved${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
 
     if [ "${#PLAN_ORDER[@]}" -gt 0 ]; then
       PRS=$(((2 * TOTAL_MOVED + DIFF_BUDGET - 1) / DIFF_BUDGET))
@@ -742,10 +742,10 @@ case "$MODE" in
 
     # ratchet verdicts on the source
     if [ "$TOTAL" -le "$BASELINE_LIMIT" ] && [ -z "${GF["$REL"]:-}" ]; then
-      VIOLATIONS+=("no se preflighta: '$REL' mide <= hard_limit ($BASELINE_LIMIT); si está grandfathered a ≤ límite consolidá con --remove, dividirlo es aritmética forzada")
+      VIOLATIONS+=("nothing to preflight: '$REL' measures <= hard_limit ($BASELINE_LIMIT); if it is grandfathered at or under the limit, consolidate with --remove — splitting it is forced arithmetic")
     fi
     if [ -n "${GF["$REL"]:-}" ] && [ "$SRC_FINAL" -le "$BASELINE_LIMIT" ]; then
-      NOTICES+=("la fuente quedaría en $SRC_FINAL <= hard_limit ($BASELINE_LIMIT): consolidá la victoria con bash scripts/check_file_size.sh --remove '$REL' en el mismo PR")
+      NOTICES+=("the source would land at $SRC_FINAL <= hard_limit ($BASELINE_LIMIT): consolidate the win with bash scripts/check_file_size.sh --remove '$REL' in the same PR")
     fi
 
     for notice in "${NOTICES[@]}"; do
@@ -755,7 +755,7 @@ case "$MODE" in
       printf 'defecto: %s\n' "$defect" >&2
     done
     for violation in "${VIOLATIONS[@]}"; do
-      printf 'violación: %s\n' "$violation" >&2
+      printf 'violation: %s\n' "$violation" >&2
     done
     if [ "${#DEFECTS[@]}" -gt 0 ]; then
       exit 4

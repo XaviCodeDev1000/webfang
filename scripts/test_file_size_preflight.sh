@@ -64,19 +64,19 @@ for arg in "$@"; do
   case "$arg" in
     --negation) NEGATION=1 ;;
     -h|--help_preflight)
-      printf '%s\n' "Uso: bash scripts/test_file_size_preflight.sh [--negation]"
+      printf '%s\n' "Usage: bash scripts/test_file_size_preflight.sh [--negation]"
       printf '%s\n' ""
-      printf '%s\n' "  --negation  invierte la expectativa de paridad del corpus."
+      printf '%s\n' "  --negation  flips the corpus-parity expectation."
       printf '%s\n' "              Un harness que no puede fallar no prueba nada (#2056)."
       exit 0 ;;
     *)
-      printf 'argumento desconocido: %s\n' "$arg" >&2
+      printf 'unknown argument: %s\n' "$arg" >&2
       exit 2 ;;
   esac
 done
 
 if [ ! -f "$PRE" ]; then
-  printf 'FAIL: falta %s -- F1a todavia no esta escrito (RED esperado)\n' "$PRE" >&2
+  printf 'FAIL: missing %s -- F1a not written yet (expected RED)\n' "$PRE" >&2
   exit 1
 fi
 
@@ -103,12 +103,12 @@ bad() {
 
 # expect_rc <desc> <esperado> <obtenido> [detalle]
 expect_rc() {
-  if [ "$2" = "$3" ]; then ok "$1" "rc=$3"; else bad "$1" "esperado rc=$2, obtenido rc=$3" "${4:-}"; fi
+  if [ "$2" = "$3" ]; then ok "$1" "rc=$3"; else bad "$1" "expected rc=$2, got rc=$3" "${4:-}"; fi
 }
 
 # expect_eq <desc> <obtenido> <esperado>
 expect_eq() {
-  if [ "$2" = "$3" ]; then ok "$1" "$2"; else bad "$1" "obtenido='$2' esperado='$3'"; fi
+  if [ "$2" = "$3" ]; then ok "$1" "$2"; else bad "$1" "got='$2' expected='$3'"; fi
 }
 
 # expect_match <desc> <texto> <regex>  (regex extendida de grep)
@@ -116,7 +116,7 @@ expect_eq() {
 # on the first match SIGPIPEs the printf when the text is larger than the
 # pipe buffer (the 161 KB ci.yml) and the pipeline fails DESPITE the match.
 expect_match() {
-  if printf '%s\n' "$2" | grep -E -- "$3" > /dev/null; then ok "$1" "$2"; else bad "$1" "sin match /$3/ en: $2"; fi
+  if printf '%s\n' "$2" | grep -E -- "$3" > /dev/null; then ok "$1" "$2"; else bad "$1" "no match /$3/ in: $2"; fi
 }
 
 SB=""
@@ -135,8 +135,8 @@ new_sandbox() {
 }
 
 # write_baseline <ruta:conteo>... [exc:ruta ...] -- UN mapa grandfathered;
-# exc:ruta añade la entrada al mapa exceptions (el parser del guard la tolera:
-# solo valida grandfathered y hard_limit).
+# exc:path adds the entry to the exceptions map (the guard's parser tolerates it:
+# it only validates grandfathered and hard_limit).
 write_baseline() {
   python3 -I - "$SB/scripts/quality-baselines.json" "$@" <<'PY'
 import json, sys
@@ -209,9 +209,9 @@ GUARD_FIND="$(sed -n 's/^ *if ! \(find "\$ROOT\/crates" .*\) -print0 \\$/\1/p' "
 # shellcheck disable=SC2016
 GUARD_CORPUS="$(printf '%s' "$GUARD_FIND" | sed 's/find "\$ROOT\/crates"/find crates/')"
 if [ -z "$GUARD_CORPUS" ]; then
-  bad "2.0 el harness extrae el find del guard" "no match en $GUARD"
+  bad "2.0 the harness extracts the guard's find" "no match in $GUARD"
 else
-  ok "2.0 el harness extrae el find del guard" "$GUARD_CORPUS"
+  ok "2.0 the harness extracts the guard's find" "$GUARD_CORPUS"
 fi
 
 run_pre --corpus-literal
@@ -219,7 +219,7 @@ EXPECT_CORPUS="$GUARD_CORPUS"
 if [ "$NEGATION" = "1" ]; then
   EXPECT_CORPUS="$GUARD_CORPUS -maxdepth 1"
 fi
-expect_eq "2.1 --corpus-literal == el find del guard, byte a byte" "$OUT" "$EXPECT_CORPUS"
+expect_eq "2.1 --corpus-literal == the guard's find, byte for byte" "$OUT" "$EXPECT_CORPUS"
 
 # 2.2 the THREE-WAY LOCK: AGENTS.md documents the corpus, the guard owns it,
 # the preflight imports it. If the guard's find expression changes without
@@ -227,7 +227,7 @@ expect_eq "2.1 --corpus-literal == el find del guard, byte a byte" "$OUT" "$EXPE
 # documentation does not describe is a corpus nobody can audit.
 AGENTS_CORPUS="$(grep -o "find crates -name '[^']*' -not -path '[^']*'" "$REPO_ROOT/AGENTS.md" | head -1)"
 if [ -z "$AGENTS_CORPUS" ]; then
-  bad "2.2 el harness extrae el corpus documentado de AGENTS.md" "sin 'find crates' en $REPO_ROOT/AGENTS.md"
+  bad "2.2 the harness extracts the corpus documented in AGENTS.md" "no 'find crates' in $REPO_ROOT/AGENTS.md"
 else
   expect_eq "2.2 the corpus is the one AGENTS.md documents (three-way lock)" "$OUT" "$AGENTS_CORPUS"
 fi
@@ -238,7 +238,7 @@ fi
 new_sandbox c3
 run_pre --format "crates/webfang_x/src/nope.rs"
 expect_rc "3.1 a missing path fails (rc=1)" 1 "$RC" "$ERRF"
-expect_match "3.2 the cause is named, not a bare traceback" "$(cat "$ERRF" 2>/dev/null)" "NOT_FOUND|no existe|no se encontro"
+expect_match "3.2 the cause is named, not a bare traceback" "$(cat "$ERRF" 2>/dev/null)" "file not found|NOT_FOUND"
 
 run_pre --format
 expect_rc "3.3 --format without a path is a usage error (rc=2)" 2 "$RC" "$ERRF"
@@ -541,7 +541,7 @@ HARNESS_HITS="$(sed 's/[[:space:]]*#.*$//' "$REPO_ROOT/scripts/ci_fast_gate.sh" 
 if [ "${GATE_HITS:-0}" -ge 1 ] && [ "${HARNESS_HITS:-0}" -ge 1 ]; then
   ok "18.2 ci_fast_gate.sh runs the preflight and its harness (local wiring enforced)"
 else
-  bad "18.2 ci_fast_gate.sh runs the preflight and its harness" "preflight=$GATE_HITS harness=$HARNESS_HITS (el cableado local se quitó o quedó comentado y nada lo nota)"
+  bad "18.2 ci_fast_gate.sh runs the preflight and its harness" "preflight=$GATE_HITS harness=$HARNESS_HITS (the local wiring was removed or commented out and nothing notices)"
 fi
 
 new_sandbox c25
