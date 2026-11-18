@@ -262,6 +262,28 @@ else
   bad "lane(s) in the coverage table that the dispatcher never assigns: $(echo "$COVERAGE_BAD_LANE" | tr '\n' ' ')"
 fi
 
+# --- 7. Every scripts/*.sh named in a coverage note must be wired in ci.yml ---
+# The notes are DECLARATIONS of what covers each job. The M4 mutation (F1a
+# review, PR #2926) proved that deleting a harness's invocation from the
+# workflows left nothing red — the declaration rotted into stale prose. A
+# script named in a data-row note and absent from ci.yml fails here, so the
+# declaration stays live. Header comments are exempt (they cite, not declare).
+NOTE_SCRIPTS="$(awk -F'\t' '$1 !~ /^#/ && $1 != "" {print $4"\n"$5}' "$COVERAGE" \
+  | grep -oE 'scripts/[A-Za-z0-9_-]+\.sh' | sort -u)"
+if [[ -z "$NOTE_SCRIPTS" ]]; then
+  ok "no scripts named in coverage notes (nothing to wire-check)"
+else
+  MISSING_WIRING=""
+  while IFS= read -r named; do
+    grep -q "$named" "$CI_YML" || MISSING_WIRING="$MISSING_WIRING $named"
+  done <<< "$NOTE_SCRIPTS"
+  if [[ -z "$MISSING_WIRING" ]]; then
+    ok "every script named in a coverage note is wired in ci.yml ($(printf '%s\n' "$NOTE_SCRIPTS" | wc -l) scripts)"
+  else
+    bad "scripts named in coverage notes but not wired in ci.yml:$MISSING_WIRING"
+  fi
+fi
+
 echo
 if [[ "$fail" -ne 0 ]]; then
   echo "ci_gate_structure: $PASSED passed, at least one assertion FAILED."
