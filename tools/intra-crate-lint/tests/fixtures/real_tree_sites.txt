@@ -2164,7 +2164,7 @@ infrastructure/http/waf_engine/inspector.rs	7	use	crate::domain::waf::WafInspect
 infrastructure/http/waf_engine/inspector.rs	7	use	crate::domain::waf::WafVerdict
 infrastructure/http/waf_engine/inspector.rs	7	use	crate::domain::waf::sealed::Sealed
 infrastructure/http/waf_engine/signatures.rs	11	use	crate::domain::waf::WafTier
-infrastructure/http/waf_engine/tests_common.rs	10	use	crate::domain::waf::InspectionContext
+infrastructure/http/waf_engine/tests_common.rs	11	use	crate::domain::waf::InspectionContext
 infrastructure/http/waf_engine/tests_context.rs	10	use	crate::domain::waf::EvidenceSource
 infrastructure/http/waf_engine/tests_context.rs	10	use	crate::domain::waf::InspectionContext
 infrastructure/http/waf_engine/tests_context.rs	10	use	crate::domain::waf::WafTier
