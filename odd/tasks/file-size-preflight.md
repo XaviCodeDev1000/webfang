@@ -236,7 +236,9 @@ find without moving AGENTS.md (or the other way), the harness FAILS: a corpus th
 does not describe is a corpus nobody can audit. Harness 59/59.
 
 L15 (2026-11-18, owner review — the lexer report): the lexer spans **211 lines**
-(embedded python, lines 203-413 of the 719-line preflight). What the harness proves about the
+(embedded python, lines 203-413 of the 719-line preflight; anchored by the round-8 figure fix:
+`git show 55f940e4:scripts/file_size_preflight.sh | wc -l` = 719 at base `55f940e4`, 2026-11-18 —
+today's same-state commands are in L27(b) and the close battery). What the harness proves about the
 adversarial cases: 7.1-7.3 (braces in strings `"{"`, char literals `'{'`, raw strings `r#"{"#`,
 line and block comments, lifetimes `'static` do NOT move the span — the adversarial fixture
 measured as span 2..9 in a 9-line file), 8.1-8.3 (an unbalanced file → an `indeterminate` span
@@ -270,8 +272,9 @@ expression above breaks the lock and forces the human sync (fail-closed). (5) **
 margin for F0** (fact verified in the tree): the `agents_doc` budget = 650 lines / 40 960
 bytes (scripts/quality-baselines.json, enforced by scripts/check_agents_doc.sh); AGENTS.md
 margin measured with `wc -l -c AGENTS.md` against `jq '.agents_doc' scripts/quality-baselines.json`
-(650 lines / 40 960 bytes) — ALWAYS RE-MEASURE when using it (it was +5/+141 at F1a open, +3/+27 after
-the #2922 merge). Any F0 router edit must be net-zero or negative, or trim
+(650 lines / 40 960 bytes) — ALWAYS RE-MEASURE when using it (it was +5/+141 at F1a open; +3/+27 after
+the #2922 merge — anchored by the round-8 figure fix: base `bcd4b345`,
+`git show bcd4b345:AGENTS.md | wc -l -c` = 647 lines / 40933 bytes, 2026-11-18). Any F0 router edit must be net-zero or negative, or trim
 runbook into Engram (obs #370) BEFORE touching; raising the budget is a manual
 maintainer edit. (6) **Label verified against
 precedents**: the map (scripts/auto_label_type.sh --map) gives feat→type:feature, and the ratchet's
@@ -337,9 +340,11 @@ span), typed.rs, chromiumoxide (the one IND by the guard today). Harness 73/73 a
 L22 (2026-11-18, round 3 — §6 dogfooding with the command --budget emits):
 `gh pr view 2901 --json additions,deletions -q '.additions+.deletions'` → **2246** ✓;
 2896 → **3018** ✓; 2856 → **3933** ✓; 2893 → **5101** ✓ — the four sample figures
-reproduce EXACTLY with the tool's own command. #2926 measures **1519 add+del**
-(under P=3000: no warning). The P constant carries its sample in the preflight header comment
-(DIFF_BUDGET, lines 22-27) and in the --budget output.
+reproduce EXACTLY with the tool's own command. #2926 measured **1519 add+del** at round 3
+(pre-push; its base SHA was not recorded — L24(b) and L27(b) carry the anchored series and the
+reproducible command; under P=3000: no warning). The P constant carries its sample in the
+preflight's DIFF_BUDGET header comment (`grep -n 'DIFF_BUDGET' scripts/file_size_preflight.sh`)
+and in the --budget output.
 
 L23 (2026-11-18, round 4 — owner decision (a) EXECUTED): scope measured before touching.
 Literal rule (origin/main's AGENTS.md, lines 84-86): "English only — every repository-facing
@@ -359,8 +364,8 @@ The remaining Spanish in the preflight were CITATIONS of the Spanish normative t
 names and §4.3's "plus headers"). Then: the origin/main merge (bcd4b345, 78 files, 0
 text conflicts — #2922 touched ci.yml and ci_fast_gate.sh in regions disjoint from mine).
 Post-merge re-measure: ratchet OK, harness 73/73, structure 24 assertions, .tsv grep=1,
-AGENTS.md now **647/40933** → margin **+3 lines / +27 bytes** (the sweep grew the router:
-F0 must be net-zero or negative).
+AGENTS.md now **647/40933** → margin **+3 lines / +27 bytes** (base `bcd4b345`, the L17 command;
+the sweep grew the router: F0 must be net-zero or negative).
 
 L24 (2026-11-18, round 4 — numeric reconciliations the owner caught): (a) **562 = 240 +
 318 + 4**, produced by the reproducible command (the tool per corpus file, without a
@@ -421,11 +426,17 @@ closing brace, inclusive) in lines; bare `#[test]` fns outside spans DO NOT coun
 indeterminate guard when spans exist; 0 when there are no spans — the corpus's tests_*.rs
 case, declared). Verbatim command with date/base: the L24 scan
 (corpus-literal + the --format loop + awk), measurement base commit `df3f9f01`, date
-2026-11-18. **(b) the size of #2926 = 1884 add+del** on both bases (gh vs main 0f1f74c0 = git
-diff vs merge-base 0f1f74c0 = 1882+2), with the 8 files: ci.yml (+18), odd/tasks
-(+395), ci_fast_gate.sh (+19), .tsv (2±), preflight (+772), baseline (3±),
-test_ci_gate_structure.sh (+22), harness (+653). The 1704 and the 1519 were measurements
-taken before pushing later commits. **(c) contract tokens derived by command**:
+2026-11-18. **(b) the size of #2926**: measured while the branch grew — 1519 (round 3), 1704
+(round 4), 1884 (round 5), all PRE-PUSH with no recorded base SHA, kept only as history (they do
+not reproduce). The anchored figure, with its command: `git diff --numstat 0f1f74c0..3d6e7e8f`
+(2026-11-18, base `0f1f74c0` = the merge-base) = 2055 insertions + 4 deletions = **2059 add+del**,
+9 files: ci.yml (+18), odd/tasks (+480), ci_fast_gate.sh (+19), .tsv (+1/-1), preflight (+789),
+baseline (+2/-1), test_ci_fast_gate.sh (+24/-1), test_ci_gate_structure.sh (+64/-1), harness
+(+658). [The round-5 report's list — 1884 = 1882+2, 8 files, preflight (+772), mission (+395),
+structure (+22), harness (+653) — was a transcription of an earlier state and does not reproduce
+against the numstat above; the +772 for the preflight is wrong at EVERY commit (768 at c7634ded,
+789 from eca24374 on).] The current size is produced at close by
+`git diff --stat $(git merge-base origin/main HEAD)..HEAD | tail -1`. **(c) contract tokens derived by command**:
 block keys over a fixture (19 keys: allow, blast_radius, blast_radius_note,
 churn_commits, churn_commits_note, clasificacion, clasificacion_note, funciones, in_corpus,
 inline_tests, muestra, overlap_prs, overlap_prs_note, path, plan, presupuesto_diff,
