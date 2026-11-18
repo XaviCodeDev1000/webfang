@@ -290,7 +290,7 @@ jobs:
           set -euo pipefail
           SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$VALIDATED_COMMIT")"
           if ! [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
-            echo "::error::no se pudo derivar SOURCE_DATE_EPOCH del commit validado '$VALIDATED_COMMIT'" >&2
+            echo "::error::could not derive SOURCE_DATE_EPOCH from the validated commit '$VALIDATED_COMMIT'" >&2
             exit 1
           fi
           echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> "$GITHUB_OUTPUT"
@@ -327,7 +327,7 @@ jobs:
               fi
             done
           fi
-          echo "::error::no se encontró GNU tar. En macOS el 'tar' del sistema es bsdtar y no implementa --sort/--mtime/--format=gnu igual que GNU tar; instálalo con 'brew install gnu-tar'. No se continúa con un bsdtar silencioso: produciría un archivo aparentemente normalizado que no lo está." >&2
+          echo "::error::GNU tar was not found. On macOS the system 'tar' is bsdtar and does not implement --sort/--mtime/--format=gnu like GNU tar; install it with 'brew install gnu-tar'. We do not continue with a silent bsdtar: it would produce an apparently normalized archive that is not." >&2
           exit 1
 
       # SC-04: normalized tar. --format=gnu (not pax) is load-bearing: the pax
@@ -629,7 +629,7 @@ jobs:
           set -euo pipefail
           SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$VALIDATED_COMMIT")"
           if ! [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
-            echo "::error::no se pudo derivar SOURCE_DATE_EPOCH del commit validado '$VALIDATED_COMMIT'" >&2
+            echo "::error::could not derive SOURCE_DATE_EPOCH from the validated commit '$VALIDATED_COMMIT'" >&2
             exit 1
           fi
           export SOURCE_DATE_EPOCH
@@ -748,7 +748,7 @@ jobs:
           while IFS= read -r expected; do
             if [[ -z "$expected" ]]; then continue; fi   # trailing-newline tail-safety
             if [[ ! -f "artifacts/$expected" ]]; then
-              echo "::error::falta el artefacto requerido artifacts/$expected — una release con inventario incompleto es exactamente el hueco que este paso cierra" >&2
+              echo "::error::the required artifact artifacts/$expected is missing — a release with an incomplete inventory is exactly the gap this step closes" >&2
               exit 1
             fi
           done <<<"$RELEASE_EXPECTED_ASSETS"
@@ -760,11 +760,11 @@ jobs:
               | LC_ALL=C sort
           )
           if [ "${#assets[@]}" -eq 0 ]; then
-            echo "::error::no hay assets que firmar: una release sin firmas es exactamente el defecto que este paso cierra" >&2
+            echo "::error::there are no assets to sign: a release without signatures is exactly the defect this step closes" >&2
             exit 1
           fi
           for asset in "${assets[@]}"; do
-            [ -f "artifacts/$asset" ] || { echo "::error::falta artifacts/$asset" >&2; exit 1; }
+            [ -f "artifacts/$asset" ] || { echo "::error::artifacts/$asset is missing" >&2; exit 1; }
             cosign sign-blob --yes --bundle "artifacts/$asset.sigstore.json" "artifacts/$asset"
             echo "signed: $asset"
           done
@@ -890,7 +890,7 @@ jobs:
           while IFS= read -r expected; do
             if [[ -z "$expected" ]]; then continue; fi   # trailing-newline tail-safety
             if [[ ! -f "artifacts/$expected" ]]; then
-              echo "::error::falta el artefacto requerido artifacts/$expected — no se verifica una firma de la que nunca se firmó: el conjunto completo debe estar en la lista" >&2
+              echo "::error::the required artifact artifacts/$expected is missing — a signature of something never signed is not verified: the complete set must be in the list" >&2
               exit 1
             fi
           done <<<"$RELEASE_EXPECTED_ASSETS"
@@ -1042,7 +1042,7 @@ jobs:
             [[ -f "artifacts/$expected" ]] || expected_missing+=("$expected")
           done <<<"$RELEASE_EXPECTED_ASSETS"
           if [ "${#expected_missing[@]}" -gt 0 ]; then
-            echo "::error::faltan artefactos requeridos para publicar: ${expected_missing[*]}" >&2
+            echo "::error::required artifacts for publishing are missing: ${expected_missing[*]}" >&2
             exit 1
           fi
           mapfile -t assets < <(
@@ -1051,7 +1051,7 @@ jobs:
               | LC_ALL=C sort
           )
           if [ "${#assets[@]}" -eq 0 ]; then
-            echo "::error::no hay assets que publicar" >&2
+            echo "::error::there are no assets to publish" >&2
             exit 1
           fi
           upload=()

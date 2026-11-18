@@ -131,7 +131,7 @@ seed_recipe_abs() {
   printf '%s' "$out"
 }
 
-# ── 3. qué binarios ejecuta el build ──
+# ── 3. which binaries the build runs ──
 seed_recipe_resolve_binaries() {
   SEED_RECIPE_CARGO_BIN="$(command -v cargo 2>/dev/null || true)"
   [ -n "$SEED_RECIPE_CARGO_BIN" ] || {
@@ -506,7 +506,7 @@ seed_recipe_cargo_args() {
 # silently outranks the configuration the key was computed from. Measured with
 # seven of them set, and the key unchanged in every case:
 #
-#     CARGO_BUILD_RUSTC=/opt/otro/rustc        key: unchanged
+#     CARGO_BUILD_RUSTC=/opt/other/rustc        key: unchanged
 #     CARGO_BUILD_RUSTFLAGS=-C debuginfo=0     key: unchanged
 #     CARGO_BUILD_TARGET=aarch64-...           key: unchanged
 #     CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=/w  key: unchanged

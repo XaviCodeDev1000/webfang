@@ -416,7 +416,7 @@ EOF
   # like the ai-providers guard above.
   run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
     bash scripts/check_data_flow_doc.sh
-  # Docs claims gate (auditoría QA/QC 2026-10-24): README.md is the most-read
+  # Docs claims gate (QA/QC audit 2026-10-24): README.md is the most-read
   # file in the repo and nothing read it. The Architecture diagram drew an edge
   # no manifest has, and two badges outlived the facts they described. This
   # lane is where a markdown-only edit lands — exactly the edit that can
@@ -756,7 +756,7 @@ EOF
     skip_step "mcp surface wiring" "no mcp surface guard files changed"
   fi
   # Breaking-marker guard harness (#2081): the squash path silently destroyed a
-  # breaking declaration twice (ADR-0004 paso 6, #2072 and #2078), and both
+  # breaking declaration twice (ADR-0004 step 6, #2072 and #2078), and both
   # shipped as patches. `merge-when-green.sh` now refuses that merge; this
   # harness pins the refusal AND its negation (title marker + --squash must not
   # merge). Triggered by the script or its harness, both `scripts/**` — a PR
@@ -1054,7 +1054,7 @@ lane_fmt_and_guards() {
   # reaches lane_docs. Blocking, like the CI step it mirrors.
   run_guard "data-flow disclosure gate (#2241)" scripts/check_data_flow_doc.sh \
     bash scripts/check_data_flow_doc.sh
-  # Docs claims gate (auditoría QA/QC 2026-10-24): the code side of the same
+  # Docs claims gate (QA/QC audit 2026-10-24): the code side of the same
   # drift. A dependency edge or an MSRV bump changes no markdown, so a lane
   # that only saw docs would miss it. Same guard as lane_docs, same block.
   run_guard "docs claims gate (README truth)" scripts/check_docs_claims.sh \
@@ -1189,7 +1189,7 @@ targeted_cargo() {
   [[ "$core_changed" == "true" || "$crawler_changed" == "true" || "$downloader_changed" == "true" ]] && pkgs+=(webfang_core)
   [[ "$cli_changed" == "true" ]] && pkgs+=(webfang_cli)
   [[ "$mcp_changed" == "true" ]] && pkgs+=(webfang_mcp)
-  # The `ai` feature/crate is gone (ADR-0004 paso 6): the semantic-cleaning
+  # The `ai` feature/crate is gone (ADR-0004 step 6): the semantic-cleaning
   # surface lives in webfang_core now, so an AI-area change inside core/mcp/cli
   # is already covered by those packages and needs no package of its own. An
   # AI-area change outside them falls through to the workspace-scope branch

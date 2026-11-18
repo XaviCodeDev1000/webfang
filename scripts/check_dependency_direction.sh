@@ -45,7 +45,7 @@
 #   webfang_test_utils: webfang_core
 #   webfang_benchmark:  webfang_core
 #
-#   webfang_ai was removed in ADR-0004 paso 6 (see docs/adr/
+#   webfang_ai was removed in ADR-0004 step 6 (see docs/adr/
 #   0004-onnx-local-removal.md): the crate and its ai feature no longer
 #   exist. A surviving webfang_ai edge is now caught in three ways: it
 #   cannot be resolved by cargo (metadata fails → the gate fails closed), it

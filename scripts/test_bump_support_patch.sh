@@ -526,7 +526,7 @@ if [[ "$LAST_DRIFT_RC" -eq 0 ]]; then
 else
   fail "el gate enforcing está rojo en la ventana en vuelo del bump (rc=$LAST_DRIFT_RC): $LAST_DRIFT_OUT"
 fi
-if grep -qF 'publicación pendiente' <<<"$LAST_DRIFT_OUT"; then
+if grep -qF 'pending publication' <<<"$LAST_DRIFT_OUT"; then
   pass "la ventana en vuelo se anuncia como nota (no como error)"
 else
   fail "la ventana en vuelo no se anuncia: $LAST_DRIFT_OUT"

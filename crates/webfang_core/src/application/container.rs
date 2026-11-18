@@ -824,17 +824,17 @@ impl Container {
     /// Takes `Arc<dyn LlmPort>` — the concrete `OpenAiLlmClient` is built in
     /// the CLI/MCP layer and injected here. Absence stays the default no-op.
     ///
-    /// Política `None` (contrato ai-providers): el Container es permisivo — NO
-    /// falla en construcción sin provider. Pero todo binario de servicio que
-    /// arranque con un feature LLM habilitado DEBE validar
-    /// `llm_port().is_some()` en startup y salir con error claro si falta
-    /// (falla en startup si el feature está habilitado; no falla si no lo
-    /// está). Sin esa validación, el fallo llega tarde en la primera llamada
-    /// (`ScraperError::Config` en `extract`: `absent_llm_port_is_config_error`
-    /// testea ese comportamiento del Container, no lo justifica como
-    /// contrato del servicio). La capa binaria (CLI/MCP) valida según su
-    /// propio argv (p. ej. `--extract-with-llm` sin provider configurado),
-    /// nunca el Container.
+    /// `None` policy (ai-providers contract): the Container is permissive — it
+    /// does NOT fail at construction without a provider. But every service
+    /// binary that starts with an LLM feature enabled MUST validate
+    /// `llm_port().is_some()` at startup and exit with a clear error if it is
+    /// missing (it fails at startup when the feature is enabled; it does not
+    /// fail when it is not). Without that validation the failure arrives late,
+    /// on the first call (`ScraperError::Config` in `extract`:
+    /// `absent_llm_port_is_config_error` tests that Container behavior, it does
+    /// not justify it as a service contract). The binary layer (CLI/MCP)
+    /// validates against its own argv (e.g. `--extract-with-llm` with no
+    /// configured provider), never the Container.
     ///
     /// Injection is at-most-once ([`OnceCell`] semantics): a second call keeps
     /// the first port.

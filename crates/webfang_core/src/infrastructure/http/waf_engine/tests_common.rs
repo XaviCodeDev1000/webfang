@@ -1,11 +1,12 @@
-//! Base compartida de los tests de `waf_engine`.
+//! Shared base for the `waf_engine` tests.
 //!
-//! Extraido del `mod tests` inline de `waf_engine.rs` (PR 1 de la mision Ola 1,
-//! paraguas #2584). `ctx_with` no vive con los tests de verdict a pesar de haber
-//! nacido ahi: sus consumidores son tres hijos distintos (`tests_evidence` por el
-//! cap de evidencia, `tests_inspect` por la politica de verdict y `tests_entropy`
-//! por las filas de entropia), asi que el destino lo dictan los consumidores y no
-//! la comodidad. `pub(super)` = visible en el modulo `waf_engine` y sus descendientes.
+//! Extracted from the inline `mod tests` of `waf_engine.rs` (PR 1 of the Ola 1
+//! mission, umbrella #2584). `ctx_with` does not live with the verdict tests
+//! despite having been born there: its consumers are three different children
+//! (`tests_evidence` for the evidence cap, `tests_inspect` for the verdict policy
+//! and `tests_entropy` for the entropy rows), so the destination is dictated by
+//! the consumers and not by convenience. `pub(super)` = visible in the
+//! `waf_engine` module and its descendants.
 
 use crate::domain::waf::InspectionContext;
 

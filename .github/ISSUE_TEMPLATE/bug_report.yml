@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for filing this. Issues without reproduction steps will be
-        returned for more info. (Podés escribir el cuerpo del issue en español.)
+        returned for more info.
   - type: textarea
     id: problem
     attributes:

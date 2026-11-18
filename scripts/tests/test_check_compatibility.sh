@@ -19,7 +19,7 @@
 #              degrades into a compile-only pass (finding 5);
 #   section D  the --output-vectors exit contract is asserted PER COMBO, not
 #              accepted from whatever the binary returns: since ADR-0004
-#              paso 6 there is exactly ONE contract (65 on every build), so a
+#              step 6 there is exactly ONE contract (65 on every build), so a
 #              binary honouring it passes all five combos, while one that
 #              still applies the retired build-capability arm (65 only for an
 #              --all-features build) or one that always exits 78 fails
@@ -154,10 +154,10 @@ esac
 echo "STUB-PROBE-STDOUT: webfang $*"
 echo "STUB-PROBE-STDERR: simulated application failure" >&2
 # The oracle: independent re-derivation of the contract. Since ADR-0004
-# paso 6 the `--output-vectors` contract is UNIFORM — without `--clean-ai`
+# step 6 the `--output-vectors` contract is UNIFORM — without `--clean-ai`
 # it is a data-format error (65) on every build — so the honest binary
 # always exits 65. The `oldcontract` mode re-derives the RETIRED
-# pre-paso-6 contract from the argv the build actually received (65 only
+# pre-step-6 contract from the argv the build actually received (65 only
 # for an `--all-features` build, 78 otherwise), so the harness can be
 # shown to REJECT it: a harness that took the exit code from the binary
 # instead of asserting it would pass that mode.

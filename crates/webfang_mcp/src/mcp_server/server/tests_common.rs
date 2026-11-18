@@ -1,7 +1,7 @@
-//! Tests extraídos del hub `server.rs` por tema (PR 1 de #2584, movimiento puro).
-//! Los cuerpos son verbatim del módulo de tests inline original.
+//! Tests extracted from the `server.rs` hub by topic (PR 1 of #2584, pure move).
+//! Bodies are verbatim from the original inline test module.
 //!
-//! Base compartida por los hijos de test: el harness de `McpHandler`.
+//! Shared base for the test children: the `McpHandler` harness.
 
 use crate::mcp_server::{McpHandler, McpState};
 use webfang_core::config::Config;

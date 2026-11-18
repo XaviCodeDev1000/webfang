@@ -308,7 +308,7 @@ run_case "case 5: unbootstrapped main refuses the worktree" \
 assert_contains "case 5: preserved message text" \
   "$LAST_OUT" "main checkout is not bootstrapped"
 
-# NEGATION (#2070 ítem 3): main's declaration was read with a rigid `sed`
+# NEGATION (#2070 item 3): main's declaration was read with a rigid `sed`
 # that demands the declaration in column 0, while every other tree — the
 # worktrees and the tree under check — goes through the liberal
 # `parse_envrc_target_decl`. An indented declaration therefore left

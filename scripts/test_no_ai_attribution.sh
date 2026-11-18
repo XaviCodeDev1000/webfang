@@ -218,7 +218,7 @@ expect reject "empty fixture has no messages" ""
 # transient failure — 5xx, secondary rate limit, network hiccup — used to
 # come back as an empty message (the `|| true` swallowed the cause) and
 # hard-red the required check for a healthy PR. Measured: run 41125376595
-# rejected commit ad68339e with "No se pudo leer el mensaje del commit",
+# rejected commit ad68339e with "Could not read the commit message",
 # and a rerun with identical inputs passed. The contract now: the transient
 # class is retried with bounded exponential backoff, a permanent 4xx fails
 # on the FIRST attempt, and a sustained failure still fails closed naming

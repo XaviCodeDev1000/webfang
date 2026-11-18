@@ -52,7 +52,7 @@
 #   3. The classifier `ai` predicate (model markers: embedding, onnx, granite,
 #      clean_ai, ai_integration) has NO counterpart in the current mutants
 #      workflow, which runs `cargo mutants -p webfang_core` over the 6 gated
-#      hot paths only. Since ADR-0004 paso 6 the `webfang_ai` crate is gone
+#      hot paths only. Since ADR-0004 step 6 the `webfang_ai` crate is gone
 #      and the semantic-cleaning surface lives inside webfang_core
 #      (EmbeddingPort, the remote embedding adapter, the cleaner), so an
 #      ai-only change is reported with those scope-paths flagged as

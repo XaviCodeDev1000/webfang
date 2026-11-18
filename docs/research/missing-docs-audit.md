@@ -1,19 +1,19 @@
-# Auditoría missing_docs
+# missing_docs audit
 
-## Resumen
+## Summary
 
-> **Baseline histórico de auditoría cruda** (con doble-conteo por módulo):
+> **Historical baseline of the raw audit** (with double counting per module):
 > - webfang_core: 206 warnings
 > - webfang_ai: 213 warnings
 > - Total: 419 warnings
 >
-> Este número incluye duplicados entre módulos. El conteo deduplicado real es 199.
+> This number includes duplicates across modules. The real deduplicated count is 199.
 
-- warnings deduplicados: **199** → **0** (post #257/#258)
+- deduplicated warnings: **199** → **0** (post #257/#258)
 
-## Por módulo
+## By module
 
-| Módulo | Warnings |
+| Module | Warnings |
 |---|---:|
 | cli | 74 |
 | infrastructure/crawler | 44 |
@@ -31,12 +31,12 @@
 | application/pipeline/stages | 6 |
 | adapters/downloader | 6 |
 | adapters/detector | 6 |
-| (raíz del crate) | 6 |
+| (crate root) | 6 |
 | domain/site | 2 |
 
-## Top archivos
+## Top files
 
-| Archivo | Warnings |
+| File | Warnings |
 |---|---:|
 | adapters/url_path.rs | 36 |
 | domain/error/crawl_error.rs | 30 |
@@ -59,96 +59,96 @@
 | application/crawler/collector.rs | 6 |
 | adapters/downloader/mod.rs | 6 |
 
-## Recomendación de implementación
+## Implementation recommendation
 
-Esfuerzo estimado: L
+Estimated effort: L
 
-Justificación basada en el total de warnings:
-- Total 100-500 → M (2-3 PRs por módulo)
+Justification based on the total number of warnings:
+- Total 100-500 → M (2-3 PRs per module)
 
-Plan sugerido por fases:
-1. Dominio (traits, entidades, value objects, errores, invariantes)
-2. Application (servicios, casos de uso, orquestación)
-3. Ports/config/errors (interfaces de adaptadores, repositorios, tipos públicos de config)
-4. webfang_ai (providers, prompts, schemas, errores de integración)
-5. CI + deny final
+Suggested phase plan:
+1. Domain (traits, entities, value objects, errors, invariants)
+2. Application (services, use cases, orchestration)
+3. Ports/config/errors (adapter interfaces, repositories, public config types)
+4. webfang_ai (providers, prompts, schemas, integration errors)
+5. CI + final deny
 
-## Criterios para activar `deny`
+## Criteria to enable `deny`
 
-- Total < 100 warnings → activar deny en el próximo PR de documentación.
-- Total 100-500 → activar deny por fases, deny solo en módulos ya documentados.
-- Total > 500 → no activar deny hasta tener un plan de documentación por fases aprobado.
+- Total < 100 warnings → enable deny in the next documentation PR.
+- Total 100-500 → enable deny in phases, deny only in already-documented modules.
+- Total > 500 → do not enable deny until an approved phased documentation plan exists.
 
-## Notas técnicas
+## Technical notes
 
-- `missing_docs` default es `allow`. Se cambió a `warn` para la auditoría.
-- No se activó `deny` en esta fase.
-- No se modificó ningún ítem de configuración de lints en Cargo.toml.
+- `missing_docs` default is `allow`. It was changed to `warn` for the audit.
+- `deny` was not enabled in this phase.
+- No lint configuration item in Cargo.toml was modified.
 
-## Corrección de clasificación
+## Classification correction
 
-La clasificación original fue **M**, pero el total de 419 warnings supera el umbral de 200 warnings definido en el brief.
-Por lo tanto, el esfuerzo correcto es **L** y corresponde implementar la documentación por fases,
-no en un único PR.
+The original classification was **M**, but the total of 419 warnings exceeds the 200-warning
+threshold defined in the brief.
+Therefore, the correct effort is **L** and it corresponds to implementing the documentation
+in phases, not in a single PR.
 
-## Addendum: Reconciliación crudo → deduplicado (2026-07-24)
+## Addendum: Raw → deduplicated reconciliation (2026-07-24)
 
-La auditoría original reporta **419 warnings crudos**:
+The original audit reports **419 raw warnings**:
 
 - `webfang_core`: 206
 - `webfang_ai`: 213
-- Total crudo: 419
+- Raw total: 419
 
-Sin embargo, `webfang_ai` depende de `webfang_core`. Cuando se activa `#![warn(missing_docs)]`
-en `webfang_ai`, los 206 warnings de `webfang_core` se propagan. Solo **7 warnings** son
-realmente de `webfang_ai` (en `infrastructure_ai/`).
+However, `webfang_ai` depends on `webfang_core`. When `#![warn(missing_docs)]` is enabled
+in `webfang_ai`, the 206 warnings from `webfang_core` propagate. Only **7 warnings** are
+really from `webfang_ai` (in `infrastructure_ai/`).
 
-El script `audit-missing-docs.sh` fue corregido para deduplicar por `file:line`,
-eliminando el doble-conteo. Estado efectivo:
+The `audit-missing-docs.sh` script was fixed to deduplicate by `file:line`, eliminating the
+double counting. Effective state:
 
-| Métrica | Crudo | Deduplicado |
+| Metric | Raw | Deduplicated |
 |:--------|------:|:-----------:|
 | webfang_core | 206 | 192 |
-| webfang_ai (propios) | 213 | 7 |
+| webfang_ai (own) | 213 | 7 |
 | **Total** | **419** | **199** |
 
-### Breakdown por PR (Fase 0)
+### Breakdown per PR (Phase 0)
 
-| PR | Módulos | ΣWarnings | ΣE (pub(crate)) | ΣR (docs/allow) |
+| PR | Modules | ΣWarnings | ΣE (pub(crate)) | ΣR (docs/allow) |
 |:--:|:--------|:---------:|:----------------:|:----------------:|
-| 0A | (sin warnings — tooling + lint swap) | 0 | 0 | 0 |
+| 0A | (no warnings — tooling + lint swap) | 0 | 0 | 0 |
 | 0B | infrastructure/*, adapters/* | 62 | ~50 | ~12 |
 | 0C | cli/*, cli/args/* | 50 | ~35 | ~15 |
 | 0D | domain/*, application/*, config.rs | 80 | ~42 | ~38 |
 | F5 | webfang_ai/infrastructure_ai | 7 | 0 | 7 |
 | **Total** | | **199** | **~127** | **~72** |
 
-**Post-Fase-0 (real):** 90 eliminados, 109 restantes para Fases 1-5.
+**Post-Phase-0 (real):** 90 eliminated, 109 remaining for Phases 1-5.
 
-### Impacto en esfuerzo
+### Impact on effort
 
-El esfuerzo se revisa de **L** a **M**, dado que:
-- Warnings únicos reales: 199 (no 419)
-- Eliminados vía `pub(crate)` (Fase 0): 90
-- Restantes para documentación (Fases 1-5): **109**
+The effort is revised from **L** to **M**, given that:
+- Real unique warnings: 199 (not 419)
+- Eliminated via `pub(crate)` (Phase 0): 90
+- Remaining for documentation (Phases 1-5): **109**
 
-## Reproducción
+## Reproduction
 
-Para reproducir el conteo deduplicado:
+To reproduce the deduplicated count:
 
 ```bash
 ./scripts/audit-missing-docs.sh
 ```
 
-El script deduplica automáticamente por `file:line` usando `sort + awk`.
+The script automatically deduplicates by `file:line` using `sort + awk`.
 
-## Estado final (post #257 / #258)
+## Final status (post #257 / #258)
 
-- Warnings missing_docs: **0** (199 dedup → 0)
-- Doctests: **86 passed**, 7 ignored (justificados por ítem), 0 failed
-- deny(missing_docs): **activo** en webfang_core y webfang_ai
-- `[package.metadata.docs.rs]`: configurado en ambos crates
-- CI: 3 jobs de calidad de docs (rustdoc, doctests, workspace check+test)
-- Miri: 3 tests FFI ignorados (BoringSSL), resto PASS
-- Snapshot tests: `#[cfg(feature = "ai")]` gating + `webfang_path()` con `--all-features`
-
+- missing_docs warnings: **0** (199 dedup → 0)
+- Doctests: **86 passed**, 7 ignored (justified per item), 0 failed
+- deny(missing_docs): **active** in webfang_core and webfang_ai
+- `[package.metadata.docs.rs]`: configured in both crates
+- CI: 3 docs quality jobs (rustdoc, doctests, workspace check+test)
+- Miri: 3 FFI tests ignored (BoringSSL), the rest PASS
+- Snapshot tests: `#[cfg(feature = "ai")]` gating + `webfang_path()` with `--all-features`

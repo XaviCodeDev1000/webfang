@@ -350,7 +350,7 @@ if [[ "$ROOT_CANON" != "$MAIN_ROOT_CANON" ]]; then
     # demands the declaration in column 0 left MAIN_TARGET empty for an
     # INDENTED declaration — a shape the bootstrap itself writes — and every
     # worktree of the repo was then rejected with reason=main-unbootstrapped
-    # for a precondition the tree already met (#2070 ítem 3).
+    # for a precondition the tree already met (#2070 item 3).
     MAIN_TARGET="$(parse_envrc_target_decl "$MAIN_ENVRC")"
   fi
   if [[ -z "$MAIN_TARGET" ]]; then

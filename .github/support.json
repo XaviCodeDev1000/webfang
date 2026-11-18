@@ -179,7 +179,7 @@
       "latest": "2.12.0",
       "released_at": "2026-10-17T23:52:18+01:00",
       "eol_at": "2026-10-20T01:25:00+01:00",
-      "eol_reason": "ventana de soporte rotada a 3.0; 2.12 queda fuera de las dos líneas vivas (2026-10-20)"
+      "eol_reason": "support window rotated to 3.0; 2.12 falls outside the two live lines (2026-10-20)"
     },
     {
       "minor": "2.11",
@@ -188,7 +188,7 @@
       "latest": "2.11.0",
       "released_at": "2026-10-15T23:40:36+01:00",
       "eol_at": "2026-10-18T21:59:45+01:00",
-      "eol_reason": "ventana de soporte rotada a 2.13; 2.11 queda fuera de las dos líneas vivas (2026-10-18)"
+      "eol_reason": "support window rotated to 2.13; 2.11 falls outside the two live lines (2026-10-18)"
     },
     {
       "minor": "2.10",
@@ -197,7 +197,7 @@
       "latest": "2.10.1",
       "released_at": "2026-10-11T19:40:15+01:00",
       "eol_at": "2026-10-18T07:18:33+01:00",
-      "eol_reason": "ventana de soporte rotada a 2.12; 2.10 queda fuera de las dos líneas vivas (2026-10-18)"
+      "eol_reason": "support window rotated to 2.12; 2.10 falls outside the two live lines (2026-10-18)"
     },
     {
       "minor": "2.9",
@@ -278,7 +278,7 @@
       "latest": "2.1.1",
       "released_at": "2026-09-11T16:33:39+01:00",
       "eol_at": "2026-10-17T02:52:17+01:00",
-      "eol_reason": "backfill: ventana de soporte rotada a 2.11; 2.1 quedo 9 minors atras (2026-10-17)"
+      "eol_reason": "backfill: support window rotated to 2.11; 2.1 is 9 minors behind (2026-10-17)"
     },
     {
       "minor": "2.0",
