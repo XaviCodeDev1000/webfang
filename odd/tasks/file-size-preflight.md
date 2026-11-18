@@ -66,7 +66,11 @@ por predicado → exception, tests-mayoria, funcion-gigante (el atributo allow, 
 señal too_many_lines de §5 necesita clippy y vive en la clave `funciones` reservada; NO hay parser
 de funciones). NO clasifican por predicado (decisión humana per la columna Señal de §5) → módulos
 pegados, declarativo cohesivo, alto riesgo, arquitectónico → caen en `revisar`. No se fabrican
-clasificaciones para llegar a seis.]
+clasificaciones para llegar a seis. **Precedencia documentada (código, elif chain en
+file_size_preflight.sh): exception > tests-mayoria > funcion-gigante > revisar; un span
+indeterminado NUNCA clasifica tests-mayoria (el flag `[ -n "$INLINE_N" ]` lo impide) pero
+funcion-gigante SÍ puede disparar con span indeterminado si el archivo lleva el allow —
+extraction.rs es el caso real del corpus.]
 
 S9 (cableado del gate): ci.yml nombra AMBOS scripts en repo-guards (harness 15.1 corre el harness,
 15.2 corre el preflight mismo: línea terminando en `file_size_preflight.sh`); el .tsv NO gana fila
@@ -259,9 +263,11 @@ informe. Semántica de `head -1`: gana la PRIMERA expresión documentada; una ex
 más arriba rompe el lock y fuerza la sincronización humana (fail-closed). (5) **Margen de
 AGENTS.md para F0** (fact verificado en el árbol): budget `agents_doc` = 650 líneas / 40 960
 bytes (scripts/quality-baselines.json, enforced por scripts/check_agents_doc.sh); AGENTS.md
-mide hoy 645 / 40 819 → margen **+5 líneas / +141 bytes**. Cualquier edición de router en F0
-debe ser net-zero o negativa, o recortar runbook hacia Engram (obs #370) ANTES de tocar;
-subir el presupuesto es edición manual de maintainer. (6) **Label verificado con
+mide hoy margen medido con `wc -l -c AGENTS.md` contra `jq '.agents_doc' scripts/quality-baselines.json`
+(650 líneas / 40 960 bytes) — RE-MEDIR SIEMPRE al usar (era +5/+141 al abrir F1a, +3/+27 tras
+el merge de #2922). Cualquier edición de router en F0 debe ser net-zero o negativa, o recortar
+runbook hacia Engram (obs #370) ANTES de tocar; subir el presupuesto es edición manual de
+maintainer. (6) **Label verificado con
 precedentes**: el mapa (scripts/auto_label_type.sh --map) da feat→type:feature, y el PR
 hermano del ratchet #2569 (`feat(ci): file-size ratchet…`, misma regla ~500) llevó
 `type:feature` — el de #2926 quedó correcto. F1b listado como siguiente fase; no requiere
@@ -393,3 +399,62 @@ preflight: 0 ok / 1 fallo de herramienta / 2 uso / 3 rechazo de ratchet / 4 defe
 (ya así, con 13 checks que lo fijan); done (F1b): 0 ok / 1 defecto / 2 parked / ≥3 uso o
 entorno. Un "≥3 = uso/entorno" GLOBAL rompería el 3/4 del preflight, ya consumido por el
 harness y citado por la política.
+
+L27 (2026-11-18, ronda 5 — conciliaciones por script, nada a mano): **(a) contraste del
+lexer**: el mismo driver (el tool por cada archivo del corpus) sobre TRES árboles: pre-fix
+`d6342de3` → **SPAN=235 NOSPAN=313 IND=14**; post-fix pre-merge `c7634ded` → **240/318/4**;
+post-merge `df3f9f01` → **240/318/4** (0 cambios de categoría entre pre y post merge: los 78
+archivos de main no tocaron el corpus .rs). Movimientos pre-fix→post-fix por archivo (script):
+**9 IND→SPAN + 5 IND→NOSPAN + 4 SPAN→IND = 18**; aritmética cerrada (235+9−4=240,
+313+5=318, 14−14+4=4). Los "302/246/14" de los reportes previos eran AGREGADOS DE
+DEFINICIONES DISTINTAS (302 = mismatches span-end≠última-} del driver con bugs, incluidos
+archivos sin span; 246 = aritmética mía, no medición) — no hubo movimiento de 16 archivos.
+Definición declarada: `inline_tests` = LARGO DEL SPAN de `mod tests` (línea del atributo
+`#[cfg(test)]` o del `mod` hasta la llave de cierre, inclusive) en líneas; los `#[test]`
+desnudos fuera de spans NO cuentan (→ guard indeterminado si hay spans; 0 si no hay spans —
+caso tests_*.rs del corpus, declarado). Comando verbatim con fecha/base: el escaneo de L24
+(corpus-literal + loop --format + awk), commit base de la medición `df3f9f01`, fecha
+2026-11-18. **(b) tamaño de #2926 = 1884 add+del** en ambas bases (gh vs main 0f1f74c0 = git
+diff vs merge-base 0f1f74c0 = 1882+2), con los 8 archivos: ci.yml (+18), odd/tasks
+(+395), ci_fast_gate.sh (+19), .tsv (2±), preflight (+772), baseline (3±),
+test_ci_gate_structure.sh (+22), harness (+653). El 1704 y el 1519 fueron mediciones
+anteriores al push de commits posteriores. **(c) tokens de contrato derivados por comando**:
+claves del bloque sobre fixture (19 claves: allow, blast_radius, blast_radius_note,
+churn_commits, churn_commits_note, clasificacion, clasificacion_note, funciones, in_corpus,
+inline_tests, muestra, overlap_prs, overlap_prs_note, path, plan, presupuesto_diff,
+production, prs, total) + valores enumerados; conteo por archivo con grep -cw → los tokens
+REALMENTE españoles son CINCO: lineas (8/3/1/0), indeterminado (6/4/9/1), revisar (1/4/7/1),
+tests-mayoria (1/3/7/2), funcion-gigante (1/2/7/1) — mi lista previa incluía tokens ingleses
+o neutros (commits, PRs, exception, na, in_corpus): CORREGIDO. **(d)** cifra stale L17
+reemplazada por el comando (arriba); body y Engram sin cifras stale (grep=0 y FTS sin hits
+propios). **§2 idioma**: detector sobre líneas '+' del diff (límites: stopwords sin acentos,
+fallos conocidos en 'no'/'corpus' ambiguos EN/ES — excluidos): misión 299 (registro de
+decisión, pendiente de decisión del owner), preflight 26 → verificado línea a línea: falsos
+positivos del substring + las CITAS declaradas (§5, §4.3); harness 10; ci.yml 4 (nombres de
+checks en comentarios — inglés); ci_fast_gate.sh 2 (comentarios míos en inglés — verificado);
+check_file_size.sh: 0 líneas '+' en mi diff (preexistente, probado con el diff). Commits:
+1 subject con cita española (da8425f9 "más cabeceras" — pushed history inmutable, queda),
+0 cuerpos en español con acentos. Convención merge: AGENTS.md:498 (nunca rebase sobre
+pusheado) + :406 (main ff-only); la cola squash usa el TÍTULO del PR para 2+ commits
+(merge-when-green.sh:24-28) — el título es inglés; el body no va al mensaje. **Traducción
+COMPLETADA** (8 cadenas más que los lotes abortados dejaron: lexer reason, sin plan, churn
+note, blast/overlap notes, usage --negation, write_code comment, run_pre comment) — la
+prueba mecánica de c7634ded dio diff=4 (la traducción estaba incompleta EN EL COMMIT:
+corrección encima, pushed history inmutable). **§3**: check 7 endurecido a líneas vivas de
+ci.yml (M4c: comentado = quitado) + self-tests 8/9/10 (positivo, no-cableado → rojo,
+comentado → rojo) + depth guard (el caso 8 intacto recursaba infinito — descubierto y
+arreglado). **Control #2056**: mismo sandbox SIN mutar + árbol real — las 8 violaciones del
+sandbox son del CONTEXTO (otros guards sin herramientas del repo), ninguna nombra mi
+harness; M4 aislado. **§4**: glue =0 legal (17.14) y =-5 defecto (17.15) — 90/90; grep
+prueba 0 llamadas vivas a git show/gh en el harness (solo comentarios y el patrón asertado);
+P con la muestra en comentario (línea 24 + salida --budget); sed ±5 de los 4 flaggeados →
+3 eran mods declarados/use (falso positivo del GUARD, no del lexer) y 1 #[test] fn desnudo
+real → **guard refinado a ítems fn-shape** → corpus re-escaneado **243/318/1** (solo
+chromiumoxide tests.rs:314 queda IND, verificado con sed); ssrf_guard.rs **470 líneas,
+0 en el baseline, ≤ hard_limit** → §10 "cerrada" verificado con datos. **§5** costo medido:
+mover el 2 del preflight = 1 check; mover 3/4 = 14 checks + citas de política. **Entorno**:
+/tmp lleno otra vez (109089 artefactos webfang-*, 7.6G) — limpieza con find -exec rm
+(el glob de 109k argumentos hace fallar rm -rf en silencio); clase §8 fallo de estación,
+comando registrado. **Pendiente del owner**: tokens de contrato (los 5 españoles), alcance
+de la regla (misión/commits/title/body — la cola usa el título), mapa de exit codes (§5 del
+owner + colisión del 2). F1b espera.
