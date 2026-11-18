@@ -2344,9 +2344,9 @@ infrastructure/ssrf.rs	385	choke	dns_resolver
 infrastructure/ssrf.rs	395	choke	redirect
 infrastructure/ssrf.rs	397	choke	ValidatingResolver::with_policy
 infrastructure/ssrf.rs	397	choke	dns_resolver
-infrastructure/ssrf.rs	409	choke	redirect
-infrastructure/ssrf.rs	435	choke	ValidatingResolver::with_policy
-infrastructure/ssrf.rs	435	choke	dns_resolver
+infrastructure/ssrf.rs	410	choke	redirect
+infrastructure/ssrf.rs	437	choke	ValidatingResolver::with_policy
+infrastructure/ssrf.rs	437	choke	dns_resolver
 infrastructure/stream/mod.rs	62	use	crate::domain::clock::SystemUtcClock
 infrastructure/stream/mod.rs	62	use	crate::domain::clock::UtcClock
 infrastructure/stream/mod.rs	63	use	crate::domain::repository::VectorRepository

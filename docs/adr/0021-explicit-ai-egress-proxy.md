@@ -1,6 +1,6 @@
 # ADR 0021: Explicit Per-Provider Forward Proxy for AI Egress — Type-Separated SSRF Policies and Zero Ambient Env Reads
 
-- **Status:** Proposed — draft for owner review. Authorizes no code until approved.
+- **Status:** Accepted — 2026-11-18. Implemented by ADR-0020 Slice 2 and ADR-0021 Slices 1–4 (`#2878`, `#2884`, `#2897`, `#2904`, `#2913`).
 - **Date:** 2026-11-16
 - **Deciders:** Project owner (`Xavi`), architecture review
 - **Related:** `ADR-0003` (remote OpenAI-compatible inference), `ADR-0004` (local ONNX removal, B1 `#1462` `allow_loopback`, B2 `#1947` `NetworkPolicy` + FIN-017), `ADR-0010` / `ADR-0012` (intra-crate dependency direction), `ADR-0018` (crawl egress strategy without third-party proxies), `ADR-0020` (shared LLM transport primitives)
@@ -280,7 +280,7 @@ a primitive that does not exist.
    `wiremock` acting as an observable local forward proxy proving (absolute-form forwarding
    for `http://` targets only — wiremock does not implement CONNECT, so HTTPS tunneling is
    **not** covered by this harness and must be asserted at the builder/wiring level or with a
-   tunnel-capable fake):
+   tunnel-capable fake — the wiring assertion lives in `tests/ai_proxy_connect_test.rs`):
    - ambient `HTTP_PROXY` / `HTTPS_PROXY` remains ignored (0 requests at ambient proxy),
    - configured loopback/RFC1918 proxy **without** proxy opt-in is rejected pre-socket (0 requests),
    - configured proxy **with** opt-in routes AI requests for an unresolvable external hostname through the proxy (`received_requests() == 1`),

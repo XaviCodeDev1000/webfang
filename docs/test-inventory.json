@@ -155,10 +155,28 @@
       "tier": "ai_model_semantic"
     },
     {
+      "path": "crates/webfang_core/tests/ai_proxy_connect_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 1,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "ai_model_semantic"
+    },
+    {
       "path": "crates/webfang_core/tests/ai_proxy_e2e_test.rs",
       "crate": "webfang_core",
       "area": "core",
       "test_count": 6,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "ai_model_semantic"
+    },
+    {
+      "path": "crates/webfang_core/tests/ai_proxy_profile_direct_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 1,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"
