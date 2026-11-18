@@ -90,16 +90,30 @@ exception). Ask-first: APROBADO por el owner (paste 2026-11-18: "Mi recomendaci�
 ## Tasks
 
 T0 ✅ (S11): sync branch — ff-only origin/main → 0d2c16c2 (housekeeping, sin commit).
-T1 (S7,S8,S10): refinamientos RED del harness: fix 1.2 (`--` suelto que degradaba la aserción),
-`sim_age` muerto fuera, tests 16.x de clasificación (fixtures tests-mayoria / funcion-gigante /
-revisar / exception) + `write_baseline` con mapa exceptions. Commit `test(ci)`.
-T2 (S2-S8,S10): implementar `scripts/file_size_preflight.sh`; harness 1-14 GREEN. Commit `feat(ci)`.
-T3 (S1,S9,S3): cableado: ci.yml (2 steps en repo-guards), ci_fast_gate.sh (run_guard + lane_ci),
-nota repo-guards del .tsv; harness 15.x GREEN + `test_ci_gate_structure.sh` verde. Commit `feat(ci)`.
-T4 (S11,S7): verificación: `--negation` (rojo sobre árbol correcto), spot checks reales
-(params.rs exception, total == wc -l, churn reproducible), lane ci del gate local sobre el diff,
-cobertura del gate leída antes de pushear.
-T5: Log final + espejo Engram + resumen. Push/PR = decisión del owner (cuerpo del PR = política v3).
+T1 ✅ (S7,S8,S10) `e331a300`: refinamientos RED del harness: fix 1.2 (`--` suelto que degradaba
+la aserción), `sim_age` muerto fuera, tests 16.x de clasificación (fixtures tests-mayoria /
+funcion-gigante / revisar / exception) + `write_baseline` con mapa exceptions. RED confirmado
+(rc=1, causa nombrada) antes del commit.
+T2 ✅ (S2-S8,S10) `cd0a54fa`: `scripts/file_size_preflight.sh` implementado; harness 56/58
+(solo faltaba el wiring 15.x). Defectos encontrados y corregidos en el mismo unit: el flag
+`--format` sobrescribía MODE=simulate; el lexer entraba en estado CHR al consumir un char
+literal inline (estado eliminado, consumo inline); `r#"..."#` no manejaba los hashes ANTES de
+la comilla. Fix del harness: el corte real del test 10 usaba `head -n N /dev/null` (0 líneas)
+y no podía producir la cabecera que la propia aserción exige.
+T3 ✅ (S1,S9,S3) `d6342de3`: cableado — ci.yml (2 steps en repo-guards), ci_fast_gate.sh
+(run_guard en lane_fmt_and_guards + harness disparado en lane_ci), nota repo-guards del .tsv;
+harness 58/58 + `test_ci_gate_structure.sh` 23 assertions. Descubrimiento: `grep -q` bajo
+`set -o pipefail` SIGPIPEaba el printf con el ci.yml de 161 KB y el pipeline fallaba A PESAR
+del match — expect_match ahora usa `grep -E > /dev/null` (consumo completo).
+T4 ✅ (S11,S7) `55f940e4`: verificación completa — `--negation` 57/58 rc=1 (puede fallar);
+spot checks reales: params.rs total 1552 == wc -l, clasificacion `exception` (la declarada),
+churn 36 == git rev-list; --simulate legal sobre params.rs (dest 33 = header 3 + 30 movidas,
+fuente 1522, prs=1, rc=0) sin escribir en el árbol (params_child.rs no existe); shellcheck
+clean tras silenciar los SC2016 intencionales inline; gate local GREEN (23 PASS, 0 FAIL) con
+cobertura leída — los pasos file-size no cubiertos por la lane docs+ci corridos a mano
+(ratchet OK, preflight bare OK).
+T5 ✅: Log final + espejo Engram + resumen. Push/PR = decisión del owner (cuerpo del PR =
+política v3).
 
 ## Log
 
@@ -136,3 +150,40 @@ garantizada por el guard y jq añadiría una dependencia de entorno nueva al pre
 L6: modo default del preflight = `--budget`: la invocación desnuda de ci.yml (15.2 exige la línea
 terminando en `file_size_preflight.sh`) corre el bloque de parámetros — smoke real contra el repo
 sin red ni cargo; el baseline corrupto lo levanta el guard, que CI también corre.
+
+L7 (2026-11-18, T2): los tres defectos que la ejecución sacó a la luz. (a) `--format` seteaba
+MODE="format" y sobrescribía "simulate": el flujo simulado moría tras el bloque como formato
+simple (rc=0 sin filas de plan ni veredictos) — --format ahora no clobberiza un simulate.
+(b) El lexer entraba en estado CHR al consumir un char literal completo inline, y el autómata
+quedaba atrapado comiéndose la línea hasta la próxima comilla (el fixture adversario reportaba
+"profundidad de llaves 1") — los char literals se consumen inline sin cambiar de estado y el
+estado CHR quedó inalcanzable, eliminado. (c) `r#"{"#`: los hashes van ANTES de la comilla de
+apertura; el scanner buscaba la comilla directamente y caía a un string normal. Harness 56/58.
+
+L8 (2026-11-18, T3): el descubrimiento de la sesión — `expect_match` usaba `grep -q`; bajo
+`set -o pipefail`, `-q` hace exit temprano al primer match, el `printf '%s\n' "$texto"`
+recibe SIGPIPE escribiendo el ci.yml de 161 KB (> buffer de pipe) y el pipeline devuelve 1
+A PESAR del match. Los tests 1-14 pasaban porque sus textos son chicos. Fix: `grep -E -- "$3"
+> /dev/null` (consumo completo). Además: shellcheck SC2016 sobre los 4 sed con `\$ROOT`
+literal intencional — supresión inline (SC1125 al ponerle prosa al directive: la prosa va en
+su propia línea), nunca en la ignore list compartida.
+
+L9 (2026-11-18, T4): evidencia de verificación. Harness 58/58; --negation 57/58 rc=1 (la
+paridad del corpus invertida falla: puede fallar). Spot checks reales sobre params.rs (la
+excepción declarada): total 1552 == wc -l; clasificacion exception; churn 36 == `git
+rev-list --count HEAD`; --simulate "params_child.rs:1522-1551:header=3" → dest 33, fuente
+1522, prs=1=ceil(60/3000), rc=0, y `params_child.rs` NO existe tras la corrida (nada se
+escribe). test_ci_gate_structure.sh: 23 assertions, 7 self-tests. Gate local (lanes docs+ci):
+GREEN 23 PASS / 0 FAIL / 18 SKIP; cobertura leída; los pasos file-size no cubiertos por esas
+lanes (ratchet gate, preflight bare) corridos a mano y en verde.
+
+L10 (2026-11-18): bootstrap del worktree ejecutado a mitad de misión (faltaba): .envrc de 5
+líneas con el nombre del árbol + direnv allow + .env copiado; codedb reindexado (1535 files,
+root y head == d6342de3) y codegraph init. Verificación de aislamiento: CARGO_TARGET_DIR
+$'.../feat-file-size-preflight' observado en `direnv export bash`.
+
+L11: pendiente para la entrega: push/PR = decisión del owner. El cuerpo del PR es la política
+v3 (texto del owner del 2026-11-18). Gates del PR: issue vinculado con `Closes part of
+#2584` + `status:approved` antes de abrir; label `type:*` (auto por el título `feat(ci):...`);
+rama `feat/file-size-preflight` convencional ✓; sin atribución de IA ✓ (4 commits work-unit
+ya convencionales).
