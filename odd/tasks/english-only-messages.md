@@ -44,8 +44,8 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
 | A1 | S1, S3 | Fase A — Governance text: `AGENTS.md` (3 sites: § Project rules, § Error stratification, pre-PR checklist) + `README.md` § Architecture rules | inline | done | `2e8befd9` |
 | A1b | S1, S3 | Fase A — Governance hardening: broaden the `AGENTS.md` rule to every repository-facing artifact, and remove the competing "Spanish message" rule in `docs/error-classification-matrix.md` with an amendment note | inline | done | `8347f463` |
 | A2 | S2, S3 | Fase A — Comments and doc-comments in 25 files under `crates/**/src/**`; literals and assertions untouched and still deferred to Fase C | inline | done | `693f49c1` |
-| A3a | S2, S3 | Fase A — `docs/src/SUMMARY.md` chapter title | inline | done | pending |
-| A3b | S2, S3 | Fase A — pure-prose docs: `architecture/ai-providers-design.md` (149), `adr/0004-onnx-local-removal.md` (106), `research/ci-test-playbook.md` (42), `security/prompt-injection-policy.md` (37), `adr/README.md` (33), `llm-backend-decision.md` (29), `research/missing-docs-audit.md` (20), `src/ai-onnx-migration.md` (18) | inline | pending | — |
+| A3a | S2, S3 | Fase A — `docs/src/SUMMARY.md` chapter title | inline | done | `c3062f7e` |
+| A3b | S2, S3 | Fase A — pure-prose docs: `architecture/ai-providers-design.md` (149), `adr/0004-onnx-local-removal.md` (106), `research/ci-test-playbook.md` (42), `security/prompt-injection-policy.md` (37), `adr/README.md` (33), `llm-backend-decision.md` (29), `research/missing-docs-audit.md` (20), `src/ai-onnx-migration.md` (18) | inline | done | `03c7c5fa` |
 | A3c | S2, S3 | Fase C-coupled docs that quote CLI output verbatim: `src/troubleshooting.md`, `ssrf-layers.md`, `src/cli-reference.md`, `src/state-recovery-runbook.md`, `adr/0018-…`, root `REPORTE.md`, `COMPATIBILITY-MATRIX.md` | inline | pending | — |
 | B1 | S1, S3 | Fase B — `.github/ISSUE_TEMPLATE/*.yml` (4) + `.github/support.json` `eol_reason` strings. Gated by `AGENTS.md` "Ask first: Modifying CI/CD (`.github/`)" | inline | blocked | — |
 | B2 | S2, S3 | Fase B — `scripts/*.sh` (57 files, ~1070 lines): `# STYLE:` comments + error strings, each `test_*.sh` assertion moving with its script | inline | pending | — |
@@ -142,6 +142,29 @@ breaking surface (CLI and domain error strings) and is deferred to a later sessi
   - Lesson for Fase C: the detector is not a scoping tool. Scope by `typos` plus an
     accented-character scan plus a full read of each file, and treat message + assertion +
     snapshot as one unit.
+
+- **L12 (2026-11-18)** — A3b executed (`03c7c5fa`, 8 files, +932/−950). Findings:
+  - `docs/architecture/ai-providers-design.md` carries a **claim manifest**
+    (`<!-- claims:begin -->` … `<!-- claims:end -->`) verified by
+    `scripts/check_ai_providers_doc.sh`. Measured before editing: `claim` and `shape` read the
+    cited **source** line, not the doc; only `impl` compares the doc fence against the source,
+    and it strips comments first. So prose and comment translation is safe, but the manifest's
+    literal source strings must stay verbatim. Gate re-run after the change: `OK … 30 claim,
+    8 shape, 5 impl, 1 absent; 47 cita(s) de prosa cubiertas; 26 referencia(s) § resueltas`.
+  - The manifest still contains two Spanish literals — `Credencial en variable de entorno
+    (legacy, solo CI o desarrollo)` at `auth_source.rs:72` and ``Sin variante `Inline` en v1``
+    at `auth_source.rs:6` — because they assert the **current source text**. They become
+    translatable only when Fase C translates those source lines, in the same change.
+  - `docs/adr/0004-onnx-local-removal.md` keeps one Spanish string on purpose: line 83 quotes
+    the real PR title `chore: canal de objeción — migración desde ONNX local` (#1997). It is a
+    historical citation that must stay findable with `git log --grep`; translating it would
+    break the reference.
+  - The original `adr/0004` contained a corrupted fragment (`tres de esos ficheros都属于 al
+    crate`) — Chinese characters inside Spanish prose. Fixed in passing.
+  - `typos` on the original `ci-test-playbook.md` reported 15 errors; after the translation it
+    reports 2 (`label-messager`, `SME`), both legitimate proper nouns. `typos` is not wired
+    into any `.github/workflows/*.yml`, so it is not a CI gate here.
+  - No Markdown build was run; the claims gate is the real check for this batch.
 
 - **L10 (2026-11-18)** — A3 split after reading the small files. Five of the six smallest
   docs (`src/troubleshooting.md`, `ssrf-layers.md`, `src/cli-reference.md`,
