@@ -426,16 +426,22 @@ closing brace, inclusive) in lines; bare `#[test]` fns outside spans DO NOT coun
 indeterminate guard when spans exist; 0 when there are no spans — the corpus's tests_*.rs
 case, declared). Verbatim command with date/base: the L24 scan
 (corpus-literal + the --format loop + awk), measurement base commit `df3f9f01`, date
-2026-11-18. **(b) the size of #2926**: measured while the branch grew — 1519 (round 3), 1704
-(round 4), 1884 (round 5), all PRE-PUSH with no recorded base SHA, kept only as history (they do
-not reproduce). The anchored figure, with its command: `git diff --numstat 0f1f74c0..3d6e7e8f`
-(2026-11-18, base `0f1f74c0` = the merge-base) = 2055 insertions + 4 deletions = **2059 add+del**,
-9 files: ci.yml (+18), odd/tasks (+480), ci_fast_gate.sh (+19), .tsv (+1/-1), preflight (+789),
-baseline (+2/-1), test_ci_fast_gate.sh (+24/-1), test_ci_gate_structure.sh (+64/-1), harness
-(+658). [The round-5 report's list — 1884 = 1882+2, 8 files, preflight (+772), mission (+395),
-structure (+22), harness (+653) — was a transcription of an earlier state and does not reproduce
-against the numstat above; the +772 for the preflight is wrong at EVERY commit (768 at c7634ded,
-789 from eca24374 on).] The current size is produced at close by
+2026-11-18. **(b) the size of #2926**: measured while the branch grew — 1519 (round 3; still
+unanchored: it reproduces against NO base measured — the full loop over `git rev-list --reverse
+0f1f74c0..HEAD` against both `0f1f74c0` and the pre-merge base `aba0e9cf` gives 2311..4979
+pre-merge and 1704..2125 post-merge, never 1519), 1704 (round 4 = exactly `bcd4b345`:
+`git diff --numstat 0f1f74c0..bcd4b345` = 1702+2), 1884 (round 5). **CORRECTION of my round-8
+report defect (round 9)**: the round-8 claim that "1884/1882+2 and the 8-file list do not
+reproduce" and that "+772 is wrong at every commit" was FALSE — it compared against a LATER HEAD
+(`3d6e7e8f`) instead of the measurement's own HEAD. Verified by the full loop: `772` is the
+preflight's line count at `8d67ad05`, `a12d55d7` and `df3f9f01`
+(`git show 8d67ad05:scripts/file_size_preflight.sh | wc -l` = 772), and at `df3f9f01`
+`git diff --numstat 0f1f74c0..df3f9f01` = 1882+2 = **1884** with the 8 files EXACTLY as the
+round-5 report listed them: ci.yml (+18), odd/tasks (+395), ci_fast_gate.sh (+19), .tsv (+1/-1),
+preflight (+772), baseline (+2/-1), test_ci_gate_structure.sh (+22), harness (+653). The 2059
+figure is the LATER state at `3d6e7e8f` (2055+4, 9 files — test_ci_fast_gate.sh joined in
+`75526e6f`): both are anchored measurements of a growing branch, not a transcription error. The
+current size is produced at close by
 `git diff --stat $(git merge-base origin/main HEAD)..HEAD | tail -1`. **(c) contract tokens derived by command**:
 block keys over a fixture (19 keys: allow, blast_radius, blast_radius_note,
 churn_commits, churn_commits_note, clasificacion, clasificacion_note, funciones, in_corpus,
