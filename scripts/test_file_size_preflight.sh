@@ -19,7 +19,7 @@
 #   7. the inline-tests span is lexed: braces in strings, chars, comments and
 #      lifetimes do not move it;
 #   8. an UNBALANCED file reports the span as indeterminate, never invents it;
-#   9. outside a git repository the churn says indeterminado, never 0;
+#   9. outside a git repository the churn says indeterminate, never 0;
 #  10. --simulate arithmetic equals a REAL cut performed line by line;
 #  11. --simulate rejects a non-grandfathered destination over hard_limit (3),
 #      and a grandfathered one over its own baseline (3);
@@ -32,9 +32,9 @@
 #      meta-guard #2056 cannot leave them dormant, and the coverage .tsv gains
 #      no row: a row per script would break #2559.
 #  16. the suggested §5 classification is a MEASURED predicate: exception (the
-#      baseline's exceptions map), tests-mayoria (inline > 50%), funcion-gigante
-#      (allow(too_many_lines)), revisar otherwise.
-#  17. --glue delivers §4.3's "más cabeceras": destination = header + moved +
+#      baseline's exceptions map), tests-majority (inline > 50%), giant-function
+#      (allow(too_many_lines)), needs-review otherwise.
+#  17. --glue delivers §4.3's "plus headers": destination = header + moved +
 #      glue, source = total - moved + glue; glue on a file the plan does not
 #      touch is a defect.
 #  18. the harness watches its own house: no early-exit grep after a pipe in
@@ -165,7 +165,7 @@ write_code() {
   done
 }
 
-# append_test_mod <archivo> <n>: #[cfg(test)] + mod tests { ... } => n+4 lineas
+# append_test_mod <archivo> <n>: #[cfg(test)] + mod tests { ... } => n+4 lines
 append_test_mod() {
   local f="$1" n="$2" i
   {
@@ -196,7 +196,7 @@ expect_rc "1.1 --help exits 0" 0 "$RC" "$ERRF"
 for mode in "--format" "--simulate" "--corpus-literal" "--budget"; do
   expect_match "1.2 --help names $mode" "$OUT" "$mode"
 done
-expect_match "1.3 --help names the unit 'lineas' (wc -l)" "$OUT" "lineas"
+expect_match "1.3 --help names the unit 'lines' (wc -l)" "$OUT" "lines"
 
 # --- 2. the corpus is the guard's corpus, byte for byte -------------------------
 # NEGATION A preflight that re-derives the corpus drifts from the ratchet one
@@ -369,8 +369,8 @@ new_sandbox c7e
   printf 'fn bare_outside() { assert!(true); }\n'
 } > "$SB/crates/webfang_x/src/c7e.rs"
 run_pre --format "crates/webfang_x/src/c7e.rs"
-expect_match "7.7 a bare #[test] outside the span goes indeterminate, never a wrong number" "$OUT" "^inline_tests	indeterminado"
-expect_match "7.7b ... and classifies as revisar, never tests-mayoria" "$OUT" "^clasificacion	revisar"
+expect_match "7.7 a bare #[test] outside the span goes indeterminate, never a wrong number" "$OUT" "^inline_tests	indeterminate"
+expect_match "7.7b ... and classifies as needs-review, never tests-majority" "$OUT" "^clasificacion	needs-review"
 
 # --- 8. an UNBALANCED file says so; it does not invent a span ------------------
 # NEGATION: a truncated file (missing the closing brace after a crash) would
@@ -385,7 +385,7 @@ new_sandbox c8
 } > "$SB/crates/webfang_x/src/d.rs"
 run_pre --format "crates/webfang_x/src/d.rs"
 expect_rc "8.1 an unbalanced file is still reportable (rc=0)" 0 "$RC" "$ERRF"
-expect_match "8.2 the span is declared indeterminate" "$OUT" "^inline_tests	indeterminado"
+expect_match "8.2 the span is declared indeterminate" "$OUT" "^inline_tests	indeterminate"
 expect_match "8.3 ... with the cause, not a number" "$OUT" "^inline_tests_note	[^	]+"
 
 # --- 9. churn outside a git repository is INDETERMINATE, never 0 ---------------
@@ -395,7 +395,7 @@ expect_match "8.3 ... with the cause, not a number" "$OUT" "^inline_tests_note	[
 new_sandbox c9
 write_code "$SB/crates/webfang_x/src/e.rs" 520
 run_pre --format "crates/webfang_x/src/e.rs"
-expect_match "9.1 outside git the churn is indeterminate" "$OUT" "^churn_commits	indeterminado"
+expect_match "9.1 outside git the churn is indeterminate" "$OUT" "^churn_commits	indeterminate"
 
 # --- 10. --simulate arithmetic equals a REAL cut -------------------------------
 # The harness performs the cut: extract L11-40 to src/z.rs with a 2-line header.
@@ -447,7 +447,7 @@ expect_match "11.2 ... naming the destination and the limit" "$OUT$(cat "$ERRF" 
 new_sandbox c12
 write_code "$SB/crates/webfang_x/src/h.rs" 540
 write_baseline "crates/webfang_x/src/h.rs:540"
-# mueve 10 lineas pero el destino suma 20 de header: h queda en 530 <= 540, legal
+# mueve 10 lines pero el destino suma 20 de header: h queda en 530 <= 540, legal
 run_pre --simulate "src/h2.rs:1-10:header=20" --format "crates/webfang_x/src/h.rs"
 expect_rc "11.3 a grandfathered source that SHRINKS stays legal (rc=0)" 0 "$RC" "$ERRF"
 
@@ -515,9 +515,9 @@ expect_eq "15.3 the coverage .tsv declares no row for a non-job" "$TSV_EXTRA" ""
 
 # --- 16. the suggested §5 classification is a MEASURED predicate ---------------
 # NEGATION: a classification invented from vibes is the prose defect again.
-# The mechanical §5 signals get fixtures; the semantic ones (módulos pegados,
-# declarativo cohesivo, alto riesgo, arquitectónico) are maintainer calls per
-# §5's own Señal column, so a file without mechanical signals says "revisar".
+# The mechanical §5 signals get fixtures; the semantic ones (glued modules,
+# cohesive declarative, high risk, architectural) are maintainer calls per
+# §5's own Signals column, so a file without mechanical signals says "needs-review".
 
 new_sandbox c18
 {
@@ -527,7 +527,7 @@ new_sandbox c18
   printf '}\n'
 } > "$SB/crates/webfang_x/src/n.rs"
 run_pre --format "crates/webfang_x/src/n.rs"
-expect_match "16.1 inline > 50% suggests tests-mayoria" "$OUT" "^clasificacion	tests-mayoria"
+expect_match "16.1 inline > 50% suggests tests-majority" "$OUT" "^clasificacion	tests-majority"
 
 new_sandbox c19
 {
@@ -537,12 +537,12 @@ new_sandbox c19
   printf '}\n'
 } > "$SB/crates/webfang_x/src/o.rs"
 run_pre --format "crates/webfang_x/src/o.rs"
-expect_match "16.2 an allow(too_many_lines) suggests funcion-gigante" "$OUT" "^clasificacion	funcion-gigante"
+expect_match "16.2 an allow(too_many_lines) suggests giant-function" "$OUT" "^clasificacion	giant-function"
 
 new_sandbox c20
 write_code "$SB/crates/webfang_x/src/q.rs" 600
 run_pre --format "crates/webfang_x/src/q.rs"
-expect_match "16.3 production-heavy without signals says revisar" "$OUT" "^clasificacion	revisar"
+expect_match "16.3 production-heavy without signals says needs-review" "$OUT" "^clasificacion	needs-review"
 expect_match "16.4 ... naming the semantic §5 signals" "$OUT" "^clasificacion_note	"
 
 new_sandbox c21
@@ -551,7 +551,7 @@ write_baseline "crates/webfang_x/src/r.rs:512" "exc:crates/webfang_x/src/r.rs"
 run_pre --format "crates/webfang_x/src/r.rs"
 expect_match "16.5 a declared exception says exception" "$OUT" "^clasificacion	exception"
 
-# --- 17. --glue: §4.3's "más cabeceras" completes the move model ---------------
+# --- 17. --glue: §4.3's "plus headers" completes the move model ---------------
 # NEGATION: a simulator that cannot model the glue FORCES criterion drift —
 # the v3 criterion "Reproduce server.rs 2012→360" got amended to a weaker
 # form before the tool grew this parameter. With glue the verbatim criterion

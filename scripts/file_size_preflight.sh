@@ -11,7 +11,7 @@
 # WHAT IT EMITS (--format, TAB separated, one fact per line): every number
 # carries value, unit and the command that reproduces it ON THE SAME LINE
 # (policy 6: every number carries its unit and the command that produces it
-# on the same line). Indeterminable facts say "indeterminado" and carry a note:
+# on the same line). Indeterminable facts say "indeterminate" and carry a note:
 # "0 commits" and "cannot know" are different facts. The inline-tests span is
 # LEXED (strings, chars, comments and lifetimes do not move it), never
 # brace-counted; an unbalanced file reports its span as indeterminate instead
@@ -67,7 +67,7 @@ Uso: bash scripts/file_size_preflight.sh [modo]
   --corpus-literal      the guard's find expression, byte for byte
   --help                this help
 
-Modes: --format --simulate --corpus-literal --budget; units are lineas/commits/attrs/PRs.
+Modes: --format --simulate --corpus-literal --budget; units are lines/commits/attrs/PRs.
 USAGE
 }
 
@@ -564,7 +564,7 @@ case "$MODE" in
     else
       emit2 "in_corpus" "false"
     fi
-    emit4 "total" "$TOTAL" "lineas" "wc -l < '$REL'"
+    emit4 "total" "$TOTAL" "lines" "wc -l < '$REL'"
 
     LEXED="$(lex_span "$ABSPATH")"
     LEX_TAG="${LEXED%%$'\t'*}"
@@ -573,8 +573,8 @@ case "$MODE" in
     SPAN_TOTAL="${LEX_REST##*$'\t'}"
     INLINE_N=""
     if [ "$LEX_TAG" = "INDETERMINATE" ]; then
-      emit4 "production" "indeterminado" "-" "-"
-      emit4 "inline_tests" "indeterminado" "-" "-"
+      emit4 "production" "indeterminate" "-" "-"
+      emit4 "inline_tests" "indeterminate" "-" "-"
       emit2 "inline_tests_note" "$PAIRS: the span is not invented; re-measure the repaired file"
     else
       SPAN_RANGES=()
@@ -593,11 +593,11 @@ case "$MODE" in
       INLINE_N="$SPAN_TOTAL"
       PROD_N=$((TOTAL - INLINE_N))
       if [ "${#SPAN_RANGES[@]}" -gt 0 ]; then
-        emit4 "production" "$PROD_N" "lineas" "$(range_cmd "$REL" "${GAP_RANGES[@]}")"
-        emit4 "inline_tests" "$INLINE_N" "lineas" "$(range_cmd "$REL" "${SPAN_RANGES[@]}")"
+        emit4 "production" "$PROD_N" "lines" "$(range_cmd "$REL" "${GAP_RANGES[@]}")"
+        emit4 "inline_tests" "$INLINE_N" "lines" "$(range_cmd "$REL" "${SPAN_RANGES[@]}")"
       else
-        emit4 "production" "$PROD_N" "lineas" "wc -l < '$REL'"
-        emit4 "inline_tests" "0" "lineas" "$(range_cmd "$REL")"
+        emit4 "production" "$PROD_N" "lines" "wc -l < '$REL'"
+        emit4 "inline_tests" "0" "lines" "$(range_cmd "$REL")"
       fi
     fi
 
@@ -605,7 +605,7 @@ case "$MODE" in
     if [ -n "$CHURN" ]; then
       emit4 "churn_commits" "$CHURN" "commits" "git -C '$ROOT' rev-list --count HEAD -- '$REL'"
     else
-      emit4 "churn_commits" "indeterminado" "-" "-"
+      emit4 "churn_commits" "indeterminate" "-" "-"
       emit2 "churn_commits_note" "not a git repo or no HEAD: 0 and cannot-know are different facts"
     fi
 
@@ -614,14 +614,14 @@ case "$MODE" in
     emit4 "allow" "$ALLOW_N" "attrs" "grep -c 'allow(clippy::too_many_lines)' '$REL'"
 
     emit4 "funciones" "" "-" "reserved (F1a): needs clippy/rustc, not available in the offline preflight"
-    emit4 "blast_radius" "indeterminado" "-" "-"
+    emit4 "blast_radius" "indeterminate" "-" "-"
     emit2 "blast_radius_note" "codegraph explore / codedb callers on '$REL' (intelligence tools; the preflight is offline)"
-    emit4 "overlap_prs" "indeterminado" "-" "-"
+    emit4 "overlap_prs" "indeterminate" "-" "-"
     emit2 "overlap_prs_note" "gh pr list --state open and scripts/ci_pr_overlap.sh <N1> <N2>; the preflight is offline"
 
     # the suggested §5 classification: MEASURED predicates only. The semantic
-    # §5 signals (módulos pegados, declarativo cohesivo, alto riesgo,
-    # arquitectónico) are maintainer calls per §5's own Señal column.
+    # §5 signals (glued modules, cohesive declarative, high risk,
+    # architectural) are maintainer calls per §5's own Signals column.
     if [ "$IN_CORPUS" -eq 0 ]; then
       emit2 "clasificacion" "na"
       emit2 "clasificacion_note" "outside the ratchet's corpus (the guard's find); no §5 classification"
@@ -629,19 +629,19 @@ case "$MODE" in
       emit2 "clasificacion" "exception"
       emit2 "clasificacion_note" "declared in the baseline's exceptions map; does not waive the limit or the net-zero"
     elif [ -n "$INLINE_N" ] && [ "$((2 * INLINE_N))" -gt "$TOTAL" ]; then
-      emit2 "clasificacion" "tests-mayoria"
+      emit2 "clasificacion" "tests-majority"
     elif [ "$ALLOW_N" -gt 0 ]; then
-      emit2 "clasificacion" "funcion-gigante"
+      emit2 "clasificacion" "giant-function"
     else
-      emit2 "clasificacion" "revisar"
-      emit2 "clasificacion_note" "non-mechanical §5 signals (módulos pegados, declarativo cohesivo, alto riesgo, arquitectónico — cited from §5): a review decision"
+      emit2 "clasificacion" "needs-review"
+      emit2 "clasificacion_note" "non-mechanical §5 signals (glued modules, cohesive declarative, high risk, architectural — cited from §5): a review decision"
     fi
 
     [ "$MODE" = "format" ] && exit 0
 
     # --- simulate: plan arithmetic first, then the verdict -------------------
     # Policy 4.3: "--simulate toma el plan (destino ← rangos) y calcula el
-    # tamaño resultante de cada archivo con wc -l total, más cabeceras."
+    # resulting size of each file with wc -l total, plus headers."
     PARENT="$(dirname "$ABSPATH")"
     BASE_DIR="$(dirname "$PARENT")"
     [ "$BASE_DIR" = "$PARENT" ] && BASE_DIR="$PARENT"  # a root-level file
@@ -695,7 +695,7 @@ case "$MODE" in
       PLAN_MOVED["$DEST"]="$MOVED"
     done
 
-    # --- glue (§4.3 "más cabeceras"): the non-moved lines a real split adds --
+    # --- glue (§4.3 "plus headers"): the non-moved lines a real split adds --
     # (import blocks, re-exports). It may target a plan destination or the
     # source itself — the server.rs split added 29 lines of glue to the
     # source, which is exactly the delta a pure-move model cannot see.
@@ -743,7 +743,7 @@ case "$MODE" in
         CAP="$BASELINE_LIMIT"
         CAP_DESC="hard_limit ($CAP)"
       fi
-      emit4 "plan" "$dest" "$DEST_FINAL" "lineas" "$NOTE"
+      emit4 "plan" "$dest" "$DEST_FINAL" "lines" "$NOTE"
       if [ "$DEST_FINAL" -gt "$CAP" ]; then
         if [ -n "${GF["$DEST_REL"]:-}" ]; then
           VIOLATIONS+=("destination '$dest' would land at $DEST_FINAL > $CAP_DESC: grandfathered files cannot grow")
@@ -754,7 +754,7 @@ case "$MODE" in
     done
 
     SRC_FINAL=$((TOTAL - TOTAL_MOVED + ${GLUE["$SRC_KEY"]:-0}))
-    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lineas" "$TOTAL lines - $TOTAL_MOVED moved${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
+    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lines" "$TOTAL lines - $TOTAL_MOVED moved${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
 
     if [ "${#PLAN_ORDER[@]}" -gt 0 ]; then
       PRS=$(((2 * TOTAL_MOVED + DIFF_BUDGET - 1) / DIFF_BUDGET))
