@@ -66,11 +66,12 @@ phase on `main` (no stacked PRs). Test runner: `cargo nextest`. Local gate:
 - T3 (S5): P2 — profile-aware shared LLM builder + resolved proxy auth + symmetric wiring into
   `RemoteEmbeddingAdapter` / `OpenAiCompatibleProvider` / `llm_wire` / `webfang_cli` + 407 terminal
   classification + `[[proxies]]` config load and `ProxyRegistry` resolution — inline — branch
-  `feat/ai-proxy-transport-wiring` — TBD. The guard method itself already landed in T2 and is NOT
-  reimplemented here.
+  `feat/ai-proxy-transport-wiring` — commit `d4825976` (PR #2897). The guard method itself already
+  landed in T2 and is NOT reimplemented here.
 - T4 (S6): P3 — doctor/show posture + tracing + disclosure docs — inline — branch
-  `feat/ai-proxy-diagnostics` — delivered (see L16), unpublished.
-- T5 (S7): P4 — E2E harness — inline — branch `feat/ai-proxy-e2e-harness` — TBD.
+  `feat/ai-proxy-diagnostics` — commit `f3b0f011` (PR #2904).
+- T5 (S7): P4 — E2E harness — inline — branch `feat/ai-proxy-e2e-harness` — commit `47ae5765`
+  (+ mission log in the follow-up doc commit).
 
 Delivery forecast ≈ 1200–1500 authored lines across 5 PRs → strategy `ask-on-risk` (default):
 when publishing beyond the first slice, ask the owner once for the chain strategy.
@@ -204,3 +205,21 @@ when publishing beyond the first slice, ask the owner once for the chain strateg
   pin the legacy wording and the no-secret guarantee. Gate GREEN PASS=45 FAIL=0 SKIP=2; rustdoc
   -D warnings OK. Tree-derived golden set refreshed in the same commit. Unpublished pending
   owner decision.
+- L17 (T5 delivered, 2026-11-17): branch `feat/ai-proxy-e2e-harness` from main `f3b0f011`;
+  test slice commit `47ae5765`.
+  New `crates/webfang_core/tests/ai_proxy_e2e_test.rs` (6 tests, no production change):
+  ambient `HTTP(S)_PROXY` ignored (provider hit once, ambient proxy zero); configured proxy
+  without loopback opt-in rejected pre-socket (exit 78, Spanish SSRF-guard fragment, zero
+  requests); configured proxy with opt-in routes the probe in absolute form (proxy sees the
+  `ai.invalid` target once); proxy 302 to `169.254.169.254` reports the redirect and journals
+  exactly one proxy request; 16 MiB embedding body cap yields exit 78 with the Spanish cap
+  fragment; `429 + Retry-After: 2` replays only after pacing (journal 2, elapsed ≥ 1.9 s).
+  RED proof by mutation: removing `.no_proxy()` from `secure_client_with_policy` made the
+  ambient test fail (exit 78 — the ambient proxy swallowed the probe); line restored, GREEN.
+  Focused run 19/19 (file + shared harness tests). `cargo check`, clippy all-targets
+  all-features `-D warnings`, `fmt --check`, rustdoc `-D warnings` all OK. Fast gate GREEN
+  PASS=44 FAIL=0 SKIP=3 (rustdoc run separately); `docs/test-inventory.json` regenerated
+  (189 files) and travels in the commit; no `src/` change, so the real-tree golden is untouched.
+  Follow-up (not fixed here): `secure_client_with_profile`'s direct arm lacks `.no_proxy()` and
+  its comment claims otherwise; unreachable from `build_llm_client` today (direct providers use
+  `build_guarded_http_client`), but it should be hardened when that helper gains callers.
