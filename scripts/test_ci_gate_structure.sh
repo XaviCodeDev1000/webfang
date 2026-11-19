@@ -262,6 +262,34 @@ else
   bad "lane(s) in the coverage table that the dispatcher never assigns: $(echo "$COVERAGE_BAD_LANE" | tr '\n' ' ')"
 fi
 
+# --- 7. Every scripts/*.sh named in a coverage note must be wired in ci.yml ---
+# The notes are DECLARATIONS of what covers each job. The M4 mutation (F1a
+# review, PR #2926) proved that deleting a harness's invocation from the
+# workflows left nothing red — the declaration rotted into stale prose. A
+# script named in a data-row note and absent from LIVE ci.yml lines fails
+# here, so the declaration stays live. Commented-out wiring counts as removed
+# (the M2c lesson: text-level matching misses the commented form). Header
+# rows are exempt (they cite, not declare).
+NOTE_SCRIPTS="$(awk -F'\t' '$1 !~ /^#/ && $1 != "" {print $4"\n"$5}' "$COVERAGE" \
+  | grep -oE 'scripts/[A-Za-z0-9_-]+\.sh' | sort -u)"
+CI_YML_LIVE="$(sed 's/[[:space:]]*#.*$//' "$CI_YML")"
+if [[ -z "$NOTE_SCRIPTS" ]]; then
+  ok "no scripts named in coverage notes (nothing to wire-check)"
+else
+  MISSING_WIRING=""
+  while IFS= read -r named; do
+    # full-consumption grep, NOT -q: under set -o pipefail an early-exit -q
+    # SIGPIPEs the producing printf and fails even on a match — the same trap
+    # expect_match already hit with the 161 KB ci.yml.
+    printf '%s\n' "$CI_YML_LIVE" | grep -E -- "$named" > /dev/null || MISSING_WIRING="$MISSING_WIRING $named"
+  done <<< "$NOTE_SCRIPTS"
+  if [[ -z "$MISSING_WIRING" ]]; then
+    ok "every script named in a coverage note is wired in ci.yml ($(printf '%s\n' "$NOTE_SCRIPTS" | wc -l) scripts)"
+  else
+    bad "scripts named in coverage notes but not wired in live ci.yml lines:$MISSING_WIRING"
+  fi
+fi
+
 echo
 if [[ "$fail" -ne 0 ]]; then
   echo "ci_gate_structure: $PASSED passed, at least one assertion FAILED."
@@ -272,6 +300,11 @@ fi
 # A structural guard that cannot red is indistinguishable from no guard at
 # all. Each case mutates a THROWAWAY copy (never the repository) and asserts
 # the harness exits non-zero.
+#
+# Depth guard: the self-tests re-invoke this harness. A nested run on a
+# BROKEN input exits at the summary before reaching this section, but an
+# INTACT nested run (case 8) would recurse into its own self-tests forever.
+# One level of self-tests is the contract; deeper levels skip them.
 expect_fail() {
   local case_name="$1"
   if bash "$0" > /dev/null 2>&1; then
@@ -280,6 +313,12 @@ expect_fail() {
     ok "self-test '$case_name': the harness fails closed"
   fi
 }
+
+# The nested intact run (case 8) must not recurse into its own self-tests.
+if [[ "${CI_GATE_STRUCTURE_SELFTEST_DEPTH:-0}" -ge 1 ]]; then
+  echo "All ci_gate_structure checks passed ($PASSED assertions; self-tests skipped at depth >= 1)."
+  exit "$fail"
+fi
 
 SELF="$T/self"
 mkdir -p "$SELF"
@@ -327,7 +366,31 @@ sed 's/^  FAST_GATE_LANES="code"$/  FAST_GATE_LANES=""/' "$FAST_GATE" > "$SELF/c
 export CI_FAST_GATE="$SELF/ci_fast_gate.sh"
 expect_fail "coverage table lane the dispatcher no longer assigns"
 
+# Case 8 (check 7 positive): a coverage note naming a script that IS wired in
+# ci.yml must keep the harness green. The real table is exactly that shape.
+# The depth guard stops the nested INTACT run from recursing into its own
+# self-tests.
+export CI_FAST_GATE_COVERAGE="$COVERAGE" CI_FAST_GATE="$FAST_GATE"
+if CI_GATE_STRUCTURE_SELFTEST_DEPTH=1 bash "$0" > /dev/null 2>&1; then
+  ok "self-test 'note-named script wired': the harness stays green"
+else
+  bad "self-test 'note-named script wired': the harness went red on an intact tree"
+fi
+
+# Case 9 (check 7 negative): a coverage note naming a script that NO ci.yml
+# line wires must go red — a stale declaration is exactly what the note is
+# supposed to make impossible.
+{ cat "$COVERAGE"; printf 'retired-job\tcode\t-\ta note naming scripts/never_wired_anywhere.sh\t-\n'; } > "$SELF/coverage-unwired.tsv"
+export CI_FAST_GATE_COVERAGE="$SELF/coverage-unwired.tsv"
+expect_fail "note names a script that is not wired"
+
+# Case 10 (check 7, M4c shape): the wiring line COMMENTED OUT in ci.yml must
+# also go red — commented wiring is removed wiring (the M2c lesson).
+sed 's|^\( *run: bash scripts/test_file_size_preflight.sh\)$|#MUT \1|' "$CI_YML" > "$SELF/ci.yml"
+export CI_GATE_STRUCTURE_YML="$SELF/ci.yml" CI_FAST_GATE_COVERAGE="$COVERAGE"
+expect_fail "note-named script only wired on a commented-out line"
+
 unset CI_GATE_STRUCTURE_YML CI_PLAN CI_FAST_GATE_COVERAGE CI_FAST_GATE
 
-echo "All ci_gate_structure checks passed ($PASSED assertions, 7 self-tests)."
+echo "All ci_gate_structure checks passed ($PASSED assertions, 10 self-tests)."
 exit 0

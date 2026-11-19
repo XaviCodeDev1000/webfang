@@ -298,6 +298,24 @@ jobs:
       # Offline, no repo state touched.
       - name: File size ratchet gate semantics harness
         run: bash scripts/test_file_size.sh
+      # File-size preflight (F1a of the file-size policy v3; ODD
+      # odd/tasks/file-size-preflight.md): measures what a file IS and what a
+      # cut will COST — one fact per line, each carrying value, unit and the
+      # command that reproduces it — and plans cuts with --simulate against
+      # the ratchet's own rules. The bare invocation runs the budget block:
+      # a live read of the tool against the real tree, offline, no cargo.
+      # The corpus is extracted from check_file_size.sh at runtime, so the
+      # two tools cannot drift: one corpus, one owner.
+      - name: File size preflight
+        run: bash scripts/file_size_preflight.sh
+      # Semantics harness for the preflight: hermetic mktemp sandboxes (the
+      # tool exercised as a COPY) proving the block contract, the lexed
+      # inline-tests span (strings, chars, comments and lifetimes do not move
+      # it), the honest indeterminates, the --simulate verdicts (rc 0/3/4)
+      # and the prs = ceil(2 * moved / P) formula. Offline, no repo state
+      # touched.
+      - name: File size preflight semantics harness
+        run: bash scripts/test_file_size_preflight.sh
       # Build-graph hygiene guard (issues #1799, #1797, #1796). The graph must
       # carry ONE source of RAM (`sysinfo`, never `sys-info`, whose unit was
       # undocumented), NO `built`/`git2`/`libgit2-sys` (they fed a function with

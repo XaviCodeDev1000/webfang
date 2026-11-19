@@ -608,6 +608,18 @@ EOF
   else
     skip_step "file size ratchet semantics" "no file-size ratchet files changed"
   fi
+  # File-size preflight harness (odd/tasks/file-size-preflight.md, F1a):
+  # hermetic mktemp-sandbox proof of the preflight's contract (one fact per
+  # line with unit + reproducing command, the lexed inline-tests span, the
+  # honest indeterminates, the --simulate verdicts, the P constant and its
+  # samples). Triggered by either the preflight or its harness changing —
+  # both are `scripts/**`, so a PR touching only one of them still lands in
+  # this CI-ONLY lane. Offline, no cargo, <1s.
+  if grep -Eq '^(scripts/file_size_preflight\.sh|scripts/test_file_size_preflight\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "file size preflight semantics (offline)" bash scripts/test_file_size_preflight.sh
+  else
+    skip_step "file size preflight semantics" "no file-size preflight files changed"
+  fi
   # Windows-platform check semantics (#1833): pins the guard's fail-closed
   # missing-target refusal (a PATH-stubbed rustup, so the case itself is
   # offline) and, where the MSVC std target is installed, the GREEN/RED/lint
@@ -1020,6 +1032,13 @@ lane_fmt_and_guards() {
   # here, so FULL does not run it twice.
   run_guard "file size ratchet gate" scripts/check_file_size.sh \
     bash scripts/check_file_size.sh
+  # File-size preflight (F1a, policy v3): measures what a file is and what a
+  # cut will cost; the bare invocation runs the budget block. Pure
+  # bash+python3, so it runs in the local gate like the ratchet above; CI
+  # runs it for real in the repo-guards job of ci.yml. Its hermetic harness
+  # is wired in lane_ci (triggered), not here, so FULL does not run it twice.
+  run_guard "file size preflight" scripts/file_size_preflight.sh \
+    bash scripts/file_size_preflight.sh
   run_guard "nextest invocation lint gate (#1784)" scripts/check_nextest_invocation_lint.sh \
     bash scripts/check_nextest_invocation_lint.sh
   run_guard "nextest invocation lint semantics harness (#1784)" scripts/test_nextest_invocation_lint.sh \
