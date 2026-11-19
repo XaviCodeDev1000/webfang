@@ -340,10 +340,12 @@ span), typed.rs, chromiumoxide (the one IND by the guard today). Harness 73/73 a
 L22 (2026-11-18, round 3 — §6 dogfooding with the command --budget emits):
 `gh pr view 2901 --json additions,deletions -q '.additions+.deletions'` → **2246** ✓;
 2896 → **3018** ✓; 2856 → **3933** ✓; 2893 → **5101** ✓ — the four sample figures
-reproduce EXACTLY with the tool's own command. #2926 measured **1519 add+del** at round 3
-(NOT REPRODUCIBLE against any measured base — origin unknown, the round-4 explanation
-"pre-push against an old base" withdrawn 2026-11-19; L24(b) and L27(b) carry the loop evidence;
-under P=3000: no warning). The P constant carries its sample in the
+reproduce EXACTLY with the tool's own command. #2926 measured **1519 add+del** at round 3 —
+ANCHORED (2026-11-19, round 11): `git diff --numstat 6f77fbdf..4ef586a9` = 1519 — base
+`6f77fbdf`, the merge-base with main at that moment, measured at the round-3 commit `4ef586a9`.
+[The round-10 "not reproducible; origin unknown" was itself wrong: the earlier loops used the
+bases `aba0e9cf`/`0f1f74c0`, never the actual per-commit merge-base `6f77fbdf`.] Under P=3000:
+no warning. The P constant carries its sample in the
 preflight's DIFF_BUDGET header comment (`grep -n 'DIFF_BUDGET' scripts/file_size_preflight.sh`)
 and in the --budget output.
 
@@ -376,11 +378,13 @@ while IFS= read -r -d '' f; do bash scripts/file_size_preflight.sh --format "$f"
 counts (246/302 and 254) were WRONG — the reproducible scan is the figure. (b) **The size
 of #2926 = 1704 add+del on both bases**: `gh pr view 2926 ...` (vs main 0f1f74c0, after the
 push of everything) = 1704; git diff vs merge-base 0f1f74c0 = 1704. The earlier 1519 was a
-figure NOT REPRODUCIBLE against any measured base — origin unknown (the round-4/5 explanation
-"pre-push measurement against an old base" was itself unproven and is withdrawn 2026-11-19: the
-loop over `git rev-list --reverse 0f1f74c0..HEAD` against both `0f1f74c0` and the pre-merge base
-`aba0e9cf` yields 1704..2125 post-merge and 2311..4979 pre-merge, never 1519). The final figure
-goes to the close (it changes with the translation). (c) The "296" column DOES NOT EXIST in the tool's output: it was a transcription
+figure ANCHORED (2026-11-19, round 11): `git diff --numstat 6f77fbdf..4ef586a9` = **1519**
+(base `6f77fbdf` = the merge-base with main at that moment). The round-4/5 explanation
+"pre-push against an old base" and the round-10 "not reproducible; origin unknown" are both
+withdrawn: the earlier loops used the wrong bases (`aba0e9cf`/`0f1f74c0`) and one mixed them
+("2311..4979 pre-merge" = the aba0e9cf minimum with the 0f1f74c0 maximum — a report defect).
+Real ranges by the full two-base loop: vs `aba0e9cf` pre-merge 1545..2635; vs `0f1f74c0`
+pre-merge 3889..4979. The final figure goes to the close (it changes with the translation). (c) The "296" column DOES NOT EXIST in the tool's output: it was a transcription
 artifact of mine when compacting the round-3 paste; the full --glue output (10 lines,
 untruncated) contains no 296. Recorded as a report defect, not a tool defect.
 
@@ -430,10 +434,11 @@ closing brace, inclusive) in lines; bare `#[test]` fns outside spans DO NOT coun
 indeterminate guard when spans exist; 0 when there are no spans — the corpus's tests_*.rs
 case, declared). Verbatim command with date/base: the L24 scan
 (corpus-literal + the --format loop + awk), measurement base commit `df3f9f01`, date
-2026-11-18. **(b) the size of #2926**: measured while the branch grew — 1519 (round 3; still
-unanchored: it reproduces against NO base measured — the full loop over `git rev-list --reverse
-0f1f74c0..HEAD` against both `0f1f74c0` and the pre-merge base `aba0e9cf` gives 2311..4979
-pre-merge and 1704..2125 post-merge, never 1519), 1704 (round 4 = exactly `bcd4b345`:
+2026-11-18. **(b) the size of #2926**: measured while the branch grew — 1519 (round 3;
+ANCHORED 2026-11-19: `git diff --numstat 6f77fbdf..4ef586a9` = 1519, base `6f77fbdf` = the
+per-commit merge-base the round-10 loops omitted; the round-10 "2311..4979 pre-merge" mixed the
+`aba0e9cf` minimum with the `0f1f74c0` maximum — report defect; real ranges: vs `aba0e9cf`
+1545..2635, vs `0f1f74c0` 3889..4979), 1704 (round 4 = exactly `bcd4b345`:
 `git diff --numstat 0f1f74c0..bcd4b345` = 1702+2), 1884 (round 5). **CORRECTION of my round-8
 report defect (round 9)**: the round-8 claim that "1884/1882+2 and the 8-file list do not
 reproduce" and that "+772 is wrong at every commit" was FALSE — it compared against a LATER HEAD
