@@ -379,12 +379,17 @@ counts (246/302 and 254) were WRONG — the reproducible scan is the figure. (b)
 of #2926 = 1704 add+del on both bases**: `gh pr view 2926 ...` (vs main 0f1f74c0, after the
 push of everything) = 1704; git diff vs merge-base 0f1f74c0 = 1704. The earlier 1519 was a
 figure ANCHORED (2026-11-19, round 11): `git diff --numstat 6f77fbdf..4ef586a9` = **1519**
-(base `6f77fbdf` = the merge-base with main at that moment). The round-4/5 explanation
-"pre-push against an old base" and the round-10 "not reproducible; origin unknown" are both
-withdrawn: the earlier loops used the wrong bases (`aba0e9cf`/`0f1f74c0`) and one mixed them
-("2311..4979 pre-merge" = the aba0e9cf minimum with the 0f1f74c0 maximum — a report defect).
-Real ranges by the full two-base loop: vs `aba0e9cf` pre-merge 1545..2635; vs `0f1f74c0`
-pre-merge 3889..4979. The final figure goes to the close (it changes with the translation). (c) The "296" column DOES NOT EXIST in the tool's output: it was a transcription
+(base `6f77fbdf` = the merge-base with main at that moment). CORRECTED 2026-11-19 (round 12):
+the round-4/5 explanation "pre-push measurement against an old base" was TRUE — `4ef586a9` is
+the round-3 pushed HEAD and `6f77fbdf` is the base before main advanced to `0f1f74c0`; what was
+false was the hunt itself (the round-10 retraction "not reproducible; origin unknown" and the
+loops that used the bases `aba0e9cf`/`0f1f74c0`, never the per-commit merge-base `6f77fbdf`, and
+the round-10 range "2311..4979 pre-merge" that mixed the aba0e9cf minimum with the 0f1f74c0
+maximum — report defects). The full loop (34 commits × 4 bases, with the per-commit merge-base)
+holds exactly one 1519: `4ef586a9 base=6f77fbdf add+del=1519`; merge-base per commit is
+`6f77fbdf` for all 14 pre-merge commits and `0f1f74c0` for all 20 post-merge commits
+(`git merge-base <c> origin/main | sort | uniq -c` = 14 + 20). The final figure goes to the
+close (it changes with the translation). (c) The "296" column DOES NOT EXIST in the tool's output: it was a transcription
 artifact of mine when compacting the round-3 paste; the full --glue output (10 lines,
 untruncated) contains no 296. Recorded as a report defect, not a tool defect.
 
@@ -486,7 +491,10 @@ P with its sample in a comment (line 24 + the --budget output); sed ±5 of the 4
 → **the guard refined to fn-shaped items** → the corpus re-scanned **243/318/1** (only
 chromiumoxide tests.rs:314 stays IND, verified with sed); ssrf_guard.rs **470 lines,
 0 in the baseline, ≤ hard_limit** → §10's "closed" verified with data. **§5** the measured
-cost: moving the preflight's 2 = 1 check; moving 3/4 = 14 checks + policy citations.
+cost (re-measured at HEAD by `grep -oE 'expect_rc "[^"]+" [0-9]'
+scripts/test_file_size_preflight.sh | awk '{print $NF}' | sort | uniq -c` = 30 expect_rc:
+0×12, 1×2, 2×1, 3×5, 4×10): moving the preflight's 2 = 1 check; moving 3 = 5 checks; moving 4 =
+10 checks + policy citations.
 **Environment**: /tmp full again (109089 webfang-* artifacts, 7.6G) — cleaned with find -exec rm
 (the 109k-argument glob makes rm -rf fail silently); a §8-class station failure, the
 command recorded. **Pending from the owner**: contract tokens (the 5 Spanish ones), the rule's
