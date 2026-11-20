@@ -54,8 +54,8 @@ creation and merge stay owner decisions.
 - T2 — S1,S5 — delegated (same trigger) — persistence.rs split (735→461) — COMPLETE (21/21 tests; token proof empty)
 - T3 — S1,S5 — delegated (same trigger) — robots_utils.rs split (684→483, TWO sibling files) — COMPLETE (13/13 tests; token proofs empty)
 - T4 — S1,S5 — delegated (same trigger) — real.rs split (755→477) — COMPLETE (7/7 tests with --features adaptive-selectors; token proof empty)
-- T5 — S3 — inline (shared files, parent owns git) — ratchet remove x4 + golden fixture refresh — pending
-- T6 — S4,S5 — inline — verification triple + four-lens review + gate — pending
+- T5 — S3 — inline (shared files, parent owns git) — ratchet remove x4 + golden fixture refresh — COMPLETE in `ed9c42ef` (85 → 81 entries; golden +16 sites; harness 8/8)
+- T6 — S4,S5 — inline — verification triple + four-lens review + gate — COMPLETE in `ed9c42ef` (gate 4/4 green; nextest 60/60; fast gate PASS=46 FAIL=0; duplication down)
 
 ## Log
 
@@ -105,3 +105,28 @@ inline block (186/277/207/281 lines) including its `#[cfg(test)]`/`mod tests {`/
 the post-extraction source is production + 3 (or +6 for the two-module T3). Observed: config 454,
 persistence 461, robots_utils 483, real 477 — all <=500. No defect; recorded so the descent is
 reproducible.
+
+L8 (closure evidence, commit `ed9c42ef`): single work-unit commit — the golden fixture's same-commit
+contract binds all four tree changes together, so the batch ships as one reviewable slice (12 files,
++1057/-950). Verification triple: line guard green (81 grandfathered, down from 85); clippy full
+(`--all-targets --all-features -D warnings -W cognitive_complexity -W too_many_lines`) green;
+duplication DOWN (jscpd 5.4.0 base 8204 lines/56138 tokens → 8197/56088, `newClones: 0`, gate
+baseline 8219). Pre-commit 4/4 green (check, clippy, fmt --check, doc with RUSTDOCFLAGS=-D warnings).
+Combined nextest of the four modules with `--features adaptive-selectors`: 60/60 pass (19+21+13+7).
+Golden harness `test_refresh_real_tree_golden.sh`: 8/8. Local gate (`ci_fast_gate.sh`, code lane):
+PASS=46 FAIL=0 SKIP=2; coverage confirms the touched jobs (file-size ratchet/preflight, intra-crate
+lint tool tests, duplication ratchet) ran in this lane; the 2 SKIPs (pinned lint, windows cross-target)
+do not apply — no platform module or lint config changed.
+
+L9 (four-lens review — explicit result): logic — no findings (token-equivalent move, 60/60 tests,
+all full names preserved); efficiency — no findings (no production code changed); security — no
+findings (no new inputs, SSRF-guard test moved verbatim); maintainability — no findings, with two
+declared deviations already recorded in L5 (two sibling files for the two-module file) and L6
+(rustfmt reflow with token-stream proof). Advisory-only notice from the fast gate: 30 moved test
+functions have no issue/PR number in their names — pre-existing names, unchanged by this batch;
+disclose in the PR body, do not rename (renaming would break S1's full-name invariant).
+
+L10: delivery state — committed locally on `refactor/file-size-test-batch` at `ed9c42ef`. Push, PR
+creation and merge remain owner decisions under ordinary repository policy. PR must carry
+`Closes part of #2584`, label `type:refactor`, base `main`, and the two declaration lists
+(`Movido sin cambios` = all five extracted modules; `Corregido / mejorado` = none).
