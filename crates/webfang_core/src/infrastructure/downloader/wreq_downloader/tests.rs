@@ -3,6 +3,7 @@
 /// hid the UB living inside it. What the skip protected is now a PER-TEST
 /// gate: every test that builds a `wreq::Client` carries the btls-sys FFI
 /// reason, and the pure ones (the `Set-Cookie` parser) run under Miri.
+use super::cookies::parse_set_cookie;
 use super::*;
 
 #[cfg_attr(miri, ignore = "btls-sys FFI (wreq Client) not supported by Miri")]

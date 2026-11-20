@@ -1,4 +1,5 @@
-use super::*;
+use super::selector::serialize_matches;
+use crate::domain::html_extraction::fallback;
 
 const BASE: &str = "https://example.com/docs/page.html";
 

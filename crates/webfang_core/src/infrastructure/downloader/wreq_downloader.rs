@@ -6,7 +6,6 @@
 //! Following **own-arc-shared**: Uses `Arc<Client>` for thread-safe shared ownership
 //! of the connection pool. The client is created once and shared across all requests.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,12 +17,15 @@ use wreq::header::{HeaderMap, HeaderName, HeaderValue};
 use wreq::Client;
 use wreq_util::Profile;
 
+use self::cookies::{extract_cookies, lowercase_headers, parse_retry_after_ms};
+use self::wreq_body::BoundedRead;
 use super::cause::FetchPhase;
 use super::{Cookie, DownloadError, Downloader, FetchedPage};
 use crate::domain::waf::{is_t2_blocking_status, waf_inspector, InspectionContext};
 use crate::error::ErrorClass;
 use crate::infrastructure::user_agent::UserAgentCache;
 
+mod cookies;
 pub(crate) mod dns_budget;
 mod retry;
 mod wreq_body;
@@ -34,45 +36,6 @@ mod wreq_body;
 /// Value is approximate — real usage varies by pool size and active connections.
 const WREQ_MEMORY_COST: usize = 1_024 * 1_024; // ~1 MB
 
-/// Bytes of a non-2xx response body read for WAF challenge inspection (F-11).
-///
-/// Bounded on purpose: this read happens on every failing attempt of every crawl, so
-/// the cost is failures × attempts × this number. Cloudflare, Akamai and DataDome
-/// challenge documents keep their marker prose ("Just a moment…", "Checking your
-/// browser", the `cf_chl_*` script prelude) inside the first few KiB, and every T1
-/// signature the engine knows is a substring match — so 8 KiB captures all of them
-/// while a pathological error page cannot be buffered per attempt. Deliberately far
-/// below `max_page_bytes`: this is evidence, not content.
-const WAF_SNIFF_MAX_BYTES: u64 = 8 * 1024;
-
-/// What to do when a bounded body read reaches its ceiling.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BoundedRead {
-    /// Abort with [`DownloadError::BodyTooLarge`] — the page path, where the operator
-    /// configured a hard size cap (FIX-1, #1231 F-12).
-    Abort,
-    /// Keep the prefix and stop pulling the stream — the WAF sniff path (F-11), where a
-    /// body longer than the budget is normal and the prefix is all the evidence needs.
-    Truncate,
-}
-
-/// Collect a `wreq` header map into the lowercased, single-valued form the WAF
-/// inspection boundary expects (REQ-WAF-01).
-///
-/// This adapter — and not the inspection logic — is what each HTTP stack keeps local,
-/// because `domain` must not learn `wreq` types. Duplicate header names collapse with
-/// last-value-wins, which is sound here: every WAF control header is single-valued.
-fn lowercase_headers(headers: &HeaderMap) -> HashMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|v| (name.as_str().to_lowercase(), v.to_string()))
-        })
-        .collect()
-}
 /// Downloader implementation backed by `wreq` with connection pooling.
 ///
 /// The internal `wreq::Client` is shared via `Arc` — all requests reuse the same
@@ -294,101 +257,6 @@ impl WreqDownloader {
             ignore_waf: false,
         }
     }
-
-    /// Extract cookies from a wreq response.
-    fn extract_cookies(url: &Url, response: &wreq::Response) -> Vec<Cookie> {
-        let mut cookies = Vec::new();
-
-        // Extract cookies from the cookie store via the response cookies
-        for cookie in response.cookies() {
-            cookies.push(Cookie {
-                name: cookie.name().to_string(),
-                value: cookie.value().to_string(),
-                domain: cookie.domain().unwrap_or("").to_string(),
-                path: cookie.path().unwrap_or("/").to_string(),
-                http_only: cookie.http_only(),
-                secure: cookie.secure(),
-            });
-        }
-
-        // Also extract Set-Cookie headers for cookies not in the store
-        let set_cookie_headers = response.headers().get_all("set-cookie");
-        let existing_names: std::collections::HashSet<_> =
-            cookies.iter().map(|c| c.name.clone()).collect();
-
-        for header_value in set_cookie_headers {
-            if let Ok(value_str) = header_value.to_str() {
-                // Parse basic cookie fields from Set-Cookie header
-                if let Some(cookie) = parse_set_cookie(value_str, url) {
-                    if !existing_names.contains(&cookie.name) {
-                        cookies.push(cookie);
-                    }
-                }
-            }
-        }
-
-        cookies
-    }
-}
-
-/// Parse a Set-Cookie header value into a Cookie struct.
-fn parse_set_cookie(header: &str, url: &Url) -> Option<Cookie> {
-    let parts: Vec<&str> = header.split(';').collect();
-    if parts.is_empty() {
-        return None;
-    }
-
-    let name_value = parts[0].trim();
-    let pos = name_value.find('=')?;
-    let (name, value) = (
-        name_value[..pos].trim().to_string(),
-        name_value[pos + 1..].trim().to_string(),
-    );
-
-    if name.is_empty() {
-        return None;
-    }
-
-    let mut domain = url.host_str().unwrap_or("").to_string();
-    let mut path = "/".to_string();
-    let mut http_only = false;
-    let mut secure = false;
-
-    for part in &parts[1..] {
-        let part = part.trim().to_lowercase();
-        if let Some(val) = part.strip_prefix("domain=") {
-            domain = val.trim().to_string();
-        } else if let Some(val) = part.strip_prefix("path=") {
-            path = val.trim().to_string();
-        } else if part == "httponly" {
-            http_only = true;
-        } else if part == "secure" {
-            secure = true;
-        }
-    }
-
-    Some(Cookie {
-        name,
-        value,
-        domain,
-        path,
-        http_only,
-        secure,
-    })
-}
-
-/// Parse the `Retry-After` header (integer seconds) into milliseconds.
-///
-/// Returns the delay in ms, defaulting to 1000ms if the header is absent or unparseable.
-fn parse_retry_after_ms(response: &wreq::Response, max_ms: u64) -> u64 {
-    let raw_ms = response
-        .headers()
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .unwrap_or(1)
-        .saturating_mul(1000);
-    raw_ms.min(max_ms)
 }
 
 impl WreqDownloader {
@@ -433,7 +301,7 @@ impl WreqDownloader {
         let status = response.status().as_u16();
 
         // Extract cookies before consuming the response body
-        let cookies = Self::extract_cookies(url, &response);
+        let cookies = extract_cookies(url, &response);
 
         // Extract the final URL after redirects
         let final_url = Url::parse(&response.uri().to_string())
