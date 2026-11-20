@@ -67,7 +67,7 @@ expect_rc() {
 # only ever sees its red shape is not proven to accept the green one.
 write_ub_surfaces() {
   local root="$1"
-  mkdir -p "$root/crates/webfang_core/src/application/batch" \
+  mkdir -p "$root/crates/webfang_core/src/application/batch" "$root/crates/webfang_core/src/application/scraper_service" "$root/crates/webfang_core/src/application/extraction" \
     "$root/crates/webfang_core/src/cli" \
     "$root/crates/webfang_core/src/infrastructure/converter" \
     "$root/crates/webfang_core/src/domain"
@@ -151,7 +151,7 @@ EOF
   # matches the marker without reaching the surface — the one the nominal
   # exemption names. Both entries of that pair must exist, or the check
   # cannot distinguish "gated" from "not examined".
-  cat >"$root/crates/webfang_core/src/application/scraper_service.rs" <<'EOF'
+  cat >"$root/crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
     #[test]
@@ -168,7 +168,7 @@ mod tests {
 EOF
 
   # selector_serialization_tests: two gated cases through serialize_case.
-  cat >"$root/crates/webfang_core/src/application/selector_serialization_tests.rs" <<'EOF'
+  cat >"$root/crates/webfang_core/src/application/extraction/selector_serialization_tests.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
     #[test]
@@ -317,7 +317,7 @@ EOF
 # path, or the control would inspect the green shape and prove nothing.
 write_ub_surfaces "$FIX"
 
-cat >"$FIX/crates/webfang_core/src/application/scraper_service.rs" <<'EOF'
+cat >"$FIX/crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
     #[test]
@@ -343,9 +343,9 @@ mod tests {
 }
 EOF
 
-cp "$FIX/crates/webfang_core/src/application/scraper_service.rs" \
+cp "$FIX/crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs" \
   "$FIX/crates/webfang_core/src/infrastructure/downloader/obscura_downloader.rs"
-cp "$FIX/crates/webfang_core/src/application/scraper_service.rs" \
+cp "$FIX/crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs" \
   "$FIX/crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs"
 
 # NEGATION: a Miri job that skips a whole submodule with no written reason of
@@ -381,7 +381,7 @@ done
 # The green fixtures are written FIRST, so the renamed-marker file below is
 # the one the guard inspects.
 write_ub_surfaces "$VACUITY"
-cat >"$VACUITY/crates/webfang_core/src/application/scraper_service.rs" <<'EOF'
+cat >"$VACUITY/crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
     #[test]
@@ -480,7 +480,7 @@ mod tests {
 # Stale exemption: the exempt test no longer exists while the marker still
 # matches a GATED test — so the only thing that can fail here is the staleness
 # check. An exemption is a claim about a test that exists.
-red_surface "stale-exemption" "crates/webfang_core/src/application/scraper_service.rs" \
+red_surface "stale-exemption" "crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs" \
 'rejects a stale exemption whose test no longer exists' \
 '#[cfg(test)]
 mod tests {
@@ -504,7 +504,7 @@ mod tests {
 
 # selector_serialization_tests: `serialize_case` is the shared arrange helper into
 # `serialize_matches` → `absolutize_urls` (fragment_urls.rs) → rewrite_str.
-red_surface "serialize-tables" "crates/webfang_core/src/application/selector_serialization_tests.rs" \
+red_surface "serialize-tables" "crates/webfang_core/src/application/extraction/selector_serialization_tests.rs" \
 'rejects an unguarded selector-serialization table' \
 'use super::*;
 
