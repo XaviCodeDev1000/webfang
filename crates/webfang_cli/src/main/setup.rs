@@ -21,7 +21,11 @@ use super::*;
 /// was calibrated for, what replaces it. Never a second copy of the sentence.
 pub(super) fn emit_orphan_threshold_notice(pending: webfang_core::cli::args::ai::PendingNotices) {
     if let Some(threshold) = pending.orphan_threshold {
+        // `target: "webfang"` pins the tracing module path the snapshot and
+        // operators already key on: this event is the binary's own notice, and
+        // moving the function into a child module must not rename its source.
         tracing::warn!(
+            target: "webfang",
             notice = "orphan_relevance_threshold",
             // `display`, not the raw f32: tracing's `Value` impl for `f32`
             // prints the IEEE-754 round-trip form (`0.30000001192092896`), which

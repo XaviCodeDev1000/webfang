@@ -10,7 +10,6 @@
   "file_size_rust": {
     "hard_limit": 500,
     "grandfathered": {
-      "crates/webfang_cli/src/main.rs": 1174,
       "crates/webfang_core/src/adapters/url_path.rs": 895,
       "crates/webfang_core/src/application/container.rs": 1071,
       "crates/webfang_core/src/application/crawl_result_repository.rs": 1097,
@@ -22,7 +21,6 @@
       "crates/webfang_core/src/application/crawler/session.rs": 1006,
       "crates/webfang_core/src/application/crawler/sitemap_discovery.rs": 1400,
       "crates/webfang_core/src/application/elastic_ingestion.rs": 878,
-      "crates/webfang_core/src/application/extraction.rs": 780,
       "crates/webfang_core/src/application/http_client/client.rs": 1317,
       "crates/webfang_core/src/application/llm_extraction.rs": 677,
       "crates/webfang_core/src/application/rate_limiter.rs": 935,
@@ -36,7 +34,6 @@
       "crates/webfang_core/src/cli/error.rs": 1117,
       "crates/webfang_core/src/cli/export_flow.rs": 753,
       "crates/webfang_core/src/cli/llm_wire.rs": 975,
-      "crates/webfang_core/src/cli/orchestrator.rs": 1230,
       "crates/webfang_core/src/cli/scrape_flow.rs": 1444,
       "crates/webfang_core/src/cli/spec_command.rs": 895,
       "crates/webfang_core/src/cli/url_discovery.rs": 599,
@@ -63,7 +60,7 @@
       "crates/webfang_core/src/infrastructure/crawler/url_queue.rs": 881,
       "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs": 609,
       "crates/webfang_core/src/infrastructure/downloader/spa_detector.rs": 686,
-      "crates/webfang_core/src/infrastructure/downloader/wreq_downloader.rs": 764,
+      "crates/webfang_core/src/infrastructure/downloader/wreq_downloader.rs": 632,
       "crates/webfang_core/src/infrastructure/export/jsonl_exporter.rs": 768,
       "crates/webfang_core/src/infrastructure/export/record_store.rs": 1393,
       "crates/webfang_core/src/infrastructure/export/tail_window.rs": 592,
