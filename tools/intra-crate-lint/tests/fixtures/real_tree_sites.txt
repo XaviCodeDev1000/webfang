@@ -52,6 +52,13 @@ application/adaptive_engine/real.rs	15	use	crate::domain::dom_inspector::Selecto
 application/adaptive_engine/real.rs	18	use	crate::domain::semantic_inspector::SemanticContext
 application/adaptive_engine/real.rs	18	use	crate::domain::semantic_inspector::SemanticInspectorPort
 application/adaptive_engine/real.rs	18	use	crate::domain::semantic_inspector::SemanticMatch
+application/adaptive_engine/real_tests.rs	2	use	crate::domain::dom_inspector::DomStructureReport
+application/adaptive_engine/real_tests.rs	2	use	crate::domain::dom_inspector::SelectorSuggestion
+application/adaptive_engine/real_tests.rs	3	use	crate::domain::semantic_inspector::BoxFuture
+application/adaptive_engine/real_tests.rs	3	use	crate::domain::semantic_inspector::SemanticContext
+application/adaptive_engine/real_tests.rs	3	use	crate::domain::semantic_inspector::SemanticInspectorPort
+application/adaptive_engine/real_tests.rs	3	use	crate::domain::semantic_inspector::SemanticMatch
+application/adaptive_engine/real_tests.rs	3	use	crate::domain::semantic_inspector::TierSource
 application/asset_download.rs	19	use	crate::domain::config::ScraperConfig
 application/asset_download.rs	20	use	crate::domain::DownloadedAsset
 application/asset_download.rs	21	use	crate::error::Result
@@ -1560,6 +1567,13 @@ domain/config.rs	16	use	crate::domain::http_config::HttpClientConfig
 domain/config.rs	349	inline	crate::domain::budget::detector::system_parallelism
 domain/config_serde.rs	78	inline	crate::domain::proxy_config::ProxySpec
 domain/config_serde.rs	82	inline	crate::domain::proxy_config::ProxySpec
+domain/config_tests.rs	119	inline	crate::domain::budget::clamp::clamp_budget
+domain/config_tests.rs	122	inline	crate::domain::budget::clamp::MAX_CONCURRENCY_CEILING
+domain/config_tests.rs	140	inline	crate::domain::budget::detector::system_parallelism
+domain/config_tests.rs	156	inline	crate::domain::config::ScraperConfig::default
+domain/config_tests.rs	163	inline	crate::domain::config::ScraperConfig::default
+domain/config_tests.rs	173	inline	crate::domain::downloader_port::DownloadError::timeout
+domain/config_tests.rs	180	inline	crate::domain::crawler_port::SitemapConfig::default
 domain/cookie_bridge.rs	19	use	crate::domain::downloader_port::Cookie
 domain/cookie_bridge.rs	19	use	crate::domain::downloader_port::FetchedPage
 domain/cpu_executor.rs	22	use	crate::domain::text_chunker::ByteSpan
@@ -1978,6 +1992,8 @@ infrastructure/crawler/robots_utils.rs	31	use	crate::domain::crawler_port::Robot
 infrastructure/crawler/robots_utils.rs	32	use	crate::infrastructure::error::InfraError
 infrastructure/crawler/robots_utils.rs	221	inline	crate::domain::ssrf_guard::ssrf_guard
 infrastructure/crawler/robots_utils.rs	423	inline	crate::domain::ssrf_guard::reject_forbidden_literal_url
+infrastructure/crawler/robots_utils_memory_probe_tests.rs	2	use	crate::infrastructure::observability::memory_probe
+infrastructure/crawler/robots_utils_tests.rs	60	inline	crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV
 infrastructure/crawler/sitemap_parser.rs	45	use	crate::domain::crawler_port::sitemap::SitemapParserPort
 infrastructure/crawler/sitemap_parser.rs	46	use	crate::domain::crawler_port::SitemapConfig
 infrastructure/crawler/sitemap_parser.rs	47	use	crate::domain::url_validation::is_internal_link
