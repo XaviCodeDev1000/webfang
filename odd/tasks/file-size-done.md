@@ -172,3 +172,17 @@ parenthetical); it never gates.
   measured 632 at open — and one defect per exit-1 discriminator; .tsv note + ci.yml repo-guards
   steps + ci_fast_gate.sh trigger, #2056-wired, --negation proof)". The changelog gains the
   v3.5.0 entry (F1b merged; [F1b] labels retired; no contract token changed).
+- L8 (2026-11-21, CI round on PR #2947 — the B52 stub lesson): repo-guards went red with three
+  named failures: "lane_ci harnesses missing from the B52 fixture stub list:
+  test_file_size_done.sh", and B52/B53 "the FULL lane failed: file size close-out semantics
+  (offline)". Symptom: the fixture tree has no real baseline, no wreq_downloader — the REAL
+  harness ran inside the fixture and its real-tree checks failed. Root cause: the fixture stub
+  list in test_ci_fast_gate.sh's make_fixture is HAND-MAINTAINED, and wiring a new harness into
+  lane_ci requires adding it there — F1a's own NEGATION comment on check 7b documents this exact
+  class ("wiring a NEW semantics harness into lane_ci ... without adding it to make_fixture's
+  no-op list made B52/B53 fail"). The check did its job: it failed loudly, BEFORE the lane-shape
+  cases could fail for the wrong reason. Where fixed: the stub list gains
+  test_file_size_done.sh next to its two siblings (same commit); test_ci_fast_gate.sh → 98 ok,
+  0 fail after the fix. The miss was mine: I registered in the .tsv, ci.yml and ci_fast_gate.sh
+  but did not grep the fast gate's own test harness for fixture coupling. §8 row added to the
+  PR body (v3.5.1).
