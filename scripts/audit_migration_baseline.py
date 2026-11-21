@@ -1,40 +1,41 @@
 #!/usr/bin/env python3
-"""Re-auditoría reproducible de PRD-MIG-2026-01 y verificación fail-closed.
+"""Reproducible re-audit of PRD-MIG-2026-01 with fail-closed verification.
 
-Por qué existe
---------------
-El PRD v1 medía ~60 hechos contra un SHA y los copiaba en prosa. En este repo
-se publican varias versiones por día: entre el baseline del v1 y hoy el
-workspace pasó de 7.7.1 a 8.0.0, 8.0.1 y 8.0.2. La propia regla del v1
-("si el repo se mueve, se re-corre el script") se activó y nadie la ejecutó.
-Re-correr el script a mano NO arregla eso: la auditoría siguiente también es
-una foto, y también envejece.
+Why this exists
+---------------
+The PRD v1 measured ~60 facts against one SHA and copied them into prose. This
+repo publishes several versions a day: between the v1 baseline and today the
+workspace went from 7.7.1 to 8.0.0, 8.0.1 and 8.0.2. The v1 rule itself
+("if the repo moves, re-run the script") fired and nobody ran it. Re-running
+the script by hand does NOT fix that: the next audit is also a snapshot, and
+it ages too.
 
-La corrección estructural es quitarle los hechos al documento:
+The structural fix is taking the facts away from the document:
 
-  * `--write`  re-deriva TODOS los hechos del árbol y los congela en
-               evidence/mig-2026-01/baseline.json (evidencia de F0).
-  * `--check`  verifica que el PRD v2 no contenga hechos literales, que cada
-               {{BASELINE.ruta}} resuelva, que no cite RFs inexistentes, que
-               el SHA siga siendo HEAD, ancestro o el árbol de un squash, y
-               que las DECISIONES que el v1 escribía a mano (major, línea de
-               backport, gate de Miri, flip de edición) sigan siendo las que
-               se DERIVAN de las políticas vivas del repo.
+  * `--write`  re-derives ALL the facts from the tree and freezes them into
+               evidence/mig-2026-01/baseline.json (the F0 evidence).
+  * `--check`  verifies that the PRD v2 contains no literal facts, that every
+               {{BASELINE.path}} resolves, that it cites no nonexistent RFs,
+               that the SHA is still HEAD, an ancestor, or the tree of a
+               squash, and that the DECISIONS the v1 wrote by hand (major,
+               backport line, Miri gate, edition flip) are still the ones
+               DERIVED from the repo's living policies.
 
-`--check` nunca compara un contador contra un número congelado: los contadores
-son evidencia de F0, no un gate sobre main. Sí compara un conjunto pequeño de
-hechos que *invalidan decisiones* (versión, canal, líneas de soporte, política
-Miri, edición). Con `TRAIN_OPEN` presente esa deriva es bloqueante; sin el
-marcador degrada a NOTE para no poner rojo el repo cuando el tren está cerrado.
+`--check` never compares a counter against a frozen number: counters are F0
+evidence, not a gate over main. It does compare a small set of facts that
+*invalidate decisions* (version, channel, support lines, Miri policy,
+edition). With `TRAIN_OPEN` present that drift is blocking; without the
+marker it degrades to a NOTE so the repo does not go red once the train is
+closed.
 
-Uso
----
+Usage
+-----
   python3 scripts/audit_migration_baseline.py --write evidence/mig-2026-01/baseline.json
   python3 scripts/audit_migration_baseline.py --check evidence/mig-2026-01/baseline.json
-  python3 scripts/audit_migration_baseline.py --check ... --json   # resumen
+  python3 scripts/audit_migration_baseline.py --check ... --json   # summary
 
-No requiere dependencias fuera de la stdlib, no escribe en el repo salvo en
-`--write`, y no necesita cargo/rustc (importante: este sandbox no los tiene).
+Needs no dependencies beyond the stdlib, writes to the repo only under
+`--write`, and needs no cargo/rustc (important: this sandbox has neither).
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ DEFAULT_EVIDENCE = "evidence/mig-2026-01/baseline.json"
 DEFAULT_PRD = "evidence/mig-2026-01/PRD-v2.md"
 DEFAULT_MARKER = "evidence/mig-2026-01/TRAIN_OPEN"
 
-# Hechos que, si cambian, invalidan una DECISIÓN del PRD (no un contador).
+# Facts that, when they change, invalidate a DECISION of the PRD (not a counter).
 DECISION_FACTS = [
     "workspace_version",
     "toolchain.channel",
@@ -65,8 +66,8 @@ DECISION_FACTS = [
     "distribution.crates_io",
 ]
 
-# Cifras/frases del v1 que NO pueden volver a escribirse en el v2. El v2 las
-# expresa como {{BASELINE.*}} o como decisión derivada. Es una lista de regex.
+# Numbers/phrases from v1 that must never be written into the v2 again. The v2
+# expresses them as {{BASELINE.*}} or as a derived decision. A list of regexes.
 BANNED_LITERALS = [
     r"v7\.7\.1",
     r"\b8\.0\.0\b",
@@ -84,7 +85,7 @@ BANNED_LITERALS = [
 
 
 # --------------------------------------------------------------------------
-# utilidades de lectura (defensivas: un fichero ausente es un dato, no un crash)
+# reading helpers (defensive: a missing file is a fact, not a crash)
 # --------------------------------------------------------------------------
 def read(root: Path, rel: str) -> str:
     try:
@@ -106,7 +107,7 @@ def toml_scalar(text: str, section: str, key: str) -> str | None:
 
 
 def git_rc(root: Path, *args: str) -> tuple[int, str]:
-    """Ejecuta git y conserva el código de salida (fail-closed en el caller)."""
+    """Runs git and keeps the exit code (callers fail closed)."""
     if not (root / ".git").exists():
         return 1, ""
     try:
@@ -125,13 +126,13 @@ def git(root: Path, *args: str) -> str:
 
 
 def head_sha_matches_history(root: Path, sha: str, live_head: str) -> bool:
-    """Acepta HEAD, ancestría real o un SQUASH que preservó el árbol medido.
+    """Accepts HEAD, real ancestry, or a SQUASH that preserved the measured tree.
 
-    La cola de merge usa SQUASH: el tip del PR no es ancestro de main, pero su
-    árbol sí sobrevive al squash. `--write` congela el tip YA medido y recién
-    después escribe baseline.json, así que entre el árbol del SHA y el del
-    squash el único cambio legítimo es el propio baseline. Cualquier otra
-    diferencia (o un git sin ese objeto) sigue fail-closed.
+    The merge queue uses SQUASH: the PR tip is not an ancestor of main, but its
+    tree does survive the squash. `--write` freezes the tip ALREADY measured and
+    only afterwards writes baseline.json, so between the SHA's tree and the
+    squash's the only legitimate change is the baseline itself. Any other
+    difference (or a git without that object) stays fail-closed.
     """
     if sha == live_head:
         return True
@@ -150,18 +151,71 @@ def resolve_head_sha(root: Path, explicit: str | None) -> str:
     return git(root, "rev-parse", "HEAD") or ""
 
 
-# Refs that survive a squash merge. The queue uses SQUASH (.github/merge-queue.json),
-# so the tip of a Release PR is NOT in the history of main and never will be: freezing
-# it passes the ancestry check exactly once, on the squash commit, and then fails on the
-# first PR that touches any other file. Measured on #2909/#2914: the branch tip 4efcaf66
-# was orphaned the moment the queue squashed it, and every later PR read as
-# "el baseline fue medido sobre otro árbol" with no drift behind it.
-DURABLE_REFS = ("main", "origin/main")
+def repository_state(root: Path) -> str:
+    """Classifies `root` for the freeze: repository top, nested inside one, or none.
+
+    A `.git` entry at the root (a worktree's is a file and counts) says "top".
+    A missing one is ambiguous: the no-repo fixture the harness pins is
+    legitimate — ancestry is unprovable there and the --check guard already
+    reports it as "measured over another tree" — but the same shape is
+    reachable in production by pointing --root/MIGRATION_ROOT at a
+    subdirectory, where the hazard check would be silently skipped.
+    rev-parse --show-toplevel tells the two apart: success means a repository
+    surrounds this root and the freeze must fail closed.
+    """
+    if (root / ".git").exists():
+        return "top"
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if p.returncode == 0:
+            return "nested"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "none"
+
+
+# Refs that survive a squash merge: the default branch, local and remote, in
+# lookup order. The merge queue uses SQUASH (.github/merge-queue.json), so the
+# tip of a Release PR is NOT in the history of the default branch and never
+# will be: freezing it passes the ancestry check exactly once, on the squash
+# commit, and then fails on the first PR that touches any other file. Only an
+# anchor reachable from the default branch survives the merge.
+def durable_refs(root: Path) -> tuple[str, ...]:
+    """The default branch, local and remote, detected through origin's HEAD.
+
+    When origin (or its HEAD symref) is absent, the main/origin-main pair is
+    the fallback. A ref that does not exist in this repository is skipped —
+    not counted as a rejection — by existing_durable_refs.
+    """
+    rc, out = git_rc(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if rc == 0:
+        remote = out.strip()
+        local = remote.split("/", 1)[1] if remote.startswith("origin/") else remote
+        return (local, remote) if local != remote else (remote,)
+    return ("main", "origin/main")
+
+
+def existing_durable_refs(root: Path) -> tuple[str, ...]:
+    """The durable refs that exist in this repository, in lookup order.
+
+    merge-base --is-ancestor exits 1 for "not an ancestor" and 128 for "no
+    such ref"; only the first is evidence about the commit. A ref that
+    rev-parse --verify rejects simply does not exist here.
+    """
+    present = []
+    for ref in durable_refs(root):
+        rc, _ = git_rc(root, "rev-parse", "--verify", "--quiet", ref)
+        if rc == 0:
+            present.append(ref)
+    return tuple(present)
 
 
 def durable_anchor(root: Path, sha: str) -> str | None:
-    """Devuelve el primer ref durable del que `sha` es ancestro, o None."""
-    for ref in DURABLE_REFS:
+    """Returns the first durable ref that `sha` is an ancestor of, or None."""
+    for ref in existing_durable_refs(root):
         rc, _ = git_rc(root, "merge-base", "--is-ancestor", sha, ref)
         if rc == 0:
             return ref
@@ -169,22 +223,29 @@ def durable_anchor(root: Path, sha: str) -> str | None:
 
 
 def freeze_hazard(root: Path, sha: str) -> str | None:
-    """Diagnóstico de un SHA congelado que el próximo squash va a dejar huérfano.
+    """Diagnosis of a frozen SHA the next squash would orphan.
 
-    Devuelve None cuando el ancla es durable. Un SHA sin ref durable es aceptable
-    SOLO en una rama cuyo tip todavía no está en main (el PR de release antes del
-    squash): ahí el operador lo re-ancla a mano, con --allow-unmerged-anchor, y el
-    gate lo vuelve a verificar en cada PR posterior.
+    Returns None when the anchor is durable. A SHA without a durable ref is
+    acceptable ONLY on a branch whose tip is not on the default branch yet
+    (a Release PR before the squash): there the operator re-anchors by hand
+    with --allow-unmerged-anchor and the gate re-verifies it on every later PR.
     """
     if durable_anchor(root, sha):
         return None
     rc, _ = git_rc(root, "rev-parse", "--verify", "--quiet", sha)
     if rc != 0:
-        return f"head_sha {sha[:12]} no es un objeto de este repositorio"
+        return f"head_sha {sha[:12]} is not an object of this repository"
+    present = existing_durable_refs(root)
+    if not present:
+        return (
+            f"no durable ref exists in this repository (looked for: "
+            f"{', '.join(durable_refs(root))}): ancestry of head_sha "
+            f"{sha[:12]} cannot be proven"
+        )
     return (
-        f"head_sha {sha[:12]} no es ancestro de {' ni '.join(DURABLE_REFS)}: "
-        "el próximo squash lo dejará huérfano y el baseline fallará en el primer PR "
-        "que toque otro archivo"
+        f"head_sha {sha[:12]} is not an ancestor of {' nor '.join(present)}: "
+        "the next squash will orphan it and the baseline will fail on the first PR "
+        "that touches any other file"
     )
 
 
@@ -208,7 +269,7 @@ def render(value: object) -> str:
 
 
 # --------------------------------------------------------------------------
-# derivación de hechos
+# fact derivation
 # --------------------------------------------------------------------------
 def support_facts(root: Path) -> dict:
     raw = read(root, ".github/support.json")
@@ -264,12 +325,12 @@ def toolchain_pin_facts(root: Path) -> dict:
         for sha in re.findall(r"dtolnay/rust-toolchain@([0-9a-f]{40})", text):
             steps += 1
             shas[sha[:12]] = shas.get(sha[:12], 0) + 1
-        # Cuenta TODAS las apariciones, incluidas las citas parciales en
-        # comentarios: el v1 fijó "35" en un acceptance y el árbol ya medía 37.
+        # Counts EVERY occurrence, including partial citations in comments:
+        # v1 pinned "35" in an acceptance and the tree already measured 37.
         references += len(re.findall(r"dtolnay/rust-toolchain@", text))
-        # [ \t] y no \s: \s cruza saltos de línea y confunde el job id
-        # `toolchain:` (ci.yml) con un pin, capturando `name:` de la línea
-        # siguiente. Un job id no es un pin.
+        # [ \t] and not \s: \s crosses line breaks and confuses the job id
+        # `toolchain:` (ci.yml) with a pin, capturing `name:` from the next
+        # line. A job id is not a pin.
         for m in re.finditer(r"(?m)^([ \t]+)toolchain:[ \t]*([^\s#]+)", text):
             line = text[: m.start()].count("\n") + 1
             rec = {"file": str(wf.relative_to(root)), "line": line, "value": m.group(2)}
@@ -293,9 +354,10 @@ def release_target_facts(root: Path) -> list[str]:
 def edition_facts(root: Path) -> dict:
     manifest = read(root, "Cargo.toml")
     workspace = toml_scalar(manifest, "workspace.package", "edition")
-    # Sólo el array `members`: leer todo el bloque [workspace] mezcla
-    # resolver = "2" y los `exclude` (fuzz, tools/...) con los miembros, y
-    # haría creer que hay overrides de edición por crate donde no los hay.
+    # Only the `members` array: reading the whole [workspace] block mixes
+    # resolver = "2" and the `exclude` entries (fuzz, tools/...) with the
+    # members, and would make it believe there are per-crate edition overrides
+    # where there are none.
     block = re.search(r"(?ms)^\s*members\s*=\s*\[(.*?)\]", manifest)
     members = re.findall(r'"([^"]+)"', block.group(1)) if block else []
     inherit, overrides = [], []
@@ -309,7 +371,7 @@ def edition_facts(root: Path) -> dict:
     for rel in ("fuzz/Cargo.toml", "tools/intra-crate-lint/Cargo.toml"):
         value = toml_scalar(read(root, rel), "package", "edition")
         if value is None:
-            # esos manifiestos declaran edition antes de [dependencies]
+            # those manifests declare edition before [dependencies]
             m = re.search(r'(?m)^\s*edition\s*=\s*"([^"]*)"', read(root, rel))
             value = m.group(1) if m else None
         excluded[rel] = value
@@ -381,7 +443,7 @@ def symbol_facts(root: Path) -> dict:
 
 
 def quick_facts(root: Path) -> dict:
-    """Los 4 ficheros de los que dependen las decisiones. Barato para CI."""
+    """The 4 files the decisions depend on. Cheap enough for CI."""
     manifest = read(root, "Cargo.toml")
     toolfile = read(root, "rust-toolchain.toml")
     sup = support_facts(root)
@@ -400,7 +462,7 @@ def quick_facts(root: Path) -> dict:
 
 
 def derive_decisions(quick: dict, edition: dict, sup: dict, miri: dict) -> dict:
-    """RF-23/RF-24/RF-13/K9 dejan de ser números escritos a mano."""
+    """RF-23/RF-24/RF-13/K9 stop being hand-written numbers."""
     try:
         next_major = int(str(quick["support.stable"]).split(".")[0]) + 1
         major_target = f"{next_major}.0.0"
@@ -414,6 +476,9 @@ def derive_decisions(quick: dict, edition: dict, sup: dict, miri: dict) -> dict:
         "backport_line": quick["support.stable"],
         "eol_on_release": quick["support.maintenance"],
         "msrv_compat_toolchain": quick["toolchain.channel"],
+        # The wording values are frozen data: baseline.json stores them and
+        # --check re-derives and compares them, so translating them is a
+        # decision-fact change that needs the release-process re-freeze first.
         "miri_gate_wording": (
             "advisory revisado, sin rojos nuevos atribuibles al bump"
             if miri["policy"] == "advisory"
@@ -468,74 +533,74 @@ def collect(root: Path, head_sha: str) -> dict:
 
 
 # --------------------------------------------------------------------------
-# verificación fail-closed
+# fail-closed verification
 # --------------------------------------------------------------------------
 def verify(root: Path, evidence_path: Path, prd_path: Path,
            train_marker: Path, live_head: str) -> tuple[int, list[str], list[str], dict]:
     errors: list[str] = []
     notes: list[str] = []
 
-    # 1. evidencia legible y completa -------------------------------------
+    # 1. evidence readable and complete ------------------------------------
     try:
         ev = json.loads(evidence_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        return 1, [f"baseline inaccesible o JSON inválido: {exc}"], [], {}
+        return 1, [f"baseline unreadable or invalid JSON: {exc}"], [], {}
     if ev.get("schema") != SCHEMA:
-        errors.append(f"schema={ev.get('schema')!r}, se esperaba {SCHEMA}")
+        errors.append(f"schema={ev.get('schema')!r}, expected {SCHEMA}")
     for key in ("head_sha", "decisions", "decision_facts", "banned_literals",
                 "workspace_version", "toolchain", "support", "miri", "edition"):
         if key not in ev:
-            errors.append(f"falta la clave obligatoria '{key}' en el baseline")
+            errors.append(f"missing required key '{key}' in the baseline")
 
-    # 2. el PRD no puede contener hechos literales ------------------------
+    # 2. the PRD cannot contain literal facts ------------------------------
     prd = ""
     if not prd_path.is_file():
-        errors.append(f"no se encontró el PRD v2 en {prd_path}")
+        errors.append(f"PRD v2 not found at {prd_path}")
     else:
         prd = prd_path.read_text(encoding="utf-8", errors="replace")
         for literal in ev.get("banned_literals", []):
             try:
                 if re.search(literal, prd):
-                    errors.append(f"el PRD v2 reintroduce el hecho literal /{literal}/")
+                    errors.append(f"PRD v2 reintroduces the literal fact /{literal}/")
             except re.error as exc:
-                errors.append(f"regex inválida en banned_literals: {literal}: {exc}")
+                errors.append(f"invalid regex in banned_literals: {literal}: {exc}")
 
-        # 3. cada placeholder resuelve contra la evidencia -----------------
+        # 3. every placeholder resolves against the evidence ----------------
         placeholders = sorted(set(re.findall(r"\{\{BASELINE\.([A-Za-z0-9_.]+)\}\}", prd)))
         for dotted in placeholders:
             try:
                 get_path(ev, dotted)
             except KeyError:
-                errors.append(f"placeholder {{{{BASELINE.{dotted}}}}} no resuelve en baseline.json")
-        notes.append(f"{len(placeholders)} placeholders resueltos")
+                errors.append(f"placeholder {{{{BASELINE.{dotted}}}}} does not resolve in baseline.json")
+        notes.append(f"{len(placeholders)} placeholders resolved")
 
-        # 4. deriva de numeración §3 -> §6: ningún RF huérfano --------------
+        # 4. §3 -> §6 numbering drift: no orphan RF -------------------------
         defined = set(re.findall(r"\*\*RF-(\d{2})", prd))
         mentioned = set(re.findall(r"\bRF-(\d{2})\b", prd))
         orphan = sorted(mentioned - defined)
         if orphan:
-            errors.append("RFs citados pero no definidos en el índice: " + ", ".join("RF-" + x for x in orphan))
-        notes.append(f"{len(defined)} RFs definidos, {len(mentioned)} citados, 0 huérfanos" if not orphan else "índice de RFs incompleto")
+            errors.append("RFs cited but not defined in the index: " + ", ".join("RF-" + x for x in orphan))
+        notes.append(f"{len(defined)} RFs defined, {len(mentioned)} cited, 0 orphans" if not orphan else "incomplete RF index")
 
-    # 5. el SHA del baseline sigue en la historia (o en el squash) ---------
+    # 5. the baseline SHA is still in the history (or in the squash) --------
     sha = str(ev.get("head_sha", ""))
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        errors.append(f"head_sha no es un SHA completo: {sha!r}")
+        errors.append(f"head_sha is not a full SHA: {sha!r}")
     elif live_head and not head_sha_matches_history(root, sha, live_head):
         errors.append(
-            f"head_sha {sha[:12]} no es HEAD, ancestro ni equivalente en árbol a "
-            f"{live_head[:12]}: el baseline fue medido sobre otro árbol"
+            f"head_sha {sha[:12]} is not HEAD, an ancestor, nor tree-equivalent to "
+            f"{live_head[:12]}: the baseline was measured over another tree"
         )
     if not live_head:
-        errors.append("no se pudo determinar el HEAD vivo (git o MIGRATION_HEAD_SHA)")
+        errors.append("could not determine the live HEAD (git or MIGRATION_HEAD_SHA)")
 
-    # 6. las decisiones se re-derivan de las políticas vivas ---------------
+    # 6. the decisions are re-derived from the living policies --------------
     live = quick_facts(root)
     missing = [f for f in ("Cargo.toml", "rust-toolchain.toml",
                            ".github/support.json", "README.md")
                if not (root / f).is_file()]
     if missing:
-        errors.append("faltan fuentes de decisión: " + ", ".join(missing))
+        errors.append("missing decision sources: " + ", ".join(missing))
     sup = support_facts(root)
     miri = miri_facts(root)
     derived = derive_decisions(live, edition_facts(root), sup, miri)
@@ -545,7 +610,7 @@ def verify(root: Path, evidence_path: Path, prd_path: Path,
         try:
             frozen = get_path(ev, dotted)
         except KeyError:
-            errors.append(f"decision_fact '{dotted}' no existe en el baseline")
+            errors.append(f"decision_fact '{dotted}' does not exist in the baseline")
             continue
         current = live.get(dotted)
         if frozen != current:
@@ -558,17 +623,17 @@ def verify(root: Path, evidence_path: Path, prd_path: Path,
         # The pointer names the document and its section, and copies no command:
         # instructions in a message would be a second copy that rots. The reader
         # lands on the procedure itself (docs/src/release-process.md).
-        msg = ("DERIVA DE DECISIÓN; re-corre --write, actualiza §7 y re-aprueba "
-               "(ver docs/src/release-process.md, «Re-freezing the evidence baseline "
-               "on a Release PR»): "
+        msg = ("DECISION DRIFT; re-run --write, update §7 and re-approve "
+               '(see docs/src/release-process.md, "Re-freezing the evidence baseline '
+               'on a Release PR"): '
                + " | ".join(drift))
         if train_marker.is_file():
             errors.append(msg)
         else:
-            notes.append("NOTE (tren cerrado, no bloqueante): " + msg)
+            notes.append("NOTE (train closed, non-blocking): " + msg)
     else:
-        notes.append("decisiones coherentes con Cargo.toml, support.json, README y toolchain")
-    notes.append("tren " + ("ABIERTO (deriva bloqueante)" if train_marker.is_file() else "cerrado (deriva = NOTE)"))
+        notes.append("decisions coherent with Cargo.toml, support.json, README and the toolchain")
+    notes.append("train " + ("OPEN (drift is blocking)" if train_marker.is_file() else "closed (drift = NOTE)"))
 
     return (1 if errors else 0), errors, notes, ev
 
@@ -577,18 +642,18 @@ def main() -> int:
     here = Path(__file__).resolve().parent
     root_default = here.parent
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--root", type=Path, default=None, help="raíz del repo a auditar")
-    ap.add_argument("--head-sha", default=None, help="override del HEAD vivo")
+    ap.add_argument("--root", type=Path, default=None, help="root of the repository to audit")
+    ap.add_argument("--head-sha", default=None, help="override of the live HEAD")
     ap.add_argument("--write", type=Path, default=None, metavar="FILE")
     ap.add_argument("--check", type=Path, default=None, metavar="FILE")
     ap.add_argument("--prd", type=Path, default=None)
     ap.add_argument("--marker", type=Path, default=None)
-    ap.add_argument("--json", action="store_true", help="--check: imprime resumen JSON")
+    ap.add_argument("--json", action="store_true", help="--check: print a JSON summary")
     ap.add_argument(
         "--allow-unmerged-anchor", action="store_true",
-        help="--write: acepta un head_sha que todavía no está en main (rama de un PR de "
-             "release antes del squash). Sin este flag el freeze se niega, porque ese ancla "
-             "se rompe en el PR siguiente",
+        help="--write: accept a head_sha that is not on the default branch yet (a "
+             "Release PR branch before the squash). Without this flag the freeze "
+             "refuses, because that anchor breaks on the next PR",
     )
     args = ap.parse_args()
 
@@ -598,28 +663,35 @@ def main() -> int:
     head_sha = resolve_head_sha(root, explicit_sha)
 
     if args.write:
-        if not head_sha:
-            print("::error:: no se pudo determinar head_sha (git o --head-sha)", file=sys.stderr)
+        state = repository_state(root)
+        if state == "nested":
+            print(
+                "::error:: --write refuses: the audit root is inside a repository but "
+                "is not its top; run the freeze from the repository root",
+                file=sys.stderr,
+            )
             return 1
-        hazard = freeze_hazard(root, head_sha)
-        # Un árbol sin .git no puede probar ancestría: el guard de --check ya lo
-        # reporta como "medido sobre otro árbol" en los fixtures sin repo, así que
-        # --write no es el lugar para bloquearlo.
-        has_git = (root / ".git").exists()
-        if hazard and has_git and not args.allow_unmerged_anchor:
+        if not head_sha:
+            print("::error:: could not determine head_sha (git or --head-sha)", file=sys.stderr)
+            return 1
+        # Without a repository at all there is nothing to prove: the no-repo
+        # fixture is legitimate and the --check guard already reports it as
+        # "measured over another tree", so --write is not the place to block it.
+        hazard = freeze_hazard(root, head_sha) if state == "top" else None
+        if hazard and not args.allow_unmerged_anchor:
             print(f"::error:: {hazard}", file=sys.stderr)
             print(
-                "  congelá el commit del release que YA está en main, o pasá "
-                "--allow-unmerged-anchor y re-anclá después del squash",
+                "  freeze the release commit that is ALREADY on the default branch, or pass "
+                "--allow-unmerged-anchor and re-anchor after the squash",
                 file=sys.stderr,
             )
             return 1
         if hazard:
-            print(f"NOTE: {hazard} (aceptado por --allow-unmerged-anchor)", file=sys.stderr)
+            print(f"NOTE: {hazard} (accepted by --allow-unmerged-anchor)", file=sys.stderr)
         data = collect(root, head_sha)
         args.write.parent.mkdir(parents=True, exist_ok=True)
         args.write.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        print(f"OK: baseline escrito en {args.write} (head={head_sha[:12]}, "
+        print(f"OK: baseline written to {args.write} (head={head_sha[:12]}, "
               f"workspace={data['workspace_version']}, major={data['decisions']['major_target']}, "
               f"backports={data['decisions']['backport_line']})")
         return 0
@@ -640,10 +712,10 @@ def main() -> int:
             for line in notes:
                 print("OK: " + line)
             if rc == 0:
-                print("OK: evidencia de migración coherente con el árbol")
+                print("OK: migration evidence coherent with the tree")
         return rc
 
-    ap.error("indicá --write FILE o --check FILE")
+    ap.error("specify --write FILE or --check FILE")
     return 2
 
 
