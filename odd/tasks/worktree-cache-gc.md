@@ -15,11 +15,11 @@ S5. Assumption (from the agreed salvage design, not a user string): the sweep is
 
 ## Tasks
 
-- T1 — S1,S4 — route inline — bootstrap worktree + ODD doc + mirror — status: done — commit: pending
-- T2 — S2,S3,S5 — route inline — shared canonicalization helper + orphan sweep + tests — status: pending — commit: pending
-- T3 — S1,S3,S5 — route inline — identity gate + pre-commit wiring + manifest helper + tests — status: pending — commit: pending
-- T4 — S2,S3 — route inline — AGENTS.md alignment (gitignore, namespace, mbx vs sccache, hook) — status: pending — commit: pending
-- T5 — S1,S5 — route inline — full verification + ODD close + mirror — status: pending — commit: pending
+- T1 — S1,S4 — route inline — bootstrap worktree + ODD doc + mirror — status: done — commit: 26bf0100 (doc landed with T2)
+- T2 — S2,S3,S5 — route inline — shared canonicalization helper + orphan sweep + tests — status: done — commit: 26bf0100
+- T3 — S1,S3,S5 — route inline — identity gate + pre-commit wiring + manifest helper + tests — status: done — commit: 3677cb8a
+- T4 — S2,S3 — route inline — AGENTS.md alignment (gitignore, namespace, mbx vs sccache, hook) — status: done — commit: pending
+- T5 — S1,S5 — route inline — full verification + ODD close + mirror — status: in_progress — commit: pending
 
 ## Log
 
@@ -40,3 +40,9 @@ L4 — Evidence collected before implementation (all confirmed on this FS, 2026-
 - Live worktree set changes between checks (`chore-reanchor-baseline-v921` replaced `fix-baseline-anchor-durability` mid-audit): sweep must read state at execution time.
 
 L5 — Route declaration: everything inline; no writer-delegation trigger (no parallel independent units, context within budget). High-risk item: T3 touches the shared `pre-commit` hook (delivery/environment, item 5); it gets its own commit and an independent verifier after its own checks. RDD mode is on (global).
+
+L6 — T2 evidence: `scripts/tests/test_sweep_orphan_targets.sh` PASS on an ephemeral git repo/fake cache (scanned 8, reserved 4, live 2, protected 1, orphaned 1; live and reserved dirs not classified; dry-run deleted nothing; `--execute` without token and missing repo both exit 2). `bash -n` + shellcheck clean. Full cargo gate passed (`cargo check`, clippy all-targets/all-features, fmt --check, doc with -D warnings); cargo doc emitted known rustdoc ICE dumps (gitignored, build succeeded). Commit 26bf0100. During the gate mbx reported collecting 593.3 GiB logical of gone checkouts; the real-cache dry-run at T5 must re-measure current state.
+
+L7 — T3 evidence: `scripts/tests/test_identity_gate.sh` PASS (main pass; manifest pass; missing manifest deny; wrong manifest deny; unset CARGO_TARGET_DIR deny; inherited main target deny; non-main branch in main checkout deny; detached HEAD deny). `bash -n` + shellcheck clean, including the edited `pre-commit`. `scripts/worktree_identity.sh` ran in this worktree and the gate passed in a direnv-loaded shell. The commit itself ran through the new pre-commit wiring successfully. Commit 3677cb8a.
+
+L8 — RDD: `gentle-ai review assess` over the branch range returned `risk: high` (`executable_mode`, `process_boundary`, `shell_source`) and `review_due: true`. Per ODD, source-mutating work (T4) is finished before opening the frozen review candidate; the native review is the last step of T5.
