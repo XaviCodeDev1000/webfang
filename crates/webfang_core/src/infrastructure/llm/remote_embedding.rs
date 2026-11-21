@@ -40,6 +40,7 @@ use crate::error::SemanticError;
 use crate::infrastructure::llm::provider::ProviderInitError;
 use retry::{backoff_delay_ms, retry_after_delay};
 use wire::{EmbeddingRequest, EmbeddingResponse, EmbeddingDatum, EmbeddingUsage};
+use gate::entry_gate;
 
 /// A boxed future for dyn-compatible async port methods.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -155,62 +156,6 @@ pub fn render_error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     rendered
 }
 
-/// Entry gate for the remote endpoint (fetch-chain stage 1): http(s) scheme
-/// plus the parameterized, policy-aware literal-IP check.
-///
-/// Runs at construction so a forbidden `base_url` fails fast at startup,
-/// before any socket opens. The literal check MUST be policy-aware: wreq's
-/// connector parses IP literals directly and never invokes the custom
-/// resolver, so a forbidden-looking LAN literal declared in `allow_cidrs`
-/// would otherwise be unreachable no matter what the resolver does.
-///
-/// Hostnames pass here — they are enforced per connection by the validating
-/// resolver, which applies the AND decision (`allow_cidrs` AND `allow_hosts`)
-/// on the actual answer set.
-///
-/// # Errors
-///
-/// [`ProviderInitError::InvalidBaseUrl`] when the scheme is not http(s) or
-/// the host is a forbidden literal. The message names the config field that
-/// can open the target, and never points at one that cannot.
-fn entry_gate(config: &ProviderConfig) -> Result<(), ProviderInitError> {
-    let invalid = |msg: String| ProviderInitError::InvalidBaseUrl {
-        provider_id: config.id.clone(),
-        source: crate::error::ScraperError::Config(msg),
-    };
-    let scheme = config.base_url.scheme();
-    if scheme != "http" && scheme != "https" {
-        return Err(invalid(format!(
-            "esquema '{scheme}' no permitido para embeddings remotos (solo http/https)"
-        )));
-    }
-    let host = config.base_url.host_str().unwrap_or("");
-    if crate::domain::ssrf_guard::is_forbidden_literal_host_with_policy(
-        host,
-        config.allow_loopback,
-        &config.network_policy,
-    ) {
-        // A literal inside an allowlisted CIDR that is still refused is in the
-        // never-allowable set (FIN-017): saying "add it to allow_cidrs" there
-        // would send the operator in a circle, because no entry can open it.
-        let cidr_hint = config
-            .network_policy
-            .allows_ip(&host.parse().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)));
-        let hint = if cidr_hint {
-            format!(
-                "la red de '{host}' no se puede habilitar nunca (link-local, multicast o reservada)"
-            )
-        } else {
-            "para endpoints en LAN declaralo en `network_policy.allow_cidrs` del provider; \
-             para endpoints locales activá `allow_loopback` en el archivo de configuración"
-                .to_string()
-        };
-        return Err(invalid(format!(
-            "URL de embeddings bloqueada por SSRF: el host '{host}' pertenece a una red interna; {hint}"
-        )));
-    }
-    Ok(())
-}
 
 
 /// Pure wire parse: response body → one vector per input, in order.
@@ -663,6 +608,7 @@ mod proxy_auth;
 mod proxy_wiring;
 mod retry;
 mod wire;
+mod gate;
 
 #[cfg(test)]
 mod tests {
@@ -703,90 +649,6 @@ mod tests {
 
     // --- B2 slice 2: network policy at the entry gate (ADR-0004 M2) ---
 
-    fn lan_policy(cidrs: &[&str], hosts: &[&str]) -> NetworkPolicy {
-        NetworkPolicy {
-            mode: crate::domain::network_policy::NetworkPolicyMode::Allowlist,
-            allow_cidrs: cidrs
-                .iter()
-                .map(|c| {
-                    crate::domain::network_policy::CidrBlock::parse(c).expect("test CIDR parses")
-                })
-                .collect(),
-            allow_hosts: hosts.iter().map(|h| (*h).to_string()).collect(),
-        }
-    }
-
-    #[test]
-    fn entry_gate_accepts_allowlisted_lan_literal() {
-        let mut cfg = config_with(AuthSource::None);
-        cfg.base_url = Url::parse(&format!("http://{LAN_HOST}:{LAN_PORT}/v1")).expect("url");
-        cfg.network_policy = lan_policy(&["10.0.0.0/8"], &[]);
-        entry_gate(&cfg).expect("an allowlisted LAN literal must pass the entry gate");
-    }
-
-    #[test]
-    fn entry_gate_rejects_undeclared_lan_literal_naming_the_fields() {
-        let mut cfg = config_with(AuthSource::None);
-        cfg.base_url = Url::parse(&format!("http://{LAN_HOST}:{LAN_PORT}/v1")).expect("url");
-        cfg.network_policy = NetworkPolicy::default();
-        let err = entry_gate(&cfg).expect_err("an undeclared LAN literal stays forbidden");
-        let rendered = err.to_string();
-        assert!(
-            rendered.contains("allow_loopback") && rendered.contains("allow_cidrs"),
-            "the rejection must name both config fields that can open it: {rendered}"
-        );
-    }
-
-    #[test]
-    fn entry_gate_keeps_cloud_metadata_denied_under_any_policy() {
-        // FIN-017 invariant 1: a hand-built policy that bypassed config
-        // validation still cannot open the metadata endpoint, and the
-        // message says why instead of pointing at a field that would not help.
-        let mut cfg = config_with(AuthSource::None);
-        cfg.base_url = Url::parse("http://169.254.169.254/v1").expect("url");
-        cfg.network_policy = lan_policy(&["169.254.0.0/16"], &[]);
-        let err = entry_gate(&cfg).expect_err("metadata stays denied");
-        let rendered = err.to_string();
-        assert!(
-            !rendered.contains("allow_cidrs"),
-            "the message must not point at a field that cannot permit this range: {rendered}"
-        );
-    }
-
-    #[test]
-    fn entry_gate_leaves_hostnames_to_the_resolver() {
-        let mut cfg = config_with(AuthSource::None);
-        cfg.base_url = Url::parse("http://vllm.lan:8000/v1").expect("url");
-        cfg.network_policy = lan_policy(&["10.0.0.0/8"], &["vllm.lan"]);
-        entry_gate(&cfg).expect("hostnames are enforced per connection, not here");
-    }
-
-    #[test]
-    fn transport_error_surfaces_the_resolver_diagnosis() {
-        // The resolver's Spanish, field-naming diagnosis reaches the operator
-        // through the transport error: it lives in the source chain, and the
-        // top-level Display does not carry it (measured — the chain is
-        // "error sending request … → client error (Connect) → dns error →
-        // <our message>").
-        #[derive(Debug, thiserror::Error)]
-        #[error("error sending request for uri (http://vllm.lan:8000/v1/embeddings): client error (Connect)")]
-        struct Transport {
-            #[source]
-            source: Denied,
-        }
-
-        #[derive(Debug, thiserror::Error)]
-        #[error("el host 'vllm.lan' resolvió a una red privada no declarada en allow_hosts")]
-        struct Denied;
-
-        let rendered = render_error_chain(&Transport { source: Denied });
-        assert!(
-            rendered.starts_with("error sending request") && rendered.contains("allow_hosts"),
-            "the rendered chain must carry the diagnosis: {rendered}"
-        );
-        // A flat error renders as itself: no dangling separators.
-        assert_eq!(render_error_chain(&Denied), Denied.to_string());
-    }
 
 
 
