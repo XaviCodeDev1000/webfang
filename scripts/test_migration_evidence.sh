@@ -349,6 +349,32 @@ else
   sed 's/^/    /' "$WORK/w4.log"
 fi
 
+# --- 18. --write root is a repository subdirectory --------------------------
+# NEGATION: a root without .git at its top is ambiguous — the no-repo fixture
+# is legitimate, but the same shape is reachable in production by pointing
+# --root at a subdirectory, where the hazard check would be silently skipped.
+# The freeze must tell "no repository at all" apart from "a repository I could
+# not resolve" and fail closed on the latter.
+D18="$(mktemp -d "$WORK/nested.XXXXXX")"
+(
+  cd "$D18" || exit 1
+  git_identity
+  git init -q -b main
+  printf 'measured facts\n' > facts.txt
+  git add -A && git commit -q -m base
+) >/dev/null 2>&1
+mkdir -p "$D18/sub/deeper"
+NESTED_SHA="$(git -C "$D18" rev-parse HEAD)"
+if python3 "$AUDITOR" --root "$D18/sub/deeper" --head-sha "$NESTED_SHA" \
+     --write "$WORK/nested.json" >"$WORK/w5.log" 2>&1; then
+  bad "--write accepted a repository subdirectory root (hazard check skipped)"
+elif grep -Fq "is not its top" "$WORK/w5.log"; then
+  ok "--write refuses a repository subdirectory root (fail closed)"
+else
+  bad "--write failed without the subdirectory refusal message"
+  sed 's/^/    /' "$WORK/w5.log"
+fi
+
 printf '\nmigration evidence harness: %d OK, %d FAIL\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1
 exit 0

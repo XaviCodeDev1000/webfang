@@ -150,6 +150,32 @@ def resolve_head_sha(root: Path, explicit: str | None) -> str:
     return git(root, "rev-parse", "HEAD") or ""
 
 
+def repository_state(root: Path) -> str:
+    """Classifies `root` for the freeze: repository top, nested inside one, or none.
+
+    A `.git` entry at the root (a worktree's is a file and counts) says "top".
+    A missing one is ambiguous: the no-repo fixture the harness pins is
+    legitimate — ancestry is unprovable there and the --check guard already
+    reports it as "measured over another tree" — but the same shape is
+    reachable in production by pointing --root/MIGRATION_ROOT at a
+    subdirectory, where the hazard check would be silently skipped.
+    rev-parse --show-toplevel tells the two apart: success means a repository
+    surrounds this root and the freeze must fail closed.
+    """
+    if (root / ".git").exists():
+        return "top"
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if p.returncode == 0:
+            return "nested"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "none"
+
+
 # Refs that survive a squash merge: the default branch, local and remote, in
 # lookup order. The merge queue uses SQUASH (.github/merge-queue.json), so the
 # tip of a Release PR is NOT in the history of the default branch and never
@@ -632,15 +658,22 @@ def main() -> int:
     head_sha = resolve_head_sha(root, explicit_sha)
 
     if args.write:
+        state = repository_state(root)
+        if state == "nested":
+            print(
+                "::error:: --write refuses: the audit root is inside a repository but "
+                "is not its top; run the freeze from the repository root",
+                file=sys.stderr,
+            )
+            return 1
         if not head_sha:
             print("::error:: no se pudo determinar head_sha (git o --head-sha)", file=sys.stderr)
             return 1
-        hazard = freeze_hazard(root, head_sha)
-        # Un árbol sin .git no puede probar ancestría: el guard de --check ya lo
-        # reporta como "medido sobre otro árbol" en los fixtures sin repo, así que
-        # --write no es el lugar para bloquearlo.
-        has_git = (root / ".git").exists()
-        if hazard and has_git and not args.allow_unmerged_anchor:
+        # Without a repository at all there is nothing to prove: the no-repo
+        # fixture is legitimate and the --check guard already reports it as
+        # "measured over another tree", so --write is not the place to block it.
+        hazard = freeze_hazard(root, head_sha) if state == "top" else None
+        if hazard and not args.allow_unmerged_anchor:
             print(f"::error:: {hazard}", file=sys.stderr)
             print(
                 "  congelá el commit del release que YA está en main, o pasá "
