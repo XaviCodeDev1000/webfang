@@ -1,4 +1,3 @@
-use super::*;
 use super::super::parse_embedding_body;
 use super::super::fixtures::load_fixture;
 use crate::error::SemanticError;
