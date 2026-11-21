@@ -19,7 +19,7 @@ S5. Assumption (from the agreed salvage design, not a user string): the sweep is
 - T2 — S2,S3,S5 — route inline — shared canonicalization helper + orphan sweep + tests — status: done — commit: 26bf0100
 - T3 — S1,S3,S5 — route inline — identity gate + pre-commit wiring + manifest helper + tests — status: done — commit: 3677cb8a
 - T4 — S2,S3 — route inline — AGENTS.md alignment (gitignore, namespace, mbx vs sccache, hook) — status: done — commit: c3f0bf29
-- T5 — S1,S5 — route inline — full verification + ODD close + mirror — status: in_progress — commit: pending
+- T5 — S1,S5 — route inline — full verification + ODD close + mirror — status: done — commit: pending (this doc update)
 
 ## Log
 
@@ -52,3 +52,5 @@ L9 — T4 evidence: `check_agents_doc` PASS (639 lines / 40955 bytes, budget 650
 L10 — T5 verification: local fast gate GREEN (code lane; PASS=44 FAIL=0 SKIP=3; coverage read: repo-guards partial, doc-quality partial, test-core partial, security NOT covered locally). Real-cache sweep dry-run PASS: scanned 30, reserved 4, live 2, protected 1, orphaned 23, reclaimable 256467953737 bytes; no deletion executed. Independent verifier (#3202) found one blocker (S3 checks clause: four named cases lacked durable tests) plus advisories (stale codedb index — reindexed; --execute snapshot race — token-gated). Correction: added `scripts/tests/test_sweep_mtime_lsof.sh` and `scripts/tests/test_identity_deferral_hook_order.sh`; both PASS with `bash -n` and shellcheck clean. Verifier scratch `/tmp/opencode/wfverify-l6Aakv` removed by parent.
 
 L11 — B1 recheck CLOSED by the same independent verifier: both new harnesses assert the four named cases with regression sensitivity (dir/file mtime pair, real fd lsof guard, rebase/cherry-pick deferral, identity-before-review ordering with a fake review-gate marker). `bash -n` + shellcheck + both harnesses PASS; worktree and main clean. Correction commit 987e4809. Recheck scratch `/tmp/opencode/wfverify-recheck-SP4ANN` removed by parent.
+
+L12 — Native RDD review: `review assess` returned `risk: high`, `review_due: true`; preflight returned a fresh-target START with lenses risk/readability/reliability. The typed consent envelope was relayed and the owner chose "Skip this time" (answer token `declined`); the exact provider invocation returned `action: declined`, `consent: declined_this_candidate`, no lineage, no lenses bound. No review record was created and the global RDD switch was NOT disabled. Ordinary repository policy owns delivery.
