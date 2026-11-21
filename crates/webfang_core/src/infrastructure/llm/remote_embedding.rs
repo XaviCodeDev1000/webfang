@@ -39,6 +39,7 @@ use crate::domain::providers::ProviderConfig;
 use crate::error::SemanticError;
 use crate::infrastructure::llm::provider::ProviderInitError;
 use retry::{backoff_delay_ms, retry_after_delay};
+use wire::{EmbeddingRequest, EmbeddingResponse, EmbeddingDatum, EmbeddingUsage};
 
 /// A boxed future for dyn-compatible async port methods.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -71,48 +72,6 @@ const BACKOFF_MAX_MS: u64 = 10_000;
 /// [`EMBEDDING_MAX_ATTEMPTS`] retries to ~4 minutes.
 const RETRY_AFTER_MAX_MS: u64 = 60_000;
 
-/// Wire request for OpenAI-compatible `POST /embeddings`.
-#[derive(serde::Serialize)]
-struct EmbeddingRequest<'a> {
-    model: &'a str,
-    input: &'a [String],
-}
-
-/// Wire response: only the fields this adapter consumes.
-///
-/// Tolerancia deliberada (fixtures de contrato en
-/// `fixtures/remote_embedding/`): vendors add `id`, `created`,
-/// `system_fingerprint` and per-datum extras — all ignored. `usage` is
-/// `Option` + `#[serde(default)]` (vendors may send `null` or omit it);
-/// `index` is `Option` (order is positional 1:1, never re-sorted).
-#[derive(serde::Deserialize)]
-struct EmbeddingResponse {
-    data: Vec<EmbeddingDatum>,
-    #[serde(default)]
-    usage: Option<EmbeddingUsage>,
-}
-
-/// One datum of the wire response.
-///
-/// `index` is parsed for contract tolerance but never used for ordering:
-/// vectors map 1:1 to inputs positionally (count-checked in
-/// [`parse_embedding_body`]).
-#[derive(serde::Deserialize)]
-struct EmbeddingDatum {
-    #[allow(dead_code)]
-    #[serde(default)]
-    index: Option<u32>,
-    embedding: Vec<f32>,
-}
-
-/// Token usage reported by the vendor (informational only).
-#[derive(Debug, serde::Deserialize)]
-struct EmbeddingUsage {
-    #[serde(default)]
-    prompt_tokens: u32,
-    #[serde(default)]
-    total_tokens: u32,
-}
 
 /// Accumulated embedding usage metrics for a single run.
 ///
@@ -703,6 +662,7 @@ mod fixtures;
 mod proxy_auth;
 mod proxy_wiring;
 mod retry;
+mod wire;
 
 #[cfg(test)]
 mod tests {
@@ -828,68 +788,6 @@ mod tests {
         assert_eq!(render_error_chain(&Denied), Denied.to_string());
     }
 
-    #[test]
-    fn parse_happy_fixture_maps_vectors_one_to_one_in_order() {
-        let parsed = parse_embedding_body(&load_fixture("embeddings_happy.json"), 2)
-            .expect("happy fixture parses");
-        let vecs = parsed.vectors;
-        assert_eq!(vecs.len(), 2, "one vector per input, in order");
-        assert_eq!(vecs[0], vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]);
-        assert_eq!(vecs[1], vec![0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]);
-    }
-
-    #[test]
-    fn parse_tolerant_fixture_ignores_unknown_fields() {
-        let parsed = parse_embedding_body(&load_fixture("embeddings_tolerant.json"), 1)
-            .expect("vendor extras must be ignored");
-        let vecs = parsed.vectors;
-        assert_eq!(vecs.len(), 1);
-        assert_eq!(vecs[0].len(), 8, "non-384d dims pass through");
-        assert!((vecs[0][0] - 0.5).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn parse_empty_data_is_semantic_error() {
-        let err = parse_embedding_body(&load_fixture("embeddings_empty.json"), 1)
-            .expect_err("empty data must fail");
-        assert!(
-            matches!(err, SemanticError::Inference(_)),
-            "empty data must be Inference, got: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_count_mismatch_is_semantic_error() {
-        let err = parse_embedding_body(&load_fixture("embeddings_happy.json"), 1)
-            .expect_err("2 vectors for 1 input must fail");
-        assert!(
-            matches!(err, SemanticError::Inference(_)),
-            "count mismatch must be Inference, got: {err}"
-        );
-        assert!(
-            err.to_string().contains('2'),
-            "mismatch must name the served count, got: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_empty_vector_is_semantic_error() {
-        let err = parse_embedding_body(r#"{"data": [{"index": 0, "embedding": []}]}"#, 1)
-            .expect_err("empty vector must fail");
-        assert!(
-            matches!(err, SemanticError::Inference(_)),
-            "empty vector must be Inference, got: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_invalid_json_is_semantic_error() {
-        let err = parse_embedding_body("not json", 1).expect_err("invalid body must fail");
-        assert!(
-            matches!(err, SemanticError::Inference(_)),
-            "invalid body must be Inference, got: {err}"
-        );
-    }
 
 
     // --- Construction contract ---
