@@ -28,7 +28,14 @@ check "refs/heads/gh-readonly-queue/main/pr-123-<sha> -> 123" test "$(resolve 'r
 check "gh-readonly-queue/main/pr-123-<sha> -> 123" test "$(resolve 'gh-readonly-queue/main/pr-123-abcdef123')" = 123
 check "release/1.2 base -> 77" test "$(resolve 'refs/heads/gh-readonly-queue/release/1.2/pr-77-deadbeef')" = 77
 check "malformed PR id -> empty" test -z "$(resolve 'refs/heads/gh-readonly-queue/main/pr-abc-def')"
-check "no live pulls?head lookup" bash -c '! grep -vE "^[[:space:]]*#" "$1" | grep -q "pulls?head="' _ "$WF"
+# Full-consumption form (issue #2925): `grep -q` exits at the first match and
+# closes the pipe, so if this workflow ever outgrows the 64 KiB buffer the
+# feeding grep dies of EPIPE. This pipeline runs in `bash -c`, which resets the
+# harness's `pipefail` (verified: SHELLOPTS is not exported), so today the
+# verdict is correct — but any environment that exports SHELLOPTS would leak
+# `pipefail` in and `!` would flip the EPIPE false negative into a FALSE PASS
+# of this negative assertion. Plain grep reads to EOF with the same status.
+check "no live pulls?head lookup" bash -c '! grep -vE "^[[:space:]]*#" "$1" | grep "pulls?head=" > /dev/null' _ "$WF"
 check "topology reads refs from the resolved PR" grep -q 'gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefName,baseRefName' "$WF"
 check "topology no longer reads merge_group.base_ref" bash -c '! grep -q "merge_group.base_ref" "$1"' _ "$WF"
 check "resolved PR is checked OPEN" grep -q 'if \[ "$state" != "OPEN" \]' "$WF"

@@ -623,7 +623,13 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
         # The doc states "zero occurrences in `crates/`": it is searched in the WHOLE
         # tree, not only in the `.rs` files — a symbol mentioned in a fixture or in
         # an internal doc is also an occurrence.
-        hit="$(grep -rnF -- "$sym" "$ROOT/crates" 2>/dev/null | head -n 1)"
+        # Full-consumption form (issue #2925): head -n 1 closes the pipe after the
+        # first line, so a symbol frequent enough to outgrow the 64 KiB buffer
+        # EPIPEs the recursive grep mid-scan. This script has no `errexit`, so the
+        # discarded status keeps the verdict correct today — but a future
+        # `set -e` would abort here (or empty the hit) on a present symbol.
+        # sed keeps reading to EOF and only reprints the first line, same status.
+        hit="$(grep -rnF -- "$sym" "$ROOT/crates" 2>/dev/null | sed -n '1p')"
       else
         rc=0
         rfile="$(resolve_path "$mfile")" || rc=$?
@@ -631,7 +637,9 @@ for ((e = 0; e < ${#M_KIND[@]}; e++)); do
           report "$DOC_REL" "$at" "C1: no se pudo resolver la ruta '$mfile' de la entrada 'absent' ($(motivo_ruta "$rc"))"
           continue
         fi
-        hit="$(grep -nF -- "$sym" "$ROOT/$rfile" 2>/dev/null | head -n 1)"
+        # Same full-consumption form as above (issue #2925): head -n 1 would
+        # EPIPE the producer once a single file's matches outgrow the buffer.
+        hit="$(grep -nF -- "$sym" "$ROOT/$rfile" 2>/dev/null | sed -n '1p')"
       fi
       if [[ -n "$hit" ]]; then
         where="${hit%%:*}"
