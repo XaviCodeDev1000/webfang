@@ -24,8 +24,9 @@
 #   2246 (add+del) #2901 · 3018 #2896 · 3933 #2856 · 5101 #2893
 # The PR-count formula is policy 6: prs = ceil(2 * moved / P).
 #
-# Exit codes: 0 legal · 1 tool failure (named cause) · 2 usage ·
-# 3 ratchet violation (--simulate) · 4 defective plan (--simulate, named).
+# Exit codes: 0 ok · 1 tool failure (named cause) · 3 ratchet violation
+# (--simulate) · 4 defective plan (--simulate, named) · 64 usage (EX_USAGE).
+# (2 is reserved by the policy for file_size_done.sh's "parked" — issue #2928.)
 #
 # HERMETIC: nothing is ever written into the measured tree (all scratch lives
 # in a mktemp dir). The corpus is NOT re-implemented: the find expression is
@@ -68,6 +69,7 @@ Usage: bash scripts/file_size_preflight.sh [mode]
   --help                this help
 
 Modes: --format --simulate --corpus-literal --budget; units are lines/commits/attrs/PRs.
+Exit codes: 0 ok · 1 tool failure · 3 ratchet violation (--simulate) · 4 defective plan (--simulate) · 64 usage (EX_USAGE)
 USAGE
 }
 
@@ -76,14 +78,16 @@ die_tool() {   # rc=1: the tool cannot answer, with a NAMED cause
   exit 1
 }
 
-usage_error() {  # rc=2
+usage_error() {  # rc=64 (EX_USAGE): 2 is reserved by the policy for
+                 # file_size_done.sh's "parked" verdict (issue #2928)
   printf 'error: %s\n' "$1" >&2
   usage >&2
-  exit 2
+  exit 64
 }
 
 emit2() { printf '%s\t%s\n' "$1" "$2"; }
 emit4() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }
+emit5() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5"; }  # the plan rows' note column (issue #2928)
 
 # --- the corpus lives in the guard ---------------------------------------------
 #
@@ -744,7 +748,7 @@ case "$MODE" in
         CAP="$BASELINE_LIMIT"
         CAP_DESC="hard_limit ($CAP)"
       fi
-      emit4 "plan" "$dest" "$DEST_FINAL" "lines" "$NOTE"
+      emit5 "plan" "$dest" "$DEST_FINAL" "lines" "$NOTE"
       if [ "$DEST_FINAL" -gt "$CAP" ]; then
         if [ -n "${GF["$DEST_REL"]:-}" ]; then
           VIOLATIONS+=("destination '$dest' would land at $DEST_FINAL > $CAP_DESC: grandfathered files cannot grow")
@@ -755,7 +759,7 @@ case "$MODE" in
     done
 
     SRC_FINAL=$((TOTAL - TOTAL_MOVED + ${GLUE["$SRC_KEY"]:-0}))
-    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lines" "$TOTAL lines - $TOTAL_MOVED moved${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
+    emit5 "plan" "$SRC_KEY" "$SRC_FINAL" "lines" "$TOTAL lines - $TOTAL_MOVED moved${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
 
     if [ "${#PLAN_ORDER[@]}" -gt 0 ]; then
       PRS=$(((2 * TOTAL_MOVED + DIFF_BUDGET - 1) / DIFF_BUDGET))

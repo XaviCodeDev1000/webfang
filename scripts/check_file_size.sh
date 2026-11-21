@@ -220,20 +220,20 @@ elif op in ("update", "remove"):
                 new = int(rest)
                 if key not in grandfathered:
                     refusals.append(
-                        "agregar una entrada es una edición manual del JSON "
-                        "revisada por maintainer, no --update: %s" % key
+                        "adding an entry is a maintainer-reviewed manual "
+                        "JSON edit, not --update: %s" % key
                     )
                 elif new <= ratchet["hard_limit"]:
                     refusals.append(
-                        "count <= hard_limit no se guarda en el baseline "
-                        "(usá --remove para consolidar la victoria): %s=%d"
+                        "count <= hard_limit is not stored in the baseline "
+                        "(use --remove to consolidate the win): %s=%d"
                         % (key, new)
                     )
                 elif new > grandfathered[key]:
                     refusals.append(
-                        "subir un valor no es descendente "
-                        "(%s: %d > %d); es una edición manual del JSON "
-                        "revisada por maintainer" % (key, new, grandfathered[key])
+                        "raising a value is not descending "
+                        "(%s: %d > %d); it is a maintainer-reviewed "
+                        "manual JSON edit" % (key, new, grandfathered[key])
                     )
                 elif new == grandfathered[key]:
                     pass  # no-op: nothing to lower
@@ -243,7 +243,7 @@ elif op in ("update", "remove"):
             else:  # remove
                 if key not in grandfathered:
                     refusals.append(
-                        "la entrada no existe en el baseline: %s" % key
+                        "the entry does not exist in the baseline: %s" % key
                     )
                 else:
                     del grandfathered[key]
@@ -303,19 +303,19 @@ run_measurement() {
     detail="${err#*$'\t'}"
     case "$status" in
       NO_CRATES_DIR)
-        die "No existe $ROOT/crates: el corpus no se puede medir (fail-closed)."
+        die "$ROOT/crates does not exist: the corpus cannot be measured (fail-closed)."
         ;;
       FIND_FAILED)
-        die "find falló sobre crates/: la medición no es confiable (fail-closed)."
+        die "find failed over crates/: the measurement is not trustworthy (fail-closed)."
         ;;
       UNREADABLE_FILE)
-        die "No se puede contar $detail: la medición no es completa (fail-closed)."
+        die "cannot count $detail: the measurement is not complete (fail-closed)."
         ;;
       EMPTY_CORPUS)
-        die "El corpus midió 0 archivos .rs: no hay medición sobre la que decidir (fail-closed)."
+        die "the corpus measured 0 .rs files: there is no measurement to decide on (fail-closed)."
         ;;
       *)
-        die "Medición fallida ($status)."
+        die "measurement failed ($status)."
         ;;
     esac
   fi
@@ -335,7 +335,7 @@ while [[ $# -gt 0 ]]; do
     --update) MODE="update"; shift; UPDATE_ARGS=("$@"); break ;;
     --remove) MODE="remove"; shift; REMOVE_ARGS=("$@"); break ;;
     -h | --help) usage; exit 0 ;;
-    *) die "Argumento desconocido '$1' (ver --help)." ;;
+    *) die "unknown argument '$1' (see --help)." ;;
   esac
   shift
 done
@@ -351,36 +351,36 @@ case "$MODE" in
     VALUE="${RAW#*$'\t'}"
     case "$STATUS" in
       OK)
-        echo "Baseline escrito: $BASELINE_FILE"
+        echo "Baseline written: $BASELINE_FILE"
         echo "  hard_limit: $HARD_LIMIT_GENERATE"
-        echo "  entradas grandfathered: $VALUE"
+        echo "  grandfathered entries: $VALUE"
         ;;
       KEY_EXISTS)
-        die "--generate es de un solo uso: 'file_size_rust' ya existe en $BASELINE_FILE. Borrá la clave manualmente (es una edición revisada) si querés regenerar."
+        die "--generate is one-shot: 'file_size_rust' already exists in $BASELINE_FILE. Delete the key manually (a reviewed edit) if you want to regenerate."
         ;;
       MISSING_FILE)
         die "Missing baseline file $BASELINE_FILE"
         ;;
       *)
-        die "El baseline no se puede escribir ($STATUS): $VALUE"
+        die "the baseline cannot be written ($STATUS): $VALUE"
         ;;
     esac
     ;;
 
   update | remove)
     if [[ "$MODE" == "update" ]]; then
-      [[ ${#UPDATE_ARGS[@]} -gt 0 ]] || die "--update requiere al menos un par path=count."
+      [[ ${#UPDATE_ARGS[@]} -gt 0 ]] || die "--update requires at least one path=count pair."
       OPS="$WORKDIR/ops.tsv"
       : > "$OPS"
       for arg in "${UPDATE_ARGS[@]}"; do
-        [[ "$arg" == *=* ]] || die "--update espera path=count, recibí '$arg'."
+        [[ "$arg" == *=* ]] || die "--update expects path=count, got '$arg'."
         pair_path="${arg%%=*}"
         pair_count="${arg#*=}"
-        [[ "$pair_count" =~ ^[0-9]+$ ]] || die "El conteo de '$arg' no es un número entero."
+        [[ "$pair_count" =~ ^[0-9]+$ ]] || die "the count of '$arg' is not an integer."
         printf '%s\t%s\n' "$pair_path" "$pair_count" >> "$OPS"
       done
     else
-      [[ ${#REMOVE_ARGS[@]} -gt 0 ]] || die "--remove requiere al menos un path."
+      [[ ${#REMOVE_ARGS[@]} -gt 0 ]] || die "--remove requires at least one path."
       OPS="$WORKDIR/ops.tsv"
       : > "$OPS"
       for arg in "${REMOVE_ARGS[@]}"; do
@@ -391,10 +391,10 @@ case "$MODE" in
     STATUS="${RAW%%$'\t'*}"
     VALUE="${RAW#*$'\t'}"
     case "$STATUS" in
-      OK) echo "OK: baseline actualizado ($VALUE cambio(s)): $BASELINE_FILE" ;;
-      REFUSED) die "Refusado (nada fue escrito): $VALUE" ;;
+      OK) echo "OK: baseline updated ($VALUE change(s)): $BASELINE_FILE" ;;
+      REFUSED) die "refused (nothing was written): $VALUE" ;;
       *)
-        die "El baseline no se puede editar ($STATUS): $VALUE"
+        die "the baseline cannot be edited ($STATUS): $VALUE"
         ;;
     esac
     ;;
@@ -409,15 +409,15 @@ case "$MODE" in
     case "$STATUS" in
       OK) HARD_LIMIT="$VALUE" ;;
       MISSING_FILE) die "Missing baseline file $BASELINE_FILE" ;;
-      UNREADABLE) die "No se puede leer el baseline $BASELINE_FILE: $VALUE" ;;
-      BAD_JSON) die "El baseline $BASELINE_FILE no es JSON válido: $VALUE" ;;
-      MISSING_KEY) die "Falta la clave 'file_size_rust' en $BASELINE_FILE" ;;
-      NOT_AN_OBJECT) die "'file_size_rust' no es un objeto en $BASELINE_FILE" ;;
-      MISSING_HARD_LIMIT) die "Falta 'file_size_rust.hard_limit' en $BASELINE_FILE" ;;
-      HARD_LIMIT_NOT_INT) die "'file_size_rust.hard_limit' no es un entero en $BASELINE_FILE: $VALUE" ;;
-      GRANDFATHERED_NOT_OBJECT) die "'file_size_rust.grandfathered' no es un objeto en $BASELINE_FILE" ;;
-      ENTRY_NOT_INT) die "Entrada no entera en 'file_size_rust.grandfathered': $VALUE" ;;
-      *) die "No se puede leer el baseline ($STATUS)" ;;
+      UNREADABLE) die "cannot read the baseline $BASELINE_FILE: $VALUE" ;;
+      BAD_JSON) die "the baseline $BASELINE_FILE is not valid JSON: $VALUE" ;;
+      MISSING_KEY) die "missing the 'file_size_rust' key in $BASELINE_FILE" ;;
+      NOT_AN_OBJECT) die "'file_size_rust' is not an object in $BASELINE_FILE" ;;
+      MISSING_HARD_LIMIT) die "missing 'file_size_rust.hard_limit' in $BASELINE_FILE" ;;
+      HARD_LIMIT_NOT_INT) die "'file_size_rust.hard_limit' is not an integer in $BASELINE_FILE: $VALUE" ;;
+      GRANDFATHERED_NOT_OBJECT) die "'file_size_rust.grandfathered' is not an object in $BASELINE_FILE" ;;
+      ENTRY_NOT_INT) die "non-integer entry in 'file_size_rust.grandfathered': $VALUE" ;;
+      *) die "cannot read the baseline ($STATUS)" ;;
     esac
 
     declare -A GF=()
@@ -439,7 +439,7 @@ case "$MODE" in
     # moved out of crates/**/src) would otherwise rot in the JSON forever.
     for gf_path in "${!GF[@]}"; do
       if [[ -z "${MEASURED_MAP["$gf_path"]+x}" ]]; then
-        VIOLATIONS+=("La entrada del baseline '$gf_path' ya no está en el corpus medido (borrado o movido fuera de crates/**/src). Quitá esta entrada: bash scripts/check_file_size.sh --remove '$gf_path'")
+        VIOLATIONS+=("the baseline entry '$gf_path' is no longer in the measured corpus (deleted or moved out of crates/**/src). Remove the entry: bash scripts/check_file_size.sh --remove '$gf_path'")
       fi
     done
 
@@ -448,18 +448,18 @@ case "$MODE" in
       if [[ -n "${GF["$m_path"]+x}" ]]; then
         gf_cap="${GF["$m_path"]}"
         if (( m_lines > gf_cap )); then
-          VIOLATIONS+=("Archivo grandfathered CRECIÓ: $m_path ($m_lines > $gf_cap). No puede crecer ni una línea: dividí el archivo o revertí el cambio.")
+          VIOLATIONS+=("grandfathered file GREW: $m_path ($m_lines > $gf_cap). It cannot grow by a single line: split the file or revert the change.")
         elif (( m_lines <= HARD_LIMIT )); then
-          VIOLATIONS+=("Archivo grandfathered ahora mide <= $HARD_LIMIT líneas: $m_path ($m_lines). Consolidá la victoria quitándolo del baseline: bash scripts/check_file_size.sh --remove '$m_path'")
+          VIOLATIONS+=("grandfathered file now measures <= $HARD_LIMIT lines: $m_path ($m_lines). Consolidate the win by removing it from the baseline: bash scripts/check_file_size.sh --remove '$m_path'")
         elif (( m_lines < gf_cap )); then
-          NOTICES+=("Se puede bajar el baseline: bash scripts/check_file_size.sh --update '$m_path=$m_lines' (de $gf_cap a $m_lines)")
+          NOTICES+=("the baseline can go down: bash scripts/check_file_size.sh --update '$m_path=$m_lines' (from $gf_cap to $m_lines)")
         fi
       elif (( m_lines > HARD_LIMIT )); then
-        VIOLATIONS+=("Archivo por encima del límite ($HARD_LIMIT líneas): $m_path ($m_lines). No está en el baseline: dividí el archivo (agregar un ofensor histórico es una edición manual del JSON revisada por maintainer).")
+        VIOLATIONS+=("file above the limit ($HARD_LIMIT lines): $m_path ($m_lines). Not in the baseline: split the file (adding a historical offender is a maintainer-reviewed manual JSON edit).")
       fi
     done
 
-    echo "Corpus medido: ${#MEASURED_MAP[@]} archivos .rs (límite duro: $HARD_LIMIT, grandfathered: ${#GF[@]})."
+    echo "measured corpus: ${#MEASURED_MAP[@]} .rs files (hard limit: $HARD_LIMIT, grandfathered: ${#GF[@]})."
     for notice in "${NOTICES[@]}"; do
       echo "::notice::$notice"
     done
@@ -467,9 +467,9 @@ case "$MODE" in
       for violation in "${VIOLATIONS[@]}"; do
         echo "::error::$violation"
       done
-      echo "Ratchet de tamaño de archivo: ROJO (${#VIOLATIONS[@]} violación(es))."
+      echo "file-size ratchet: RED (${#VIOLATIONS[@]} violation(s))."
       exit 1
     fi
-    echo "OK: el ratchet de tamaño de archivo se sostiene."
+    echo "OK: the file-size ratchet holds."
     ;;
 esac
