@@ -102,13 +102,16 @@ parenthetical); it never gates.
 
 ## Tasks
 
-- T0 (S8, S1–S10): this record. ✅ (first commit)
+- T0 (S8, S1–S10): this record. ✅ 8f4f7983
 - T1 (S4, S6, S9): harness RED — `scripts/test_file_size_done.sh`, hermetic git-fixture
-  sandboxes; RED confirmed against the missing tool before T2.
-- T2 (S1, S2, S3, S6, S9, S10): tool GREEN — `scripts/file_size_done.sh`.
-- T3 (S5): registration — .tsv note, ci.yml steps, ci_fast_gate.sh trigger; test_ci_gate_structure.sh green.
-- T4 (S4, S9): full verification pass (harness + --negation, gate structure, fast-gate lanes, pre-commit gate).
-- T5 (S7): policy-text delta drafted for the PR body (v3.5.0).
+  sandboxes. ✅ de079502 — RED observed: "FAIL 1.1 the tool under test exists —
+  file_size_done.sh not written yet (expected RED)", exit 1.
+- T2 (S1, S2, S3, S6, S9, S10): tool GREEN — `scripts/file_size_done.sh`. ✅ 98a1ff12 —
+  one defect found on the way (L5), fixed in the same unit; harness 77/77.
+- T3 (S5): registration — .tsv note, ci.yml steps (the --list smoke + the harness),
+  ci_fast_gate.sh trigger block + run_guard; test_ci_gate_structure.sh green. ✅
+- T4 (S4, S9): full verification pass (harness + --negation, gate structure, fast-gate lanes, pre-commit gate). ✅ evidence in L6.
+- T5 (S7): policy-text delta drafted for the PR body (v3.5.0) — the three text edits live in L7.
 
 ## Log
 
@@ -136,3 +139,36 @@ parenthetical); it never gates.
 - L4 (2026-11-21): wreq_downloader measured at open: 632 lines, grandfathered cap 632 (jq +
   wc -l at 98a26c39) — the S1 quote's "764" was the policy's writing-day figure; the fixture
   asserts the measured count equals the emitted count, never a constant (S9).
+- L5 (2026-11-21, T2): defect found and fixed in the same unit — §8 candidate lesson row:
+  symptom, the exit-1 discriminators (exceptions/grandfathered facts) never fired while
+  hard-limit-changed did; root cause, the python reader's stdout is captured by a command
+  substitution that STRIPS the final newline, and `while IFS=$'\t' read` then discards a last
+  line that lacks one (read populates the variables but returns 1, so the loop body never
+  runs): the mission's authority surface vanished line-by-line from the tail; where fixed, the
+  facts file is written with `printf '%s\n'` (scripts/file_size_done.sh, baseline_diff) and
+  the comment names the mechanism. This is the mirror image of #2925's "an assertion that
+  fails despite holding": here a FACT silently disappeared instead of an assertion — both are
+  consumption bugs at a pipe/file boundary.
+- L6 (2026-11-21, T3/T4 verification evidence): harness `bash scripts/test_file_size_done.sh`
+  → passed=77 failed=0 (includes 10.1: the --negation run fails as required, #2056; and 10.3:
+  the family lint, no `grep -q` under pipes); `bash scripts/test_ci_gate_structure.sh` → all
+  checks passed (27 assertions, 10 self-tests); `shellcheck -S warning` on both new scripts →
+  clean (ci_fast_gate.sh's 6 warnings are pre-existing, none on the added lines); the local
+  gate (lanes docs+ci, classifier-picked) → GREEN, PASS=23 FAIL=0 SKIP=19, with
+  "PASS: file size close-out semantics (offline)" inside it and the ratchet/preflight
+  harnesses correctly SKIPped (their files unchanged); `bash scripts/file_size_done.sh --list`
+  against the real tree at the mission HEAD → exit 0, 77 verdict rows = 73 parked + 4 closed
+  (exactly the baseline's four exceptions — measured, not copied); the two code/full-lane
+  repo-guards steps the ci lane does not cover, run by hand: `check_file_size.sh` → OK (one
+  --update notice, measured), `file_size_preflight.sh` (budget block) → rc 0; ci.yml YAML
+  parsed OK; `git diff --stat origin/main...HEAD` → the 6 expected files, no .rs touched.
+  Not run here (no Rust surface touched; CI runs them on the PR): the cargo pre-commit gate
+  and nextest.
+- L7 (2026-11-21, T5 policy-text delta for the PR body, v3.5.0): (a) §4.6 step 6 — the label
+  retires: "6. Close. file_size_done.sh <path>: exit 0 = closed (…)"; (b) §7 — "This is
+  exercised today by the guard; file_size_done.sh returns it as exit 2."; (c) §11 F1b row
+  marked Done with the acceptance evidence: "Done (2026-11-21): scripts/file_size_done.sh +
+  scripts/test_file_size_done.sh (77/77, one green close, the real parked wreq_downloader —
+  measured 632 at open — and one defect per exit-1 discriminator; .tsv note + ci.yml repo-guards
+  steps + ci_fast_gate.sh trigger, #2056-wired, --negation proof)". The changelog gains the
+  v3.5.0 entry (F1b merged; [F1b] labels retired; no contract token changed).
