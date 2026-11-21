@@ -7,7 +7,7 @@ use super::render_error_chain;
 use super::retry::{backoff_delay_ms, retry_after_delay};
 use super::wire::EmbeddingRequest;
 use super::RemoteEmbeddingAdapter;
-use super::{EMBEDDING_MAX_ATTEMPTS, EMBEDDING_MAX_BODY_BYTES, parse_embedding_body};
+use super::{parse_embedding_body, EMBEDDING_MAX_ATTEMPTS, EMBEDDING_MAX_BODY_BYTES};
 use crate::error::SemanticError;
 
 impl RemoteEmbeddingAdapter {
@@ -15,7 +15,10 @@ impl RemoteEmbeddingAdapter {
     /// (honoring `max(Retry-After, backoff)`) and 5xx retry with backoff;
     /// other 4xx and builder errors are terminal as-is; exhaustion reports
     /// the last observed status, never a hardcoded one.
-    pub(super) async fn post_embeddings(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
+    pub(super) async fn post_embeddings(
+        &self,
+        texts: &[String],
+    ) -> Result<Vec<Vec<f32>>, SemanticError> {
         let endpoint = format!(
             "{}/embeddings",
             self.base_url.as_str().trim_end_matches('/')

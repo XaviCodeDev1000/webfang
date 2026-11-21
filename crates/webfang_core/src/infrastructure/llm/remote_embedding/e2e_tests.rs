@@ -1,5 +1,5 @@
-use super::*;
 use super::fixtures::*;
+use super::*;
 use crate::domain::auth_source::AuthSource;
 use std::time::Duration;
 
@@ -40,8 +40,7 @@ async fn embed_batch_happy_path_serves_fixture_vectors_in_order() {
 async fn embed_delegates_to_batch_for_single_text() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    let _guard =
-        mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
+    let _guard = mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
     let adapter = adapter_for(&server, |_| {});
 
     let vec = adapter.embed("hello").await.expect("single embed serves");
@@ -356,8 +355,7 @@ async fn probe_adopts_dim_when_unpinned() {
     let server = MockServer::start().await;
     // Single-vector body: the probe sends exactly one input, and the
     // 1:1 count check holds the wire honest.
-    let _guard =
-        mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
+    let _guard = mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
     let adapter = adapter_for(&server, |_| {});
 
     let dim = adapter.probe_dim().await.expect("probe serves 8d");
@@ -369,8 +367,7 @@ async fn probe_adopts_dim_when_unpinned() {
 async fn probe_matching_pin_continues() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    let _guard =
-        mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
+    let _guard = mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
     let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let dim = adapter.probe_dim().await.expect("matching pin continues");
@@ -381,8 +378,7 @@ async fn probe_matching_pin_continues() {
 async fn probe_pin_mismatch_fails_closed() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    let _guard =
-        mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
+    let _guard = mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
     let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(7));
 
     let err = adapter.probe_dim().await.expect_err("pin mismatch fails");

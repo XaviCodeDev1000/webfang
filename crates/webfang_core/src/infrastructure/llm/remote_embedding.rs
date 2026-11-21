@@ -35,8 +35,8 @@ use crate::domain::embedding_port::EmbeddingPort;
 use crate::domain::providers::ProviderConfig;
 use crate::error::SemanticError;
 use crate::infrastructure::llm::provider::ProviderInitError;
-use wire::{EmbeddingResponse, EmbeddingUsage};
 use gate::entry_gate;
+use wire::{EmbeddingResponse, EmbeddingUsage};
 
 /// A boxed future for dyn-compatible async port methods.
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -68,7 +68,6 @@ const BACKOFF_MAX_MS: u64 = 10_000;
 /// instruction while bounding the total stall across
 /// [`EMBEDDING_MAX_ATTEMPTS`] retries to ~4 minutes.
 const RETRY_AFTER_MAX_MS: u64 = 60_000;
-
 
 /// Accumulated embedding usage metrics for a single run.
 ///
@@ -151,8 +150,6 @@ pub fn render_error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     }
     rendered
 }
-
-
 
 /// Pure wire parse: response body → one vector per input, in order.
 ///
@@ -296,7 +293,6 @@ impl RemoteEmbeddingAdapter {
     }
 }
 
-
 impl EmbeddingPort for RemoteEmbeddingAdapter {
     fn embed<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<Vec<f32>, SemanticError>> {
         let request_id = uuid::Uuid::new_v4();
@@ -401,12 +397,12 @@ impl RemoteEmbeddingAdapter {
 
 #[cfg(test)]
 mod fixtures;
+mod gate;
+mod http;
 mod proxy_auth;
 mod proxy_wiring;
 mod retry;
 mod wire;
-mod gate;
-mod http;
 
 #[cfg(test)]
 mod adapter_tests;
@@ -415,34 +411,34 @@ mod e2e_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::fixtures::adapter_for;
+    use super::*;
 
-// --- Trait contract through the vtable ---
+    // --- Trait contract through the vtable ---
 
-#[tokio::test]
-async fn as_any_dispatches_through_the_vtable() {
-    // Regression pin: `EmbeddingPort::as_any` panics by default, so an
-    // impl carrying only a private *inherent* method of the same name
-    // still resolves to that panicking default when called through
-    // `Arc<dyn EmbeddingPort>`. That shape aborted the CLI's embedding
-    // summary after a Tier 2 run had already emitted its output.
-    let server = wiremock::MockServer::start().await;
-    let adapter = adapter_for(&server, |_| {});
+    #[tokio::test]
+    async fn as_any_dispatches_through_the_vtable() {
+        // Regression pin: `EmbeddingPort::as_any` panics by default, so an
+        // impl carrying only a private *inherent* method of the same name
+        // still resolves to that panicking default when called through
+        // `Arc<dyn EmbeddingPort>`. That shape aborted the CLI's embedding
+        // summary after a Tier 2 run had already emitted its output.
+        let server = wiremock::MockServer::start().await;
+        let adapter = adapter_for(&server, |_| {});
 
-    // Erase the concrete type exactly like the caller does, so the
-    // dispatch below must reach the trait impl and not an inherent one.
-    let erased: std::sync::Arc<dyn EmbeddingPort> = std::sync::Arc::new(adapter);
+        // Erase the concrete type exactly like the caller does, so the
+        // dispatch below must reach the trait impl and not an inherent one.
+        let erased: std::sync::Arc<dyn EmbeddingPort> = std::sync::Arc::new(adapter);
 
-    let adapter = erased
-        .as_any()
-        .downcast_ref::<RemoteEmbeddingAdapter>()
-        .expect("as_any must dispatch to the trait impl, not the panicking default");
-    // Reaching `metrics()` is the reason this downcast exists at all.
-    let metrics = adapter.metrics();
-    assert_eq!(
-        metrics.request_count, 0,
-        "a freshly built adapter has issued no requests"
-    );
-}
+        let adapter = erased
+            .as_any()
+            .downcast_ref::<RemoteEmbeddingAdapter>()
+            .expect("as_any must dispatch to the trait impl, not the panicking default");
+        // Reaching `metrics()` is the reason this downcast exists at all.
+        let metrics = adapter.metrics();
+        assert_eq!(
+            metrics.request_count, 0,
+            "a freshly built adapter has issued no requests"
+        );
+    }
 }

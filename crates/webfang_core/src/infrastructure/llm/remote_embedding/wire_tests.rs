@@ -1,5 +1,5 @@
-use super::super::parse_embedding_body;
 use super::super::fixtures::load_fixture;
+use super::super::parse_embedding_body;
 use crate::error::SemanticError;
 
 #[test]

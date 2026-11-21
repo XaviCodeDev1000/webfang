@@ -1,5 +1,5 @@
-use super::*;
 use super::fixtures::*;
+use super::*;
 use crate::domain::auth_source::AuthSource;
 
 // --- Construction contract ---
@@ -49,8 +49,7 @@ fn loopback_base_url_rejected_without_opt_in() {
     let mut cfg = config_with(AuthSource::Env {
         var: "WEBFANG_TEST_REMOTE_KEY".to_string(),
     });
-    cfg.base_url =
-        Url::parse(&format!("http://{LOOPBACK_HOST}:{LOOPBACK_PORT}/v1")).expect("url");
+    cfg.base_url = Url::parse(&format!("http://{LOOPBACK_HOST}:{LOOPBACK_PORT}/v1")).expect("url");
     cfg.allow_loopback = false;
     let client = wreq::Client::builder()
         .build()
@@ -71,8 +70,7 @@ fn loopback_base_url_constructs_with_opt_in() {
     let mut cfg = config_with(AuthSource::Env {
         var: "WEBFANG_TEST_REMOTE_KEY".to_string(),
     });
-    cfg.base_url =
-        Url::parse(&format!("http://{LOOPBACK_HOST}:{LOOPBACK_PORT}/v1")).expect("url");
+    cfg.base_url = Url::parse(&format!("http://{LOOPBACK_HOST}:{LOOPBACK_PORT}/v1")).expect("url");
     cfg.allow_loopback = true;
     let client = wreq::Client::builder()
         .build()

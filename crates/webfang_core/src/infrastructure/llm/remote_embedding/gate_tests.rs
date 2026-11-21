@@ -1,6 +1,6 @@
-use super::*;
 use super::super::fixtures::{config_with, LAN_HOST, LAN_PORT};
 use super::super::render_error_chain;
+use super::*;
 use crate::domain::auth_source::AuthSource;
 use crate::domain::network_policy::NetworkPolicy;
 use url::Url;
@@ -10,9 +10,7 @@ fn lan_policy(cidrs: &[&str], hosts: &[&str]) -> NetworkPolicy {
         mode: crate::domain::network_policy::NetworkPolicyMode::Allowlist,
         allow_cidrs: cidrs
             .iter()
-            .map(|c| {
-                crate::domain::network_policy::CidrBlock::parse(c).expect("test CIDR parses")
-            })
+            .map(|c| crate::domain::network_policy::CidrBlock::parse(c).expect("test CIDR parses"))
             .collect(),
         allow_hosts: hosts.iter().map(|h| (*h).to_string()).collect(),
     }
