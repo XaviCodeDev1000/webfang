@@ -180,14 +180,42 @@ if [[ "$MODE" == "dry-run" ]]; then
     exit 0
 fi
 
+# Re-read the live registry at delete time: a worktree may have appeared
+# between the scan and the token-gated execution. Fail closed if git fails.
+FRESH_TMP="$(mktemp)" || exit 2
+if ! wt_live_targets "$REPO" >"$FRESH_TMP"; then
+    rm -f "$FRESH_TMP"
+    echo "error: live registry unreadable at delete time; refusing" >&2
+    exit 2
+fi
+declare -A FRESH_LIVE=()
+while IFS= read -r live; do
+    [[ -n "$live" ]] && FRESH_LIVE["$live"]=1
+done <"$FRESH_TMP"
+rm -f "$FRESH_TMP"
+del_now="$(date +%s)"
+
 failures=0
 deleted=0
 for name in "${CANDIDATES[@]}"; do
     dir="$TARGET_CACHE/$name"
+    [[ -d "$dir" ]] || continue
     dir_canon="$(wt_canon "$dir")" || exit 2
-    # Re-check instantly before deleting: state may have changed since scan.
-    if wt_is_reserved "$dir_canon" "$TARGET_CACHE" || [[ -n "${LIVE_TARGETS[$dir_canon]:-}" ]]; then
+    # Re-check every guard at delete time, not just the scan-time snapshot.
+    if wt_is_reserved "$dir_canon" "$TARGET_CACHE" || [[ -n "${FRESH_LIVE[$dir_canon]:-}" ]]; then
         echo "skip (state changed): $dir" >&2
+        continue
+    fi
+    if lsof +D "$dir" >/dev/null 2>&1; then
+        echo "skip (in use at delete time): $dir" >&2
+        continue
+    fi
+    newest="$(newest_file_mtime "$dir")" || {
+        echo "skip (no files at delete time): $dir" >&2
+        continue
+    }
+    if (( del_now - newest < IDLE_SECONDS )); then
+        echo "skip (recent at delete time): $dir" >&2
         continue
     fi
     if rm -rf -- "$dir" 2>/dev/null; then
