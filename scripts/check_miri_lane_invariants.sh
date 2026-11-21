@@ -59,7 +59,7 @@ REPO_ROOT="${MIRI_LANE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 # Modules this lot owns: the downloader submodules the skip-net used to
 # delete wholesale, plus the module of the attributed UB.
 OWNED_MODULES=(
-  "crates/webfang_core/src/application/scraper_service.rs"
+  "crates/webfang_core/src/application/scraper_service/mod.rs"
   "crates/webfang_core/src/infrastructure/downloader/wreq_downloader.rs"
   "crates/webfang_core/src/infrastructure/downloader/obscura_downloader.rs"
   "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs"
@@ -78,7 +78,7 @@ MIRI_JOBS=(miri miri-infra-fast miri-infra-slow)
 # A listed test that no longer exists is a FAIL too: a stale exemption is a
 # lie nobody can evaluate.
 UB_SURFACE_EXEMPT=(
-  "crates/webfang_core/src/application/scraper_service.rs~scrape_span_records_error_outcome_with_error_class~the 404 arm returns before clean_html (fetch_html rejects every non-2xx status before the cleaner)~scoped Miri run of 2026-10-22: 2 passed, 0 failed, 1 ignored"
+  "crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs~scrape_span_records_error_outcome_with_error_class~the 404 arm returns before clean_html (fetch_html rejects every non-2xx status before the cleaner)~scoped Miri run of 2026-10-22: 2 passed, 0 failed, 1 ignored"
 )
 
 # The DECLARED UB surface: one entry per (file, marker) that physically reaches
@@ -163,10 +163,10 @@ UB_SURFACE_EXEMPT=(
 # gate (the `htmd_converter` shape) when a whole module is UB-routed.
 UB_SURFACE_ENTRIES=(
   "crates/webfang_core/src/domain/html_cleaner.rs~clean_html~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
-  "crates/webfang_core/src/application/scraper_service.rs~scrape_with_config~1~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs~scrape_with_config~1~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/infrastructure/converter/htmd_converter.rs~HtmdConverter.convert|converter.convert~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/batch/spool_export.rs~convert_lines|convert_spool~0~extract_page_content → clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
-  "crates/webfang_core/src/application/selector_serialization_tests.rs~serialize_case~0~serialize_matches → absolutize_urls (application/fragment_urls.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/application/extraction/selector_serialization_tests.rs~serialize_case~0~serialize_matches → absolutize_urls (application/fragment_urls.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/cli/batch_flush_tests.rs~flush_spool_tail|convert_spool~0~flush_spool_tail → convert_spool → extract_content → extract_with_selector → serialize_matches → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/fragment_markdown.rs~with_header~0~with_header (fragment_markdown.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/domain/keyring_store.rs~store.build|default_store.build~0~keyctl (syscall 250) building a real kernel-keyring credential"

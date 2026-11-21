@@ -2,6 +2,29 @@
 //! Their own module so the downloader stays under its grandfathered size.
 
 use super::*;
+
+/// Bytes of a non-2xx response body read for WAF challenge inspection (F-11).
+///
+/// Bounded on purpose: this read happens on every failing attempt of every crawl, so
+/// the cost is failures × attempts × this number. Cloudflare, Akamai and DataDome
+/// challenge documents keep their marker prose ("Just a moment…", "Checking your
+/// browser", the `cf_chl_*` script prelude) inside the first few KiB, and every T1
+/// signature the engine knows is a substring match — so 8 KiB captures all of them
+/// while a pathological error page cannot be buffered per attempt. Deliberately far
+/// below `max_page_bytes`: this is evidence, not content.
+pub(super) const WAF_SNIFF_MAX_BYTES: u64 = 8 * 1024;
+
+/// What to do when a bounded body read reaches its ceiling.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum BoundedRead {
+    /// Abort with [`DownloadError::BodyTooLarge`] — the page path, where the operator
+    /// configured a hard size cap (FIX-1, #1231 F-12).
+    Abort,
+    /// Keep the prefix and stop pulling the stream — the WAF sniff path (F-11), where a
+    /// body longer than the budget is normal and the prefix is all the evidence needs.
+    Truncate,
+}
+
 use crate::domain::error::cause::FetchPhase;
 use crate::domain::error::mapping::with_cause;
 
