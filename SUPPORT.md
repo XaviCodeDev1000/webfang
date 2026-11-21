@@ -6,7 +6,7 @@ Source of truth: `.github/support.json`. This file is a generated view.
 
 | Line | State | Latest | Branch | Accepts |
 |---|---|---|---|---|
-| 9.2 | STABLE | 9.2.0 | — | bugfix, security |
+| 9.2 | STABLE | 9.2.1 | — | bugfix, security |
 | 9.1 | MAINTENANCE | 9.1.0 | — | security |
 | 9.0 | EOL | 9.0.0 | — | — |
 | 8.0 | EOL | 8.0.2 | — | — |
