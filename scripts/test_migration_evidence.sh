@@ -282,7 +282,7 @@ else
        --write "$WORK/orphan.json" >"$WORK/w.log" 2>&1; then
     bad "--write aceptó un ancla huérfana (regresión de #2909)"
     sed 's/^/    /' "$WORK/w.log"
-  elif grep -Fq "el próximo squash lo dejará huérfano" "$WORK/w.log"; then
+  elif grep -Fq "the next squash will orphan it" "$WORK/w.log"; then
     ok "--write rechaza un ancla que ningún ref durable alcanza"
   else
     bad "--write falló pero sin el mensaje esperado"
@@ -296,6 +296,57 @@ else
     bad "--allow-unmerged-anchor no aceptó el estado pre-squash"
     sed 's/^/    /' "$WORK/w2.log"
   fi
+fi
+
+# --- 16. default branch is not main -----------------------------------------
+# NEGATION: the durable refs are the default branch, local and remote, detected
+# through origin's HEAD symref. A repository whose default branch is `develop`
+# must still prove ancestry; treating a missing `main` as "not an ancestor"
+# would block every valid --write there.
+D16="$(mktemp -d "$WORK/nonmain.XXXXXX")"
+(
+  cd "$D16" || exit 1
+  git_identity
+  git init -q -b develop
+  printf 'measured facts\n' > facts.txt
+  git add -A && git commit -q -m base
+  git init -q --bare "$D16.git"
+  git remote add origin "$D16.git"
+  git push -q origin develop
+  git fetch -q origin
+  git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
+) >/dev/null 2>&1
+NONMAIN_SHA="$(git -C "$D16" rev-parse HEAD)"
+if python3 "$AUDITOR" --root "$D16" --head-sha "$NONMAIN_SHA" \
+     --write "$D16/evidence/baseline.json" >"$WORK/w3.log" 2>&1; then
+  ok "--write proves ancestry through origin/HEAD when main does not exist"
+else
+  bad "--write refused a durable anchor on a non-main default branch"
+  sed 's/^/    /' "$WORK/w3.log"
+fi
+
+# --- 17. no durable ref exists in the repository ----------------------------
+# NEGATION: without origin (and without main) ancestry cannot be proven. The
+# refusal must say so, instead of claiming the commit is "not an ancestor" of
+# refs that do not exist here. The explicit escape (--allow-unmerged-anchor)
+# keeps serving the pre-squash state.
+D17="$(mktemp -d "$WORK/norefs.XXXXXX")"
+(
+  cd "$D17" || exit 1
+  git_identity
+  git init -q -b develop
+  printf 'measured facts\n' > facts.txt
+  git add -A && git commit -q -m base
+) >/dev/null 2>&1
+NOREFS_SHA="$(git -C "$D17" rev-parse HEAD)"
+if python3 "$AUDITOR" --root "$D17" --head-sha "$NOREFS_SHA" \
+     --write "$D17/evidence/baseline.json" >"$WORK/w4.log" 2>&1; then
+  bad "--write accepted an anchor with no durable ref in the repository"
+elif grep -Fq "no durable ref exists in this repository" "$WORK/w4.log"; then
+  ok "--write reports missing durable refs instead of a fake orphan claim"
+else
+  bad "--write failed without the no-durable-ref message"
+  sed 's/^/    /' "$WORK/w4.log"
 fi
 
 printf '\nmigration evidence harness: %d OK, %d FAIL\n' "$PASS" "$FAIL"

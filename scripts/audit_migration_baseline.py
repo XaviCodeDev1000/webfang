@@ -150,18 +150,45 @@ def resolve_head_sha(root: Path, explicit: str | None) -> str:
     return git(root, "rev-parse", "HEAD") or ""
 
 
-# Refs that survive a squash merge. The queue uses SQUASH (.github/merge-queue.json),
-# so the tip of a Release PR is NOT in the history of main and never will be: freezing
-# it passes the ancestry check exactly once, on the squash commit, and then fails on the
-# first PR that touches any other file. Measured on #2909/#2914: the branch tip 4efcaf66
-# was orphaned the moment the queue squashed it, and every later PR read as
-# "el baseline fue medido sobre otro árbol" with no drift behind it.
-DURABLE_REFS = ("main", "origin/main")
+# Refs that survive a squash merge: the default branch, local and remote, in
+# lookup order. The merge queue uses SQUASH (.github/merge-queue.json), so the
+# tip of a Release PR is NOT in the history of the default branch and never
+# will be: freezing it passes the ancestry check exactly once, on the squash
+# commit, and then fails on the first PR that touches any other file. Only an
+# anchor reachable from the default branch survives the merge.
+def durable_refs(root: Path) -> tuple[str, ...]:
+    """The default branch, local and remote, detected through origin's HEAD.
+
+    When origin (or its HEAD symref) is absent, the main/origin-main pair is
+    the fallback. A ref that does not exist in this repository is skipped —
+    not counted as a rejection — by existing_durable_refs.
+    """
+    rc, out = git_rc(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    if rc == 0:
+        remote = out.strip()
+        local = remote.split("/", 1)[1] if remote.startswith("origin/") else remote
+        return (local, remote) if local != remote else (remote,)
+    return ("main", "origin/main")
+
+
+def existing_durable_refs(root: Path) -> tuple[str, ...]:
+    """The durable refs that exist in this repository, in lookup order.
+
+    merge-base --is-ancestor exits 1 for "not an ancestor" and 128 for "no
+    such ref"; only the first is evidence about the commit. A ref that
+    rev-parse --verify rejects simply does not exist here.
+    """
+    present = []
+    for ref in durable_refs(root):
+        rc, _ = git_rc(root, "rev-parse", "--verify", "--quiet", ref)
+        if rc == 0:
+            present.append(ref)
+    return tuple(present)
 
 
 def durable_anchor(root: Path, sha: str) -> str | None:
-    """Devuelve el primer ref durable del que `sha` es ancestro, o None."""
-    for ref in DURABLE_REFS:
+    """Returns the first durable ref that `sha` is an ancestor of, or None."""
+    for ref in existing_durable_refs(root):
         rc, _ = git_rc(root, "merge-base", "--is-ancestor", sha, ref)
         if rc == 0:
             return ref
@@ -169,22 +196,29 @@ def durable_anchor(root: Path, sha: str) -> str | None:
 
 
 def freeze_hazard(root: Path, sha: str) -> str | None:
-    """Diagnóstico de un SHA congelado que el próximo squash va a dejar huérfano.
+    """Diagnosis of a frozen SHA the next squash would orphan.
 
-    Devuelve None cuando el ancla es durable. Un SHA sin ref durable es aceptable
-    SOLO en una rama cuyo tip todavía no está en main (el PR de release antes del
-    squash): ahí el operador lo re-ancla a mano, con --allow-unmerged-anchor, y el
-    gate lo vuelve a verificar en cada PR posterior.
+    Returns None when the anchor is durable. A SHA without a durable ref is
+    acceptable ONLY on a branch whose tip is not on the default branch yet
+    (a Release PR before the squash): there the operator re-anchors by hand
+    with --allow-unmerged-anchor and the gate re-verifies it on every later PR.
     """
     if durable_anchor(root, sha):
         return None
     rc, _ = git_rc(root, "rev-parse", "--verify", "--quiet", sha)
     if rc != 0:
-        return f"head_sha {sha[:12]} no es un objeto de este repositorio"
+        return f"head_sha {sha[:12]} is not an object of this repository"
+    present = existing_durable_refs(root)
+    if not present:
+        return (
+            f"no durable ref exists in this repository (looked for: "
+            f"{', '.join(durable_refs(root))}): ancestry of head_sha "
+            f"{sha[:12]} cannot be proven"
+        )
     return (
-        f"head_sha {sha[:12]} no es ancestro de {' ni '.join(DURABLE_REFS)}: "
-        "el próximo squash lo dejará huérfano y el baseline fallará en el primer PR "
-        "que toque otro archivo"
+        f"head_sha {sha[:12]} is not an ancestor of {' nor '.join(present)}: "
+        "the next squash will orphan it and the baseline will fail on the first PR "
+        "that touches any other file"
     )
 
 
