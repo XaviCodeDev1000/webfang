@@ -250,40 +250,34 @@ filesystem attribute. `ctime` is kept as auxiliary evidence in the note, not as 
 what makes them obviously obsolete; their *quarantine age* is under two hours. Those
 are different facts, and only the second one is the gate.
 
-## 9. Current quarantine state
+## 9. Current quarantine state (verified 2026-11-21)
 
-| Path | Size | Quarantined | Authorised to delete |
-| :--- | --- | --- | :--- |
-| `~/.cache/cargo-target/quarantine/main-shared-478g-20260930` | 478 G apparent | 2026-09-30 | **No** |
+**The policy is unchanged and still enforced.** `check_target_isolation.sh` still
+rejects a target inside the quarantine store with no opt-out, and
+`scripts/sweep_orphan_targets.sh` protects both reserved identities by canonical path:
+its post-execution dry-run reported `reserved: 4, orphaned: 0`. Nothing in this section
+authorises a deletion.
 
-Evidence at quarantine time: 545 907 files; moving window delta 0 over 90 s; zero
-`cargo`/`rustc`/`cargo-nextest`/`sccache`; `lsof` 0; latest mtime 327 min before, the
-tail of the migration's own builds. Post-rename `cargo build --workspace` on `main`
-completed as a 0.28 s no-op and still reported `webfang 2.4.1`.
+| Path | Size | Contents | Quarantine metadata | Authorised to delete |
+| :--- | :--- | :--- | :--- | :--- |
+| `~/.cache/cargo-target/quarantine/` | 4.4 G | `seeds/` with the two obsolete keys, plus rustc/rustdoc fingerprint files | none | **No** |
+| `~/.cache/cargo-target/quarantine-webfang/` | 4.9 G | Sep-30 campaign target (`debug/`, `CACHEDIR.TAG`, `.rustc_info.json`) | none | **No** |
 
-Restore path: `mv ~/.cache/cargo-target/quarantine/main-shared-478g-20260930
-~/.cache/cargo-target/webfang` and restore the old `.envrc`. Nothing else references
-that path any more.
+`quarantine_age.sh eligible` returns `UNKNOWN` (exit 2, fail-closed) for both entries:
+neither contains `quarantine.meta`. The timestamps in the seed runbook are a historical
+note, not a running retention clock. Removing either directory still needs an explicit,
+path-named owner decision with fresh ownership/use evidence under §2–§8.
 
-### Re-verification before any deletion decision
+### Historical record (superseded)
 
-Runbook §2–§5, re-run against the quarantined path. Every precondition still holds,
-and the gap since quarantine has grown rather than shrunk:
-
-| Check | Result |
-| :--- | :--- |
-| A live worktree owns it (§3) | none — `git worktree list` contains no such path |
-| `main` declares it (§4) | no — `main` declares `cargo-target/main` |
-| Any script names it | none |
-| Build processes (§5) | 0 cargo, rustc, nextest, sccache |
-| Open files (§5) | `lsof` 0 |
-| Moving window (§5) | 545 907 → 545 907 over 90 s, **delta 0** |
-| Most recent mtime | 366 min before, unchanged in character since quarantine |
-| Size / file count | 478 G, 545 907 files — identical to the quarantine-time reading |
-
-A 6-hour-old newest mtime and a zero delta over 90 s say the same thing: nothing has
-written here since `main` moved off it. **The deletion in §8 remains unauthorised and
-was not performed.**
+The 478 G object `quarantine/main-shared-478g-20260930` documented here on 2026-09-30
+is **absent today**. Its quarantine-time evidence is retained for provenance only:
+545 907 files, moving-window delta 0 over 90 s, zero `cargo`/`rustc`/`cargo-nextest`/
+`sccache`, `lsof` 0, latest mtime 327 min before, a post-rename build that completed as a
+0.28 s no-op, and the restore path `mv <quarantined-path> ~/.cache/cargo-target/webfang`
+plus the old `.envrc`. None of that describes an existing object now. mbx reported
+collecting large volumes of old checkout state during later builds, but the exact
+remover of this object is unproven. **The deletion decision in §8 remains unauthorised.**
 
 ### Not quarantined, deliberately
 
@@ -291,7 +285,7 @@ was not performed.**
 | :--- | --- | :--- |
 | `~/.cache/cargo-target/seeds/v1-da8aa82dd29c4018` | 2.2 G | **Live.** The active key. |
 | `~/.cache/cargo-target/seeds/v1-dfde71780c07a662` | 2.2 G | `RETAINED` predecessor, per `seed-reclamation-runbook.md`. |
-| `~/.cache/cargo-target/fix-build-cache-leak` | 7.1 G | Category C, another mission's. Not ours to attribute. |
+| `~/.cache/cargo-target/fix-build-cache-leak` | 7.1 G then | Category C, another mission's. Historical row: since reclaimed by the orphan sweep; not attributed or deleted by this runbook. |
 The two obsolete seeds moved to `quarantine/seeds/` by rename under the seed policy;
 they are **not deleted**. See `odd/tasks/seed-reclamation-runbook.md`.
 
