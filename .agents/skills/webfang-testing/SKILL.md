@@ -1,17 +1,17 @@
 ---
 name: webfang-testing
-description: "Trigger: integration test, harness, insta, snapshot, webfang_path, BehavioralTest, six-node. Write webfang integration tests with the shared harness and deterministic snapshots."
+description: "Trigger: integration test, shell harness, insta, snapshot, webfang_path, BehavioralTest, six-node. Write webfang integration tests and scripts/tests/ harnesses with deterministic fixtures."
 license: Apache-2.0
 metadata:
   author: webfang
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Activation Contract
 
-Activate when writing or modifying an integration test in `crates/webfang_core/tests/`, resolving
-the `webfang` binary, producing Markdown/JSON/stderr assertions, or reviewing a snapshot diff.
-Skip for pure unit tests inside a module.
+Activate when writing or modifying an integration test in `crates/webfang_core/tests/`, a shell
+harness in `scripts/tests/`, resolving the `webfang` binary, producing Markdown/JSON/stderr
+assertions, or reviewing a snapshot diff. Skip for pure unit tests inside a module.
 
 ## Hard Rules
 
@@ -30,6 +30,19 @@ Skip for pure unit tests inside a module.
 - Integration tests auto-discover (one file per target); add a `[[test]]` entry only for
   subdirectories or special features. Import the harness with `#[path = "common/mod.rs"] mod common;`.
 
+## Shell harnesses (`scripts/tests/`)
+
+Scripts and hooks are verified by standalone bash harnesses, not insta snapshots:
+
+- Build fixtures in `mktemp -d` with a `trap 'rm -rf "$TMP"' EXIT`; never touch the real
+  `~/.cache/cargo-target/` or a session worktree. A fake git repo and fake cache are enough.
+- Assert observable behavior only: report JSON fields, exit codes and filesystem effects. No
+  `contains` on incidental text; no dependency on clock or process IDs.
+- For destructive scripts, test the dry-run default and the missing-token failure; never run
+  `--execute` against real data from a harness.
+- Run `bash -n`, `shellcheck` and the harness itself; these are not covered by `ci_fast_gate.sh`
+  lanes, so run them by hand when the corresponding script changes.
+
 ## Decision Gates
 
 | Situation | Action |
@@ -38,6 +51,7 @@ Skip for pure unit tests inside a module.
 | Output assertion | Snapshot + `redact_nondeterministic()`, never `contains` |
 | Snapshot diff | `cargo insta review` every diff; never auto-accept blind |
 | Arrange >5 lines | Refactor the production design, not the test |
+| Script or hook changed | Add/update a `scripts/tests/` harness; run `bash -n` + shellcheck + harness |
 
 ## Execution Steps
 
@@ -57,3 +71,4 @@ and the nextest + insta-review verdict (green, no pending snapshots).
 - `../../../crates/webfang_core/tests/common/cli_harness.rs` — `BehavioralTest`, `scraper_cmd()`,
   `find_files()`, `read_md_content()`, `webfang_path()`, `redact_nondeterministic()`.
 - `../../../AGENTS.md` — § Testing (normative rules + six-node diagnostic).
+- `../../../scripts/tests/` — shell harnesses for `sweep_orphan_targets.sh` and the identity gate.
