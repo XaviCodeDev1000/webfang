@@ -620,6 +620,19 @@ EOF
   else
     skip_step "file size preflight semantics" "no file-size preflight files changed"
   fi
+  # File-size close-out harness (odd/tasks/file-size-done.md, F1b): hermetic
+  # mktemp-sandbox proof of the close-out's closed exit map (0 closed / 2
+  # parked with reason, date and base / 1 defect per discriminator / 64
+  # usage), the base-commit read of exceptions/grandfathered/hard_limit, the
+  # allow multiset, the closed key list and the real-tree parked case.
+  # Triggered by either the tool or its harness changing — both are
+  # `scripts/**`, so a PR touching only one of them still lands in this
+  # CI-ONLY lane. Offline, no cargo, <1s.
+  if grep -Eq '^(scripts/file_size_done\.sh|scripts/test_file_size_done\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "file size close-out semantics (offline)" bash scripts/test_file_size_done.sh
+  else
+    skip_step "file size close-out semantics" "no file-size close-out files changed"
+  fi
   # Windows-platform check semantics (#1833): pins the guard's fail-closed
   # missing-target refusal (a PATH-stubbed rustup, so the case itself is
   # offline) and, where the MSVC std target is installed, the GREEN/RED/lint
@@ -1039,6 +1052,15 @@ lane_fmt_and_guards() {
   # is wired in lane_ci (triggered), not here, so FULL does not run it twice.
   run_guard "file size preflight" scripts/file_size_preflight.sh \
     bash scripts/file_size_preflight.sh
+  # File-size close-out (F1b, policy v3): decides whether a mission is DONE.
+  # The tool takes files and a base commit, so the lane runs its INFORMATIONAL
+  # --list as a live smoke (it reads the real baseline and exits 0; policy 4.6:
+  # "--list is not a guard mode" — the verdicts here are not gate decisions).
+  # Pure bash+python3+git, offline; CI runs it for real in the repo-guards job
+  # of ci.yml. Its hermetic harness is wired in lane_ci (triggered), not here,
+  # so FULL does not run it twice.
+  run_guard "file size close-out smoke (--list)" scripts/file_size_done.sh \
+    bash scripts/file_size_done.sh --list
   run_guard "nextest invocation lint gate (#1784)" scripts/check_nextest_invocation_lint.sh \
     bash scripts/check_nextest_invocation_lint.sh
   run_guard "nextest invocation lint semantics harness (#1784)" scripts/test_nextest_invocation_lint.sh \

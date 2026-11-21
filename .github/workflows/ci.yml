@@ -316,6 +316,26 @@ jobs:
       # touched.
       - name: File size preflight semantics harness
         run: bash scripts/test_file_size_preflight.sh
+      # File-size close-out (F1b of the file-size policy v3; ODD
+      # odd/tasks/file-size-done.md): decides whether a split mission is DONE
+      # with a CLOSED exit map (0 closed / 2 parked with reason, date and base
+      # commit / 1 defect per discriminator / 64 usage). exceptions,
+      # grandfathered and hard_limit are read from BOTH the base commit and
+      # the working tree, so a mission cannot grant itself an exception or
+      # move the limit. The step here runs the INFORMATIONAL --list as a live
+      # smoke against the real baseline ("--list is not a guard mode", policy
+      # 4.6); the verdicts need a mission's files and base commit. Offline,
+      # no repo state touched.
+      - name: File size close-out smoke (--list)
+        run: bash scripts/file_size_done.sh --list
+      # Semantics harness for the close-out: hermetic mktemp sandboxes with a
+      # real one-commit git repo (reading the base commit IS the tool's
+      # contract) proving the green close, the parked record, one defect per
+      # exit-1 discriminator, the closed key list and the harness's own
+      # --negation (#2056: a harness that cannot fail proves nothing).
+      # Offline, no repo state touched.
+      - name: File size close-out semantics harness
+        run: bash scripts/test_file_size_done.sh
       # Build-graph hygiene guard (issues #1799, #1797, #1796). The graph must
       # carry ONE source of RAM (`sysinfo`, never `sys-info`, whose unit was
       # undocumented), NO `built`/`git2`/`libgit2-sys` (they fed a function with

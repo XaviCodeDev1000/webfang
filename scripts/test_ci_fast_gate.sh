@@ -392,6 +392,7 @@ make_fixture() {
     test_mcp_surface_wiring.sh test_merge_when_green_breaking.sh \
     test_ci_merge_when_green.sh test_apply_tag_ruleset.sh test_ci_metrics.sh \
     test_ci_mutant_shards.sh test_file_size.sh test_file_size_preflight.sh \
+    test_file_size_done.sh \
     test_bug_discovery_report.sh \
     test_docs_claims.sh test_docs_claims_wiring.sh \
     test_agents_doc.sh test_agents_doc_wiring.sh; do
