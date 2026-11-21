@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit delivery gate — reports the Gentle AI review verdict (#1036).
-# Fail-open when the verdict is missing, failed, timed out, or unparseable.
+# Pre-commit delivery gates: identity first, then the Gentle AI review verdict.
+# identity-gate.sh is fail-closed; review-gate.sh stays fail-open by design (#1036).
+"$(dirname "$0")/identity-gate.sh" || exit $?
 exec "$(dirname "$0")/review-gate.sh" pre-commit
