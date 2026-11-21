@@ -314,6 +314,7 @@ write_baseline 500
 run_done --base "$BASE_SHA" "crates/fx/src/big.rs"
 expect_rc "4.5 a grandfathered descent with --remove done closes (0)" 0 "$RC" "$ERRF" "$ERRF"
 expect_match "4.6 the descent is reported" "$OUT" $'descent\tcrates/fx/src/big\.rs'
+DESCENT_OUT="$OUT"
 
 new_sandbox g3
 write_baseline 500 "crates/fx/src/kept.rs=900" "exc:crates/fx/src/kept.rs=a single declarative unit, argued in the baseline"
@@ -327,16 +328,19 @@ new_sandbox g4
 write_baseline 500 "crates/fx/src/hub.rs=900"
 write_code "crates/fx/src/hub.rs" 900
 snap_base
-# the mission: the hub shrinks to 300 and two parts are born at 150 each
+# the mission: the hub shrinks to 300 and two parts are born at 150 each;
+# the baseline entry goes with the win (--remove done)
 write_code "crates/fx/src/hub.rs" 300
 write_code "crates/fx/src/part_one.rs" 150
 write_code "crates/fx/src/part_two.rs" 150
+write_baseline 500
 run_done --base "$BASE_SHA" "crates/fx/src/hub.rs" "crates/fx/src/part_one.rs" "crates/fx/src/part_two.rs"
 expect_rc "4.9 a split whose parts all fit closes (0)" 0 "$RC" "$ERRF"
 VERDICT_N="$(printf '%s\n' "$OUT" | grep -c $'^verdict\t')" || VERDICT_N=0
 expect_eq "4.10 every named file got a verdict" "$VERDICT_N" "3"
 
 new_sandbox g5
+write_baseline 500
 write_code "crates/fx/src/withallow.rs" 600 "#[allow(clippy::too_many_lines)]" "#![allow(dead_code)]"
 snap_base
 # a plain (never grandfathered) file: the allow existed at base and survives
@@ -472,6 +476,21 @@ run_done --base "$BASE_SHA" "crates/fx/src/ok.rs"
 expect_rc "6.13 a removal whose file landed at/below the limit is the descent (0)" 0 "$RC" "$ERRF" "$ERRF"
 expect_match "6.14 the descent is reported for the legitimate removal" "$OUT" $'descent\tcrates/fx/src/ok\.rs'
 
+new_sandbox d6t
+write_baseline 500 "crates/fx/src/mod_tests.rs=520"
+write_code "crates/fx/src/mod_tests.rs" 520
+snap_base
+# the tests-majority split: the file MOVES OUT of the corpus (into tests/) and
+# the entry goes with it -- the removal is the guard's own orphan rule, not a
+# defect
+mkdir -p "$SB/crates/fx/tests"
+write_code "crates/fx/tests/mod_tests.rs" 520
+rm "$SB/crates/fx/src/mod_tests.rs"
+write_code "crates/fx/src/part_one.rs" 100
+write_baseline 500
+run_done --base "$BASE_SHA" "crates/fx/src/part_one.rs"
+expect_rc "6.17 a removal whose file left the corpus is not a defect" 0 "$RC" "$ERRF" "$ERRF"
+
 new_sandbox d7
 write_baseline 500 "crates/fx/src/hub.rs=900"
 write_code "crates/fx/src/hub.rs" 900 "#[allow(clippy::result_large_err)]"
@@ -521,10 +540,11 @@ expect_match "8.4 --list annotates exceptions" "$EXC_ROW" 'exception'
 # NEGATION: a key invented in an untested branch would ship unreviewed prose
 # through the contract (v3.3: the contract is enumerated, not detected).
 
-CLOSED_KEYS='^(base|cap|defect|descent|file|hard_limit|lines|mode|parked_date|reason|state|verdict)$'
+CLOSED_KEYS='^(base|cap|defect|descent|hard_limit|lines|mode|parked_date|reason|state|verdict)$'
 UNION="$(
   {
     printf '%s\n' "$GREEN_OUT"
+    printf '%s\n' "$DESCENT_OUT"
     printf '%s\n' "$PARKED_OUT"
     printf '%s\n' "$DEFECT_OUT"
     printf '%s\n' "$LIST_OUT"
