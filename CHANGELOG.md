@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.2.1] - 2026-11-21
+
+
+### 🏗️ Architecture Improvements
+
+- Extract exit_codes inline tests to a sibling file ([#2931](https://github.com/XaviCodeDev1000/webfang/pull/2931))
+- Split five giant-function files by seam (part of #2584) ([#2934](https://github.com/XaviCodeDev1000/webfang/pull/2934))
+
+### 🔧 Fixed
+
+- Close ADR-0021 egress gaps with no_proxy and CONNECT proof ([#2920](https://github.com/XaviCodeDev1000/webfang/pull/2920))
+
+### 🔧 Other
+
+- Make English the only language across code, docs and CI ([#2922](https://github.com/XaviCodeDev1000/webfang/pull/2922))
+
+### 🧪 Testing
+
+- Prove explicit AI egress proxy behavior end to end ([#2913](https://github.com/XaviCodeDev1000/webfang/pull/2913))
 ## [9.2.0] - 2026-11-17
 
 
