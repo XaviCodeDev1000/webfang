@@ -134,7 +134,7 @@ new_sandbox c2
 make_rs "$SB/crates/webfang_x/src/a.rs" 500
 write_baseline "$SB" < <(baseline_json 500)
 run_guard
-if [[ $RC -eq 0 ]] && grep -q "OK: el ratchet" "$OUT"; then
+if [[ $RC -eq 0 ]] && grep -q "OK: the file-size ratchet" "$OUT"; then
   ok "new file at exactly 500 PASSES (strict >)"
 else
   bad "new file at exactly 500 PASSES (strict >)" "rc=$RC" "$OUT"
@@ -148,7 +148,7 @@ new_sandbox c3
 make_rs "$SB/crates/webfang_x/src/b.rs" 601
 write_baseline "$SB" < <(baseline_json 500 "crates/webfang_x/src/b.rs 600")
 run_guard
-if [[ $RC -eq 1 ]] && grep -q "CRECI" "$OUT"; then
+if [[ $RC -eq 1 ]] && grep -q "GREW" "$OUT"; then
   ok "grandfathered +1 line FAILS"
 else
   bad "grandfathered +1 line FAILS" "rc=$RC" "$OUT"
@@ -162,7 +162,7 @@ new_sandbox c4
 make_rs "$SB/crates/webfang_x/src/b.rs" 600
 write_baseline "$SB" < <(baseline_json 500 "crates/webfang_x/src/b.rs 600")
 run_guard
-if [[ $RC -eq 0 ]] && grep -q "OK: el ratchet" "$OUT"; then
+if [[ $RC -eq 0 ]] && grep -q "OK: the file-size ratchet" "$OUT"; then
   ok "grandfathered at baseline PASSES"
 else
   bad "grandfathered at baseline PASSES" "rc=$RC" "$OUT"
@@ -243,7 +243,7 @@ new_sandbox c8c
 # never "0 files = all green".
 write_baseline "$SB" < <(baseline_json 500)
 run_guard
-if [[ $RC -eq 1 ]] && grep -q "0 archivos" "$OUT"; then
+if [[ $RC -eq 1 ]] && grep -q "0 .rs files" "$OUT"; then
   ok "empty corpus FAILS (fail-closed)"
 else
   bad "empty corpus FAILS (fail-closed)" "rc=$RC" "$OUT"
@@ -264,7 +264,7 @@ write_baseline "$SB" <<'JSON'
 JSON
 run_guard --generate
 GEN_JSON_OK=true
-if [[ $RC -eq 0 ]] && grep -q "entradas grandfathered: 2" "$OUT"; then
+if [[ $RC -eq 0 ]] && grep -q "grandfathered entries: 2" "$OUT"; then
   : # count asserted below via the JSON itself
 else
   GEN_JSON_OK=false
@@ -300,7 +300,7 @@ PY
     bad "--generate output feeds a PASSING check" "rc=$RC" "$OUT"
   fi
   run_guard --generate
-  if [[ $RC -eq 1 ]] && grep -q "un solo uso" "$OUT"; then
+  if [[ $RC -eq 1 ]] && grep -q "one-shot" "$OUT"; then
     ok "--generate refuses when the key already exists"
   else
     bad "--generate refuses when the key already exists" "rc=$RC" "$OUT"
@@ -333,7 +333,7 @@ else
 fi
 
 run_guard --update "crates/webfang_x/src/ghost.rs=100"
-if [[ $RC -eq 1 ]] && grep -q "edición manual" "$OUT"; then
+if [[ $RC -eq 1 ]] && grep -q "manual JSON edit" "$OUT"; then
   ok "--update refuses an ADDITION"
 else
   bad "--update refuses an ADDITION" "rc=$RC" "$OUT"
@@ -360,7 +360,7 @@ else
   bad "--remove deletes the entry" "rc=$RC" "$OUT"
 fi
 run_guard
-if [[ $RC -eq 1 ]] && grep -q "No está en el baseline" "$OUT"; then
+if [[ $RC -eq 1 ]] && grep -q "Not in the baseline" "$OUT"; then
   ok "after --remove the file counts as NEW (unguarded)"
 else
   bad "after --remove the file counts as NEW (unguarded)" "rc=$RC" "$OUT"
