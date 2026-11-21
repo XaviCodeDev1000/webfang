@@ -18,7 +18,7 @@ S5. Assumption (from the agreed salvage design, not a user string): the sweep is
 - T1 — S1,S4 — route inline — bootstrap worktree + ODD doc + mirror — status: done — commit: 26bf0100 (doc landed with T2)
 - T2 — S2,S3,S5 — route inline — shared canonicalization helper + orphan sweep + tests — status: done — commit: 26bf0100
 - T3 — S1,S3,S5 — route inline — identity gate + pre-commit wiring + manifest helper + tests — status: done — commit: 3677cb8a
-- T4 — S2,S3 — route inline — AGENTS.md alignment (gitignore, namespace, mbx vs sccache, hook) — status: done — commit: pending
+- T4 — S2,S3 — route inline — AGENTS.md alignment (gitignore, namespace, mbx vs sccache, hook) — status: done — commit: c3f0bf29
 - T5 — S1,S5 — route inline — full verification + ODD close + mirror — status: in_progress — commit: pending
 
 ## Log
@@ -46,3 +46,7 @@ L6 — T2 evidence: `scripts/tests/test_sweep_orphan_targets.sh` PASS on an ephe
 L7 — T3 evidence: `scripts/tests/test_identity_gate.sh` PASS (main pass; manifest pass; missing manifest deny; wrong manifest deny; unset CARGO_TARGET_DIR deny; inherited main target deny; non-main branch in main checkout deny; detached HEAD deny). `bash -n` + shellcheck clean, including the edited `pre-commit`. `scripts/worktree_identity.sh` ran in this worktree and the gate passed in a direnv-loaded shell. The commit itself ran through the new pre-commit wiring successfully. Commit 3677cb8a.
 
 L8 — RDD: `gentle-ai review assess` over the branch range returned `risk: high` (`executable_mode`, `process_boundary`, `shell_source`) and `review_due: true`. Per ODD, source-mutating work (T4) is finished before opening the frozen review candidate; the native review is the last step of T5.
+
+L9 — T4 evidence: `check_agents_doc` PASS (639 lines / 40955 bytes, budget 650 / 40960) after moving the full identity-exception protocol to Engram #3201 and trimming duplicated runbook prose in AGENTS.md. `test_agents_doc_wiring` and `test_docs_claims_wiring` PASS. Commit c3f0bf29.
+
+L10 — T5 verification: local fast gate GREEN (code lane; PASS=44 FAIL=0 SKIP=3; coverage read: repo-guards partial, doc-quality partial, test-core partial, security NOT covered locally). Real-cache sweep dry-run PASS: scanned 30, reserved 4, live 2, protected 1, orphaned 23, reclaimable 256467953737 bytes; no deletion executed. Independent verifier (#3202) found one blocker (S3 checks clause: four named cases lacked durable tests) plus advisories (stale codedb index — reindexed; --execute snapshot race — token-gated). Correction: added `scripts/tests/test_sweep_mtime_lsof.sh` and `scripts/tests/test_identity_deferral_hook_order.sh`; both PASS with `bash -n` and shellcheck clean. Verifier scratch `/tmp/opencode/wfverify-l6Aakv` removed by parent.
