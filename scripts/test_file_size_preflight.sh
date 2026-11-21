@@ -244,7 +244,9 @@ expect_rc "3.1 a missing path fails (rc=1)" 1 "$RC" "$ERRF"
 expect_match "3.2 the cause is named, not a bare traceback" "$(cat "$ERRF" 2>/dev/null)" "file not found|NOT_FOUND"
 
 run_pre --format
-expect_rc "3.3 --format without a path is a usage error (rc=2)" 2 "$RC" "$ERRF"
+expect_rc "3.3 --format without a path is a usage error (rc=64, EX_USAGE)" 64 "$RC" "$ERRF"
+run_pre --help
+expect_match "3.4 --help documents the exit-code map (64 = usage, EX_USAGE)" "$OUT" "^Exit codes: 0 ok.*64 usage \(EX_USAGE\)$"
 
 # --- 4. a path outside the corpus is REPORTED, not measured --------------------
 # NEGATION: crates/**/tests/* is outside the ratchet corpus; measuring it would

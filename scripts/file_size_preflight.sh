@@ -24,8 +24,9 @@
 #   2246 (add+del) #2901 · 3018 #2896 · 3933 #2856 · 5101 #2893
 # The PR-count formula is policy 6: prs = ceil(2 * moved / P).
 #
-# Exit codes: 0 legal · 1 tool failure (named cause) · 2 usage ·
-# 3 ratchet violation (--simulate) · 4 defective plan (--simulate, named).
+# Exit codes: 0 ok · 1 tool failure (named cause) · 3 ratchet violation
+# (--simulate) · 4 defective plan (--simulate, named) · 64 usage (EX_USAGE).
+# (2 is reserved by the policy for file_size_done.sh's "parked" — issue #2928.)
 #
 # HERMETIC: nothing is ever written into the measured tree (all scratch lives
 # in a mktemp dir). The corpus is NOT re-implemented: the find expression is
@@ -68,6 +69,7 @@ Usage: bash scripts/file_size_preflight.sh [mode]
   --help                this help
 
 Modes: --format --simulate --corpus-literal --budget; units are lines/commits/attrs/PRs.
+Exit codes: 0 ok · 1 tool failure · 3 ratchet violation (--simulate) · 4 defective plan (--simulate) · 64 usage (EX_USAGE)
 USAGE
 }
 
@@ -76,10 +78,11 @@ die_tool() {   # rc=1: the tool cannot answer, with a NAMED cause
   exit 1
 }
 
-usage_error() {  # rc=2
+usage_error() {  # rc=64 (EX_USAGE): 2 is reserved by the policy for
+                 # file_size_done.sh's "parked" verdict (issue #2928)
   printf 'error: %s\n' "$1" >&2
   usage >&2
-  exit 2
+  exit 64
 }
 
 emit2() { printf '%s\t%s\n' "$1" "$2"; }
