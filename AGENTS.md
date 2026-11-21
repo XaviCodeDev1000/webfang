@@ -227,6 +227,8 @@ before validating, or pacing after dialing, is rejected in review even if its te
 ### Build
 
 - `cmake` is mandatory: `wreq` → `btls` → `btls-sys` compiles BoringSSL from C++.
+- Compiler cache: **mbx** (content-addressed, per-tree targets, own GC). `sccache` is inert
+  (`unset RUSTC_WRAPPER`, zero cross-tree hits); no target migration without new measurements: **obs #2306**.
 - 🔒 **`[profile.dev]` lives in the root `Cargo.toml`, never in `.cargo/config.toml`.** Cargo
   resolves `config.toml` from the CWD upward: a profile there changes the `-C metadata` hash of
   every unit for any invocation whose CWD is outside the repo (cron, IDE, `mise exec`,
@@ -346,7 +348,10 @@ tree, index and HEAD are isolated.
 ### Placement, naming and the identity proxy
 
 Layout: `~/Projects/Rust/webfang/` (main, always on `main`) and sibling
-`~/Projects/Rust/webfang-worktrees/<dir>/` (globally gitignored), e.g. `feat-auth/` ↔ `feat/auth`.
+`~/Projects/Rust/webfang-worktrees/<dir>/` — outside the repo, so no ignore rule is needed: Git
+cannot track paths outside the worktree. The per-tree file that IS ignored is `.envrc`.
+Example: `feat-auth/` ↔ `feat/auth`. Native review `candidate-views/` are detached HEADs under
+`.git/gentle-ai/`, not worktrees for humans.
 
 **Never put a worktree under `/tmp`** — a 16 GB tmpfs here: a from-scratch `target/` does not
 fit (`Disk quota exceeded`), and a backgrounded build that dies that way returns an **empty
@@ -359,30 +364,17 @@ on the branch intended for the task/PR.** Run the name proxy before every commit
 [ "$(basename "$PWD")" = "$(git branch --show-current | tr '/' '-')" ] || echo "MISMATCH"
 ```
 
+`scripts/githooks/identity-gate.sh` runs **before** `review-gate.sh` in `pre-commit` and is
+fail-closed; `review-gate.sh` stays fail-open for verdicts (#1036). Main needs canonical root **and**
+branch `main`; rebase/cherry-pick defer; detached HEAD denies. Bootstrap writes the ignored
+`.worktree-identity` via `scripts/worktree_identity.sh` (existing trees need it too). Non-interactive
+shells must run `eval "$(direnv export bash)"` or an inherited `CARGO_TARGET_DIR` is denied.
+
 ### Identity-exception protocol
 
-A failed proxy does not prove you are in the wrong worktree, nor does the branch name prove you
-are in the right one. A mismatch commit is allowed only when **all three** hold:
-
-1. **Externally anchored expectation** — the intended branch is known from outside this
-   worktree *before* committing (PR metadata `gh pr view --json headRefOid,headRefName`, task
-   metadata, an upstream ref, or explicit human instruction); a branch that only exists inside
-   the worktree proves nothing.
-2. **Verifiable binding** — `git symbolic-ref --short HEAD` and `git worktree list` agree
-   (path → branch); `git rev-parse @{u}` is an extra signal with an upstream.
-3. **Ancestry, not equality** — pre-commit HEAD is at or a descendant of the expected tip/base
-   (a strict `HEAD == tip` check breaks after the first commit of a sequence).
-
-Every exception commit records the evidence in its body:
-
-```text
-Worktree-Identity-Exception: directory-name mismatch
-Intended-Branch: <branch>
-Expected-Head: <sha>
-Evidence: <external source> + git symbolic-ref + git worktree list
-```
-
-If any condition fails, MISMATCH is a hard stop.
+A mismatch commit is allowed only under the three-condition protocol (external anchor +
+verifiable binding + ancestry, not equality), with the `Worktree-Identity-Exception` trailer in
+the commit body. Any failed condition is a hard stop. Full text: **Engram #3201**.
 
 ### Per-worktree bootstrap
 
@@ -390,24 +382,22 @@ The `.envrc` is **per worktree**, never shared, written **from the tree's own na
 derived from main's — a `sed` over main's silently points `CARGO_TARGET_DIR` at MAIN's target).
 It is **exactly 5 lines**; `$TREE` is substituted when written, only `$HOME` stays literal — a
 literal `$TREE` makes the isolation guard reject the build (`reason=unregistered-target`). Then
-`direnv allow`, `cp` main's `.env`, and index the tree (`codegraph init`; `codedb "$PWD" reindex
-&& codedb "$PWD" status`). **Without both indexes the agent is blind**: the tools resolve to main
+`direnv allow`, `cp` main's `.env`, write the identity manifest with `scripts/worktree_identity.sh`,
+and index the tree (`codegraph init`; `codedb "$PWD" reindex && codedb "$PWD" status`).
+**Without both indexes the agent is blind**: the tools resolve to main
 or return nothing; restart the MCP connection after indexing. The heredoc, the seed contract
 (`seed_target.sh`: `cold` normal, `refused` not a build) and the paid-for mistakes: **obs #2307**.
 
 ### Frequent commits (mandatory in worktrees)
 
-Commit **after every completed step**: a `git mv`, a bulk replace, a passing `cargo check`, the
-tests in green — uncommitted work can be lost silently. The full pattern: the
-`work-unit-commits` skill.
+Commit **after every completed step** (a `git mv`, bulk replace, passing `cargo check`, green
+tests): uncommitted work can be lost silently. Pattern: `work-unit-commits` skill.
 
 ### Post-merge cleanup (the merge is not done until the repo is ready)
 
-From the **main** repo, after verifying `state: MERGED`: sync main **ff-only** (failure = main
-diverged — **STOP**), remove the mission's worktree, delete its local branch with `-D` (squash
-rewrites history; never touch `main`, `gh-pages`, `backup/*` or the current branch), `git
-worktree prune`, delete the mission's target dir **by ownership** — never enumerate, never
-chained — and verify no leftovers **of the mission you merged**. 7 steps: **obs #2307**.
+From **main**, after `state: MERGED`: sync main **ff-only** (diverged = STOP), remove the mission
+worktree, delete its branch with `-D`, `git worktree prune`, delete its target dir **by ownership**
+(never enumerate/chained), verify no leftovers of that mission. 7 steps: **obs #2307**.
 
 ### Shared vs per-worktree resources
 
@@ -417,17 +407,19 @@ are per worktree; `seeds/` read-only, `quarantine/` never a target, `refs/stash`
 
 ### Reserved `~/.cache/cargo-target/` namespace
 
-`<worktree-target>/` is build state owned by one agent; `seeds/` (published store) and
-`quarantine/` (retired objects) are **reserved** and can never be a worktree's
-`CARGO_TARGET_DIR`. Do not invent new categories (`scratch/`, `shared/`, `cache/`, `tmp/`): the
-guard rejects three known identities and accepts anything else — the explicit namespace, not a
-denylist, is what stops invention. Detail: **obs #2307**.
+`<worktree-target>/` is one agent's build state. Reserved by canonical identity: `seeds/`,
+`seeds-webfang/`, `quarantine/`, `quarantine-webfang/` — never a `CARGO_TARGET_DIR`, never
+collected (suffixed dirs are separate stores, not prefix matches). Do not invent
+new categories: the guard accepts any non-reserved identity. **obs #2307**.
+
+`scripts/sweep_orphan_targets.sh` classifies orphans (dry-run by default). Its live registry is the
+`CARGO_TARGET_DIR` declarations in `.envrc` files — comparing with worktree ROOT paths never
+matches. It protects the four reserved identities and skips recent or `lsof`-held targets.
 
 ### Contamination
 
-If you operated outside your worktree, or a `git stash pop` applied unexpected changes:
-**STOP** immediately; do **NOT** clean up (no `git reset`, force-push or manual patching); report
-the exact sentence from **obs #2307** and wait for explicit human authorization.
+Outside-worktree work or an unexpected `git stash pop` means **STOP**, no cleanup, report the exact
+**obs #2307** sentence and wait for explicit human authorization.
 
 ### Pushed history is immutable
 

@@ -12,6 +12,9 @@ contract live in Engram; the normative rules live in the repo. Do not copy the r
 | Recurring env failures: `/tmp` leaks, false rustdoc ICE (mbx), CI state | `env failures tmp rustdoc mbx` | #3141 | project |
 | Workstation build profile (mbx, mold, OOM, timings) | `build profile mbx mold cargo target OOM` | #2306 | personal |
 | Contamination, immutable history, hard-deny | `contamination history immutable hard-deny governance` | #2312 | project |
+| Identity-exception protocol (full text) | `identity exception protocol external anchor ancestry` | #3201 | project |
+| ODD feature: sweep + identity gate | `ODD worktree-cache-gc tasks` | #3199 | project |
+| Verified guard gaps / audit findings | `sweep hook audit fail-open namespace` | #3192, #3202 | project |
 
 Resolve with `engram search "<query>" --project webfang [--scope personal]` or `mem_search`.
 
@@ -32,3 +35,5 @@ Resolve with `engram search "<query>" --project webfang [--scope personal]` or `
   exception protocol, per-worktree bootstrap, frequent commits, post-merge cleanup, shared vs
   per-worktree resources, reserved namespace, contamination, immutable history.
 - `../../../scripts/seed_target.sh` — seed contract (`cold` normal, `refused` not a build).
+- `../../../scripts/worktree_identity.sh` — manifest bootstrap; `../../../scripts/githooks/identity-gate.sh`
+  — fail-closed commit gate; `../../../scripts/sweep_orphan_targets.sh` — dry-run orphan classifier.

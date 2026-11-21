@@ -129,6 +129,12 @@ a seed published an hour ago can be quarantined today.
 | `v1-b76756ec52d50dfc.20260930` | 2026-09-30 01:45 | 48 h | **2026-10-02 01:45** |
 | `v1-4de4a216ec95753d.20260930` | 2026-09-30 01:45 | 48 h | **2026-10-02 01:45** |
 
+The timestamps above are the historical record of the first pass, not a running clock.
+Verified 2026-11-21: neither quarantined seed contains `quarantine.meta`, so
+`quarantine_age.sh eligible` returns `UNKNOWN` (fail-closed, exit 2) and no age-based
+deletion is decidable. Do not treat the table as authoritative start times; the authority
+must live inside each entry.
+
 ## 7. Current state after the first pass
 
 | Seed | `built_at` | State | Evidence |
@@ -143,6 +149,11 @@ still said `v1-b767…`, and taken at face value it would have been filed as a n
 predecessor. It is not one: a seed you cannot read its identity from is a seed you
 cannot reason about, and that is a quarantine candidate regardless of what its name
 claims.
+
+Current verification (2026-11-21): all four directories are still present with the
+states above. `ACTIVE` and `RETAINED` remain in `~/.cache/cargo-target/seeds/`; the two
+`QUARANTINED` keys remain in `~/.cache/cargo-target/quarantine/seeds/` without metadata.
+Deletion remains unauthorised and was not performed.
 
 ## 8. Steady state
 
