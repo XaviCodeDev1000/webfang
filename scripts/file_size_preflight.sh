@@ -84,6 +84,7 @@ usage_error() {  # rc=2
 
 emit2() { printf '%s\t%s\n' "$1" "$2"; }
 emit4() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4"; }
+emit5() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5"; }  # the plan rows' note column (issue #2928)
 
 # --- the corpus lives in the guard ---------------------------------------------
 #
@@ -744,7 +745,7 @@ case "$MODE" in
         CAP="$BASELINE_LIMIT"
         CAP_DESC="hard_limit ($CAP)"
       fi
-      emit4 "plan" "$dest" "$DEST_FINAL" "lines" "$NOTE"
+      emit5 "plan" "$dest" "$DEST_FINAL" "lines" "$NOTE"
       if [ "$DEST_FINAL" -gt "$CAP" ]; then
         if [ -n "${GF["$DEST_REL"]:-}" ]; then
           VIOLATIONS+=("destination '$dest' would land at $DEST_FINAL > $CAP_DESC: grandfathered files cannot grow")
@@ -755,7 +756,7 @@ case "$MODE" in
     done
 
     SRC_FINAL=$((TOTAL - TOTAL_MOVED + ${GLUE["$SRC_KEY"]:-0}))
-    emit4 "plan" "$SRC_KEY" "$SRC_FINAL" "lines" "$TOTAL lines - $TOTAL_MOVED moved${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
+    emit5 "plan" "$SRC_KEY" "$SRC_FINAL" "lines" "$TOTAL lines - $TOTAL_MOVED moved${GLUE["$SRC_KEY"]:+ + glue ${GLUE[$SRC_KEY]}}"
 
     if [ "${#PLAN_ORDER[@]}" -gt 0 ]; then
       PRS=$(((2 * TOTAL_MOVED + DIFF_BUDGET - 1) / DIFF_BUDGET))

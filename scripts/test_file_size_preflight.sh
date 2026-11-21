@@ -710,6 +710,14 @@ printf 'fn f() {
 run_pre --format "crates/webfang_x/src/u7.rs"
 expect_match "19.12 an extra-brace file names the opener cause in English" "$OUT" "^inline_tests_note	closing brace without an opener"
 
+# 19.13/19.14 (issue #2928): the plan rows carry their arithmetic NOTE as the
+# 5th column. emit4 accepts only 4 args, so both notes (destination
+# "header N + M moved + glue G", source "T lines - M moved + glue G") never
+# reached the output; emit5 delivers them. The note is prose in the row, not a
+# key of the closed list — but it IS observable output this harness pins.
+expect_match "19.13 the destination plan row carries its note (header+moved+glue)" "$SIM_OUT" "^plan	src/z2\.rs	37	lines	header 2 \+ 30 moved \+ glue 5$"
+expect_match "19.14 the source plan row carries its note (total-moved)" "$SIM_OUT" "^plan	src/s5\.rs	570	lines	600 lines - 30 moved$"
+
 # --- summary ------------------------------------------------------------------
 
 echo "----------------------------------------"
