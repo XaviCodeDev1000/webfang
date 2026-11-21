@@ -16,7 +16,7 @@ pub(crate) mod page_content;
 pub mod types;
 
 pub use batch::{scrape_multiple_with_limit, scrape_multiple_with_limit_paced, BATCH_SCOPE};
-pub use page_content::extract_original_title;
+pub(crate) use page_content::extract_original_title;
 pub use types::{
     ScrapeBatchOutcome, ScrapeErrorCategory, ScrapeFailed, ScrapeOutcome,
     MAX_INSTRUMENTED_BODY_SIZE,

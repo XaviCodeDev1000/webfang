@@ -22,7 +22,7 @@ use tracing::{debug, warn};
 /// Extract the `<title>` from the original DOM before any transformation.
 ///
 /// 'title' is a compile-time-constant selector; `Selector::parse` cannot fail.
-pub fn extract_original_title(document: &scraper::Html) -> String {
+pub(crate) fn extract_original_title(document: &scraper::Html) -> String {
     #[allow(clippy::expect_used)]
     let selector = scraper::Selector::parse("title")
         // LCOV_EXCL_LINE defensive: compile-time-selector — 'title' is a constant valid selector
