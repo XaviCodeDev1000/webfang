@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Semantics harness for scripts/check_migration_evidence.sh — issue #2056.
+# Semantics harness for scripts/check_migration_evidence.sh.
 #
-# Hermético: construye árboles mínimos en mktemp, no llama a cargo, rustc, red
-# ni servicios externos, y nunca toca el árbol real. Dos casos crean un repo
-# git LOCAL con fechas fijas para reproducir un SQUASH. Cada caso negativo
-# lleva su `# NEGATION:`.
-# El caso límite (tren cerrado) es un CONTROL POSITIVO y por eso NO lo lleva:
-# el guard debe dejar pasar la deriva cuando TRAIN_OPEN no existe.
+# Hermetic: builds minimal trees under mktemp, never calls cargo, rustc, the
+# network or external services, and never touches the real tree. Two cases
+# create a LOCAL git repo with fixed dates to reproduce a SQUASH. Every
+# negative case carries its `# NEGATION:`.
+# The closed-train boundary case is a POSITIVE CONTROL and therefore carries
+# none: the guard must let the drift through when TRAIN_OPEN does not exist.
 #
-# El meta-guard reemplaza el guard por `exit 0` y vuelve a correr este harness:
-# todos los casos negativos pasan entonces, así que el harness VA A ROJO. Eso es
-# lo que prueba que el guard decide algo y no es decoración.
+# The meta-guard replaces the guard with `exit 0` and re-runs this harness:
+# every negative case passes then, so the harness GOES RED. That is what
+# proves the guard decides something and is not decoration.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,7 +25,7 @@ FAIL=0
 ok()  { PASS=$((PASS + 1)); printf 'OK: %s\n' "$1"; }
 bad() { FAIL=$((FAIL + 1)); printf 'FAIL: %s\n' "$1"; }
 
-fixture() { # -> imprime la ruta de un árbol coherente con baseline.json
+fixture() { # -> prints the path of a tree coherent with baseline.json
   local d
   d="$(mktemp -d "$WORK/tree.XXXXXX")"
   mkdir -p "$d/.github/workflows" "$d/evidence/mig-2026-01" \
@@ -75,12 +75,12 @@ matrix:
 YML
   python3 "$AUDITOR" --root "$d" --head-sha "$SHA" \
     --write "$d/evidence/mig-2026-01/baseline.json" >/dev/null 2>&1 \
-    || { printf 'fixture: --write falló\n' >&2; return 1; }
+    || { printf 'fixture: --write failed\n' >&2; return 1; }
   cat > "$d/evidence/mig-2026-01/PRD-v2.md" <<'MD'
 # PRD fixture
-Workspace {{BASELINE.workspace_version}} en {{BASELINE.head_sha}}.
+Workspace {{BASELINE.workspace_version}} at {{BASELINE.head_sha}}.
 Major {{BASELINE.decisions.major_target}}, backports {{BASELINE.decisions.backport_line}}.
-Índice: **RF-01** congelar baseline; **RF-23** semver; **RF-24** backports.
+Index: **RF-01** freeze the baseline; **RF-23** semver; **RF-24** backports.
 MD
   : > "$d/evidence/mig-2026-01/TRAIN_OPEN"
   printf '%s' "$d"
@@ -98,21 +98,21 @@ run_guard() { # tree [head_sha]
   return $?
 }
 
-expect_ok()  { local label="$1"; shift; if run_guard "$@"; then ok "$label"; else bad "$label (esperaba verde)"; sed 's/^/    /' "$WORK/out.log"; fi; }
-expect_red() { local label="$1"; shift; if run_guard "$@"; then bad "$label (esperaba rojo, guard verde)"; sed 's/^/    /' "$WORK/out.log"; else ok "$label"; fi; }
+expect_ok()  { local label="$1"; shift; if run_guard "$@"; then ok "$label"; else bad "$label (expected green)"; sed 's/^/    /' "$WORK/out.log"; fi; }
+expect_red() { local label="$1"; shift; if run_guard "$@"; then bad "$label (expected red, guard green)"; sed 's/^/    /' "$WORK/out.log"; else ok "$label"; fi; }
 
-# Identidad y fecha deterministas: el runner de CI no tiene user.name/email
-# global, así que TODO commit del harness debe llevarla explícita.
+# Deterministic identity and date: the CI runner has no global user.name/email,
+# so EVERY harness commit must carry them explicitly.
 git_identity() {
   export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
   export GIT_AUTHOR_NAME="Migration Test" GIT_AUTHOR_EMAIL="migration@example.com"
   export GIT_COMMITTER_NAME="Migration Test" GIT_COMMITTER_EMAIL="migration@example.com"
 }
 
-# Imprime "<sha_medido> <sha_squash>": base -> PR -> tip con baseline, y un
-# squash que comparte el ÁRBOL del tip pero cuyo padre es la base. Así el SHA
-# medido NO es ancestro del squash y el guard debe decidir por árbol, igual que
-# hace la cola de merge de este repo (.github/merge-queue.json, SQUASH).
+# Prints "<measured_sha> <squash_sha>": base -> PR -> tip with baseline, plus a
+# squash sharing the tip's TREE whose parent is the base. The measured SHA is
+# thus NOT an ancestor of the squash and the guard must decide by tree, the
+# same way this repo's merge queue does (.github/merge-queue.json, SQUASH).
 make_squash_tree() { # dir -> "<measured_sha> <squash_sha>"
   local d="$1" base measured tree
   (
@@ -124,11 +124,11 @@ make_squash_tree() { # dir -> "<measured_sha> <squash_sha>"
     printf 'release work\n' > notes.txt
     git add -A && git commit -q -m pr-work
     measured="$(git rev-parse HEAD)"
-    # Este fixture representa el estado PRE-squash: el commit medido todavía no
-    # está en un ref durable, que es justo lo que el agregado de release produce.
-    # --allow-unmerged-anchor lo dice explícitamente; sin el flag --write se
-    # niega, porque congelar un ancla así la deja huérfana en el PR siguiente
-    # (#2909 -> 4efcaf66 quedó fuera de main para siempre).
+    # This fixture represents the PRE-squash state: the measured commit is not
+    # on a durable ref yet, which is exactly what a release produces.
+    # --allow-unmerged-anchor says so explicitly; without the flag --write
+    # refuses, because freezing such an anchor leaves it orphaned on the next
+    # PR.
     python3 "$AUDITOR" --root "$d" --write "$d/evidence/mig-2026-01/baseline.json" \
       --allow-unmerged-anchor >/dev/null 2>&1 || exit 1
     git add -A && git commit -q -m tip
@@ -140,59 +140,60 @@ make_squash_tree() { # dir -> "<measured_sha> <squash_sha>"
 expect_red_message() { # label tree head_sha expected_message
   local label="$1" tree="$2" sha="$3" msg="$4"
   if run_guard "$tree" "$sha"; then
-    bad "$label (esperaba rojo, guard verde)"
+    bad "$label (expected red, guard green)"
     sed 's/^/    /' "$WORK/out.log"
   elif grep -Fq "$msg" "$WORK/out.log"; then
     ok "$label"
   else
-    bad "$label (rojo pero sin el mensaje esperado)"
+    bad "$label (red but without the expected message)"
     sed 's/^/    /' "$WORK/out.log"
   fi
 }
 
-# --- 1. control positivo: un árbol coherente debe estar verde ---------------
-D="$(fixture)" || { echo "FAIL: no se pudo construir el fixture"; exit 1; }
-expect_ok "baseline + PRD + decisiones coherentes -> verde" "$D"
+# --- 1. positive control: a coherent tree must be green ----------------------
+D="$(fixture)" || { echo "FAIL: could not build the fixture"; exit 1; }
+expect_ok "baseline + PRD + coherent decisions -> green" "$D"
 
-# --- 2. evidencia ausente ---------------------------------------------------
-# NEGATION: un baseline borrado no puede degradar a "sin evidencia, sigo".
+# --- 2. missing evidence ----------------------------------------------------
+# NEGATION: a deleted baseline cannot degrade to "no evidence, moving on".
 D2="$(fixture)"; rm -f "$D2/evidence/mig-2026-01/baseline.json"
-expect_red "baseline ausente -> rojo" "$D2"
+expect_red "missing baseline -> red" "$D2"
 
-# --- 3. JSON corrupto -------------------------------------------------------
-# NEGATION: un baseline ilegible no es un baseline vacío.
+# --- 3. corrupt JSON --------------------------------------------------------
+# NEGATION: an unreadable baseline is not an empty baseline.
 D3="$(fixture)"; printf '{' > "$D3/evidence/mig-2026-01/baseline.json"
-expect_red "baseline con JSON inválido -> rojo" "$D3"
+expect_red "baseline with invalid JSON -> red" "$D3"
 
-# --- 4. hecho literal reintroducido en la prosa -----------------------------
-# NEGATION: el v1 murió de copiar cifras en el documento; el v2 las prohíbe.
+# --- 4. literal fact reintroduced into the prose -----------------------------
+# NEGATION: v1 died from copying figures into the document; v2 bans them.
 D4="$(fixture)"; printf '\nv7.7.1\n' >> "$D4/evidence/mig-2026-01/PRD-v2.md"
-expect_red "hecho literal del v1 en el PRD -> rojo" "$D4"
+expect_red "v1 literal fact in the PRD -> red" "$D4"
 
-# --- 5. placeholder sin resolver --------------------------------------------
-# NEGATION: un placeholder inventado debe fallar, no imprimirse tal cual.
-D5="$(fixture)"; printf '\n{{BASELINE.no.existe.esta.clave}}\n' >> "$D5/evidence/mig-2026-01/PRD-v2.md"
-expect_red "placeholder huérfano -> rojo" "$D5"
+# --- 5. unresolved placeholder ----------------------------------------------
+# NEGATION: an invented placeholder must fail, not be printed as-is.
+D5="$(fixture)"; printf '\n{{BASELINE.no.such.key.exists}}\n' >> "$D5/evidence/mig-2026-01/PRD-v2.md"
+expect_red "orphan placeholder -> red" "$D5"
 
-# --- 6. RF huérfano (la deriva §3 -> §6 del v1) -----------------------------
-# NEGATION: C14 citaba un requisito que no existía; el índice lo detecta.
-D6="$(fixture)"; printf '\nVer RF-99 para guardas de ruta.\n' >> "$D6/evidence/mig-2026-01/PRD-v2.md"
-expect_red "RF citado y no definido -> rojo" "$D6"
+# --- 6. orphan RF (the v1 §3 -> §6 drift) ------------------------------------
+# NEGATION: C14 cited a requirement that did not exist; the index detects it.
+D6="$(fixture)"; printf '\nSee RF-99 for path guards.\n' >> "$D6/evidence/mig-2026-01/PRD-v2.md"
+expect_red "RF cited and not defined -> red" "$D6"
 
-# --- 7. deriva de una decisión tras un release ------------------------------
-# NEGATION: un release que rota support.json invalida RF-23/RF-24 en silencio.
+# --- 7. decision drift after a release ---------------------------------------
+# NEGATION: a release that rotates support.json invalidates RF-23/RF-24 silently.
 D7="$(fixture)"; sed -i 's/version = "8.0.2"/version = "9.0.0"/' "$D7/Cargo.toml"
-expect_red "versión del workspace derivada -> rojo con tren abierto" "$D7"
+expect_red "derived workspace version -> red with the train open" "$D7"
 
-# --- 8. CONTROL POSITIVO: tren cerrado, la deriva es NOTE -------------------
-# Sin # NEGATION: este caso DEBE pasar. Es el límite que impide un gate ruidoso.
+# --- 8. POSITIVE CONTROL: train closed, the drift is a NOTE ------------------
+# Without # NEGATION: this case MUST pass. It is the boundary that keeps the
+# gate from being noisy.
 D8="$(fixture)"; sed -i 's/version = "8.0.2"/version = "9.0.0"/' "$D8/Cargo.toml"
 rm -f "$D8/evidence/mig-2026-01/TRAIN_OPEN"
-expect_ok "tren cerrado + deriva -> NOTE no bloqueante" "$D8"
+expect_ok "train closed + drift -> non-blocking NOTE" "$D8"
 
-# --- 9. decisión congelada que ya no se deriva de la política ---------------
-# NEGATION: si support.json rota, major/backport se recalculan; un JSON viejo
-# con las decisiones pegadas a mano debe caer.
+# --- 9. frozen decision no longer derivable from the policy ------------------
+# NEGATION: if support.json rotates, major/backport are recomputed; an old JSON
+# with hand-pasted decisions must fall.
 D9="$(fixture)"; python3 - "$D9/evidence/mig-2026-01/baseline.json" <<'PY'
 import json, sys
 p = sys.argv[1]
@@ -200,32 +201,33 @@ d = json.load(open(p))
 d["decisions"]["major_target"] = "1.0.0"
 json.dump(d, open(p, "w"))
 PY
-expect_red "decisiones que no se derivan de support.json -> rojo" "$D9"
+expect_red "decisions not derivable from support.json -> red" "$D9"
 
-# --- 10. baseline medido sobre otro árbol -----------------------------------
-# NEGATION: el SHA del baseline no puede ser cualquier cadena de 40 hex.
+# --- 10. baseline measured over another tree ---------------------------------
+# NEGATION: the baseline SHA cannot be any 40-hex string.
 D10="$(fixture)"
-expect_red "head_sha que no es HEAD ni ancestro -> rojo" "$D10" "0000000000000000000000000000000000000000"
+expect_red "head_sha that is neither HEAD nor an ancestor -> red" "$D10" "0000000000000000000000000000000000000000"
 
-# --- 11. CONTROL POSITIVO: el tip medido sobrevive al SQUASH ----------------
-# Sin # NEGATION: el guard DEBE pasar cuando el baseline se midió en el tip del
-# PR y el squash conservó su árbol cambiando sólo baseline.json.
+# --- 11. POSITIVE CONTROL: the measured tip survives the SQUASH --------------
+# Without # NEGATION: the guard MUST pass when the baseline was measured on the
+# PR tip and the squash preserved its tree changing only baseline.json.
 D11="$(fixture)"
 read -r measured squash <<<"$(make_squash_tree "$D11")"
 if git -C "$D11" merge-base --is-ancestor "$measured" "$squash"; then
-  bad "fixture squash inválida: el SHA medido sí es ancestro (no prueba tree-equality)"
+  bad "invalid squash fixture: the measured SHA IS an ancestor (does not prove tree-equality)"
 else
-  expect_ok "tip medido + squash del mismo árbol -> verde" "$D11" "$squash"
+  expect_ok "measured tip + squash of the same tree -> green" "$D11" "$squash"
 fi
 
-# --- 12. baseline medido sobre OTRO ÁRBOL -----------------------------------
-# NEGATION: un squash con otro árbol no puede colar aunque el SHA sea real.
+# --- 12. baseline measured over ANOTHER TREE ---------------------------------
+# NEGATION: a squash with a different tree cannot slip through even with a
+# real SHA.
 D12="$(fixture)"
 read -r measured squash <<<"$(make_squash_tree "$D12")"
 (
   cd "$D12" || exit 1
   git_identity
-  printf 'otro arbol\n' > other.txt
+  printf 'another tree\n' > other.txt
   git add -A && git commit -q -m other
 )
 other="$(git -C "$D12" rev-parse HEAD)"
@@ -236,10 +238,10 @@ d = json.load(open(p))
 d["head_sha"] = sha
 json.dump(d, open(p, "w"))
 PY
-expect_red_message "SHA de otro árbol -> rojo con mensaje de árbol" "$D12" "$squash" "el baseline fue medido sobre otro árbol"
+expect_red_message "SHA of another tree -> red with the tree message" "$D12" "$squash" "the baseline was measured over another tree"
 
-# --- 13. SHA inexistente con git real ---------------------------------------
-# NEGATION: un objeto que no existe no puede colar por la rama de árbol.
+# --- 13. nonexistent SHA with real git ---------------------------------------
+# NEGATION: a nonexistent object cannot slip through the tree branch.
 D13="$(fixture)"
 read -r measured squash <<<"$(make_squash_tree "$D13")"
 python3 - "$D13/evidence/mig-2026-01/baseline.json" <<'PY'
@@ -249,18 +251,18 @@ d = json.load(open(p))
 d["head_sha"] = "f" * 40
 json.dump(d, open(p, "w"))
 PY
-expect_red_message "head_sha inexistente con git real -> rojo con mensaje" "$D13" "$squash" "el baseline fue medido sobre otro árbol"
+expect_red_message "nonexistent head_sha with real git -> red with the message" "$D13" "$squash" "the baseline was measured over another tree"
 
-# --- 14. repo sin .git -------------------------------------------------------
-# NEGATION: sin git no se puede probar ancestría ni equivalencia de árbol.
+# --- 14. repo without .git ---------------------------------------------------
+# NEGATION: without git neither ancestry nor tree equivalence can be proven.
 D14="$(fixture)"
-expect_red_message "repo sin .git -> rojo con mensaje de árbol" "$D14" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "el baseline fue medido sobre otro árbol"
+expect_red_message "repo without .git -> red with the tree message" "$D14" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "the baseline was measured over another tree"
 
-# --- 15. --write se niega a congelar un ancla huérfana ---------------------
-# NEGATION: es el defecto de #2909. `--write` congeló el tip de la rama del
-# release; la cola lo squasheó y el commit quedó fuera de main para siempre, así
-# que el baseline pasó una vez y falló en el PR siguiente. El guard tiene que
-# negarse a escribir ese ancla salvo que el operador lo pida explícitamente.
+# --- 15. --write refuses to freeze an orphaned anchor ------------------------
+# NEGATION: --write froze a release branch tip; the queue squashed it and the
+# commit fell out of the default branch's history forever, so the baseline
+# passed once and failed on the next PR. The guard must refuse to write that
+# anchor unless the operator asks for it explicitly.
 D15="$(fixture)"
 (
   cd "$D15" || exit 1
@@ -269,31 +271,31 @@ D15="$(fixture)"
   git add -A && git commit -q -m base
   git branch -M main
   printf 'orphan\n' > orphan.txt
-  git add -A && git commit -q -m "tip fuera de main"
+  git add -A && git commit -q -m "tip outside the default branch"
   git checkout -q -b release-line 2>/dev/null || true
   printf 'release\n' > rel.txt
-  git add -A && git commit -q -m "tip de la rama del release"
+  git add -A && git commit -q -m "release branch tip"
 ) >/dev/null 2>&1
 ORPHAN_SHA="$(git -C "$D15" rev-parse HEAD)"
 if [ "$ORPHAN_SHA" = "$(git -C "$D15" rev-parse main)" ]; then
-  bad "fixture 15 inválida: el tip no puede coincidir con main"
+  bad "invalid fixture 15: the tip cannot match the default branch"
 else
   if python3 "$AUDITOR" --root "$D15" --head-sha "$ORPHAN_SHA" \
        --write "$WORK/orphan.json" >"$WORK/w.log" 2>&1; then
-    bad "--write aceptó un ancla huérfana (regresión de #2909)"
+    bad "--write accepted an orphaned anchor (the defect this check exists for)"
     sed 's/^/    /' "$WORK/w.log"
   elif grep -Fq "the next squash will orphan it" "$WORK/w.log"; then
-    ok "--write rechaza un ancla que ningún ref durable alcanza"
+    ok "--write refuses an anchor no durable ref reaches"
   else
-    bad "--write falló pero sin el mensaje esperado"
+    bad "--write failed but without the expected message"
     sed 's/^/    /' "$WORK/w.log"
   fi
-  # El escape explícito tiene que seguir existiendo para el estado pre-squash.
+  # The explicit escape must keep existing for the pre-squash state.
   if python3 "$AUDITOR" --root "$D15" --head-sha "$ORPHAN_SHA" \
        --write "$WORK/orphan.json" --allow-unmerged-anchor >"$WORK/w2.log" 2>&1; then
-    ok "--allow-unmerged-anchor sigue aceptando el estado pre-squash"
+    ok "--allow-unmerged-anchor still accepts the pre-squash state"
   else
-    bad "--allow-unmerged-anchor no aceptó el estado pre-squash"
+    bad "--allow-unmerged-anchor did not accept the pre-squash state"
     sed 's/^/    /' "$WORK/w2.log"
   fi
 fi

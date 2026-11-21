@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# check_migration_evidence.sh — el PRD no puede volver a mentir en silencio.
+# check_migration_evidence.sh — the PRD cannot lie silently again.
 #
-# Gate fail-closed de F0. Verifica evidence/mig-2026-01/baseline.json contra:
-#   * el PRD v2 (sin hechos literales, placeholders resueltos, RFs no huérfanos),
-#   * la historia de git (el SHA medido es HEAD, ancestro o el árbol de un
-#     squash; el único cambio de árbol permitido es el propio baseline),
-#   * las políticas vivas (Cargo.toml, rust-toolchain.toml, support.json, README).
+# Fail-closed F0 gate. Verifies evidence/mig-2026-01/baseline.json against:
+#   * the PRD v2 (no literal facts, placeholders resolved, no orphan RFs),
+#   * git history (the measured SHA is HEAD, an ancestor, or the tree of a
+#     squash; the only tree change allowed is the baseline itself),
+#   * the living policies (Cargo.toml, rust-toolchain.toml, support.json, README).
 #
-# A diferencia de un gate de contadores, esto NO pone rojo main cada vez que
-# alguien agrega un test: los contadores son evidencia de F0, no un contrato
-# sobre el árbol. Lo que se compara son los hechos que invalidan DECISIONES
-# (RF-23/RF-24/K9/RF-13). Con evidence/mig-2026-01/TRAIN_OPEN presente la
-# deriva es bloqueante; sin ese marcador degrada a NOTE (tren cerrado).
+# Unlike a counter gate, this does NOT turn main red every time somebody adds
+# a test: counters are F0 evidence, not a contract over the tree. What gets
+# compared are the facts that invalidate DECISIONS (RF-23/RF-24/K9/RF-13).
+# With evidence/mig-2026-01/TRAIN_OPEN present the drift is blocking; without
+# that marker it degrades to a NOTE (train closed).
 #
 # Wiring: .github/workflows/ci.yml -> job `repo-guards`.
-# Harness: scripts/test_migration_evidence.sh (con marcadores # NEGATION:),
-#          también wired en el mismo job. Ambos exigidos por #2056.
+# Harness: scripts/test_migration_evidence.sh (with # NEGATION: markers),
+#          wired in the same job.
 #
-# Exit: 0 coherente · 1 deriva/evidencia rota · 2 uso incorrecto.
+# Exit: 0 coherent · 1 drift/broken evidence · 2 incorrect usage.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,9 +27,9 @@ EVIDENCE="${MIGRATION_EVIDENCE:-$ROOT/evidence/mig-2026-01/baseline.json}"
 PRD="${MIGRATION_PRD:-$ROOT/evidence/mig-2026-01/PRD-v2.md}"
 MARKER="${MIGRATION_TRAIN_OPEN:-$ROOT/evidence/mig-2026-01/TRAIN_OPEN}"
 
-[[ -f $AUDITOR ]] || { echo "::error:: falta el auditor $AUDITOR" >&2; exit 1; }
-[[ -f $EVIDENCE ]] || { echo "::error:: falta el baseline $EVIDENCE (corré --write en F0)" >&2; exit 1; }
-[[ -f $PRD ]] || { echo "::error:: falta el PRD v2 $PRD" >&2; exit 1; }
+[[ -f $AUDITOR ]] || { echo "::error:: missing auditor $AUDITOR" >&2; exit 1; }
+[[ -f $EVIDENCE ]] || { echo "::error:: missing baseline $EVIDENCE (run --write at F0)" >&2; exit 1; }
+[[ -f $PRD ]] || { echo "::error:: missing PRD v2 $PRD" >&2; exit 1; }
 
 python3 "$AUDITOR" \
   --root "$ROOT" \
