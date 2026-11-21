@@ -190,7 +190,8 @@ pub async fn fetch_url(url: &str, config: &CrawlerConfig) -> Result<HttpFetchRes
     // Extract cookies BEFORE consuming the body. wreq's `Response::cookies()`
     // yields `wreq::cookie::Cookie<'_>` items parsed from `Set-Cookie` headers;
     // we project them into the domain `Cookie` DTO to match every other
-    // downloader in the codebase (see `WreqDownloader::extract_cookies`).
+    // downloader in the codebase (see the free `extract_cookies` helper in
+    // `downloader/wreq_downloader/cookies.rs`).
     let cookies = response
         .cookies()
         .map(|c| Cookie {
