@@ -49,7 +49,6 @@
       "crates/webfang_core/src/domain/html_extraction/date_extractor.rs": 659,
       "crates/webfang_core/src/domain/network_policy.rs": 756,
       "crates/webfang_core/src/domain/options_spec/crawler.rs": 974,
-      "crates/webfang_core/src/domain/options_spec/mod.rs": 1110,
       "crates/webfang_core/src/domain/providers.rs": 546,
       "crates/webfang_core/src/domain/record_transition.rs": 577,
       "crates/webfang_core/src/domain/site/crawler_config.rs": 808,
