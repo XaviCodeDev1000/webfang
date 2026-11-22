@@ -1,6 +1,7 @@
 //! JSON-per-domain v2 record store (D2, frozen contracts).
 //!
-//! Persists one [`RawRecord`] per canonical URL under a versioned envelope:
+//! Persists one [`crate::domain::exporter::RawRecord`] per canonical URL under
+//! a versioned envelope:
 //!
 //! ```json
 //! { "version": 2, "domain_key": "example.com", "created_at": 0,

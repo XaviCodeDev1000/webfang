@@ -474,8 +474,10 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   `record_store_file::migrate_v1` widened to `pub(super)` for parent/sibling
   use, `RawRecord` / `PageStatus` / `std::io::Write` imported directly in the
   two extracted test files (previously inherited via `use super::*`), one
-  unused `ErrorClass` import dropped, and an explicit `#[path]` added on the
-  new production child (Rust 2018 submodule lookup). Golden
+  unused `ErrorClass` import dropped, an explicit `#[path]` added on the new
+  production child (Rust 2018 submodule lookup), and the module-level
+  `[`RawRecord`]` intra-doc link re-pointed to the full crate path after the
+  import moved. Golden
   `real_tree_sites.txt` refreshed in the same commit; 27/27 focused tests
   green.
 
