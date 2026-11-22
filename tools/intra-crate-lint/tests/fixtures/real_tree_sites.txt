@@ -774,11 +774,11 @@ application/http_client/client.rs	18	use	crate::application::rate_limiter::Gover
 application/http_client/client.rs	18	use	crate::application::rate_limiter::PacingContext
 application/http_client/client.rs	18	use	crate::application::rate_limiter::record_pacing_wait
 application/http_client/client.rs	157	inline	crate::application::url_filter::extract_domain
-application/http_client/client.rs	394	inline	crate::domain::http_port::HttpClientPort
-application/http_client/client.rs	401	inline	crate::domain::http_error::HttpResult
-application/http_client/client.rs	402	inline	crate::domain::http_port::HttpResponse
-application/http_client/client.rs	416	inline	crate::domain::error::mapping::http_failure
-application/http_client/client.rs	433	inline	crate::domain::http_port::HttpResponse
+application/http_client/client.rs	393	inline	crate::domain::http_port::HttpClientPort
+application/http_client/client.rs	400	inline	crate::domain::http_error::HttpResult
+application/http_client/client.rs	401	inline	crate::domain::http_port::HttpResponse
+application/http_client/client.rs	415	inline	crate::domain::error::mapping::http_failure
+application/http_client/client.rs	432	inline	crate::domain::http_port::HttpResponse
 application/http_client/client_response.rs	15	use	crate::application::http_client::retry::RetryPolicy
 application/http_client/client_response.rs	15	use	crate::application::http_client::retry::retry_with_backoff
 application/http_client/client_response.rs	16	use	crate::domain::body_cap
