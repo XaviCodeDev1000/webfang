@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::config::ConcurrencyConfig;
 
 #[test]
 fn parse_timeout_secs_accepts_valid_value() {
@@ -169,9 +170,8 @@ fn looks_like_integer_separates_numbers_from_keywords() {
 
 #[test]
 fn rate_limit_burst_flag_parses_through_clap() {
-    let args =
-        crate::cli::args::test_support::parse_args_hermetic(&["--rate-limit-burst", "9"])
-            .expect("valid flag combination");
+    let args = crate::cli::args::test_support::parse_args_hermetic(&["--rate-limit-burst", "9"])
+        .expect("valid flag combination");
     assert_eq!(args.crawler.rate_limit_burst.as_deref(), Some("9"));
 }
 

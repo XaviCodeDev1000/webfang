@@ -302,9 +302,7 @@ fn out_of_bounds_and_malformed_inputs_error_exactly_as_before() {
 
     let err = parse_args_hermetic(&["--timeout-secs", "0"]).expect_err("zero timeout rejected");
     assert!(
-        err.contains(
-            "--timeout-secs debe ser >= 1 (0 hace que cada request falle al instante)"
-        ),
+        err.contains("--timeout-secs debe ser >= 1 (0 hace que cada request falle al instante)"),
         "got: {err}"
     );
 
@@ -318,9 +316,7 @@ fn out_of_bounds_and_malformed_inputs_error_exactly_as_before() {
     let err = parse_args_hermetic(&["--download-concurrency", "0"])
         .expect_err("zero concurrency rejected");
     assert!(
-        err.contains(
-            "--download-concurrency debe ser >= 1 (0 causa un deadlock / hang infinito)"
-        ),
+        err.contains("--download-concurrency debe ser >= 1 (0 causa un deadlock / hang infinito)"),
         "got: {err}"
     );
 
@@ -359,8 +355,7 @@ fn download_timeout_zero_and_malformed_error_like_timeout_secs() {
 /// boundary (flag and `WEBFANG_CONCURRENCY` share the parser).
 #[test]
 fn parse_concurrency_rejects_zero_with_spanish_error() {
-    let err =
-        parse_args_hermetic(&["--concurrency", "0"]).expect_err("zero concurrency rejected");
+    let err = parse_args_hermetic(&["--concurrency", "0"]).expect_err("zero concurrency rejected");
     assert!(
         err.contains("--concurrency debe ser >= 1 (usa 'auto' para autodetectar)"),
         "got: {err}"

@@ -25,7 +25,6 @@
       "crates/webfang_core/src/application/llm_extraction.rs": 677,
       "crates/webfang_core/src/application/rate_limiter.rs": 935,
       "crates/webfang_core/src/application/vault_search.rs": 1076,
-      "crates/webfang_core/src/cli/args/crawler.rs": 1375,
       "crates/webfang_core/src/cli/args/mod.rs": 797,
       "crates/webfang_core/src/cli/batch_flow.rs": 1250,
       "crates/webfang_core/src/cli/config.rs": 855,
