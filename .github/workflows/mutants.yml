@@ -11,9 +11,11 @@
 #                   is min(16, ceil(count/6)) — #2296 calibrated the draw
 #                   with a measured shard (run 40586006186: 6 mutants, 24
 #                   min of mutants, 2 of them hitting the --timeout=300
-#                   ceiling): the worst case is ~61 s build + 300 s test per
-#                   mutant, so 8 mutants/shard could exceed the 45-minute
-#                   shard timeout and 6 fits it (~40 min incl. ~3.5 min of
+#                   ceiling). #2983 (run 45009282308) re-measured the worst
+#                   case: 6 timeout-heavy mutants of ONE function cost
+#                   ~191 s build + 300 s test each (~491 s, ~49 min) and blew
+#                   past the 45-minute wall, so the shard wall is 60 min and
+#                   6 mutants/shard still fits (~51 min incl. ~1.5 min of
 #                   non-mutant overhead). Shard ids are 0-BASED: --shard k/N
 #                   requires k < N and slices the first ceil(count/N) mutants
 #                   onto shard 0 — the pre-#2296 1-based list made the last
@@ -58,6 +60,16 @@
 #   - Survivor detection greps "MISSED" — the per-survivor token emitted by
 #     cargo-mutants 27.1.0 (verified against real CI artifacts; the old
 #     "NOT CAUGHT" token matched ZERO lines — the old alarm was dead code).
+#   - The aggregator downloaded every shard artifact with merge-multiple:
+#     true into ONE directory, but every shard uploaded the same inner file
+#     name (mutants-output.txt), so the shards overwrote each other and the
+#     MISSED count covered ONE shard — #2983 reported TOTAL=0 while shard 2
+#     held 4 MISSED. Each shard now names its own file (mutants-pr-<k>.txt),
+#     and the job fails closed when the file count != the measured shard
+#     count or when the prepare job failed (both used to report green).
+#     Per-artifact DIRECTORIES are not a fix: download-artifact v4 extracts
+#     into `path` itself when the pattern matches exactly one artifact, so a
+#     1-shard PR would report zero results.
 
 name: Mutation Testing
 
@@ -98,7 +110,7 @@ jobs:
   # mutants and an empty matrix, a two-function PR runs one shard, a monster
   # diff (the export slice touched ~2k lines) caps at 16. Every mutant needs
   # a full recompile of webfang_core, and the gate holds around the
-  # 45-minute per-shard timeout below.
+  # 60-minute per-shard timeout below.
   # ---------------------------------------------------------------------------
   mutants-pr-prepare:
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
@@ -163,7 +175,10 @@ jobs:
     if: needs.mutants-pr-prepare.outputs.shard_count != '0'
     name: "cargo-mutants (PR diff shard ${{ matrix.shard }})"
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 60, not 45: a shard of 6 timeout-heavy mutants costs 6 * (~191 s build +
+    # 300 s test) ~= 49 min (run 45009282308), so the old wall killed the last
+    # mutant mid-test and the whole gate reported "shard failed: cancelled".
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -207,14 +222,16 @@ jobs:
             --baseline=skip \
             --timeout=300 \
             --in-place \
-            2>&1 | tee mutants-output.txt
+            2>&1 | tee "mutants-pr-${{ matrix.shard }}.txt"
 
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
           name: mutants-pr-${{ matrix.shard }}
-          path: mutants-output.txt
+          # The shard is IN the file name: a merged download must keep one file
+          # per shard, not one file in total (see the aggregator below).
+          path: mutants-pr-*.txt
 
   # The REQUIRED context. Its name is the check the branch protection
   # demands, so it must ALWAYS be reported — a required context that never
@@ -231,19 +248,52 @@ jobs:
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           pattern: mutants-pr-[0-9]*
+          # merge-multiple is safe ONLY because each shard uploads a
+          # shard-named file. The pre-fix shards all uploaded
+          # `mutants-output.txt`, so a merged download kept ONE file and the
+          # count below covered a single shard (#2983: TOTAL=0 while
+          # mutants-pr-2 held 4 MISSED). Do NOT reintroduce a shared inner
+          # file name. Per-artifact directories are not an alternative:
+          # download-artifact v4 extracts into `path` directly when the
+          # pattern matches exactly ONE artifact, so a 1-shard PR would lose
+          # the directory and report zero results.
           merge-multiple: true
           path: mutants-results/
 
       - name: Summarize survivors
         run: |
           TOTAL=0
+          SHARDS=0
           for f in mutants-results/*; do
             [ -f "$f" ] || continue
+            SHARDS=$((SHARDS + 1))
             COUNT=$(grep -c "MISSED" "$f" || true)
             TOTAL=$((TOTAL + COUNT))
             [ "$COUNT" -gt 0 ] && echo "Survivors in $(basename "$f"): $COUNT"
           done
           echo "**Total surviving mutants in the PR diff: $TOTAL**" >> "$GITHUB_STEP_SUMMARY"
+          # Fail closed: a missing shard file under-counts in silence, and a
+          # prepare job that FAILED used to report green. A SKIPPED prepare is
+          # not a failure — it is an out-of-scope event (weekly schedule), where
+          # no shard ran and there is nothing to aggregate.
+          PREPARE="${{ needs.mutants-pr-prepare.result }}"
+          EXPECTED="${{ needs.mutants-pr-prepare.outputs.shard_count }}"
+          if [ "$PREPARE" = "skipped" ]; then
+            echo "prepare skipped (event: ${{ github.event_name }}); no shards ran."
+            exit 0
+          fi
+          if [ "$PREPARE" != "success" ]; then
+            echo "::error::the prepare job did not succeed (result: $PREPARE)"
+            exit 1
+          fi
+          if [ -z "$EXPECTED" ]; then
+            echo "::error::the prepare job produced no shard count"
+            exit 1
+          fi
+          if [ "$SHARDS" -ne "$EXPECTED" ]; then
+            echo "::error::expected $EXPECTED shard result files, found $SHARDS"
+            exit 1
+          fi
           if [ "$TOTAL" -gt 0 ]; then
             echo "::error::$TOTAL surviving mutants in the PR diff — the diff is under-tested"
             exit 1
@@ -307,14 +357,14 @@ jobs:
             --baseline=skip \
             --timeout=300 \
             --in-place \
-            2>&1 | tee mutants-output.txt
+            2>&1 | tee "mutants-${{ matrix.shard }}.txt"
 
       - name: Check for survivors
         if: always()
         run: |
-          if grep -q "MISSED" mutants-output.txt; then
+          if grep -q "MISSED" "mutants-${{ matrix.shard }}.txt"; then
             echo "::warning::Surviving mutants detected in shard ${{ matrix.shard }}/96"
-            grep "MISSED" mutants-output.txt
+            grep "MISSED" "mutants-${{ matrix.shard }}.txt"
           fi
 
       - name: Upload results
@@ -322,7 +372,9 @@ jobs:
         if: always()
         with:
           name: mutants-${{ matrix.shard }}
-          path: mutants-output.txt
+          # The shard is IN the file name, so the merged download below keeps
+          # one row per shard instead of one row in total.
+          path: mutants-*.txt
 
   # ---------------------------------------------------------------------------
   # AGGREGATE REPORT — merge all shard outcomes into one summary.
@@ -335,6 +387,9 @@ jobs:
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           pattern: mutants-*
+          # merge-multiple is safe because each shard uploads a shard-named
+          # file. With the pre-fix shared inner name, this collapsed 96 rows
+          # into one.
           merge-multiple: true
           path: mutants-results/
 
@@ -351,7 +406,7 @@ jobs:
           for f in mutants-results/*; do
             [ -f "$f" ] || continue
             SHARD=$(basename "$f" .txt)
-            COUNT=$(grep -c "MISSED" "$f" || echo 0)
+            COUNT=$(grep -c "MISSED" "$f" || true)
             TOTAL=$((TOTAL + COUNT))
             echo "| $SHARD | $COUNT |" >> $GITHUB_STEP_SUMMARY
           done

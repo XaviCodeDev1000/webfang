@@ -418,8 +418,10 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   loop in `evict_expired` duplicates the inline loop in
   `SessionManager::evict_stale` (pre-existing).
 - L14 (2026-11-22, correction to L12 in B10b): the B10b branch was synced
-  with `main@7f96253d` (merge, not rebase) before delivery, after O3-B5 and
-  O3-B7 landed. The bookkeeping conflicts were resolved by removing both
-  splits' closed ratchet entries (`session_pool.rs`,
-  `file_trace_layer.rs`, `sqlite.rs`); the golden set was regenerated with
-  `scripts/refresh_real_tree_golden.sh` on the merged tree.
+  with `main@5b8e4130` (merge commits, not rebase) before delivery: first
+  O3-B5 + O3-B7 (`02aa7a8f`), then the mutants-gate fix
+  `fix(ci): count MISSED across every mutation shard` (`5b8e4130`). The
+  bookkeeping conflicts were resolved by removing both splits' closed
+  ratchet entries (`session_pool.rs`, `file_trace_layer.rs`, `sqlite.rs`);
+  the golden set was regenerated with `scripts/refresh_real_tree_golden.sh`
+  on the merged tree.

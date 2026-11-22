@@ -20,16 +20,19 @@
 #
 #   ci_mutant_shards.sh shard-count <mutant_count>
 #       Pure formula (#2296 calibration, measured 2026-10-27): shards of ~6
-#       mutants capped at 16. The measured worst case on the CI runner
-#       (cargo-mutants 27.1.0, CARGO_PROFILE_DEV_DEBUG=0) is ~61 s build +
-#       300 s per-test timeout per mutant — a shard of 8 where 4+ mutants hit
-#       the --timeout=300 ceiling blew past the 45-minute shard timeout, and
-#       a real shard (run 40586006186) spent 24 min on just 6 timeout-heavy
-#       mutants. 6 mutants/shard fits the worst case in ~40 min including the
-#       ~3.5 min non-mutant overhead. The cap is the cost ceiling, not a
-#       sizing promise: a diff so big that cap*size mutants stay uncovered
-#       draws cap/size mutants per shard and its shards can still hit the
-#       shard timeout (fail-closed) — the pressure valve is splitting the PR.
+#       mutants capped at 16. The worst case on the CI runner (cargo-mutants
+#       27.1.0, CARGO_PROFILE_DEV_DEBUG=0) is a shard where EVERY mutant hits
+#       the --timeout=300 ceiling: re-measured on #2983 (run 45009282308) at
+#       ~191 s build + 300 s test per timeout-heavy mutant (~491 s), so 6 of
+#       them cost ~49 min — the old 45-minute shard wall killed the last
+#       mutant mid-test. The wall is now 60 min (mutants.yml) and 6
+#       mutants/shard fits at ~51 min including the ~1.5 min non-mutant
+#       overhead. Earlier calibration (run 40586006186): ~61 s build per
+#       mutant, 24 min for 6 timeout-heavy mutants. The cap is the cost
+#       ceiling, not a sizing promise: a diff so big that cap*size mutants
+#       stay uncovered draws cap/size mutants per shard and its shards can
+#       still hit the shard timeout (fail-closed) — the pressure valve is
+#       splitting the PR.
 #       Calibration knobs: MUTANT_SHARD_SIZE, MUTANT_SHARD_CAP.
 #
 #   ci_mutant_shards.sh shards <git.diff> [extra cargo-mutants args...]
