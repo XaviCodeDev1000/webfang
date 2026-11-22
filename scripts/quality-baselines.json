@@ -30,7 +30,6 @@
       "crates/webfang_core/src/cli/batch_flow.rs": 1250,
       "crates/webfang_core/src/cli/config.rs": 855,
       "crates/webfang_core/src/cli/discovery_phase.rs": 637,
-      "crates/webfang_core/src/cli/error.rs": 1117,
       "crates/webfang_core/src/cli/export_flow.rs": 753,
       "crates/webfang_core/src/cli/llm_wire.rs": 975,
       "crates/webfang_core/src/cli/scrape_flow.rs": 1444,
@@ -80,7 +79,6 @@
       "crates/webfang_mcp/src/mcp_server/params.rs": 1552,
       "crates/webfang_mcp/src/mcp_server/path_gate.rs": 957,
       "crates/webfang_mcp/src/mcp_server/provenance.rs": 516,
-      "crates/webfang_test_utils/src/lib.rs": 1458,
       "crates/webfang_core/src/cli/batch_flush.rs": 527
     },
     "exceptions": {

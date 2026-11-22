@@ -225,3 +225,26 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   crate antes del split y se ordenan las olas por churn/complejidad dentro de
   cada banda. Sin cambio de alcance: el 500 sigue siendo guardrail y la
   catraca queda intacta.
+- L6 (2026-11-22): O3-B2 closed — the first Ola 3 / T4 batch (issue #2964,
+  branch `refactor/ola3-b2`, base `04a34612`). Both band files left the
+  ratchet with `--remove` in the same commit as the split that produced it:
+  `crates/webfang_core/src/cli/error.rs` 1117 → 453 plus three themed test
+  siblings extracted through `split_tests.sh` (multiset proof 47 = 13 + 11 +
+  23: `error_tests.rs` 165, `error_matrix_tests.rs` 162,
+  `error_overrides_tests.rs` 347); `crates/webfang_test_utils/src/lib.rs`
+  1438 → 179 (the recorded −20 drift closed by the removal) split by
+  responsibility into `env.rs` 436, `redaction.rs` 92, `bin_path.rs` 133 with
+  the crate-root re-exports preserving every `webfang_test_utils::*` path,
+  and its 29 inline tests extracted by theme (29 = 4 + 10 + 15:
+  `bin_path_tests.rs` 110, `env_tests.rs` 335, `redaction_tests.rs` 194).
+  Every resulting part measures <= 500; `file_size_done.sh` exits 0 for both
+  batch paths; the intra-crate golden gained +28 sites with the error.rs
+  split (+27 in `error_overrides_tests.rs`, +1 in `error_matrix_tests.rs`)
+  and the full gate battery (check, strict clippy, fmt --check,
+  rustdoc -D warnings, nextest, the four size/duplication/dead-test
+  guards and the dependency-direction gate) is green. The 47 + 29 = 76
+  affected test leaf names are unchanged modulo the five declared mod-path
+  renames (three in test_utils, two in error). Needs-review decision for
+  the harness file recorded on issue
+  #2964 before the first cut (driver: glued modules; strategy: extract
+  module per responsibility + re-export surface).

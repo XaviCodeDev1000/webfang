@@ -1,7 +1,7 @@
 //! OS-dependent connection-failure collapse shared by every redacted snapshot.
 //!
-//! Kept in its own module because `lib.rs` is grandfathered by the file-size
-//! ratchet and may not grow even one line.
+//! Kept in its own module: the connection-collapse regex rationale is a
+//! self-contained unit owned by the redaction family.
 
 use regex::Regex;
 
