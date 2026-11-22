@@ -17,7 +17,6 @@
       "crates/webfang_core/src/application/crawler/crawl_scheduler.rs": 645,
       "crates/webfang_core/src/application/crawler/ports.rs": 748,
       "crates/webfang_core/src/application/elastic_ingestion.rs": 878,
-      "crates/webfang_core/src/application/http_client/client.rs": 627,
       "crates/webfang_core/src/application/llm_extraction.rs": 677,
       "crates/webfang_core/src/application/rate_limiter.rs": 935,
       "crates/webfang_core/src/cli/args/mod.rs": 797,
