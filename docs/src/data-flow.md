@@ -187,7 +187,7 @@ code | crates/webfang_core/src/infrastructure/semantic_cleaner.rs | extract_text
 code | crates/webfang_core/src/infrastructure/llm/client.rs | chat/completions
 code | crates/webfang_core/src/infrastructure/llm/remote_embedding.rs | /embeddings
 code | crates/webfang_core/src/cli/llm_wire.rs | build_llm_provider
-code | crates/webfang_core/src/cli/batch_flow.rs | .webfang-batch-capture.jsonl
+code | crates/webfang_core/src/cli/batch_spool.rs | .webfang-batch-capture.jsonl
 code | crates/webfang_core/src/infrastructure/autotuning.rs | crawl.db
 code | crates/webfang_core/src/domain/local_secret_store.rs | credentials.age
 code | crates/webfang_core/src/domain/proxy_config.rs | ValidatedProxy
