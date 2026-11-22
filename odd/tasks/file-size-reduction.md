@@ -281,7 +281,7 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   green between commits): `options_spec/error.rs` (83),
   `options_spec/types.rs` (279), tests to `options_spec_tests.rs` (429)
   via `split_tests.sh` (19 items, partition proof), `options_spec/validation.rs`
-  (305); `mod.rs` = 45-line facade, `--remove` in the commit where it
+  (309); `mod.rs` = 45-line facade, `--remove` in the commit where it
   crossed <=500. `vault_search.rs`: 673-line test mod split into
   `vault_search_support_tests.rs` (235), `vault_search_search_tests.rs`
   (213), `vault_search_sync_tests.rs` (230) via `split_tests.sh`
@@ -290,5 +290,7 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   tests green before the first cut; 51 focused tests green after each
   seam. Visibility corrections (declared two-hats): `NumericPolicy::
   INTEGER_PARSE_DETAIL` -> `pub(super)`; shared vault test stubs -> `pub(super)`.
-  Golden `real_tree_sites.txt`: +12 lines from the new vault test files
-  (intra-crate direction check green after refresh).
+  Golden `real_tree_sites.txt`: +12 lines net (13 records in the three new
+  vault test files, minus relocated base test-mod records; intra-crate
+  direction check green after refresh). The branch was rebased onto
+  `main@52e4395b` before delivery.
