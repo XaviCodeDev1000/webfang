@@ -11,9 +11,7 @@ fn ensure_waf_inspector() {
     use std::sync::{Arc, OnceLock};
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        set_waf_inspector(
-            Arc::new(WafInspector) as Arc<dyn crate::domain::waf::WafInspectorPort>
-        );
+        set_waf_inspector(Arc::new(WafInspector) as Arc<dyn crate::domain::waf::WafInspectorPort>);
     });
 }
 
@@ -51,8 +49,7 @@ async fn discovers_via_robots_relative_directive() {
     Mock::given(method("GET"))
         .and(path("/robots.txt"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string("User-agent: *\nSitemap: /sitemap.xml\n"),
+            ResponseTemplate::new(200).set_body_string("User-agent: *\nSitemap: /sitemap.xml\n"),
         )
         .mount(&mock)
         .await;
@@ -115,7 +112,8 @@ async fn discovers_via_subpath_sitemap() {
 
 /// Cloudflare Turnstile widget marker — Challenge-tier (T1), blocks even
 /// in degraded mode per REQ-WAF-05/09.
-const CHALLENGE_HTML: &str = r#"<html><body>Just a moment...</body><div id="cf-turnstile" data-sitekey="abc"></div></html>"#;
+const CHALLENGE_HTML: &str =
+    r#"<html><body>Just a moment...</body><div id="cf-turnstile" data-sitekey="abc"></div></html>"#;
 
 /// A WAF challenge served where robots.txt should be must abort discovery
 /// with the typed `CrawlError::WafChallenge` (carrying host context and

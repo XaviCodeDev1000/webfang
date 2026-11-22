@@ -374,8 +374,8 @@ application/crawler/discovery.rs	443	inline	crate::cli::crash_points::POST_EXTRA
 application/crawler/discovery.rs	443	inline	crate::cli::crash_points::hit
 application/crawler/discovery_scrape_tests.rs	7	use	crate::domain::waf::set_waf_inspector
 application/crawler/discovery_scrape_tests.rs	8	use	crate::infrastructure::http::waf_engine::WafInspector
-application/crawler/discovery_scrape_tests.rs	12	inline	crate::domain::waf::WafInspectorPort
-application/crawler/discovery_scrape_tests.rs	21	use	crate::domain::downloader_port::FetchedPage
+application/crawler/discovery_scrape_tests.rs	11	inline	crate::domain::waf::WafInspectorPort
+application/crawler/discovery_scrape_tests.rs	19	use	crate::domain::downloader_port::FetchedPage
 application/crawler/discovery_tests.rs	9	use	crate::domain::CrawlError
 application/crawler/discovery_tests.rs	12	use	crate::infrastructure::crawler::parse_sitemap
 application/crawler/engine.rs	37	use	crate::application::crawler::ports::TerminationSource
@@ -617,7 +617,7 @@ application/crawler/sitemap_discovery_tests.rs	2	use	crate::domain::error::WafDe
 application/crawler/sitemap_discovery_tests.rs	3	use	crate::infrastructure::observability::test_log_capture::LogBuffer
 application/crawler/sitemap_discovery_tests.rs	9	use	crate::domain::waf::set_waf_inspector
 application/crawler/sitemap_discovery_tests.rs	10	use	crate::infrastructure::http::waf_engine::WafInspector
-application/crawler/sitemap_discovery_tests.rs	15	inline	crate::domain::waf::WafInspectorPort
+application/crawler/sitemap_discovery_tests.rs	14	inline	crate::domain::waf::WafInspectorPort
 application/crawler/sitemap_session.rs	18	use	crate::domain::persistence::PersistenceMode
 application/crawler/sitemap_session.rs	19	use	crate::domain::CorrelationId
 application/crawler/sitemap_session.rs	19	use	crate::domain::CrawlError
