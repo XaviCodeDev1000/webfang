@@ -375,6 +375,35 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   `sqlite_tests.rs` (proof 18 = 0 + 18). Work-unit commits `17087eb2`,
   `2aa41b5d`, `559aa3c5`; full verification matrix green; no push yet
   (serialized delivery per the Ola 3 plan).
+- L13 (2026-11-22, T4/O3-B6 progress, batch issue #2968): batch O3-B6
+  (umbrella #2584) split `application/crawler/session.rs` (1006 lines) and
+  `application/crawler/bounded_sink.rs` (1103 lines) on `refactor/ola3-b6`
+  (base `origin/main@3ae03d5f`). Needs-review decisions recorded on #2968
+  before each first cut. `session.rs`: test mod re-parented to
+  `session_tests.rs` (376) via `split_tests.sh` (14 items = 0 + 14, partition
+  proof), error taxonomy to `session_error.rs` (70), construction path
+  (`CrawlSessionBuilder` + `checkpoint_interval_of`) to `session_builder.rs`
+  (154); source 445 lines, `--remove` in the commit where it crossed <=500.
+  `bounded_sink.rs`: test mod re-parented to `bounded_sink_tests.rs` (447;
+  16 items = 0 + 16), byte-bounded `Backlog` (+`Admit`) to
+  `bounded_sink_backlog.rs` (124), `spool_writer` (+`write_page`) to
+  `bounded_sink_spool_writer.rs` (123); source 445 lines, `--remove`.
+  `container.rs` measured 1071/0 in the cut tree: no inline test region is
+  left to move (already path-declared `container/tests.rs`, 457 lines, the
+  O2-T7 precedent), production cannot move under the ADR-0011 permanent
+  substring exemption — no split this batch, file untouched, declared a
+  candidate for the maintainer's exception list (recorded on #2968).
+  Declared two-hat adjustments: `Engine::run` intra-doc link re-pointed to
+  the full crate path from the builder child; `CrawlSessionBuilder::
+  extra_seeds`, `Admit`, `Backlog` (+ called methods) and `spool_writer`
+  widened to `pub(super)` (sibling-only use); one test helper reflowed at
+  the mod-level dedent; `session_tests.rs` imports `ScraperError` directly
+  (it reached the type through `use super::*` before the taxonomy moved).
+  Test module paths unchanged, so no test renames: 50 affected tests
+  (14 session + 16 sink + 20 container) green before the first cut and
+  green after every seam. `file_size_done.sh` exit 0 per split file
+  (verdict `closed`, base `3ae03d5f`). Golden `real_tree_sites.txt`
+  refreshed in every commit that added production files.
 - L12 (2026-11-22, O3-B10b progress entry — ENGLISH): batch O3-B10b
   (issue #2973, umbrella #2584) split
   `infrastructure/network/session_pool.rs` (1156 lines) and
@@ -425,3 +454,8 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   ratchet entries (`session_pool.rs`, `file_trace_layer.rs`, `sqlite.rs`);
   the golden set was regenerated with `scripts/refresh_real_tree_golden.sh`
   on the merged tree.
+- L15 (2026-11-22, correction to L12/L14 in B10b): the mutants-gate shards
+  found two TTL survivors in the eviction seam; the pin tests landed
+  (`a958e317`) and the branch was synced again with `main@76c72fcf`
+  (O3-B6 `e7965e08`, O3-B8 `76c72fcf`). The golden set was regenerated on
+  the new merged tree.
