@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 use webfang_core::application::http_client::{HttpClient, HttpClientConfig, HttpError};
+use webfang_core::domain::error::cause::cause_in_chain;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
@@ -308,6 +309,106 @@ async fn test_mock_server_timeout_on_slow_response() {
         "Should have waited near timeout (1s), only waited {}ms",
         elapsed.as_millis()
     );
+}
+
+// ============================================================================
+// Body-read classification (#2859)
+// ============================================================================
+
+/// A gzip stream with its tail cut off: the transport hands `bytes_stream()` a
+/// decoder error after the 2xx headers were already accepted. No raw socket is
+/// needed — wiremock only serves bytes — and the failure is deterministic.
+async fn truncated_gzip() -> Vec<u8> {
+    use async_compression::tokio::bufread::GzipEncoder;
+    use tokio::io::{AsyncReadExt, BufReader};
+
+    let mut encoder = GzipEncoder::new(BufReader::new(std::io::Cursor::new(
+        b"a body that never reaches its end".as_slice(),
+    )));
+    let mut compressed = Vec::new();
+    encoder
+        .read_to_end(&mut compressed)
+        .await
+        .expect("in-memory gzip encode");
+    compressed.truncate(compressed.len() / 2);
+    compressed
+}
+
+/// A transport failure while reading a 2xx body is not a request-construction
+/// failure: the classified cause must survive to the caller. `max_retries: 2`
+/// is deliberate — the body read must NOT consume the retry ladder, so the
+/// mock expects exactly one outbound request.
+#[tokio::test]
+async fn body_stream_failure_keeps_its_cause_without_retrying() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/broken-body"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(truncated_gzip().await)
+                .insert_header("content-encoding", "gzip"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = retry_client(2);
+    let err = get_route(&client, &server, "/broken-body")
+        .await
+        .expect_err("the truncated body must fail the request");
+
+    assert!(
+        !matches!(&err, HttpError::Request(_)),
+        "a body-stream transport failure is not a construction failure: {err:?}"
+    );
+    assert!(
+        cause_in_chain(&err).is_some(),
+        "the classified cause must reach the caller: {err}"
+    );
+    server.verify().await;
+}
+
+/// The seam's verdict, its classified cause and the boundary `ErrorClass` all
+/// survive a body-stream failure. `Request`'s `InternalFatal` no longer
+/// applies: the variant change is the authorized #2859 contract delta.
+#[tokio::test]
+async fn body_stream_failure_pins_variant_cause_and_boundary_class() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/broken-body-class"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(truncated_gzip().await)
+                .insert_header("content-encoding", "gzip"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let err = get_route(&retry_client(2), &server, "/broken-body-class")
+        .await
+        .expect_err("the truncated body must fail the request");
+
+    assert!(
+        matches!(
+            &err,
+            HttpError::Transport { .. } | HttpError::Timeout { .. } | HttpError::Connection { .. }
+        ),
+        "the seam must choose a transport verdict, got: {err:?}"
+    );
+    assert!(
+        cause_in_chain(&err).is_some(),
+        "the classified cause must reach the caller: {err}"
+    );
+
+    let scraper: webfang_core::error::ScraperError =
+        webfang_core::domain::error::CrawlError::from(err).into();
+    assert_eq!(
+        scraper.classify(),
+        webfang_core::error::ErrorClass::TransientRetriable,
+        "the seam's class must reach the boundary: {scraper}"
+    );
+    server.verify().await;
 }
 
 // ============================================================================

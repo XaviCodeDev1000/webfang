@@ -8,12 +8,16 @@
 //! returns `HttpError` instead of `DownloadError` for use by the
 //! application HTTP client.
 
+use std::time::Instant;
+
 use bytes::BytesMut;
 use encoding_rs::{Encoding, UTF_8};
 use futures::StreamExt;
 use tracing::warn;
 use wreq::Response;
 
+use crate::domain::error::cause::FetchPhase;
+use crate::domain::error::mapping::http_failure;
 use crate::domain::http_error::HttpError;
 
 /// Reads the response body as a string with a size cap.
@@ -51,10 +55,17 @@ pub async fn read_body_capped(response: Response, limit: u64) -> Result<String, 
         })
         .unwrap_or_else(|| "utf-8".to_string());
 
+    // #2859: a body-stream failure is transport, not request construction.
+    // The host is read before the response is consumed; the phase decides that
+    // a timeout here is a read deadline, so the start instant is only carried
+    // by the seam and never used to refine a connect cause.
+    let host = response.uri().host().map(str::to_owned);
+    let body_read_started = Instant::now();
     let mut stream = response.bytes_stream();
     let mut buf = BytesMut::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| HttpError::Request(e.to_string()))?;
+        let chunk = chunk
+            .map_err(|e| http_failure(e, FetchPhase::Body, host.as_deref(), body_read_started))?;
         if buf.len().saturating_add(chunk.len()) as u64 > limit {
             // The outer fetch span already carries the URL; the event only
             // needs the machine-readable cap facts.

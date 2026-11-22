@@ -1622,7 +1622,9 @@ domain/auth_source.rs	16	use	crate::domain::credentials::ApiKey
 domain/auth_source.rs	168	inline	crate::domain::keyring_store::entry
 domain/auth_source.rs	207	inline	crate::domain::paths::config_base_dir
 domain/axtree_port.rs	17	use	crate::error::ScraperError
-domain/body_cap.rs	17	use	crate::domain::http_error::HttpError
+domain/body_cap.rs	19	use	crate::domain::error::cause::FetchPhase
+domain/body_cap.rs	20	use	crate::domain::error::mapping::http_failure
+domain/body_cap.rs	21	use	crate::domain::http_error::HttpError
 domain/config.rs	16	use	crate::domain::http_config::HttpClientConfig
 domain/config.rs	349	inline	crate::domain::budget::detector::system_parallelism
 domain/config_serde.rs	78	inline	crate::domain::proxy_config::ProxySpec
