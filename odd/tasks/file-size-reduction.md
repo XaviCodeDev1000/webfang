@@ -268,3 +268,27 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   lineage sits on `main@cecfd1b8` (branch HEAD `86892efc`). The two test
   helper widenings in `crawler_spec_parity_tests.rs` were narrowed from
   `pub(crate)` to `pub(super)` after the risk review (sibling-only use).
+
+- L9 (2026-11-22, O3-B9 progress entry — ENGLISH): batch O3-B9 (issue
+  #2971, umbrella #2584) split `domain/options_spec/mod.rs` (1110 lines)
+  and `application/vault_search.rs` (1076 lines) on
+  `refactor/ola3-b9` (base `origin/main@04a34612`, rebased onto `main@52e4395b` before delivery). Needs-review decision
+  for `options_spec/mod.rs` recorded on #2971 before the first cut:
+  driver = glued modules (declarative model + error taxonomy + derivation
+  engine + 432-line test mod), class = glued modules, strategy = sibling
+  submodules mirroring the existing per-flag-group pattern, public API
+  preserved by re-exports. Splits (one work-unit commit per seam, tests
+  green between commits): `options_spec/error.rs` (83),
+  `options_spec/types.rs` (279), tests to `options_spec_tests.rs` (429)
+  via `split_tests.sh` (19 items, partition proof), `options_spec/validation.rs`
+  (305); `mod.rs` = 45-line facade, `--remove` in the commit where it
+  crossed <=500. `vault_search.rs`: 673-line test mod split into
+  `vault_search_support_tests.rs` (235), `vault_search_search_tests.rs`
+  (213), `vault_search_sync_tests.rs` (230) via `split_tests.sh`
+  (21 items = 12+9, partition proof); source 414 lines, `--remove`.
+  All parts <=500 (no `--update` needed). Characterization: 108 affected
+  tests green before the first cut; 51 focused tests green after each
+  seam. Visibility corrections (declared two-hats): `NumericPolicy::
+  INTEGER_PARSE_DETAIL` -> `pub(super)`; shared vault test stubs -> `pub(super)`.
+  Golden `real_tree_sites.txt`: +12 lines from the new vault test files
+  (intra-crate direction check green after refresh).
