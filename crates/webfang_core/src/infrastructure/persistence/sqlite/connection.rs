@@ -1,0 +1,77 @@
+use std::path::{Path, PathBuf};
+
+use crate::error::ScraperError;
+use crate::infrastructure::persistence::pool::{Config, Hook, HookError, Manager, Pool, Runtime};
+
+/// WAL + per-connection pragmas, applied on every new pooled connection via the
+/// `post_create` hook. `journal_mode=WAL` is persistent (DB header); the other
+/// two are per-connection and therefore MUST be set on each connection.
+const INIT_PRAGMAS: &str = "\
+PRAGMA journal_mode = WAL;\
+PRAGMA synchronous = NORMAL;\
+PRAGMA cache_size = -4000;";
+
+// ============================================================================
+// Pool construction
+// ============================================================================
+/// Build a WAL-mode SQLite connection pool backed by [`crate::infrastructure::persistence::pool`].
+///
+/// `pool_size` is clamped to at least 1 (the caller — `ElasticConfig` — already
+/// applies the frozen `cpu_cores`/floor-4 sizing). The parent directory of
+/// `db_path` is created if missing. Per-connection pragmas are applied via a
+/// `post_create` hook so every connection honours the WAL-mode contract.
+///
+/// The pool is created lazily — the database file is only materialized on the
+/// first [`Pool::get`] (i.e. inside [`crate::infrastructure::persistence::sqlite::SqliteVectorRepository::setup_schema`]),
+/// which is the explicit fail-fast point if the path is not writable.
+pub fn create_pool(db_path: &Path, pool_size: usize) -> Result<Pool, ScraperError> {
+    // Fail-fast: ensure the parent directory exists before opening the DB.
+    if let Some(parent) = db_path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                ScraperError::persistence(format!("crear directorio {parent:?}: {e}"))
+            })?;
+        }
+    }
+
+    let cfg = Config::new(db_path.to_path_buf());
+    let manager = Manager::from_config(&cfg, Runtime::Tokio1);
+    let pool = Pool::builder(manager)
+        .max_size(pool_size.max(1))
+        .runtime(Runtime::Tokio1)
+        .post_create(pragma_hook())
+        .build()
+        .map_err(|e| ScraperError::persistence(format!("construir pool SQLite: {e}")))?;
+    Ok(pool)
+}
+
+/// Create a SQLite pool backed by `:memory:` for testing.
+///
+/// Uses a single connection with no WAL pragmas (in-memory databases don't
+/// support WAL mode). The pool **must** be kept alive for the entire test
+/// lifetime — dropping the pool closes all connections and destroys the
+/// in-memory database.
+pub fn create_memory_pool() -> Result<Pool, ScraperError> {
+    let cfg = Config::new(PathBuf::from(":memory:"));
+    let manager = Manager::from_config(&cfg, Runtime::Tokio1);
+    let pool = Pool::builder(manager)
+        .max_size(1)
+        .runtime(Runtime::Tokio1)
+        // No post_create hook: in-memory databases don't support WAL mode.
+        .build()
+        .map_err(|e| ScraperError::persistence(format!("construir pool SQLite en memoria: {e}")))?;
+    Ok(pool)
+}
+
+/// `post_create` hook applying the WAL-mode pragmas to each new connection.
+fn pragma_hook() -> Hook {
+    Hook::async_fn(|obj, _metrics| {
+        Box::pin(async move {
+            obj.interact(|conn| conn.execute_batch(INIT_PRAGMAS))
+                .await
+                .map_err(|e| HookError::message(format!("init pragmas (interact): {e}")))?
+                .map_err(|e| HookError::message(format!("init pragmas: {e}")))?;
+            Ok(())
+        })
+    })
+}
