@@ -67,10 +67,10 @@ Caveat: `fix/2859-body-cap-cause` also touches the golden and `docs/test-invento
 | ID | Task | Specs | Route | Status | Evidence |
 |----|------|-------|-------|--------|----------|
 | C0 | Worktree + bootstrap + indexes + this doc + issue #2952 | S1,S7,S9 | inline | done | proxy OK; direnv target + both indexes at 94de2c51 |
-| C1 | Measure: preflight `--format`, `--list` baseline, seam census, `--simulate` plan | S1,S3,S4 | inline | pending | — |
-| C2 | Test extraction by theme into `connect/tests_*.rs`; `--list` invariant; commit | S2,S3 | inline | pending | — |
-| C3 | Production seam extraction(s); tests green; commit per seam | S2,S4 | inline | pending | — |
-| C4 | Ratchet `--remove`/`--update` + golden + inventory in the same commit | S5 | inline | pending | — |
+| C1 | Measure: preflight `--format`, `--list` baseline, seam census, `--simulate` plan | S1,S3,S4 | inline | done | 1874 = 833 prod + 1041 tests; churn 3; 0 allow; 35 tests baseline |
+| C2 | Test extraction by theme into `connect/tests_*.rs`; `--list` invariant; commit | S2,S3 | inline | done | 11 / 6 / 18 tests; 35/35 pass; leaf set identical |
+| C3 | Production seam extraction(s); tests green; commit per seam | S2,S4 | inline | done | `toml_merge` 284 + `atomic_write` 193; hub 373; check green |
+| C4 | Ratchet `--remove`/`--update` + golden + inventory in the same commit | S5 | inline | done | entry removed; golden +9 sites post-fmt; inventory current |
 | C5 | Full verification + four lenses + `file_size_done.sh` | S5,S6,S8 | inline | pending | — |
 | C6 | PR-ready state; push/PR owner decision | S7 | inline | pending | — |
 
@@ -89,3 +89,18 @@ L2 (2026-11-22, C0): worktree `refactor-ola2-connect` ↔ branch `refactor/ola2-
 `~/.cache/cargo-target/refactor-ola2-connect`); codegraph + codedb indexed with root = worktree
 and head = 94de2c51. Issue #2952 created with `status:approved`. Seed attempt: `cold`
 (no compatible seed for key `v1-ebe3b78b66ad5728`).
+
+L3 (2026-11-22, C2-C4): extraction executed in one mechanical pass (tests and production)
+after the pre-validated seam plan. Test items are located by their `#[test]` marker and carry
+their contiguous attributes and doc comments; the first pass orphaned a `#[cfg(unix)]` across a
+file boundary, the v2 pass fixed it (script `/tmp/opencode/extract_connect_v2.py`, outside the
+worktree). Children: `tests_merge.rs` 456 lines (11 tests), `tests_flow.rs` 175 (6),
+`tests_atomic.rs` 414 (18), `toml_merge.rs` 284, `atomic_write.rs` 193; hub `connect.rs` 373.
+Cross-child helpers are `pub(super)` (`upsert_provider`, `temp_path`, `create_temp`,
+`gc_connect_temps`, `write_atomically`, `write_temp`, `TEMP_CREATE_ATTEMPTS`).
+Evidence: `cargo check --all-targets --all-features` green; `cargo nextest run -p webfang_core
+--lib -E 'test(/cli::commands::connect::/)'` → 35 tests run, 35 passed; the `--list` leaf set is
+identical to the 35-name baseline (`/tmp/opencode/connect-tests-before.txt`). Ratchet:
+`check_file_size.sh --remove crates/webfang_core/src/cli/commands/connect.rs` removed the 1874
+entry; `refresh_real_tree_golden.sh` added 9 sites (test-child inline `ConfigDefaults::load_explicit`
+calls + the `toml_merge` import), refreshed post-fmt; `check_test_inventory.sh` reports current.
