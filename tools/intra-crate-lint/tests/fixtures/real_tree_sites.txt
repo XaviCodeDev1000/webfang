@@ -272,6 +272,7 @@ application/crawl_result_repository.rs	39	use	crate::domain::CrawlError
 application/crawl_result_repository.rs	39	use	crate::domain::ScrapedContent
 application/crawler/bounded_sink/reader.rs	11	use	crate::application::crawler::content_sink::CapturedPage
 application/crawler/bounded_sink_backlog.rs	15	use	crate::application::crawler::content_sink::CapturedPage
+application/crawler/bounded_sink_spool_writer.rs	18	use	crate::application::crawler::content_sink::CapturedPage
 application/crawler/checkpoint.rs	357	inline	crate::application::resume::preserve_abandoned_bytes
 application/crawler/checkpoint.rs	398	inline	crate::application::resume::preserve_pre_migration_backup
 application/crawler/checkpoint.rs	424	inline	crate::application::resume::preserve_abandoned_bytes
