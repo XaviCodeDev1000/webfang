@@ -1,6 +1,7 @@
 use super::*;
 use crate::domain::error::ErrorClass;
-use crate::domain::exporter::LastError;
+use crate::domain::exporter::{LastError, RawRecord};
+use crate::domain::page_state::PageStatus;
 use std::fs;
 use tempfile::tempdir;
 
