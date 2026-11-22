@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.2.2] - 2026-11-22
+
+
+### 🏗️ Architecture Improvements
+
+- Split remote_embedding.rs by seams into a hub and nine modules ([#2950](https://github.com/XaviCodeDev1000/webfang/pull/2950))
+- Split connect.rs by seams ([#2960](https://github.com/XaviCodeDev1000/webfang/pull/2960))
+
+### 🔧 Fixed
+
+- Classify body-stream failures through the single seam ([#2953](https://github.com/XaviCodeDev1000/webfang/pull/2953))
 ## [9.2.1] - 2026-11-21
 
 
