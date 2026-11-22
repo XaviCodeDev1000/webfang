@@ -173,4 +173,6 @@ git diff --stat main...HEAD: 8 files, +1084/-10 — exactly the mission's files.
 carries the policy-text delta (v3.6.0: the [F2] phase labels retire — policy §8) and
 `Closes #2951` + `Closes part of #2584`; #2951 needs `status:approved` before the PR opens.
 The PR title (3 commits → queue squash subject = the title): "feat(ci): split_tests.sh, the
-mod-tests extraction with the multiset proof (F2)".
+mod-tests extraction with the multiset proof (F2)". Delivered: pushed @8a4f1371, **PR #2957**
+open (`Closes #2951` + `Closes part of #2584`, the v3.6.0 delta in the body) after the owner
+applied `status:approved` to #2951; the out-of-seam finding filed as **#2958**.
