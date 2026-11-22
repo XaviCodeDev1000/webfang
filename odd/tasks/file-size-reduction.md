@@ -96,6 +96,37 @@ criterio que puso `engine.rs` al frente de la Ola 1.
     `needs-review` seam decisions for schema_bridge and validation — and the
     state.rs backpressure seam that the close-out tool demanded — are
     recorded on #2963 before each first cut.
+  - Progress (2026-11-22, batch O3-B5 / issue #2967, branch `refactor/ola3-b5`):
+    the two `application/crawler` entries of the band are closed.
+    `discovery.rs` 1026 → 453 `--remove` (production untouched, including the
+    band's single `allow(clippy::too_many_lines)` that stays F3 input; the
+    580-line inline test mod regrouped at its own section seams into two themed
+    mods, then extracted by `scripts/split_tests.sh` with the multiset proof —
+    19 = 9 + 10, 9 = 0 + 9 — into `discovery_tests.rs` 279 and
+    `discovery_scrape_tests.rs` 299). `sitemap_discovery.rs` 1400 → 407
+    `--remove`: the `needs-review` decision (glued modules, four
+    responsibilities) is recorded on #2967 before the first cut; the hub keeps
+    the crawl orchestration plus the URL-building/filter helpers and three
+    sibling seams move out — `sitemap_discovery_parser.rs` 122
+    (SitemapParserPort boundary + error mapping), `sitemap_discovery_probe.rs`
+    233 (robots.txt/fallback/sub-path URL probing) and
+    `sitemap_discovery_subpath.rs` 135 (sub-path crawl fallback) — every moved
+    item byte-verbatim except `pub(super)` on the four functions the hub
+    calls (build_sitemap_parser, parse_sitemap, discover_sitemap_url,
+    crawl_with_subpath_sitemaps); both public entry points stay in the hub so
+    the MCP full paths and
+    the `discovery.rs` → `lib.rs` re-export chain keep resolving unchanged. The
+    573-line inline test mod regrouped into three themed mods (the
+    `all(test, not(miri))` gate rewritten in its equivalent stacked
+    `#[cfg(test)]` + `#[cfg(not(miri))]` form because `split_tests.sh`'s mod
+    detection requires a `cfg(...test...)` attribute — semantics identical) and
+    extracted with the multiset proof — 15 = 8 + 7, 8 = 4 + 4, 4 = 0 + 4 — into
+    `sitemap_discovery_tests.rs` 217, `sitemap_discovery_entry_tests.rs` 148
+    and `sitemap_discovery_ssrf_tests.rs` 211. Every part ≤ 500, both baseline
+    entries removed in the same commit as the split that produced them, golden
+    `real_tree_sites.txt` refreshed per split. Behavior preserved: the 35
+    affected crawler discovery/sitemap tests green before and after every work
+    unit.
 
 ## Método por archivo (por misión, en su worktree)
 
@@ -321,6 +352,29 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   delivery — the recorded base `52e4395b` is historical; the delivered
   lineage sits on `main@3ae03d5f` (branch HEAD after the golden regen).
   The batch_flow facade figure in L10 was corrected from 480 to 481.
+- L12 (2026-11-22, T4/O3-B7 progress, batch issue #2969): batch O3-B7 of the
+  Ola 3 band split in worktree `refactor-ola3-b7` (base `52e4395b`, rebased onto `main@2592333a` before delivery).
+  `infrastructure/ssrf.rs` (1287, tests-majority, security carve-out S5)
+  and `infrastructure/persistence/sqlite.rs` (1432, needs-review, churn 15)
+  both closed in the ratchet via `--remove` in the same commit as the split
+  that produced them; every resulting part measures <= 500. `ssrf.rs`
+  keeps its 448-line production region byte-identical (guard stages 3b/3c
+  untouched) while the inline test mod regroups at its own section seams
+  into three themed siblings through `split_tests.sh` with the multiset
+  proof (28 = 12 + 16, then 16 = 9 + 7, then 7 = 0 + 7):
+  `ssrf_tests.rs` 315, `ssrf_resolver_env_tests.rs` 142,
+  `ssrf_wiring_tests.rs` 329; the wiremock allow/deny parity pairs stay in
+  one file and every negative test stays adjacent to its positive.
+  `sqlite.rs` decision recorded on the issue before the first cut (glued
+  modules, not a declarative unit); the production region splits along its
+  section banners into `persistence/sqlite/` children (schema 159,
+  connection 77, blob 57, vector_repository 297, note_repository 302,
+  retention 48) with parent re-exports preserving every
+  `persistence::sqlite::*` path including fingerprint.rs's
+  `enforce_schema_version` call; the 490-line test mod extracts to
+  `sqlite_tests.rs` (proof 18 = 0 + 18). Work-unit commits `17087eb2`,
+  `2aa41b5d`, `559aa3c5`; full verification matrix green; no push yet
+  (serialized delivery per the Ola 3 plan).
 - L12 (2026-11-22, O3-B10b progress entry — ENGLISH): batch O3-B10b
   (issue #2973, umbrella #2584) split
   `infrastructure/network/session_pool.rs` (1156 lines) and
@@ -363,3 +417,9 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   in `session_pool.rs`. Follow-up noted, outside this slice: the TTL-heal
   loop in `evict_expired` duplicates the inline loop in
   `SessionManager::evict_stale` (pre-existing).
+- L14 (2026-11-22, correction to L12 in B10b): the B10b branch was synced
+  with `main@7f96253d` (merge, not rebase) before delivery, after O3-B5 and
+  O3-B7 landed. The bookkeeping conflicts were resolved by removing both
+  splits' closed ratchet entries (`session_pool.rs`,
+  `file_trace_layer.rs`, `sqlite.rs`); the golden set was regenerated with
+  `scripts/refresh_real_tree_golden.sh` on the merged tree.
