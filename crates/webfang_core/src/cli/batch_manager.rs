@@ -7,7 +7,8 @@
 //! projection (`--h2-profile`, delay/concurrency through the budget model),
 //! the resume COMMITTED filter (WU4) and the inert crawl-expansion-flag
 //! warning (#1215). The run lifecycle stays in the parent, and so does
-//! `build_batch_resume_store` — both seams call it.
+//! `build_batch_resume_store` — both seams call it. The batch-config
+//! regression tests live in the parent's `batch_flow_tests.rs`.
 
 use tracing::{error, info, warn};
 

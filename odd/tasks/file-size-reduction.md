@@ -299,7 +299,7 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   `cli/batch_flow.rs` (1250 baseline / 1212 real, needs-review, churn 18) and
   `domain/entities/content.rs` (1155, tests-majority, churn 12) both closed in
   the ratchet via `--remove`: every resulting part measures <= 500 lines
-  (batch_flow 480; content 474; children batch_spool 199, batch_manager 276,
+  (batch_flow 481; content 474; children batch_spool 199, batch_manager 276,
   scraped_content 65; test siblings batch_flow_tests 118, batch_spool_tests
   193, content_tests 464, scraped_content_tests 179). The recorded −38 drift
   on batch_flow was re-measured in the cut tree, confirmed, and closed with
@@ -317,3 +317,7 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   `entities::content::ScrapedContent` resolvable for a webfang_mcp consumer.
   Full verification matrix green on the batch branch; no push yet (serialized
   delivery per the Ola 3 plan).
+- L11 (2026-11-22, correction to L10): the O3-B4 batch was rebased before
+  delivery — the recorded base `52e4395b` is historical; the delivered
+  lineage sits on `main@3ae03d5f` (branch HEAD after the golden regen).
+  The batch_flow facade figure in L10 was corrected from 480 to 481.
