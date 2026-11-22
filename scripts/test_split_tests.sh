@@ -35,10 +35,9 @@
 #   7. a broken python3 fails with a NAMED cause (rc=1), never a bare
 #       traceback: the tool shells the span question out to the preflight
 #       (ONE Rust lexer in the program, the preflight's; no second lexer);
-#   8. the gate wiring lock lives here once the wiring lands in this same PR:
-#       the .tsv repo-guards note, ci.yml and ci_fast_gate.sh name BOTH scripts
-#       (#2056: a guard reachable from no workflow is a guard that does not
-#       exist);
+#   8. the gate wiring lock: the .tsv repo-guards note, ci.yml and
+#      ci_fast_gate.sh name BOTH scripts, on live code lines only (#2056: a
+#      guard reachable from no workflow is a guard that does not exist);
 #   9. the family lint: no pipe into an early-exit grep -q in the pair
 #       (issue #2925: the assertion fails despite holding);
 #  10. the harness watches its own house: --negation flips one expectation so
@@ -54,6 +53,10 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+TSV="$REPO_ROOT/scripts/ci_fast_gate_coverage.tsv"
+CI_YML="$REPO_ROOT/.github/workflows/ci.yml"
+FAST_GATE="$REPO_ROOT/scripts/ci_fast_gate.sh"
 
 NEGATION=0
 while [ $# -gt 0 ]; do
@@ -388,10 +391,32 @@ expect_rc "7.1 the tool fails (rc=1), never invents the span" 1 "$RC" "$ERRF"
 expect_match "7.2 ... with a NAMED python3 cause" "$ERR_ALL" 'python3'
 expect_no_match "7.3 ... and no bare traceback" "$ERR_ALL" 'Traceback'
 
-# --- 8. the gate wiring lock (added with the wiring in this same PR) --------------------
-# TODO(F2-wiring): the .tsv repo-guards note, ci.yml and ci_fast_gate.sh must
-# name BOTH scripts (live code lines only); the case lands with the wiring
-# commit so every commit in this branch stays green.
+# --- 8. the gate wiring lock (#2056: a guard reachable from no workflow is a
+# guard that does not exist) -------------------------------------------------------
+# All three surfaces name BOTH scripts, on LIVE lines only (a commented-out
+# wiring line must stop counting — the mutation test behind the family's
+# 18.2 proved that text-level counting misses the commented form).
+TSV_HITS_TOOL="$(grep -c 'scripts/split_tests.sh' "$TSV" 2>/dev/null)" || TSV_HITS_TOOL=0
+TSV_HITS_HARNESS="$(grep -c 'scripts/test_split_tests.sh' "$TSV" 2>/dev/null)" || TSV_HITS_HARNESS=0
+if [ "${TSV_HITS_TOOL:-0}" -ge 1 ] && [ "${TSV_HITS_HARNESS:-0}" -ge 1 ]; then
+  ok "8.1 the coverage .tsv's repo-guards note names both scripts"
+else
+  bad "8.1 the coverage .tsv's repo-guards note names both scripts" "tool=${TSV_HITS_TOOL:-0} harness=${TSV_HITS_HARNESS:-0} in $TSV"
+fi
+CI_HITS_TOOL="$(sed 's/[[:space:]]*#.*$//' "$CI_YML" | grep -c 'scripts/split_tests.sh')" || CI_HITS_TOOL=0
+CI_HITS_HARNESS="$(sed 's/[[:space:]]*#.*$//' "$CI_YML" | grep -c 'scripts/test_split_tests.sh')" || CI_HITS_HARNESS=0
+if [ "${CI_HITS_TOOL:-0}" -ge 1 ] && [ "${CI_HITS_HARNESS:-0}" -ge 1 ]; then
+  ok "8.2 ci.yml names both scripts (the smoke and the harness run)"
+else
+  bad "8.2 ci.yml names both scripts (the smoke and the harness run)" "tool=${CI_HITS_TOOL:-0} harness=${CI_HITS_HARNESS:-0} (live lines) in $CI_YML"
+fi
+GATE_HITS_TOOL="$(sed 's/[[:space:]]*#.*$//' "$FAST_GATE" | grep -c 'scripts/split_tests')" || GATE_HITS_TOOL=0
+GATE_HITS_HARNESS="$(sed 's/[[:space:]]*#.*$//' "$FAST_GATE" | grep -c 'scripts/test_split_tests')" || GATE_HITS_HARNESS=0
+if [ "${GATE_HITS_TOOL:-0}" -ge 1 ] && [ "${GATE_HITS_HARNESS:-0}" -ge 1 ]; then
+  ok "8.3 ci_fast_gate.sh triggers the harness on the pair's diff"
+else
+  bad "8.3 ci_fast_gate.sh triggers the harness on the pair's diff" "tool=${GATE_HITS_TOOL:-0} harness=${GATE_HITS_HARNESS:-0} (live lines) in $FAST_GATE"
+fi
 
 # --- 9. the family lint ------------------------------------------------------------------
 LINT_PAT='\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]*q[A-Za-z]*|--quiet)'
