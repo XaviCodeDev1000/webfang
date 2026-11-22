@@ -648,7 +648,7 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn temp_store(domain: &str) -> (tempfile::TempDir, RecordStore) {
+    pub(super) fn temp_store(domain: &str) -> (tempfile::TempDir, RecordStore) {
         let dir = tempdir().expect("tempdir");
         let store = RecordStore::new(domain).with_state_dir(dir.path().to_path_buf());
         (dir, store)
@@ -657,7 +657,7 @@ mod tests {
     /// Full nine-field fixture; every field populated incl. classified error.
     /// Status is `Extracted` so carrying a `last_error` stays within the
     /// D2 invariant table (only Committed forbids one).
-    fn full_record(url: &str) -> RawRecord {
+    pub(super) fn full_record(url: &str) -> RawRecord {
         RawRecord {
             url: url.to_string(),
             canonical_url: url.to_string(),
