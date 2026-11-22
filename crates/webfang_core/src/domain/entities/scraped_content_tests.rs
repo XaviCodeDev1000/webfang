@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::domain::{DownloadedAsset, ValidUrl};
+
 fn make_scraped(title: &str, url: &str) -> ScrapedContent {
     ScrapedContent {
         title: title.to_string(),

@@ -34,7 +34,6 @@
       "crates/webfang_core/src/domain/auth_source.rs": 575,
       "crates/webfang_core/src/domain/crawler_port/filename.rs": 608,
       "crates/webfang_core/src/domain/credentials.rs": 586,
-      "crates/webfang_core/src/domain/entities/content.rs": 1155,
       "crates/webfang_core/src/domain/entities/progress.rs": 629,
       "crates/webfang_core/src/domain/error/crawl_error.rs": 600,
       "crates/webfang_core/src/domain/html_extraction/date_extractor.rs": 659,

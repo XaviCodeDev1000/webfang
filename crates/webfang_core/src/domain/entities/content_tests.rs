@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::domain::ValidUrl;
+
 #[test]
 fn test_document_chunk_from_scraped_content() {
     let scraped = ScrapedContent {
