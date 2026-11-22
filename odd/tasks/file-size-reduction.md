@@ -355,3 +355,11 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   `real_tree_sites.txt`: +1 row (the `MAX_TRACKED_DOMAINS` use in
   `session_pool_eviction.rs`) + 3 line-number shifts in
   `session_pool.rs`; extracted test files emit no rows (#2980).
+- L13 (2026-11-22, correction to L12): the delivered hub figures are
+  `session_pool.rs` 483 (not 479) and `file_trace_layer.rs` 443 (not 441) —
+  the recorded values predate the appended `#[path]` test-wiring blocks.
+  The golden delta is net 0 rows: −1 (`session_pool.rs` MAX_TRACKED_DOMAINS
+  use relocated) +1 (`session_pool_eviction.rs`), plus 3 line-number shifts
+  in `session_pool.rs`. Follow-up noted, outside this slice: the TTL-heal
+  loop in `evict_expired` duplicates the inline loop in
+  `SessionManager::evict_stale` (pre-existing).
