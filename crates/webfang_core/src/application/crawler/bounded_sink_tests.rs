@@ -13,13 +13,9 @@ async fn sink_with_backlog(
     buffer: usize,
     max_backlog_bytes: usize,
 ) -> BoundedFileSink {
-    BoundedFileSink::with_backlog_bytes(
-        dir.path().join("spool.jsonl"),
-        buffer,
-        max_backlog_bytes,
-    )
-    .await
-    .expect("sink must be created")
+    BoundedFileSink::with_backlog_bytes(dir.path().join("spool.jsonl"), buffer, max_backlog_bytes)
+        .await
+        .expect("sink must be created")
 }
 
 async fn drain(sink: &BoundedFileSink) -> Vec<CapturedPage> {
