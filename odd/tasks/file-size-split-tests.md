@@ -92,8 +92,11 @@ T3 Implement split_tests.sh + the preflight's --lex-span; harness green — done
 60/60, preflight harness 118/118 (cases 20.1-20.11 added), shellcheck clean
 T4 Acceptance: tool output on real mission data == verified manual extraction (#2950) — done —
 see L3 (inventory 38/38 identical, token-level 38/38 identical)
-T5 Gate registration (.tsv, ci.yml, test_ci_gate_structure.sh green) — pending
-T6 Full verification (fast gate, pre-commit gate) + PR-ready state — pending
+T5 Gate registration (.tsv, ci.yml, test_ci_gate_structure.sh green) — done — 6641f00b (ci.yml
+smoke + harness steps, ci_fast_gate.sh lane_ci triggered block, repo-guards note extended; the
+harness's wiring-lock case 8.1-8.3 green)
+T6 Full verification (fast gate, pre-commit gate) + PR-ready state — done — see L4; 3 commits,
+PR-ready, push/PR the owner's decision (S9)
 
 ## Log
 
@@ -154,3 +157,20 @@ selects by name + cfg(test)). Work-unit note: this slice is one coherent behavio
 its proof, its span owner and both harnesses) at ~930 authored lines — above the ~400 heuristic;
 splitting it would leave an intermediate commit with the contract's proof red or the span owner
 uncovered, so the deviation is declared here.
+
+L4 (2026-11-22): T5/T6 evidence. Wiring (6641f00b): ci.yml gains the split-tests --help smoke
+and the semantics-harness steps in repo-guards (both scripts named on live lines); ci_fast_gate.sh
+gains the lane_ci triggered block for the pair (the TOOL never runs as a live-tree guard — it
+writes files); the coverage .tsv's repo-guards note names the pair (no new row, #2559); the
+harness's wiring-lock case (8.1-8.3, live lines only) turned GREEN with it. Verification: F2
+harness 63/63 (exit 0); preflight harness 118/118; test_ci_gate_structure.sh 27 assertions +
+10 self-tests green (run AFTER the wiring edits); the local fast gate GREEN (PASS=24 FAIL=0
+SKIP=19, docs+ci lanes) with "file size split-tests semantics (offline)" PASSing in the ci
+lane; shellcheck with the CI's exact invocation (`-x --exclude=SC2010,SC2012,SC2027,SC2034,
+SC2046,SC2086,SC2126,SC2129` over scripts/*.sh) clean; actionlint clean on ci.yml; the
+pre-commit hooks (core.hooksPath=scripts/githooks) ran the full Rust gate on each commit.
+git diff --stat main...HEAD: 8 files, +1084/-10 — exactly the mission's files. The PR body
+carries the policy-text delta (v3.6.0: the [F2] phase labels retire — policy §8) and
+`Closes #2951` + `Closes part of #2584`; #2951 needs `status:approved` before the PR opens.
+The PR title (3 commits → queue squash subject = the title): "feat(ci): split_tests.sh, the
+mod-tests extraction with the multiset proof (F2)".
