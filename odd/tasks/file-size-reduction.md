@@ -294,3 +294,26 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   vault test files, minus relocated base test-mod records; intra-crate
   direction check green after refresh). The branch was rebased onto
   `main@52e4395b` before delivery.
+- L10 (2026-11-22, T4/O3-B4 progress, batch issue #2966): batch O3-B4 of the
+  Ola 3 band split in worktree `refactor-ola3-b4` (base `52e4395b`).
+  `cli/batch_flow.rs` (1250 baseline / 1212 real, needs-review, churn 18) and
+  `domain/entities/content.rs` (1155, tests-majority, churn 12) both closed in
+  the ratchet via `--remove`: every resulting part measures <= 500 lines
+  (batch_flow 480; content 474; children batch_spool 199, batch_manager 276,
+  scraped_content 65; test siblings batch_flow_tests 118, batch_spool_tests
+  193, content_tests 464, scraped_content_tests 179). The recorded −38 drift
+  on batch_flow was re-measured in the cut tree, confirmed, and closed with
+  the split — no floor entry. Needs-review decision for batch_flow recorded
+  on the issue before the first cut (driver: three glued responsibilities the
+  earlier WU extractions carved around; strategy: mechanical responsibility
+  split — spool acquisition child `batch_spool.rs`, manager assembly child
+  `batch_manager.rs` including the crawl-config projection, lifecycle stays
+  in the parent; external paths `crate::cli::batch_flow::{run_batch,
+  load_batch_manager, BATCH_SPOOL_FILE}` preserved by re-exports). All mod
+  tests moved through `split_tests.sh` with partition proofs
+  (10=5+5, 5=0+5, 40=27+13, 27=0+27); content seam = two entities in one
+  file, `ScrapedContent` moved to `scraped_content.rs` with a `pub use`
+  facade in `content.rs` keeping the full path
+  `entities::content::ScrapedContent` resolvable for a webfang_mcp consumer.
+  Full verification matrix green on the batch branch; no push yet (serialized
+  delivery per the Ola 3 plan).
