@@ -2245,13 +2245,13 @@ infrastructure/llm/remote_embedding/proxy_wiring.rs	9	use	crate::domain::proxy_c
 infrastructure/llm/remote_embedding/proxy_wiring.rs	10	use	crate::infrastructure::llm::http_client::build_llm_client
 infrastructure/llm/remote_embedding/proxy_wiring.rs	65	inline	crate::error::ScraperError::Config
 infrastructure/network/session_pool.rs	50	use	crate::domain::budget::DomainSlots
-infrastructure/network/session_pool.rs	50	use	crate::domain::budget::MAX_TRACKED_DOMAINS
 infrastructure/network/session_pool.rs	51	use	crate::domain::clock::Clock
 infrastructure/network/session_pool.rs	51	use	crate::domain::clock::SystemClock
 infrastructure/network/session_pool.rs	52	use	crate::domain::session_port::SessionId
-infrastructure/network/session_pool.rs	158	inline	crate::domain::budget::DOMAIN_SLOTS_DEFAULT
-infrastructure/network/session_pool.rs	233	inline	crate::domain::session_port::SessionPoolConfig
-infrastructure/network/session_pool.rs	536	inline	crate::domain::session_port::SessionPort
+infrastructure/network/session_pool.rs	120	inline	crate::domain::budget::DOMAIN_SLOTS_DEFAULT
+infrastructure/network/session_pool.rs	195	inline	crate::domain::session_port::SessionPoolConfig
+infrastructure/network/session_pool.rs	452	inline	crate::domain::session_port::SessionPort
+infrastructure/network/session_pool_eviction.rs	12	use	crate::domain::budget::MAX_TRACKED_DOMAINS
 infrastructure/observability/error_logging.rs	7	use	crate::domain::error::cause::NetworkCause
 infrastructure/observability/error_logging.rs	7	use	crate::domain::error::cause::cause_in_chain
 infrastructure/observability/error_logging.rs	8	use	crate::domain::CorrelationId
