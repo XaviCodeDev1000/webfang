@@ -13,9 +13,9 @@ Branch: docs/tls-build-stack-adr · delivery: one work-unit commit per step · r
 
 - T1 · S1 — route inline — measurement + doc fix — status done — commit bb7fc0cf
 - T2 · S2 — route inline — read-only audit — status done — evidence in L4 (no source change)
-- T3 · S3 — route inline — doc hygiene — status pending — commit pending
-- T4 · S4 — route inline — new ADR — status pending — commit pending
-- T5 · S1-S4 — route inline — final verification, mirror, ODD close — status pending — commit pending
+- T3 · S3 — route inline — doc hygiene — status done — commit 47d971ce
+- T4 · S4 — route inline — new ADR + index row — status done — commit 0c91156b
+- T5 · S1-S4 — route inline — final verification, mirror, ODD close — status done — commit pending
 
 Route declaration: all tasks inline. Trigger evidence: one understood deliverable at a time, no independent parallel units, no context backstop. Risk: none — docs and audit only; no high-risk item (no dependency, CI, profile or public API change).
 
@@ -30,3 +30,9 @@ L3 — Baseline verification already completed before this feature: the colleagu
 L4 — T1 evidence: cold re-measurement in this worktree's virgin target dir with the real cargo (mbx shim bypassed), `cargo build -p webfang_core --features chromium --timings`, rustc 1.91.1, 16 jobs, 540 units, 132.3 s total: `chromiumoxide_cdp v0.7.0` 75.0 s (72.9 s frontend) — the longest unit — and `btls-sys` build script 74.2 s. The 47.4 s and 75.0 s values are not interchangeable (different command/load/revision). Preamble, finding #5 and finding #7 corrected; finding #3/#4 keep libgit2-sys as historical pre-purge measurements. Commit bb7fc0cf.
 
 L5 — T2 audit evidence (read-only): `chromium = ["dep:chromiumoxide"]` with `chromiumoxide` optional and `default = []` in `webfang_core`/`webfang_cli`/`webfang_mcp`; `scripts/test_build_graph.sh` pins "the default workspace graph is browser-free" and `ci.yml` `repo-guards` runs that harness. PR fast gate `test-core` is default-feature; `test-full`/flake nightly use an explicit 6-feature prebuild including chromium; `coverage`/`mcp` are non-gating `--all-features`; no workflow passes `--all-targets` to `nextest`. The 89 binaries / ~270 MB figure is from a local mold experiment, not a CI job. Removing chromium from the prebuild spec would reintroduce private per-test builds and the 180 s parity timeout (`fix-mcp-parity-timeout-2335.md` E2, `cli_harness.rs` `cfg!(feature = "chromium")`, `bin_path.rs` contract). Verdict: no defensible further gating — the 47.4 s problem was a misattributed measurement, not a gating defect. Cargo.toml/.github changes remain outside this feature's authorization.
+
+L6 — T3 evidence: `build-perf-experiments.md` T5 checkbox now scopes the accepted result to `[profile.dev.package."*"] opt-level = 0` (99.2 s) and states that `[profile.dev.build-override] opt-level = 3` never landed, was never measured, and is not part of the accepted bundle; new finding #10 records that T3 (-2%, noise) gives no evidence for optimizing build scripts and that landing it would need its own cold measurement. No Cargo.toml edit. Commit 47d971ce.
+
+L7 — T4 evidence: `docs/adr/0022-boringssl-tls-stack.md` written in English with the house ADR shape; `docs/adr/README.md` gained the `ADR-0022` row in the same commit and the total moved 19 → 20 files / 18 → 19 decisions. The ADR records the verified dependency chain, ADR-0003 §3, AGENTS.md policy, `build_wreq_client`, the Cloudflare field quote, finding #3 and the controlled 75.0 s CDP measurement; it names the portability price and rejects cc/system BoringSSL/rustls/reqwest/C-build optimization. Commit 0c91156b.
+
+L8 — Verification: RDD `gentle-ai review assess --base-ref 7f96253d --committed-only` returned `risk: passive`, `review_due: false` (non_executable_only). `bash scripts/ci_fast_gate.sh` docs lane GREEN (PASS=10 FAIL=0 SKIP=1: markdownlint declared but skipped); coverage names doc-quality partial (cargo doc runs locally, cargo test --doc does not) and several jobs NOT covered, none touched by this docs-only change. Full pre-commit gate (`cargo check`, clippy `--all-targets --all-features` with the two lints, `cargo fmt --all -- --check`, `cargo doc` with `-D warnings`) exited 0; rustdoc emitted the known ICE dumps (gitignored) and still completed. `scripts/check_docs_version_pins.sh` green. Eight generated `rustc-ice-*.txt` dumps removed; `git status --short` clean. `git diff --stat main...HEAD`: 4 files, 93 insertions, 5 deletions.
