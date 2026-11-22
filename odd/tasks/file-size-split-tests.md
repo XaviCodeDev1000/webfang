@@ -176,3 +176,16 @@ The PR title (3 commits → queue squash subject = the title): "feat(ci): split_
 mod-tests extraction with the multiset proof (F2)". Delivered: pushed @8a4f1371, **PR #2957**
 open (`Closes #2951` + `Closes part of #2584`, the v3.6.0 delta in the body) after the owner
 applied `status:approved` to #2951; the out-of-seam finding filed as **#2958**.
+
+L5 (2026-11-22, incident — CI caught it, the fix lands on top per the pushed-history rule): PR
+#2957's first CI run went red — the repo-guards step "Fast gate semantics harness"
+(scripts/test_ci_fast_gate.sh, the meta-level harness OF ci_fast_gate.sh, 98 cases) failed 3
+assertions: my lane_ci block invokes test_split_tests.sh, which was NOT in make_fixture's
+hand-maintained no-op stub list, so the B52/B53 FULL-lane fixtures failed on a missing script —
+a reason unrelated to the lane shape they test. The harness's own meta-check 7b (added by F1a
+after this exact trap) named the missing stub before the lane cases could fail for the wrong
+reason. T6's gap: the checklist ran the fast gate, test_ci_gate_structure.sh and the family
+harnesses, but NOT the fast gate's own semantics harness — it is run by CI's repo-guards
+("Fast gate semantics harness") and never invoked by ci_fast_gate.sh itself. Fix:
+test_split_tests.sh added to the stub list beside test_file_size_done.sh (the F1a precedent's
+stated remedy); harness GREEN 98 ok / 0 fail locally; pushed on top.
