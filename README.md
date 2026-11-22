@@ -486,20 +486,14 @@ webfang/
 ### Development commands
 
 ```bash
-# Quick verification (check + clippy + fmt)
-cargo check --workspace && cargo clippy --workspace -- -D warnings && cargo fmt --all -- --check
+# Quick verification (check + clippy + fmt) — matches the CI gate
+cargo check --workspace && cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines && cargo fmt --all -- --check
 
 # Run tests
 cargo nextest run --workspace
 
 # Build release
 cargo build --release -p webfang_cli
-
-# Build with all features
-cargo build --release -p webfang_cli --features full
-
-# Re-index CodeDB (code intelligence)
-codedb index .
 ```
 
 ### Architecture rules
@@ -507,7 +501,7 @@ codedb index .
 - **Dependency direction:** `cli → core` and `mcp → core`, never reverse. `cli` does not
   depend on `mcp`; both are siblings over `core`.
 - **Port/Adapter pattern:** Domain defines traits, Infrastructure implements them
-- **Error types:** DomainError, InfraError → ScraperError (dual wrapping)
+- **Error types:** see the error stratification in [AGENTS.md](AGENTS.md)
 - **User-facing errors and internal logs:** English.
 
 **Stack:** Rust 1.91 · Tokio · wreq (TLS fingerprint) · scraper 0.27 · lol_html
