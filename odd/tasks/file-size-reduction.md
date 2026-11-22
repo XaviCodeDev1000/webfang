@@ -248,3 +248,18 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   the harness file recorded on issue
   #2964 before the first cut (driver: glued modules; strategy: extract
   module per responsibility + re-export surface).
+- L7 (2026-11-22, T4/O3-B3 progress, batch issue #2965): batch O3-B3 of the
+  Ola 3 band split in worktree `refactor-ola3-b3` (base `152add03`).
+  `cli/scrape_flow.rs` (1444, needs-review, churn 64) and `cli/args/crawler.rs`
+  (1375, tests-majority, churn 46) both closed in the ratchet via `--remove`:
+  every resulting part measures <= 500 lines. `scrape_flow.rs` driver recorded
+  on the issue before the first cut (three glued responsibilities: resume/state
+  wiring, the scrape flow with fetch-guard stage-2 pacing, fingerprint
+  persistence); seam strategy = test mods to `*_tests.rs` siblings through
+  `split_tests.sh` with partition proofs, then two production children
+  (`scrape_resume.rs` with path-preserving re-exports, `scrape_fingerprint.rs`)
+  keeping the flow and the pacing untouched. `crawler.rs` seam = test mods to
+  siblings, then `CrawlerArgs` + clap impls to `crawler_args.rs` while the
+  value parsers stay (full-path callers in `normalization.rs`/`args/mod.rs`).
+  Full verification matrix green on the batch branch; no push yet (serialized
+  delivery per the Ola 3 plan).
