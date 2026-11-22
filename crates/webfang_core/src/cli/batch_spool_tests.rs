@@ -3,6 +3,8 @@ use crate::application::batch::progress::{
     BatchProgressV1, ExtractionOptions, SidecarState, SpoolIdentity, BATCH_PROGRESS_FILE,
 };
 use crate::application::crawl_options::CrawlOptions;
+// The only consumer is the `#[cfg(unix)]` permission test below.
+#[cfg(unix)]
 use crate::cli::error::CliExit;
 
 /// Run an async closure under the SHARED capturing subscriber
