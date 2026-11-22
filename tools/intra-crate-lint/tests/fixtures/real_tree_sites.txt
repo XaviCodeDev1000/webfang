@@ -2159,6 +2159,8 @@ infrastructure/export/vector_exporter.rs	18	use	crate::domain::exporter::ExportR
 infrastructure/export/vector_exporter.rs	18	use	crate::domain::exporter::Exporter
 infrastructure/export/vector_exporter.rs	18	use	crate::domain::exporter::ExporterConfig
 infrastructure/export/vector_exporter.rs	18	use	crate::domain::exporter::ExporterError
+infrastructure/export/vector_exporter_header.rs	10	use	crate::domain::exporter::ExportResult
+infrastructure/export/vector_exporter_header.rs	10	use	crate::domain::exporter::ExporterError
 infrastructure/fingerprint.rs	11	use	crate::domain::extraction_quality::FingerprintRecord
 infrastructure/fingerprint.rs	12	use	crate::domain::fingerprint_repository::FingerprintRepository
 infrastructure/fingerprint.rs	13	use	crate::error::ScraperError

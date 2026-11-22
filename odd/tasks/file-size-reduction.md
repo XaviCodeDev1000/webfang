@@ -478,3 +478,22 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   new production child (Rust 2018 submodule lookup). Golden
   `real_tree_sites.txt` refreshed in the same commit; 27/27 focused tests
   green.
+
+- L17 (2026-11-22, T4/O3-B10a progress): `infrastructure/export/vector_exporter.rs`
+  (1252, tests-majority, churn 13) split in the same worktree. The 658-line
+  inline test mod was regrouped at the Task 4.4 boundary and extracted through
+  `split_tests.sh` with the multiset proof (25 = 11 + 14, then 11 = 0 + 11)
+  into `vector_exporter_tests.rs` (279) and
+  `vector_exporter_append_tests.rs` (403). The production region shed the six
+  byte-window/header helpers (`read_header_bytes`, `find_subslice`,
+  `parse_count_field`, `count_documents`, `extract_created_at`,
+  `patch_header_field`) plus `HEADER_SCAN_BYTES` into
+  `vector_exporter_header.rs` (121) along the "header representation" seam,
+  leaving the exporter and its write path in `vector_exporter.rs` (497). Every
+  part <= 500; `--remove` landed in the same commit as the split. Declared
+  two-hat corrections: the six helpers and the const widened to `pub(super)`
+  for parent use, shared fixtures mirrored per themed test mod, one unused
+  fixture dropped, dedent reflows applied, and an explicit `#[path]` added on
+  the new child. The existing `#![allow(clippy::incompatible_msrv)]` stays in
+  the parent (no new allow). Golden `real_tree_sites.txt` refreshed in the
+  same commit (+2 sites); 25/25 focused tests green.
