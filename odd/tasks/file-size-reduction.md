@@ -238,11 +238,13 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   and its 29 inline tests extracted by theme (29 = 4 + 10 + 15:
   `bin_path_tests.rs` 110, `env_tests.rs` 335, `redaction_tests.rs` 194).
   Every resulting part measures <= 500; `file_size_done.sh` exits 0 for both
-  batch paths; the intra-crate golden gained +27 sites with the error.rs
-  split and the full gate battery (check, strict clippy, fmt --check,
+  batch paths; the intra-crate golden gained +28 sites with the error.rs
+  split (+27 in `error_overrides_tests.rs`, +1 in `error_matrix_tests.rs`)
+  and the full gate battery (check, strict clippy, fmt --check,
   rustdoc -D warnings, nextest, the four size/duplication/dead-test
-  guards and the dependency-direction gate) is green. The 47 + 29 + 4
-  affected test leaf names are unchanged modulo the two declared mod-path
-  renames. Needs-review decision for the harness file recorded on issue
+  guards and the dependency-direction gate) is green. The 47 + 29 = 76
+  affected test leaf names are unchanged modulo the five declared mod-path
+  renames (three in test_utils, two in error). Needs-review decision for
+  the harness file recorded on issue
   #2964 before the first cut (driver: glued modules; strategy: extract
   module per responsibility + re-export surface).
