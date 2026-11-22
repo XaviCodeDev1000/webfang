@@ -21,7 +21,7 @@ Out: `panic = "abort"` (#1219 correctness), `wreq` vs reqwest, release `lto`/`co
 - [ ] T2 — ccache `max_size` 10G -> 50G.
 - [ ] T3 — `CFLAGS=-O0` for C/C++ build scripts.
 - [ ] T4 — toolchain 1.88.0 -> 1.99.0 (rust-lld default on Linux since 1.90).
-- [x] T5 — `[profile.dev.package."*"]` opt-level 3 -> 0, and add `[profile.dev.build-override] opt-level = 3`.
+- [x] T5 — `[profile.dev.package."*"]` opt-level 3 -> 0 (landed and measured: 99.2 s). The second half of the original checkbox — `[profile.dev.build-override] opt-level = 3` — was never added to Cargo.toml and never measured; it is NOT part of the accepted result (see finding #10).
 - [x] T6 — mold as local-only rustc linker.
 - [ ] T7 — `split-debuginfo`.
 - [ ] T8 — kache as RUSTC_WRAPPER.
@@ -29,7 +29,7 @@ Out: `panic = "abort"` (#1219 correctness), `wreq` vs reqwest, release `lto`/`co
 - [ ] T10 — (REJECTED as a repo change: verified no script wraps interactive cargo)  global build lock (flock) for build/test commands.
 
 ## Measured results
-Cold `cargo build --workspace`, virgin target dir each time, same revision. Load is recorded because this machine is shared with other agent worktrees and contention dominates.
+Cold builds in virgin target dirs, same revision. Most rows are `cargo build --workspace` with default features, but the T9 `--all-features` row and the T6 `--all-targets` rows are explicitly labelled and use a different unit set — do not read the `--all-targets` link figures as default-feature results. Load is recorded because this machine is shared with other agent worktrees and contention dominates.
 
 | # | Change | Cold wall | Load | Verdict |
 |---|---|---|---|---|
@@ -68,11 +68,12 @@ The arg shapes that worried me most (`clippy ... -- -D warnings -W ratchet`) and
 2. Contention is a first-order cost: the identical build went 194.3 s -> 251.1 s (+29%) purely because another agent was building on the same machine. That is the case for T10 (build lock).
 3. The C build scripts are NOT the critical path, so fixing C build time does not help. At opt-level 3 they are libgit2-sys 113.1 s + btls-sys 70.8 s; at `-O0` libgit2-sys drops to 68.8 s, yet total wall moves only 4.4 s. They run concurrently with 1958 s of rustc work on 16 cores.
 4. ccache is effective per target dir (604 of 605 direct hits) and useless across dirs. Root cause proven from `CCACHE_LOGFILE`: the compile command embeds the absolute target dir in an include flag, e.g. `cc -O3 ... -I <target-dir>/debug/build/libgit2-sys-<hash>/out/include ...`, so the cache key changes with the tree. Every new worktree recompiles all 675 C files.
-5. After T5 the new critical path is `chromiumoxide_cdp` (47.4 s) plus the two C build scripts (btls-sys 41.1 s, libgit2-sys 28.6 s) and 4 binary links (~40 s of unit time). The link share is what T6 (mold) has to attack, and it only becomes dominant for `--all-targets`, which links 89 test binaries of ~270 MB each.
+5. After T5 the new critical path in a **chromium-enabled** build is `chromiumoxide_cdp` (47.4 s in the original run, exact command unrecorded) plus `btls-sys` (41.1 s) and 4 binary links (~40 s of unit time). `libgit2-sys` was purged (issue #1797, see `crates/webfang_core/build.rs`) and is no longer in the graph, so its 28.6 s must not be counted. The default-feature `cargo build --workspace` graph is browser-free (`chromium = ["dep:chromiumoxide"]`, optional dependency), so CDP cannot be on that path. Controlled re-measurement (2026-11-22, cold target, `cargo build -p webfang_core --features chromium --timings`, rustc 1.91.1, 16 jobs): `chromiumoxide_cdp v0.7.0` 75.0 s total (72.9 s frontend) and the `btls-sys` build script 74.2 s, inside a 132.3 s build of 540 units. The 47.4 s and 75.0 s figures are NOT interchangeable — different command, load and revision; the defensible claim is only that CDP is a large unit in chromium-enabled builds.
 6. A profile change invalidates every unit hash, so a worktree that lands T5 pays one full rebuild.
-7. **T6 (mold) is real but modest for `--workspace`**: -7% to -15%, two of two orderings. It only links 4 binaries here; the win should be far larger for `--all-targets`, which links 89 test binaries of ~270 MB and is what `cargo nextest` needs. That measurement is still open.
+7. **T6 (mold) is real but modest for `--workspace`**: -7% to -15%, two of two orderings. It only links 4 binaries here. The `--all-targets` measurements above (89 binaries, ~270 MB each) already exist — this finding predates those rows and is superseded by them. Those 89 binaries come from a local mold experiment, not from a CI job: no workflow passes `--all-targets` to `nextest`, so they are not "what cargo nextest needs".
 8. **T9 (mbx) is the first tool on this machine that produces cross-target-dir cache hits.** First virgin build 199.0 s / 0 hits / 2.8 GiB stored; second virgin build in a *different* dir 70.7 s with **722 hits and 209 misses**, at load 29.7. For comparison, ccache is proven ineffective across dirs (finding 4) and sccache was measured net-negative in #1447. `mbx doctor`: 0 failures, 1 warning — plain `cargo` bypasses it until `mbx setup` installs the shim, so the win requires a machine-global decision, not a repo change. Its defaults also attack the disk problem directly: 45 GiB budget, automatic GC, managed targets under `~/.cache/mbx/targets`. mise.toml was reverted: enabling it for plain cargo is a separate call.
 9. `mise use --tool-option mr_boxington=true rust mr-boxington` rewrites `rust = "1.88"` into `rust = { version = "latest", ... }`, which silently breaks the MSRV pin in the same file. Restore the pin immediately after.
+10. **T5 was only half-landed, and the missing half was never measured.** `[profile.dev.build-override] opt-level = 3` appears solely in the T5 checkbox, not in the results table, not in the root `Cargo.toml` and not in `.cargo/config.toml`. The `ACCEPTED (251.1 -> 99.2, -60%)` verdict belongs to `[profile.dev.package."*"] opt-level = 0` alone. There is no evidence that optimizing build scripts helps: T3 (`CFLAGS/CXXFLAGS=-O0`) was -2% (noise), and the root `Cargo.toml` records that the runtime cost of optimized dependencies is real. This is closed as documentation hygiene, not reopened as a performance fix — landing it would need its own cold measurement and would invalidate every unit hash (finding #6).
 
 ## Verification
 `cargo check --workspace` green with the new profile (69.9 s at load 6.2). The full pre-push gate (`scripts/ci_fast_gate.sh`) has not been run yet.

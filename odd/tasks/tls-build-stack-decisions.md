@@ -1,0 +1,40 @@
+# Feature: tls-build-stack-decisions
+Branch: docs/tls-build-stack-adr · delivery: one work-unit commit per step · runner: structural doc checks + `cargo check` only if Rust surfaces are touched (none planned).
+
+## Specs
+
+- **S1** — «correr el 47.4 s con el feature set correcto y arreglar el finding #5 rancio». Verbatim from the authorized order: *"Orden analítico que yo seguiría: (1) correr el 47.4 s con el feature set correcto y arreglar el finding #5 rancio, (2) auditar chromiumoxide con esa medición válida, (3) cerrar T5 como doc hygiene, (4) ADR del stack TLS con autorización explícita. CMake queda afuera de todo, como debe ser."* The stale finding #5 states verbatim: *"After T5 the new critical path is `chromiumoxide_cdp` (47.4 s) plus the two C build scripts (btls-sys 41.1 s, libgit2-sys 28.6 s) and 4 binary links (~40 s of unit time)."* Acceptance: the 47.4 s figure is attributed to its actual feature set (`--all-features` vs default), `libgit2-sys` is no longer presented as a post-purge critical-path unit, and the doc preamble no longer claims every timing came from a default-feature `cargo build --workspace`.
+- **S2** — «auditar chromiumoxide con esa medición válida». Acceptance: identify where `chromiumoxide_cdp` and the 89 test binaries are built, which CI lanes use `--all-features` vs default features, and whether further feature gating is warranted. **This task is read-only: any Cargo.toml or `.github/` change is out of scope and needs a separate authorization.**
+- **S3** — «cerrar T5 como doc hygiene». Acceptance: `build-perf-experiments.md` stops asserting `[profile.dev.build-override] opt-level = 3` as part of the accepted T5 bundle; the checkbox or results table reflects that only `[profile.dev.package."*"] opt-level = 0` landed and was measured. No Cargo.toml profile edit (that would be a new measured decision, not doc hygiene).
+- **S4** — «ADR del stack TLS con autorización explícita». Acceptance: a new ADR in `docs/adr/` records BoringSSL/wreq as a deliberate, measured choice, following the house ADR format (Status/Date/Deciders/Related, Context, Decision, Consequences, Alternatives rejected), in English. It must cite ADR-0003 §3, `AGENTS.md`, `build_wreq_client`, the field evidence in `jitter-pacing-2610.md`, and the measured finding that the C build is not the critical path. Explicit authorization for touching `docs/` is the user message in L2.
+- **S5** — «CMake queda afuera de todo, como debe ser.» Scope boundary: no build-script, dependency, CI or CMake work in this feature.
+
+## Tasks
+
+- T1 · S1 — route inline — measurement + doc fix — status done — commit bb7fc0cf
+- T2 · S2 — route inline — read-only audit — status done — evidence in L4 (no source change)
+- T3 · S3 — route inline — doc hygiene — status done — commit 47d971ce
+- T4 · S4 — route inline — new ADR + index row — status done — commit 0c91156b
+- T5 · S1-S4 — route inline — final verification, mirror, ODD close — status done — commit 0a3a6d28
+
+Route declaration: all tasks inline. Trigger evidence: one understood deliverable at a time, no independent parallel units, no context backstop. Risk: none — docs and audit only; no high-risk item (no dependency, CI, profile or public API change).
+
+## Log
+
+L1 — vamos a seguir tu orden analitico tienes mi autorizacion
+
+L2 — Authorized order (verbatim from the preceding answer): "Orden analítico que yo seguiría: (1) correr el 47.4 s con el feature set correcto y arreglar el finding #5 rancio, (2) auditar chromiumoxide con esa medición válida, (3) cerrar T5 como doc hygiene, (4) ADR del stack TLS con autorización explícita. CMake queda afuera de todo, como debe ser." This is the explicit `docs/` authorization required by AGENTS.md.
+
+L3 — Baseline verification already completed before this feature: the colleague's verdict was contrasted against the repo; the dependency chain, ADR-0003 §3, `build_wreq_client`, the Cloudflare field evidence and finding #3 were confirmed. Corrections found: T5 `build-override` was never in the results table (only a checked checkbox), `NOTICE` claims `ring 0.17.14` / `rustls-webpki` statically linked though neither is in `Cargo.lock`, `build-perf-experiments.md` finding #5 still lists purged `libgit2-sys`, and the 47.4 s figure has a broken feature-set premise.
+
+L4 — T1 evidence: cold re-measurement in this worktree's virgin target dir with the real cargo (mbx shim bypassed), `cargo build -p webfang_core --features chromium --timings`, rustc 1.91.1, 16 jobs, 540 units, 132.3 s total: `chromiumoxide_cdp v0.7.0` 75.0 s (72.9 s frontend) — the longest unit — and `btls-sys` build script 74.2 s. The 47.4 s and 75.0 s values are not interchangeable (different command/load/revision). Preamble, finding #5 and finding #7 corrected; finding #3/#4 keep libgit2-sys as historical pre-purge measurements. Commit bb7fc0cf.
+
+L5 — T2 audit evidence (read-only): `chromium = ["dep:chromiumoxide"]` with `chromiumoxide` optional and `default = []` in `webfang_core`/`webfang_cli`/`webfang_mcp`; `scripts/test_build_graph.sh` pins "the default workspace graph is browser-free" and `ci.yml` `repo-guards` runs that harness. PR fast gate `test-core` is default-feature; `test-full`/flake nightly use an explicit 6-feature prebuild including chromium; `coverage`/`mcp` are non-gating `--all-features`; no workflow passes `--all-targets` to `nextest`. The 89 binaries / ~270 MB figure is from a local mold experiment, not a CI job. Removing chromium from the prebuild spec would reintroduce private per-test builds and the 180 s parity timeout (`fix-mcp-parity-timeout-2335.md` E2, `cli_harness.rs` `cfg!(feature = "chromium")`, `bin_path.rs` contract). Verdict: no defensible further gating — the 47.4 s problem was a misattributed measurement, not a gating defect. Cargo.toml/.github changes remain outside this feature's authorization.
+
+L6 — T3 evidence: `build-perf-experiments.md` T5 checkbox now scopes the accepted result to `[profile.dev.package."*"] opt-level = 0` (99.2 s) and states that `[profile.dev.build-override] opt-level = 3` never landed, was never measured, and is not part of the accepted bundle; new finding #10 records that T3 (-2%, noise) gives no evidence for optimizing build scripts and that landing it would need its own cold measurement. No Cargo.toml edit. Commit 47d971ce.
+
+L7 — T4 evidence: `docs/adr/0022-boringssl-tls-stack.md` written in English with the house ADR shape; `docs/adr/README.md` gained the `ADR-0022` row in the same commit and the total moved 19 → 20 files / 18 → 19 decisions. The ADR records the verified dependency chain, ADR-0003 §3, AGENTS.md policy, `build_wreq_client`, the Cloudflare field quote, finding #3 and the controlled 75.0 s CDP measurement; it names the portability price and rejects cc/system BoringSSL/rustls/reqwest/C-build optimization. Commit 0c91156b.
+
+L8 — Verification: RDD `gentle-ai review assess --base-ref 7f96253d --committed-only` returned `risk: passive`, `review_due: false` (non_executable_only). `bash scripts/ci_fast_gate.sh` docs lane GREEN (PASS=10 FAIL=0 SKIP=1: markdownlint declared but skipped); coverage names doc-quality partial (cargo doc runs locally, cargo test --doc does not) and several jobs NOT covered, none touched by this docs-only change. Full pre-commit gate (`cargo check`, clippy `--all-targets --all-features` with the two lints, `cargo fmt --all -- --check`, `cargo doc` with `-D warnings`) exited 0; rustdoc emitted the known ICE dumps (gitignored) and still completed. `scripts/check_docs_version_pins.sh` green. Eight generated `rustc-ice-*.txt` dumps removed; `git status --short` clean. `git diff --stat main...HEAD`: 4 files, 93 insertions, 5 deletions.
+
+L9 — Delivery: pushed `origin/docs/tls-build-stack-adr`; created issue #2992 with `type:docs` + `status:approved` under the user's explicit instruction and verified target-host `admin` permission (the canonical `issue-creation` skill is not installed in this environment); opened PR #2993 against `main` with `Closes #2992` and exactly one `type:docs` label. No merge performed — ordinary repository policy owns it.
