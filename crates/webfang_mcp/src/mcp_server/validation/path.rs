@@ -230,7 +230,8 @@ pub fn require_safe_path_allow_absolute(field: &str, value: &str) -> Result<Path
 /// Validate that `value` is a single, flat filename component safe to join
 /// onto a base directory.
 ///
-/// Unlike [`require_safe_name`] — which validates only length/emptiness and
+/// Unlike [`crate::mcp_server::validation::require_safe_name`] — which
+/// validates only length/emptiness and
 /// assumes the value is never used as a path component — this enforces, by
 /// structural decomposition, that the value cannot escape its parent directory
 /// when joined via `Path::join`. This is the fix for issue #601: a `filename`
