@@ -220,10 +220,12 @@ EOF
   # PER-TEST gate — loading that file routes `RecordStore::load` through
   # `migrate_v1`, whose backup-first step is `copy_file_range`, syscall 326,
   # which Miri cannot execute (upstream miri#4183). In the real file the
-  # fixture is one `const` because `cli/scrape_flow.rs` sits exactly at its
-  # grandfathered line count and the DESCENDING ratchet leaves no room for
-  # the two gates by themselves.
-  cat >"$root/crates/webfang_core/src/cli/scrape_flow.rs" <<'EOF'
+  # fixture is one `const` because `cli/scrape_flow.rs` sat exactly at its
+  # grandfathered line count and the DESCENDING ratchet left no room for
+  # the two gates by themselves. O3-B3 extracted the resume tests (const
+  # included) into `cli/scrape_flow_tests.rs`; the entry and this fixture
+  # follow the code.
+  cat >"$root/crates/webfang_core/src/cli/scrape_flow_tests.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -584,7 +586,7 @@ mod tests {
 # On Linux that copy is `copy_file_range`, syscall 326, which Miri cannot
 # execute (upstream miri#4183) — the same primitive the six `record_store.rs`
 # migration tests already reach. Both of the file's consumers are gated.
-red_surface "scrape-flow" "crates/webfang_core/src/cli/scrape_flow.rs" \
+red_surface "scrape-flow" "crates/webfang_core/src/cli/scrape_flow_tests.rs" \
 'rejects an unguarded test that writes the pre-v2 resume fixture' \
 '#[cfg(test)]
 mod tests {
@@ -597,7 +599,7 @@ mod tests {
 # Vacuity, per entry: `V1_ONE_PROCESSED_URL` disappears — the fixture is
 # renamed, or the two resume tests that used it are replaced by a v2 store.
 # The invariant must FAIL instead of inspecting nothing and reporting green.
-red_surface "scrape-flow-vacuity" "crates/webfang_core/src/cli/scrape_flow.rs" \
+red_surface "scrape-flow-vacuity" "crates/webfang_core/src/cli/scrape_flow_tests.rs" \
 'rejects a file whose pre-v2 fixture marker disappeared' \
 '#[cfg(test)]
 mod tests {
