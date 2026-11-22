@@ -4,7 +4,8 @@
 //! decomposition (issue #1619, finding F1). The run lifecycle lives here: the
 //! per-URL crawl, content extraction, the elastic/resume wiring and the batch
 //! crawl-config projection. The bounded capture spool's acquisition path
-//! (observe → decide → act) is the [`batch_spool`] child (Ola 3 B4, #2966).
+//! (observe → decide → act) is the [`batch_spool`] child and the batch
+//! manager assembly is the [`batch_manager`] child (Ola 3 B4, #2966).
 //!
 //! The module owns no new policy. The exit-code decision stays in
 //! [`crate::cli::exit_codes`], the canonical severity mapping in
@@ -15,9 +16,9 @@
 
 use tracing::{error, info, warn};
 
-use super::batch_summary::{enforce_strict_input, input_accounting, log_batch_summary};
-use crate::application::batch::{BatchManager, BatchManagerSummary};
-use crate::application::crawl_options::{CrawlLimits, CrawlOptions};
+use super::batch_summary::log_batch_summary;
+use crate::application::batch::BatchManagerSummary;
+use crate::application::crawl_options::CrawlOptions;
 use crate::application::crawler::BoundedFileSink;
 use crate::cli::discovery_phase::base_crawler_config_builder;
 use crate::cli::elastic::{build_elastic_ingestion, run_elastic_ingestion};
@@ -37,6 +38,12 @@ mod batch_spool;
 
 use self::batch_spool::{build_batch_sink, discard_batch_spool};
 pub(crate) use batch_spool::BATCH_SPOOL_FILE;
+
+#[path = "batch_manager.rs"]
+mod batch_manager;
+
+use self::batch_manager::prepare_batch_manager;
+pub(crate) use batch_manager::load_batch_manager;
 
 /// Run batch processing mode: scrape multiple URLs from stdin or file.
 ///
@@ -314,175 +321,6 @@ fn spawn_flush_watch(
     Some(handle)
 }
 
-/// Warn when crawl-expansion flags are set on a `--batch` run (#1215).
-///
-/// Batch scrapes each input URL (one page per URL), so `--max-depth`,
-/// `--max-pages`, and `--sitemap` cannot expand anything here. A value that
-/// differs from the default means the operator asked for a crawl — staying
-/// silent would let them assume one happened — hence `warn!`, naming every
-/// inert flag. Defaults are read from [`CrawlLimits::default`] (the same
-/// source the CLI defaults mirror) rather than hardcoded, so the comparison
-/// cannot rot when defaults move.
-fn warn_batch_crawl_flags_ignored(opts: &CrawlOptions) {
-    let defaults = CrawlLimits::default();
-    let mut inert = Vec::new();
-    if opts.crawl.max_depth != defaults.max_depth {
-        inert.push(format!("--max-depth {}", opts.crawl.max_depth));
-    }
-    if opts.crawl.max_pages != defaults.max_pages {
-        inert.push(format!("--max-pages {}", opts.crawl.max_pages));
-    }
-    if opts.crawl.use_sitemap || opts.crawl.sitemap_url.is_some() {
-        inert.push("--sitemap".to_string());
-    }
-    if inert.is_empty() {
-        info!("Batch mode scrapes each input URL (one page per URL, no crawling)");
-    } else {
-        warn!(
-            flags = inert.join(", "),
-            "--batch scrapes each input URL (one page per URL): crawl-expansion flags are ignored (#1215)"
-        );
-    }
-}
-
-/// Load the batch manager, attach the capture sink, and assert it has work.
-///
-/// Warns loudly when crawl-expansion flags (`--max-depth`, `--max-pages`,
-/// `--sitemap`) differ from their defaults: since #1215 batch scrapes each
-/// URL instead of crawling it, those flags are inert here and the operator
-/// must hear about it rather than assume a crawl happened.
-///
-/// `root_correlation` (#1439) travels onto the [`BatchProcessor`](crate::application::batch::BatchProcessor) so every
-/// per-URL crawl engine of this run shares the one announced identity.
-async fn prepare_batch_manager(
-    opts: &CrawlOptions,
-    tls_emulation: wreq_util::Profile,
-    sink: std::sync::Arc<BoundedFileSink>,
-    root_correlation: &domain::CorrelationId,
-) -> Result<BatchManager, CliExit> {
-    warn_batch_crawl_flags_ignored(opts);
-    let budget = crate::domain::budget::BudgetModel::build(
-        opts.budget_overrides,
-        &crate::domain::budget::detector::SystemDetector,
-    );
-    let crawler_config = build_batch_crawler_config(opts, tls_emulation, &budget)?;
-    let manager = load_batch_manager(opts, crawler_config, &budget)
-        .await?
-        .with_content_sink(sink.clone())
-        .with_correlation(root_correlation.clone());
-
-    // WU4 (#2609/#2611): with `--resume`, drop the URLs whose records are
-    // COMMITTED-proven in the batch store BEFORE any fetch — a relaunch must
-    // not re-download pages the previous run already exported (S7 iv: zero
-    // double downloads). Runs on the blocking pool: the store read takes
-    // the flock and does file I/O.
-    let had_urls_before_resume_filter = manager.url_count() > 0;
-    let manager = if opts.crawl.resume {
-        filter_committed_batch(manager, opts, sink, root_correlation).await?
-    } else {
-        manager
-    };
-
-    if manager.url_count() == 0 {
-        if had_urls_before_resume_filter {
-            // Every input URL is already COMMITTED: the batch has nothing to
-            // do, and that is a SUCCESS (exit 0), not a usage error — same
-            // contract as the crawl-classic resume (#2609).
-            info!("resume: all batch URLs already processed, nothing pending");
-        } else {
-            // #2795: the error counts what the source yielded and why nothing
-            // is runnable — a bare "no URLs" sent the operator to count lines
-            // by hand. Exit stays 64: an input that yields no URL is a usage
-            // error (matrix row 15), strict-or-not.
-            error!("No URLs provided for batch processing");
-            let accounting = manager
-                .input_lines()
-                .map(input_accounting)
-                .unwrap_or_else(|| "sin líneas de entrada".to_string());
-            return Err(CliExit::UsageError(format!(
-                "No hay URLs para procesar ({accounting})"
-            )));
-        }
-    }
-
-    info!(
-        "Starting batch processing: {} URLs, concurrency={}",
-        manager.url_count(),
-        budget.batch().get()
-    );
-
-    Ok(manager)
-}
-
-/// Filter the batch URL list down to the not-yet-COMMITTED ones (WU4).
-///
-/// Uses the SAME typed gate as the crawl-classic resume
-/// ([`crate::application::resume::filter_committed`]) against the batch
-/// store, so a relaunched `--resume` batch skips exactly the pages a
-/// previous run committed — including pages a checkpoint flush committed
-/// mid-run. All-skipped is NOT an error here: the run exits through the
-/// normal empty-batch path, which reports success with zero work.
-async fn filter_committed_batch(
-    manager: BatchManager,
-    opts: &CrawlOptions,
-    sink: std::sync::Arc<BoundedFileSink>,
-    root_correlation: &domain::CorrelationId,
-) -> Result<BatchManager, CliExit> {
-    let store = match build_batch_resume_store(opts) {
-        Ok(Some(s)) => crate::cli::scrape_flow::record_store_bridge(&*s),
-        _ => return Ok(manager),
-    };
-    let urls = manager.urls();
-    let parsed: Vec<url::Url> = urls
-        .iter()
-        .filter_map(|u| url::Url::parse(u).ok())
-        .collect();
-    let total = parsed.len();
-    let manager_urls = manager.urls();
-    let (pending, _run_id) = {
-        let store = store.clone();
-        let parsed = parsed.clone();
-        tokio::task::spawn_blocking(move || {
-            crate::application::resume::filter_committed(
-                parsed,
-                &store as &dyn crate::domain::persistence::RecordStorePort,
-            )
-        })
-        .await
-        .map_err(|e| CliExit::IoError(format!("No se pudo leer el estado de resume: {e}")))?
-    };
-    let pending_set: std::collections::HashSet<String> =
-        pending.iter().map(|u| u.as_str().to_string()).collect();
-    let kept: Vec<String> = manager_urls
-        .into_iter()
-        .filter(|u| {
-            url::Url::parse(u)
-                .map(|p| pending_set.contains(p.as_str()))
-                .unwrap_or(true)
-        })
-        .collect();
-    let skipped = total.saturating_sub(kept.len());
-    if skipped > 0 {
-        info!(
-            skipped,
-            total, "resume: skipping URLs already COMMITTED in the batch store"
-        );
-    }
-    let budget = crate::domain::budget::BudgetModel::build(
-        opts.budget_overrides,
-        &crate::domain::budget::detector::SystemDetector,
-    );
-    // Rebuild the manager over the pending URLs with a fresh config — the
-    // crawler_config was consumed by load_batch_manager, so rebuild it.
-    let tls_emulation = resolve_batch_tls_emulation(opts)?;
-    let crawler_config = build_batch_crawler_config(opts, tls_emulation, &budget)?;
-    Ok(
-        BatchManager::from_urls(kept, crawler_config, budget.batch().nonzero())
-            .with_content_sink(sink)
-            .with_correlation(root_correlation.clone()),
-    )
-}
-
 /// Flush the capture spool and fail loudly when the batch produced nothing.
 ///
 /// An empty spool means `--batch` would write zero files while reporting
@@ -676,52 +514,6 @@ fn build_batch_crawler_config(
         .concurrency(budget.crawl().nonzero())
         .tls_emulation(tls_emulation)
         .build())
-}
-
-/// Load the batch manager from a file or stdin.
-///
-/// Also reached by the `--batch-file` dry-run preview (`run_dry_run`), which
-/// lists the URLs a batch run would scrape without fetching them.
-pub(crate) async fn load_batch_manager(
-    opts: &CrawlOptions,
-    crawler_config: CrawlerConfig,
-    budget: &crate::domain::budget::BudgetModel,
-) -> Result<BatchManager, CliExit> {
-    let manager = if let Some(ref path) = opts.batch.batch_file {
-        info!("Reading URLs from file: {}", path.display());
-        // #2355: the budget tier is already `NonZeroUsize` — hand the typed
-        // value through instead of downgrading to `usize` and revalidating.
-        BatchManager::from_file(path, crawler_config, budget.batch().nonzero()).map_err(|e| {
-            error!(error = %e, "Failed to read URLs from file");
-            CliExit::IoError(format!("Failed to read URLs from file: {e}"))
-        })?
-    } else {
-        info!("Reading URLs from stdin");
-        load_batch_manager_from_stdin(crawler_config, budget.batch().nonzero()).await?
-    };
-    enforce_strict_input(&manager, opts)?;
-    Ok(manager)
-}
-
-/// Read batch URLs from stdin on a blocking thread.
-async fn load_batch_manager_from_stdin(
-    crawler_config: CrawlerConfig,
-    concurrency: std::num::NonZeroUsize,
-) -> Result<BatchManager, CliExit> {
-    // spawn_blocking: stdin read is blocking I/O that must not run on the
-    // Tokio async runtime thread pool — it would block other tasks.
-    match tokio::task::spawn_blocking(move || BatchManager::from_stdin(crawler_config, concurrency))
-        .await
-    {
-        Ok(result) => result.map_err(|e| {
-            error!(error = %e, "Failed to read URLs from stdin");
-            CliExit::IoError(format!("Failed to read URLs from stdin: {e}"))
-        }),
-        Err(join_err) => {
-            error!(error = %join_err, "stdin read task panicked");
-            Err(CliExit::IoError(format!("Failed to read URLs: {join_err}")))
-        },
-    }
 }
 
 #[cfg(test)]
