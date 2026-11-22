@@ -15,7 +15,7 @@ Branch: docs/tls-build-stack-adr · delivery: one work-unit commit per step · r
 - T2 · S2 — route inline — read-only audit — status done — evidence in L4 (no source change)
 - T3 · S3 — route inline — doc hygiene — status done — commit 47d971ce
 - T4 · S4 — route inline — new ADR + index row — status done — commit 0c91156b
-- T5 · S1-S4 — route inline — final verification, mirror, ODD close — status done — commit pending
+- T5 · S1-S4 — route inline — final verification, mirror, ODD close — status done — commit 0a3a6d28
 
 Route declaration: all tasks inline. Trigger evidence: one understood deliverable at a time, no independent parallel units, no context backstop. Risk: none — docs and audit only; no high-risk item (no dependency, CI, profile or public API change).
 
@@ -36,3 +36,5 @@ L6 — T3 evidence: `build-perf-experiments.md` T5 checkbox now scopes the accep
 L7 — T4 evidence: `docs/adr/0022-boringssl-tls-stack.md` written in English with the house ADR shape; `docs/adr/README.md` gained the `ADR-0022` row in the same commit and the total moved 19 → 20 files / 18 → 19 decisions. The ADR records the verified dependency chain, ADR-0003 §3, AGENTS.md policy, `build_wreq_client`, the Cloudflare field quote, finding #3 and the controlled 75.0 s CDP measurement; it names the portability price and rejects cc/system BoringSSL/rustls/reqwest/C-build optimization. Commit 0c91156b.
 
 L8 — Verification: RDD `gentle-ai review assess --base-ref 7f96253d --committed-only` returned `risk: passive`, `review_due: false` (non_executable_only). `bash scripts/ci_fast_gate.sh` docs lane GREEN (PASS=10 FAIL=0 SKIP=1: markdownlint declared but skipped); coverage names doc-quality partial (cargo doc runs locally, cargo test --doc does not) and several jobs NOT covered, none touched by this docs-only change. Full pre-commit gate (`cargo check`, clippy `--all-targets --all-features` with the two lints, `cargo fmt --all -- --check`, `cargo doc` with `-D warnings`) exited 0; rustdoc emitted the known ICE dumps (gitignored) and still completed. `scripts/check_docs_version_pins.sh` green. Eight generated `rustc-ice-*.txt` dumps removed; `git status --short` clean. `git diff --stat main...HEAD`: 4 files, 93 insertions, 5 deletions.
+
+L9 — Delivery: pushed `origin/docs/tls-build-stack-adr`; created issue #2992 with `type:docs` + `status:approved` under the user's explicit instruction and verified target-host `admin` permission (the canonical `issue-creation` skill is not installed in this environment); opened PR #2993 against `main` with `Closes #2992` and exactly one `type:docs` label. No merge performed — ordinary repository policy owns it.
