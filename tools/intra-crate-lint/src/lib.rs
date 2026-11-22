@@ -9,7 +9,11 @@
 //! * **Structural test regions (B36).** A node is inside a test region when it
 //!   carries a `#[cfg(P)]` whose predicate positively mentions `test`. The
 //!   exclusion is the test-module SUBTREE, so code that follows a
-//!   `#[cfg(test)] mod` in the same file is still scanned.
+//!   `#[cfg(test)] mod` in the same file is still scanned. A `#[cfg(test)]`
+//!   mod DECLARED with its content in another file (`mod tests;`, with or
+//!   without an explicit `#[path]`) makes the declared child file a test
+//!   region too: the gate lives at the declaration site, so the child file is
+//!   excluded whole — the same exclusion an inline test mod gets.
 //! * **No comment or string blindness (B37).** `syn` drops comments and turns
 //!   strings into literal values, so a path inside a string literal is
 //!   invisible and a `/*` inside a string cannot hide anything.
@@ -20,6 +24,7 @@
 //!
 //! The CLI contract lives in `main.rs`; this module is the reusable core.
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -30,7 +35,7 @@ use proc_macro2::{Spacing, TokenTree};
 use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
 use syn::Path as SynPath;
-use syn::{Attribute, Expr, Item, ItemUse, Meta, Token, UseTree};
+use syn::{Attribute, Expr, ExprLit, Item, ItemMod, ItemUse, Lit, Meta, Token, UseTree};
 
 /// The path prefix that marks an intra-crate reference.
 pub const CRATE_ROOT: &str = "crate";
@@ -170,8 +175,16 @@ pub fn extract_file(root: &Path, file: &Path) -> Result<Vec<Site>, ExtractError>
 /// cannot hide the rest of the tree.
 pub fn extract_tree(root: &Path) -> Result<TreeExtraction, ExtractError> {
     let files = collect_rs_files(root)?;
+    let declared: HashSet<PathBuf> = declared_test_files(&files).into_iter().collect();
     let mut extraction = TreeExtraction::default();
     for file in files {
+        if declared.contains(&file) {
+            // A test region by declaration: the gate lives at the parent's
+            // `#[cfg(test)] mod` declaration, so the child file is excluded
+            // whole — the same exclusion an inline `#[cfg(test)] mod` subtree
+            // gets.
+            continue;
+        }
         match extract_file(root, &file) {
             Ok(sites) => extraction.sites.extend(sites),
             Err(error) => extraction.errors.push(error),
@@ -180,6 +193,79 @@ pub fn extract_tree(root: &Path) -> Result<TreeExtraction, ExtractError> {
     extraction.sites.sort();
     extraction.sites.dedup();
     Ok(extraction)
+}
+
+/// Every file under the same root that a sibling production file declares as a
+/// test-only module: a `#[cfg(test)]`-gated `mod` declaration whose content
+/// lives in another file — via an explicit `#[path = "..."]` or the default
+/// `<name>.rs` sibling resolution.
+///
+/// The file-size program extracts inline `#[cfg(test)]` mods into `*_tests.rs`
+/// siblings wired from the parent (`#[cfg(test)] #[path = "..."] mod tests;`).
+/// The gate lives at the declaration site, so the child file carries no `cfg`
+/// attribute of its own; without this pass the extractor would scan it as
+/// production code and report the intra-crate references that the same
+/// references never produced while they lived inline in the parent. One level
+/// of declaration is followed: a declared test file that itself declares test
+/// mods is already a test region, so its declarations do not matter.
+fn declared_test_files(files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut declared = Vec::new();
+    for file in files {
+        let source = match fs::read_to_string(file) {
+            Ok(source) => source,
+            // Unreadable and unparseable files are reported by the extraction
+            // pass, never here: this pass only collects declarations.
+            Err(_) => continue,
+        };
+        let parsed = match syn::parse_file(&source) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+        for item in &parsed.items {
+            let Item::Mod(item_mod) = item else { continue };
+            if item_mod.content.is_some() {
+                // Inline content: already excluded as a subtree in the same
+                // file; nothing is declared to another file.
+                continue;
+            }
+            if !is_test_region(&item_mod.attrs) {
+                continue;
+            }
+            if let Some(path) = declared_mod_file(file, item_mod) {
+                declared.push(path);
+            }
+        }
+    }
+    declared.sort();
+    declared.dedup();
+    declared
+}
+
+/// The file a `mod x;` declaration loads: the explicit `#[path]` attribute
+/// resolved relative to the declaring file's directory, or the default
+/// `<x>.rs` sibling. A declaration whose target does not exist is skipped —
+/// reporting it is the compiler's job, not the extractor's.
+fn declared_mod_file(declaring: &Path, item_mod: &ItemMod) -> Option<PathBuf> {
+    let explicit = item_mod.attrs.iter().find_map(|attribute| {
+        if !attribute.path().is_ident("path") {
+            return None;
+        }
+        match &attribute.meta {
+            Meta::NameValue(name_value) => match &name_value.value {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(lit), ..
+                }) => Some(lit.value()),
+                _ => None,
+            },
+            _ => None,
+        }
+    });
+    let base = declaring.parent()?;
+    let candidate = match explicit {
+        Some(path) => base.join(path),
+        None => base.join(format!("{}.rs", item_mod.ident)),
+    };
+    candidate.is_file().then_some(candidate)
 }
 
 /// Every `.rs` file under `root`, in a deterministic order.
