@@ -1196,6 +1196,15 @@ cli/commands/connect.rs	48	use	crate::domain::providers::ProviderConfig
 cli/commands/connect.rs	48	use	crate::domain::providers::ProviderKind
 cli/commands/connect.rs	48	use	crate::domain::providers::ProvidersConfig
 cli/commands/connect.rs	252	inline	crate::cli::config::ConfigDefaults
+cli/commands/connect/tests_flow.rs	122	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/tests_merge.rs	12	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/tests_merge.rs	50	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/tests_merge.rs	135	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/tests_merge.rs	172	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/tests_merge.rs	377	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/tests_merge.rs	419	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/tests_merge.rs	444	inline	crate::cli::config::ConfigDefaults::load_explicit
+cli/commands/connect/toml_merge.rs	1	use	crate::domain::providers::ProviderConfig
 cli/commands/doctor.rs	24	use	crate::cli::args::SubcommandArgs
 cli/commands/doctor.rs	25	use	crate::cli::error::CliExit
 cli/commands/doctor.rs	26	use	crate::cli::llm_wire

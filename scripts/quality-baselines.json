@@ -28,7 +28,6 @@
       "crates/webfang_core/src/cli/args/crawler.rs": 1375,
       "crates/webfang_core/src/cli/args/mod.rs": 797,
       "crates/webfang_core/src/cli/batch_flow.rs": 1250,
-      "crates/webfang_core/src/cli/commands/connect.rs": 1874,
       "crates/webfang_core/src/cli/config.rs": 855,
       "crates/webfang_core/src/cli/discovery_phase.rs": 637,
       "crates/webfang_core/src/cli/error.rs": 1117,
