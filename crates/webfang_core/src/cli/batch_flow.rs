@@ -1,10 +1,10 @@
 //! CLI batch pipeline — the `--batch` lifecycle end to end.
 //!
 //! Extracted from `cli/orchestrator.rs` as part of the composition-root
-//! decomposition (issue #1619, finding F1). Everything reachable only from
-//! `run_batch` lives here: the per-URL crawl, the bounded capture spool,
-//! content extraction, the elastic/resume wiring and the batch crawl-config
-//! projection.
+//! decomposition (issue #1619, finding F1). The run lifecycle lives here: the
+//! per-URL crawl, content extraction, the elastic/resume wiring and the batch
+//! crawl-config projection. The bounded capture spool's acquisition path
+//! (observe → decide → act) is the [`batch_spool`] child (Ola 3 B4, #2966).
 //!
 //! The module owns no new policy. The exit-code decision stays in
 //! [`crate::cli::exit_codes`], the canonical severity mapping in
@@ -31,6 +31,12 @@ use crate::domain::persistence::StateStorePort;
 use crate::CrawlerConfig;
 
 use crate::domain::semantic_cleaner::SemanticCleaner;
+
+#[path = "batch_spool.rs"]
+mod batch_spool;
+
+use self::batch_spool::{build_batch_sink, discard_batch_spool};
+pub(crate) use batch_spool::BATCH_SPOOL_FILE;
 
 /// Run batch processing mode: scrape multiple URLs from stdin or file.
 ///
@@ -508,184 +514,6 @@ async fn flush_batch_sink(sink: &BoundedFileSink) -> Result<(), CliExit> {
     Ok(())
 }
 
-/// File name of the batch capture spool, under the run's persistence root.
-pub(crate) const BATCH_SPOOL_FILE: &str = ".webfang-batch-capture.jsonl";
-
-/// Spanish disclosure for a spool quarantined as an orphan (slice 2, #2611).
-///
-/// The data is NOT deleted — it is renamed aside and the operator is pointed
-/// at `webfang recover`, which can turn it back into `.md` files.
-const ORPHAN_SPOOL_MESSAGE: &str = "Se encontró un archivo temporal de captura de una ejecución anterior que no se puede atribuir a esta corrida (sin sidecar utilizable o con identidad que no coincide). NO se eliminó: se movió a la ruta indicada. Recuperá las páginas con: webfang recover --spool <ruta> -o <dir>";
-
-/// Observe the sidecar + spool pair at the given root (the pure decision's
-/// inputs) without mutating anything.
-async fn observe_spool_pair(
-    root: &std::path::Path,
-) -> (
-    crate::application::batch::progress::SidecarState,
-    crate::application::batch::progress::SpoolFileState,
-) {
-    use crate::application::batch::progress::{
-        spool_first_line_sha256, BatchProgressV1, SidecarState, BATCH_PROGRESS_FILE,
-    };
-
-    let spool_path = root.join(BATCH_SPOOL_FILE);
-    let sidecar_path = root.join(BATCH_PROGRESS_FILE);
-
-    let sidecar = match tokio::fs::read(&sidecar_path).await {
-        Err(_) => SidecarState::Absent,
-        Ok(bytes) => match serde_json::from_slice::<BatchProgressV1>(&bytes) {
-            Ok(parsed) => SidecarState::Parsed(Box::new(parsed)),
-            Err(_) => SidecarState::Unreadable,
-        },
-    };
-
-    let spool = match tokio::fs::read(&spool_path).await {
-        Err(_) => crate::application::batch::progress::SpoolFileState {
-            len_bytes: 0,
-            first_line_sha256: None,
-        },
-        Ok(bytes) => crate::application::batch::progress::SpoolFileState {
-            len_bytes: bytes.len() as u64,
-            first_line_sha256: spool_first_line_sha256(&bytes),
-        },
-    };
-
-    (sidecar, spool)
-}
-
-/// Quarantine a leftover spool whose data cannot be attributed (L5: a sidecar
-/// that does not describe the spool must not choose its destination).
-///
-/// Renames the spool to a timestamped sibling — NEVER deletes — and discloses
-/// the path, size and the recover remedy in Spanish. Returns where the orphan
-/// went so the acquisition outcome can carry it.
-async fn quarantine_orphan_spool(
-    spool_path: &std::path::Path,
-) -> Option<(std::path::PathBuf, u64)> {
-    use crate::application::batch::progress::orphan_spool_path;
-
-    let metadata = match tokio::fs::metadata(spool_path).await {
-        Ok(m) => m,
-        // Nothing on disk: no orphan to quarantine.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                spool = %spool_path.display(),
-                "orphan spool could not be inspected before quarantine"
-            );
-            return None;
-        },
-    };
-    let orphan_bytes = metadata.len();
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let orphan_path = orphan_spool_path(spool_path, now_secs);
-
-    match tokio::fs::rename(spool_path, &orphan_path).await {
-        Ok(()) => {
-            tracing::warn!(
-                spool = %spool_path.display(),
-                orphan = %orphan_path.display(),
-                orphan_bytes,
-                user_message = ORPHAN_SPOOL_MESSAGE,
-                "quarantined an unattributable batch capture spool"
-            );
-            Some((orphan_path, orphan_bytes))
-        },
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                spool = %spool_path.display(),
-                user_message = ORPHAN_SPOOL_MESSAGE,
-                "an unattributable batch capture spool could not be moved aside; it stays in place"
-            );
-            None
-        },
-    }
-}
-
-/// Create the disk-backed capture sink for a batch run through the UNIFIED
-/// acquisition path (slice 2, WU1): observe → decide → act on the SAME data
-/// the pure table saw, THEN hand a fresh sink its spool path.
-///
-/// Order pinned by the design (L7): spool identity and the sidecar are read
-/// BEFORE anything truncates; the decision is the pure [`decide_sweep`]; an
-/// orphan is renamed aside (never deleted, never salvage-able by this run)
-/// and the new run gets a fresh spool at the original path. Salvage itself
-/// belongs to the flush seam (WU3) — acquisition only records what was
-/// decided so the flush can act on it.
-async fn build_batch_sink(opts: &CrawlOptions) -> Result<BoundedFileSink, CliExit> {
-    use crate::application::batch::progress::decide_sweep;
-
-    let root = resolve_persistence_root(opts);
-    let spool_path = root.join(BATCH_SPOOL_FILE);
-
-    let (sidecar_state, spool_state) = observe_spool_pair(&root).await;
-    match decide_sweep(&sidecar_state, &spool_state) {
-        crate::application::batch::progress::SweepDecision::OrphanSpool => {
-            // Data without a usable description: quarantine and start fresh.
-            let quarantined = quarantine_orphan_spool(&spool_path).await;
-            if quarantined.is_none() && spool_state.len_bytes > 0 {
-                // The rename failed and the residue still sits in the spool
-                // path. This run must NOT truncate it (that would destroy
-                // unattributable data): fail the run loudly instead.
-                return Err(CliExit::IoError(format!(
-                    "No se pudo apartar el spool huérfano en {}. Bórralo o recupéralo con \
-                     webfang recover antes de relanzar el batch.",
-                    spool_path.display()
-                )));
-            }
-        },
-        crate::application::batch::progress::SweepDecision::SalvageFromOffset { .. } => {
-            // WU3 wires the flush-side salvage; acquisition records the
-            // decision in the structured log so it is queryable now.
-            tracing::info!(
-                spool = %spool_path.display(),
-                "salvageable spool detected — flush-side salvage pending WU3"
-            );
-        },
-        crate::application::batch::progress::SweepDecision::Nothing => {},
-    }
-
-    // One buffered page per concurrent crawl, plus headroom, keeps the writer
-    // from becoming the bottleneck without unbounding memory. The bound derives
-    // from the budget model's Operation.batch tier (task 2.5c).
-    let budget = crate::domain::budget::BudgetModel::build(
-        opts.budget_overrides,
-        &crate::domain::budget::detector::SystemDetector,
-    );
-    let buffer = budget
-        .batch()
-        .get()
-        .saturating_mul(2)
-        .max(crate::application::crawler::bounded_sink::DEFAULT_SINK_BUFFER);
-    BoundedFileSink::new(spool_path, buffer).await.map_err(|e| {
-        error!(error = %e, "batch content spool could not be created");
-        CliExit::IoError(format!(
-            "No se pudo crear el archivo temporal de captura: {e}"
-        ))
-    })
-}
-
-/// Remove the batch capture spool once its pages have been extracted.
-///
-/// Best-effort: a leftover spool is noise, not a failure of the run. If THIS
-/// removal fails, the residue is not invisible either — the next batch run's
-/// acquisition path discloses or quarantines any survivor, which is the same
-/// remedy the crash case gets.
-async fn discard_batch_spool(sink: &BoundedFileSink) {
-    if let Err(e) = tokio::fs::remove_file(sink.spool_path()).await {
-        tracing::debug!(
-            error = %e,
-            spool = %sink.spool_path().display(),
-            "batch capture spool could not be removed"
-        );
-    }
-}
-
 /// Build the resume state store for `--resume` (#637) so `export_phase`
 /// can mark each already-crawled URL as processed. Returns `None` when
 /// neither `--resume` nor `--export-checkpoint` is on.
@@ -898,10 +726,7 @@ async fn load_batch_manager_from_stdin(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_batch_crawler_config, build_batch_sink, observe_spool_pair, quarantine_orphan_spool,
-        run_batch, BATCH_SPOOL_FILE,
-    };
+    use super::{build_batch_crawler_config, run_batch};
     use crate::application::crawl_options::CrawlOptions;
     use crate::cli::error::CliExit;
     use crate::CrawlerConfig;
@@ -1016,197 +841,6 @@ mod tests {
         assert!(
             matches!(exit, CliExit::DataFormatError(_)),
             "expected CliExit::DataFormatError, got {exit:?}"
-        );
-    }
-
-    /// Run an async closure under the SHARED capturing subscriber
-    /// ([`crate::infrastructure::observability::test_log_capture::LogBuffer`] —
-    /// the same helper every other test module uses, so the capture writer is
-    /// written once in the crate) and return what it logged plus the value.
-    async fn capture_logs<T, F, Fut>(f: F) -> (String, T)
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = T>,
-    {
-        use crate::infrastructure::observability::test_log_capture::LogBuffer;
-        let (buffer, _guard) = LogBuffer::capture();
-        let value = f().await;
-        (buffer.text(), value)
-    }
-
-    // --- Slice 2 (WU1): the unified spool acquisition (observe → decide → act).
-
-    use crate::application::batch::progress::{
-        BatchProgressV1, ExtractionOptions, SidecarState, SpoolIdentity, BATCH_PROGRESS_FILE,
-    };
-
-    /// Seed a sidecar describing the CURRENT first line of the spool at `dir`.
-    async fn seed_matching_sidecar(dir: &tempfile::TempDir, watermark: u64) {
-        let spool_bytes = tokio::fs::read(dir.path().join(BATCH_SPOOL_FILE))
-            .await
-            .expect("read spool");
-        let first_line = crate::application::batch::progress::spool_first_line_sha256(&spool_bytes);
-        let sidecar = BatchProgressV1 {
-            version: 1,
-            spool: SpoolIdentity {
-                first_line_sha256: first_line,
-            },
-            output_dir: dir.path().join("out"),
-            extraction_options: ExtractionOptions {
-                selector: Some("body".to_string()),
-                ignore_waf: false,
-            },
-            watermark_bytes: watermark,
-        };
-        tokio::fs::write(
-            dir.path().join(BATCH_PROGRESS_FILE),
-            serde_json::to_vec(&sidecar).expect("serialize sidecar"),
-        )
-        .await
-        .expect("write sidecar");
-    }
-
-    /// `observe_spool_pair` must feed the pure table EXACTLY what is on disk:
-    /// a matching sidecar parses, a corrupt one is Unreadable, and the spool
-    /// identity is the first-line hash.
-    #[tokio::test]
-    async fn observe_reads_sidecar_state_and_spool_identity() {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        tokio::fs::write(dir.path().join(BATCH_SPOOL_FILE), b"{\"url\":\"a\"}\nrest")
-            .await
-            .expect("seed spool");
-
-        // Absent sidecar.
-        let (sidecar, spool) = observe_spool_pair(dir.path()).await;
-        assert_eq!(sidecar, SidecarState::Absent);
-        assert!(
-            spool.first_line_sha256.is_some(),
-            "a full line has identity"
-        );
-        assert_eq!(
-            spool.len_bytes,
-            b"{\"url\":\"a\"}\nrest".len() as u64,
-            "the observed length is the real file length"
-        );
-
-        // Corrupt sidecar → Unreadable (NOT absent — the distinction is the
-        // whole point of the table).
-        tokio::fs::write(dir.path().join(BATCH_PROGRESS_FILE), b"{broken")
-            .await
-            .expect("seed bad sidecar");
-        let (sidecar, _) = observe_spool_pair(dir.path()).await;
-        assert_eq!(sidecar, SidecarState::Unreadable);
-
-        // Valid sidecar → Parsed with its content.
-        seed_matching_sidecar(&dir, 7).await;
-        let (sidecar, _) = observe_spool_pair(dir.path()).await;
-        assert!(
-            matches!(sidecar, SidecarState::Parsed(_)),
-            "got {sidecar:?}"
-        );
-    }
-
-    /// An orphan spool is renamed aside — never deleted — and the disclosure
-    /// names the path, the size and the recover remedy in Spanish.
-    #[tokio::test]
-    async fn an_unattributable_spool_is_quarantined_and_disclosed() {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let spool = dir.path().join(BATCH_SPOOL_FILE);
-        let body = "{\"url\":\"https://a.example\",\"body\":\"PAGE\"}\n".repeat(8);
-        tokio::fs::write(&spool, &body)
-            .await
-            .expect("seed leftover");
-        // Unreadable sidecar + non-empty spool = OrphanSpool by the table.
-        tokio::fs::write(dir.path().join(BATCH_PROGRESS_FILE), b"{broken")
-            .await
-            .expect("seed bad sidecar");
-
-        let (logs, orphan) = capture_logs(|| {
-            let spool = spool.clone();
-            async move { quarantine_orphan_spool(&spool).await }
-        })
-        .await;
-
-        let (orphan_path, orphan_bytes) = orphan.expect("the orphan must be moved aside");
-        assert!(!spool.exists(), "the original path is free for the new run");
-        assert!(orphan_path.exists(), "the data survives under the new name");
-        assert_eq!(
-            orphan_bytes,
-            body.len() as u64,
-            "the disclosure must size the residue"
-        );
-        assert_eq!(
-            orphan_path.parent(),
-            spool.parent(),
-            "the orphan stays in the same directory"
-        );
-        assert!(orphan_path.to_string_lossy().contains(".orphaned"));
-        assert!(logs.contains("no se puede atribuir"), "{logs}");
-        assert!(logs.contains("NO se eliminó"), "{logs}");
-        assert!(logs.contains("webfang recover"), "{logs}");
-    }
-
-    /// A missing spool is not an orphan: the acquisition is a no-op.
-    #[tokio::test]
-    async fn a_missing_spool_quarantines_nothing() {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let orphan = quarantine_orphan_spool(&dir.path().join(BATCH_SPOOL_FILE)).await;
-        assert!(orphan.is_none(), "nothing on disk, nothing to quarantine");
-    }
-
-    /// The full acquisition on a CLEAN root (no spool, no sidecar) must let a
-    /// fresh run start: the sink is built and the spool path is the original.
-    #[tokio::test]
-    async fn acquisition_on_a_clean_root_starts_a_fresh_sink() {
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let mut opts = CrawlOptions::default();
-        opts.export.output_dir = dir.path().to_path_buf();
-
-        let sink = build_batch_sink(&opts).await.expect("sink on clean root");
-        assert_eq!(
-            sink.spool_path(),
-            dir.path().join(BATCH_SPOOL_FILE),
-            "the spool lands at the canonical path"
-        );
-    }
-
-    /// An orphan whose rename fails must ABORT the run rather than truncate:
-    /// truncating the spool path would destroy unattributable data (L5).
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn an_unmovable_orphan_fails_the_run_instead_of_truncating() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let dir = tempfile::TempDir::new().expect("temp dir");
-        let spool = dir.path().join(BATCH_SPOOL_FILE);
-        tokio::fs::write(&spool, b"unattributable data")
-            .await
-            .expect("seed");
-        tokio::fs::write(dir.path().join(BATCH_PROGRESS_FILE), b"{broken")
-            .await
-            .expect("bad sidecar");
-        // Read-only directory: the rename out must fail.
-        let mut perms = std::fs::metadata(dir.path()).expect("dir").permissions();
-        perms.set_mode(0o500);
-        std::fs::set_permissions(dir.path(), perms).expect("chmod");
-
-        let mut opts = CrawlOptions::default();
-        opts.export.output_dir = dir.path().to_path_buf();
-        let exit = build_batch_sink(&opts).await;
-
-        // Restore before asserting so a failure never leaves a locked dir.
-        let mut perms = std::fs::metadata(dir.path()).expect("dir").permissions();
-        perms.set_mode(0o700);
-        std::fs::set_permissions(dir.path(), perms).expect("restore");
-
-        assert!(
-            matches!(exit, Err(CliExit::IoError(_))),
-            "an unmovable orphan must fail the run, got {exit:?}"
-        );
-        let kept = tokio::fs::read(&spool).await.expect("spool intact");
-        assert_eq!(
-            kept, b"unattributable data",
-            "the unattributable data must survive byte for byte"
         );
     }
 }
