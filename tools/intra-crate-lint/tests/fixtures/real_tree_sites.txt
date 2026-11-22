@@ -2313,6 +2313,10 @@ infrastructure/persistence/sqlite/vector_repository.rs	4	use	crate::domain::repo
 infrastructure/persistence/sqlite/vector_repository.rs	5	use	crate::domain::text_chunker::ByteSpan
 infrastructure/persistence/sqlite/vector_repository.rs	6	use	crate::error::ScraperError
 infrastructure/persistence/sqlite/vector_repository.rs	7	use	crate::infrastructure::persistence::pool::Pool
+infrastructure/persistence/sqlite_tests.rs	3	use	crate::domain::note_repository::NoteRepository
+infrastructure/persistence/sqlite_tests.rs	4	use	crate::domain::repository::VectorRepository
+infrastructure/persistence/sqlite_tests.rs	5	use	crate::domain::text_chunker::ByteSpan
+infrastructure/persistence/sqlite_tests.rs	6	use	crate::infrastructure::persistence::pool::Pool
 infrastructure/platform/windows_console.rs	53	use	crate::application::crawler::ports::CTRL_C_EVENT_NAME
 infrastructure/scraper/dom_inspector.rs	11	use	crate::domain::DomInspectorPort
 infrastructure/scraper/dom_inspector.rs	11	use	crate::domain::DomStructureReport
