@@ -9,10 +9,8 @@
 //! 2. JSON Schema for MCP tool input validation,
 //! 3. shared validators with identical bounds.
 //!
-//! Slice 1 migrated the export flag group (`export`, mirroring
-//! `cli::args::ExportArgs`); slice 2 migrates the crawler flag group
-//! (`crawler`, mirroring `cli::args::CrawlerArgs`). Remaining option groups
-//! keep their hand-written definitions until later slices. The clap derive
+//! All five flag groups (`export`, `crawler`, `ai`, `obsidian`, `llm`) are
+//! spec-driven, each mirroring its `cli::args` counterpart. The clap derive
 //! stays in place as the parsing engine — byte-identical help/error output is
 //! the acceptance bar — while its value parsers and the parity tests route
 //! through the spec so bounds and messages have exactly one home.
