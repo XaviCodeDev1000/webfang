@@ -71,7 +71,7 @@ Caveat: `fix/2859-body-cap-cause` also touches the golden and `docs/test-invento
 | C2 | Test extraction by theme into `connect/tests_*.rs`; `--list` invariant; commit | S2,S3 | inline | done | 11 / 6 / 18 tests; 35/35 pass; leaf set identical |
 | C3 | Production seam extraction(s); tests green; commit per seam | S2,S4 | inline | done | `toml_merge` 284 + `atomic_write` 193; hub 373; check green |
 | C4 | Ratchet `--remove`/`--update` + golden + inventory in the same commit | S5 | inline | done | entry removed; golden +9 sites post-fmt; inventory current |
-| C5 | Full verification + four lenses + `file_size_done.sh` | S5,S6,S8 | inline | pending | — |
+| C5 | Full verification + four lenses + `file_size_done.sh` | S5,S6,S8 | inline | verification done | check/clippy/fmt/doc/nextest/gates green; `file_size_done` exit 0 |
 | C6 | PR-ready state; push/PR owner decision | S7 | inline | pending | — |
 
 ## Log
@@ -104,3 +104,17 @@ identical to the 35-name baseline (`/tmp/opencode/connect-tests-before.txt`). Ra
 `check_file_size.sh --remove crates/webfang_core/src/cli/commands/connect.rs` removed the 1874
 entry; `refresh_real_tree_golden.sh` added 9 sites (test-child inline `ConfigDefaults::load_explicit`
 calls + the `toml_merge` import), refreshed post-fmt; `check_test_inventory.sh` reports current.
+
+L4 (2026-11-22, C5 verification): full gate battery green in the worktree with `direnv export`:
+`cargo check --all-targets --all-features`; strict clippy (`-D warnings -W clippy::cognitive_complexity
+-W clippy::too_many_lines`); `cargo fmt --all -- --check`; `RUSTDOCFLAGS=-D warnings cargo doc
+--workspace --all-features --no-deps`; `cargo nextest run --workspace --all-features` → 5741 run,
+5741 passed, 8 skipped; `cargo test --doc --workspace --all-features` → 58 passed; the 35 connect
+tests pass with the leaf set unchanged; `check_file_size.sh` ratchet holds; `check_test_inventory.sh`
+current; `check_duplication.sh` at/below baseline (8173 vs 8219); `check_dead_tests.sh` clean;
+`check_dependency_direction.sh` exit 0; intra-crate-lint 23/23 (real-tree golden matches).
+`bash scripts/ci_fast_gate.sh` → PASS=47 FAIL=0 SKIP=2, GREEN; its coverage report was read —
+`test-full` and `cargo test --doc` are locally uncovered, both run by hand above.
+`file_size_done.sh` exit 0 for the target + six parts: hub 373, fixtures 119, atomic_write 193,
+toml_merge 284, tests_merge 454, tests_flow 173, tests_atomic 414 — all ≤ 500. Four lenses: pending
+native review; PR/push/merge remain the owner's decision (C6).
