@@ -66,9 +66,13 @@ Usage: bash scripts/file_size_preflight.sh [mode]
   --glue <file>=<N>     with --simulate: NON-moved lines the split adds to that file
                         (imports, re-exports; the file is the source or a plan destination)
   --corpus-literal      the guard's find expression, byte for byte
+  --lex-span <path>     one SPAN line per top-level braced mod: start:end (1-based,
+                        inclusive, attribute run included) and the mod's name; or
+                        INDETERMINATE with the reason. The span question's single
+                        owner: split_tests.sh (F2) consumes it — no second lexer.
   --help                this help
 
-Modes: --format --simulate --corpus-literal --budget; units are lines/commits/attrs/PRs.
+Modes: --format --simulate --corpus-literal --budget --lex-span; units are lines/commits/attrs/PRs.
 Exit codes: 0 ok · 1 tool failure · 3 ratchet violation (--simulate) · 4 defective plan (--simulate) · 64 usage (EX_USAGE)
 USAGE
 }
@@ -206,16 +210,20 @@ load_baseline_maps() {
 
 # --- the inline-tests span lexer -------------------------------------------------
 #
-# lex_span <abs-path>: prints "SPANS<TAB>s:e s:e ...<TAB>total" (1-based,
+# lex_span <abs-path> [named]: prints "SPANS<TAB>s:e s:e ...<TAB>total" (1-based,
 # inclusive) or "INDETERMINATE<TAB><reason>". The span starts at the
 # #[cfg(test)] attribute line and closes at the mod's closing brace. Strings,
-# byte strings, raw strings, comments and lifetimes never move it.
+# byte strings, raw strings, comments and lifetimes never move it. With the
+# second argument "named", prints instead one "SPAN<TAB>start:end<TAB><name>"
+# line per top-level braced mod (the --lex-span mode's contract; the aggregate
+# format stays byte-identical for its existing consumer).
 lex_span() {
-  python3 -I - "$1" <<'PY'
+  python3 -I - "$1" "${2:-}" <<'PY'
 import re
 import sys
 
 path = sys.argv[1]
+NAMED = len(sys.argv) > 2 and sys.argv[2] == "named"
 try:
     with open(path, encoding="utf-8", errors="replace") as fh:
         text = fh.read()
@@ -392,13 +400,14 @@ if depth != 0 or state in (BC, STR, RAW) or reason is not None:
     print("INDETERMINATE\t%s" % reason)
     sys.exit(0)
 
-mod_re = re.compile(r"^\s*(pub(\s*\([a-zA-Z ]+\))?\s+)?mod\s+[A-Za-z_][A-Za-z0-9_]*\s*\{\s*$")
+mod_re = re.compile(r"^\s*(pub(\s*\([a-zA-Z ]+\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*$")
 attr_re = re.compile(r"^\s*#\[.*\]\s*$")
 spans = []
 for idx, code in enumerate(row_code):
     if row_start[idx] != 0 or row_end[idx] != 1:
         continue
-    if not mod_re.match(code):
+    mod_match = mod_re.match(code)
+    if not mod_match:
         continue
     end = None
     for j in range(idx + 1, len(row_code)):
@@ -411,7 +420,14 @@ for idx, code in enumerate(row_code):
     a = idx
     while a - 1 >= 0 and attr_re.match(row_code[a - 1]):
         a -= 1
-    spans.append((a, end))
+    spans.append((a, end, mod_match.group(3)))
+
+if NAMED:
+    # the --lex-span contract: one line per top-level braced mod, the
+    # aggregate format untouched for its existing consumer.
+    for (a, e2, name) in spans:
+        print("SPAN\t%d:%d\t%s" % (a + 1, e2 + 1, name))
+    sys.exit(0)
 
 if not spans:
     print("SPANS\t\t0")
@@ -450,8 +466,8 @@ while idx < len(row_code):
             idx = j  # mod/use items: no undercount here, keep scanning
     idx += 1
 
-pairs = " ".join("%d:%d" % (s + 1, e + 1) for (s, e) in spans)
-total = sum(e - s + 1 for (s, e) in spans)
+pairs = " ".join("%d:%d" % (s + 1, e + 1) for (s, e, _name) in spans)
+total = sum(e - s + 1 for (s, e, _name) in spans)
 print("SPANS\t%s\t%d" % (pairs, total))
 PY
 }
@@ -480,6 +496,7 @@ range_cmd() {
 
 MODE="budget"
 FORMAT_PATH=""
+LEXSPAN_PATH=""
 PLAN_ARGS=()
 GLUE_ARGS=()
 
@@ -510,6 +527,12 @@ while [ $# -gt 0 ]; do
       MODE="corpus"
       shift
       ;;
+    --lex-span)
+      [ $# -ge 2 ] || usage_error "--lex-span requires the path whose top-level braced mods are reported"
+      MODE="lexspan"
+      LEXSPAN_PATH="$2"
+      shift 2
+      ;;
     --budget)
       MODE="budget"
       shift
@@ -529,6 +552,18 @@ case "$MODE" in
   corpus)
     extract_corpus
     printf '%s\n' "$CORPUS_LITERAL"
+    ;;
+
+  lexspan)
+    command -v python3 >/dev/null 2>&1 || die_tool "python3 is not available: the span lexer needs it (install it or run on a station that has python3)"
+    [ -f "$LEXSPAN_PATH" ] || die_tool "file not found: $LEXSPAN_PATH"
+    [ -r "$LEXSPAN_PATH" ] || die_tool "file cannot be read: $LEXSPAN_PATH"
+    SPAN_RC=0
+    SPAN_RAW="$(lex_span "$LEXSPAN_PATH" named)" || SPAN_RC=$?
+    if [ -z "$SPAN_RAW" ] && [ "$SPAN_RC" -ne 0 ]; then
+      die_tool "python3 failed silently (rc=$SPAN_RC): the span lexer never invents a span (fail-closed)"
+    fi
+    printf '%s\n' "$SPAN_RAW"
     ;;
 
   budget)

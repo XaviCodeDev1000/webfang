@@ -43,6 +43,12 @@
 #  19. the block keys are a CLOSED ENGLISH LIST: any key outside it (a new
 #      Spanish key included) turns this red; --help's usage lines are bound
 #      literally (round 8, the loose-word lesson).
+#  20. --lex-span (F2, odd/tasks/file-size-split-tests.md): one SPAN line per
+#      top-level braced mod -- start:end INCLUDING the attribute run, plus the
+#      name; the lexer traps do not move the end; an unbalanced file is
+#      INDETERMINATE fail-closed; a missing path is a NAMED rc=1; a file with
+#      no braced mods prints nothing. The aggregate SPANS format that
+#      --format/--simulate consume stays byte-identical.
 #
 # HERMETIC BY DESIGN. The tool is exercised as a COPY inside a sandbox tree (its
 # ROOT is derived from its own location), so this harness never writes to the
@@ -719,6 +725,55 @@ expect_match "19.12 an extra-brace file names the opener cause in English" "$OUT
 # key of the closed list — but it IS observable output this harness pins.
 expect_match "19.13 the destination plan row carries its note (header+moved+glue)" "$SIM_OUT" "^plan	src/z2\.rs	37	lines	header 2 \+ 30 moved \+ glue 5$"
 expect_match "19.14 the source plan row carries its note (total-moved)" "$SIM_OUT" "^plan	src/s5\.rs	570	lines	600 lines - 30 moved$"
+
+# --- 20. --lex-span: the span question's single owner (F2) ----------------------
+# split_tests.sh consumes this mode; the aggregate format stays untouched.
+new_sandbox c30
+cat > "$SB/crates/webfang_x/src/lexprobe.rs" <<'PROBE'
+pub mod prod {
+    pub fn helper() -> usize {
+        3
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    const RAW: &str = r#"{ "braces": "inside raw }" }"#;
+    const CLOSE: char = '}';
+    // mod fake { }
+    #[test]
+    fn one() {
+        assert_eq!(1, 1);
+    }
+}
+PROBE
+run_pre --lex-span "crates/webfang_x/src/lexprobe.rs"
+expect_rc "20.1 --lex-span exits 0" 0 "$RC" "$ERRF"
+expect_match "20.2 the production span is named (prod 1:5)" "$OUT" "^SPAN	1:5	prod$"
+expect_match "20.3 the test span is named and the traps do not move its end (tests 7:16)" "$OUT" "^SPAN	7:16	tests$"
+ATTR_LINE="$(printf '%s\n' "$OUT" | awk -F'\t' '$3=="tests" {split($2, r, ":"); print r[1]}')"
+expect_eq "20.4 the span starts at the attribute run, not the mod line" "$ATTR_LINE" "7"
+expect_match "20.5 both spans on one invocation" "$OUT" "^SPAN	1:5	prod$"
+
+printf 'pub mod only_decl;\n' > "$SB/crates/webfang_x/src/nodecls.rs"
+run_pre --lex-span "crates/webfang_x/src/nodecls.rs"
+expect_rc "20.6 a file without braced mods exits 0 with no spans" 0 "$RC" "$ERRF"
+expect_eq "20.7 ... and prints nothing" "$OUT" ""
+
+printf 'pub mod broken {\n' > "$SB/crates/webfang_x/src/unbal.rs"
+run_pre --lex-span "crates/webfang_x/src/unbal.rs"
+expect_match "20.8 an unbalanced file is INDETERMINATE fail-closed" "$OUT" "^INDETERMINATE	the file ends in an unclosed state"
+
+run_pre --lex-span "crates/webfang_x/src/gone.rs"
+expect_rc "20.9 a missing path is a NAMED tool failure (rc=1)" 1 "$RC" "$ERRF"
+expect_match "20.10 ... naming the missing file" "$(cat "$ERRF" 2>/dev/null)" "gone\.rs"
+
+# the aggregate consumer is untouched: --format still lexes spans into the
+# same awk-range form (a test-mod-only fixture, the corpus's common shape)
+write_code "$SB/crates/webfang_x/src/aggr.rs" 2
+append_test_mod "$SB/crates/webfang_x/src/aggr.rs" 2
+run_pre --format "crates/webfang_x/src/aggr.rs"
+expect_match "20.11 --format's aggregate span still answers in its lexed form" "$OUT" "^inline_tests	[0-9]+	lines	awk"
 
 # --- summary ------------------------------------------------------------------
 
