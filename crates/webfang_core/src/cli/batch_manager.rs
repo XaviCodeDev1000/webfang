@@ -1,22 +1,25 @@
-//! Batch manager assembly — load, filter and validate the `--batch` inputs.
+//! Batch manager assembly — load, configure, filter and validate the `--batch`
+//! inputs.
 //!
 //! Extracted from `cli/batch_flow.rs` (Ola 3 B4, issue #2966): everything that
 //! builds the [`BatchManager`] — file/stdin loading (`--batch-file` and the
-//! dry-run preview both reach [`load_batch_manager`]), the resume COMMITTED
-//! filter (WU4) and the inert crawl-expansion-flag warning (#1215). The run
-//! lifecycle stays in the parent, and so do the shared helpers both seams
-//! call: `build_batch_crawler_config`, `resolve_batch_tls_emulation` and
-//! `build_batch_resume_store`.
+//! dry-run preview both reach [`load_batch_manager`]), the batch crawl-config
+//! projection (`--h2-profile`, delay/concurrency through the budget model),
+//! the resume COMMITTED filter (WU4) and the inert crawl-expansion-flag
+//! warning (#1215). The run lifecycle stays in the parent, and so does
+//! `build_batch_resume_store` — both seams call it.
 
 use tracing::{error, info, warn};
 
-use super::{build_batch_crawler_config, build_batch_resume_store, resolve_batch_tls_emulation};
+use super::build_batch_resume_store;
 use crate::application::batch::BatchManager;
 use crate::application::crawl_options::{CrawlLimits, CrawlOptions};
 use crate::application::crawler::BoundedFileSink;
 use crate::cli::batch_summary::{enforce_strict_input, input_accounting};
+use crate::cli::discovery_phase::base_crawler_config_builder;
 use crate::cli::error::CliExit;
 use crate::domain;
+use crate::domain::http_config::HttpClientConfig;
 use crate::CrawlerConfig;
 
 /// Warn when crawl-expansion flags are set on a `--batch` run (#1215).
@@ -232,4 +235,42 @@ async fn load_batch_manager_from_stdin(
             Err(CliExit::IoError(format!("Failed to read URLs: {join_err}")))
         },
     }
+}
+
+/// Resolve the TLS/H2 fingerprint for the batch crawl engine.
+///
+/// An unknown profile is a config error (exit 78), matching the scrape phase —
+/// never silently crawl with a wrong fingerprint (#312).
+pub(super) fn resolve_batch_tls_emulation(
+    opts: &CrawlOptions,
+) -> Result<wreq_util::Profile, CliExit> {
+    HttpClientConfig::profile_from_name(&opts.network.h2_profile)
+        .map_err(|e| CliExit::ConfigError(e.to_string()))
+}
+
+/// Build the crawler config for the batch engine, honoring `--h2-profile`.
+///
+/// `--delay-ms` and the concurrency bound are propagated here (#653): without
+/// them the batch engine crawled at full speed with its own default concurrency,
+/// making both flags silent no-ops on the `--batch` path.
+///
+/// #1215: the `max_pages`/`max_depth` values carried here are the CLI crawl
+/// budget, but they never expand batch seeds — the processor rebuilds a
+/// seed-only config per URL (the batch processor pins depth 0 / 1 page),
+/// so every seed is scraped exactly once and `--max-pages 1` can no longer
+/// starve seeds.
+///
+/// The concurrency bound comes from the run's [`BudgetModel`](crate::domain::budget::BudgetModel) Operation.crawl
+/// tier (task 2.5b).
+pub(super) fn build_batch_crawler_config(
+    opts: &CrawlOptions,
+    tls_emulation: wreq_util::Profile,
+    budget: &crate::domain::budget::BudgetModel,
+) -> Result<CrawlerConfig, CliExit> {
+    Ok(base_crawler_config_builder(opts)?
+        // Concurrency bound derives from the run's budget model
+        // Operation.crawl tier (task 2.5b), not from the raw CLI flag.
+        .concurrency(budget.crawl().nonzero())
+        .tls_emulation(tls_emulation)
+        .build())
 }

@@ -2,10 +2,10 @@
 //!
 //! Extracted from `cli/orchestrator.rs` as part of the composition-root
 //! decomposition (issue #1619, finding F1). The run lifecycle lives here: the
-//! per-URL crawl, content extraction, the elastic/resume wiring and the batch
-//! crawl-config projection. The bounded capture spool's acquisition path
-//! (observe → decide → act) is the [`batch_spool`] child and the batch
-//! manager assembly is the [`batch_manager`] child (Ola 3 B4, #2966).
+//! per-URL crawl, content extraction and the elastic/resume wiring. The
+//! bounded capture spool's acquisition path (observe → decide → act) is the
+//! [`batch_spool`] child and the batch manager assembly — including the batch
+//! crawl-config projection — is the [`batch_manager`] child (Ola 3 B4, #2966).
 //!
 //! The module owns no new policy. The exit-code decision stays in
 //! [`crate::cli::exit_codes`], the canonical severity mapping in
@@ -20,16 +20,13 @@ use super::batch_summary::log_batch_summary;
 use crate::application::batch::BatchManagerSummary;
 use crate::application::crawl_options::CrawlOptions;
 use crate::application::crawler::BoundedFileSink;
-use crate::cli::discovery_phase::base_crawler_config_builder;
 use crate::cli::elastic::{build_elastic_ingestion, run_elastic_ingestion};
 use crate::cli::error::CliExit;
 use crate::cli::exit_codes::{batch_exit_code, report_phase};
 use crate::cli::orchestrator::{output_vectors_gate, resolve_persistence_root};
 use crate::domain;
 use crate::domain::config::ScraperConfig;
-use crate::domain::http_config::HttpClientConfig;
 use crate::domain::persistence::StateStorePort;
-use crate::CrawlerConfig;
 
 use crate::domain::semantic_cleaner::SemanticCleaner;
 
@@ -42,7 +39,7 @@ pub(crate) use batch_spool::BATCH_SPOOL_FILE;
 #[path = "batch_manager.rs"]
 mod batch_manager;
 
-use self::batch_manager::prepare_batch_manager;
+use self::batch_manager::{prepare_batch_manager, resolve_batch_tls_emulation};
 pub(crate) use batch_manager::load_batch_manager;
 
 /// Run batch processing mode: scrape multiple URLs from stdin or file.
@@ -478,161 +475,6 @@ async fn extract_batch_content(
     ))
 }
 
-/// Print the batch completion summary and log each failed URL.
-///
-/// Resolve the TLS/H2 fingerprint for the batch crawl engine.
-///
-/// An unknown profile is a config error (exit 78), matching the scrape phase —
-/// never silently crawl with a wrong fingerprint (#312).
-fn resolve_batch_tls_emulation(opts: &CrawlOptions) -> Result<wreq_util::Profile, CliExit> {
-    HttpClientConfig::profile_from_name(&opts.network.h2_profile)
-        .map_err(|e| CliExit::ConfigError(e.to_string()))
-}
-
-/// Build the crawler config for the batch engine, honoring `--h2-profile`.
-///
-/// `--delay-ms` and the concurrency bound are propagated here (#653): without
-/// them the batch engine crawled at full speed with its own default concurrency,
-/// making both flags silent no-ops on the `--batch` path.
-///
-/// #1215: the `max_pages`/`max_depth` values carried here are the CLI crawl
-/// budget, but they never expand batch seeds — the processor rebuilds a
-/// seed-only config per URL (the batch processor pins depth 0 / 1 page),
-/// so every seed is scraped exactly once and `--max-pages 1` can no longer
-/// starve seeds.
-///
-/// The concurrency bound comes from the run's [`BudgetModel`](crate::domain::budget::BudgetModel) Operation.crawl
-/// tier (task 2.5b).
-fn build_batch_crawler_config(
-    opts: &CrawlOptions,
-    tls_emulation: wreq_util::Profile,
-    budget: &crate::domain::budget::BudgetModel,
-) -> Result<CrawlerConfig, CliExit> {
-    Ok(base_crawler_config_builder(opts)?
-        // Concurrency bound derives from the run's budget model
-        // Operation.crawl tier (task 2.5b), not from the raw CLI flag.
-        .concurrency(budget.crawl().nonzero())
-        .tls_emulation(tls_emulation)
-        .build())
-}
-
 #[cfg(test)]
-mod tests {
-    use super::{build_batch_crawler_config, run_batch};
-    use crate::application::crawl_options::CrawlOptions;
-    use crate::cli::error::CliExit;
-    use crate::CrawlerConfig;
-
-    /// Build the batch config projection for `opts` the way preflight does:
-    /// the explicit overrides ride through a freshly built [`BudgetModel`].
-    fn projected_config(opts: &CrawlOptions) -> CrawlerConfig {
-        let budget = crate::domain::budget::BudgetModel::build(
-            opts.budget_overrides,
-            &crate::domain::budget::detector::SystemDetector,
-        );
-        build_batch_crawler_config(opts, wreq_util::Profile::Chrome145, &budget)
-            .expect("valid test projection must build")
-    }
-
-    #[test]
-    fn batch_config_propagates_delay_and_model_concurrency() {
-        // Regression for #653: per-URL rate limiting never engaged on the
-        // batch path. The concurrency bound now derives from the run's
-        // BudgetModel crawl tier; an explicit `--concurrency` value reaches
-        // it THROUGH the model (explicit-wins override, design D4).
-        let mut opts = CrawlOptions::default();
-        opts.network.delay_ms = 750;
-        // Explicit flag feeds the model override exactly as preflight does.
-        opts.network.concurrency = crate::ConcurrencyConfig::new(2);
-        if let Some(explicit) = opts.network.concurrency.get() {
-            opts.budget_overrides.crawl =
-                crate::domain::budget::tiers::CrawlConcurrency::new(explicit).ok();
-        }
-
-        let config = projected_config(&opts);
-
-        assert_eq!(config.delay_ms, 750, "--delay-ms must reach the crawler");
-        assert_eq!(
-            config.concurrency.get(),
-            2,
-            "explicit --concurrency must reach the crawler through the model"
-        );
-    }
-
-    #[test]
-    fn batch_config_propagates_budget_overrides() {
-        // Bug R2-1: --batch crawls each URL through the crawl Engine via
-        // BatchProcessor.process_single_url -> crawl_site; the operator
-        // overrides must ride on the base config handed to the batch job.
-        let mut opts = CrawlOptions::default();
-        opts.budget_overrides.crawl = crate::domain::budget::tiers::CrawlConcurrency::new(4).ok();
-        opts.budget_overrides.rate_burst = crate::domain::budget::tiers::BurstPermits::new(13).ok();
-
-        let config = projected_config(&opts);
-
-        assert_eq!(
-            config.budget_overrides.crawl.map(|c| c.get()),
-            Some(4),
-            "explicit --concurrency must reach the batch Engine"
-        );
-        assert_eq!(
-            config.budget_overrides.rate_burst.map(|b| b.get()),
-            Some(13),
-            "explicit --rate-limit-burst must reach the batch Engine"
-        );
-    }
-
-    #[test]
-    fn batch_config_auto_concurrency_uses_model_tier() {
-        // With no explicit flag, the model's auto-derived crawl tier is used.
-        let opts = CrawlOptions::default();
-        assert!(opts.network.concurrency.is_auto());
-        let budget = crate::domain::budget::BudgetModel::for_test_preset();
-
-        let config = build_batch_crawler_config(&opts, wreq_util::Profile::Chrome145, &budget)
-            .expect("valid test projection must build");
-
-        assert_eq!(
-            config.concurrency.get(),
-            budget.crawl().get(),
-            "auto mode must use the model's derived Operation.crawl tier"
-        );
-    }
-
-    #[test]
-    fn batch_config_zero_delay_disables_throttling() {
-        let mut opts = CrawlOptions::default();
-        opts.network.delay_ms = 0;
-
-        let config = build_batch_crawler_config(
-            &opts,
-            wreq_util::Profile::Chrome145,
-            &crate::domain::budget::BudgetModel::for_test_preset(),
-        )
-        .expect("valid test projection must build");
-
-        assert_eq!(config.delay_ms, 0);
-    }
-
-    #[tokio::test]
-    async fn run_batch_returns_data_error_when_output_vectors_without_clean_ai() {
-        let mut opts = CrawlOptions::default();
-        opts.elastic.output_vectors = Some("vectors.jsonl".to_string());
-        let cancel = tokio_util::sync::CancellationToken::new();
-
-        let exit = run_batch(
-            opts,
-            None,
-            crate::application::container::VaultAiPorts::default(),
-            None,
-            &cancel,
-            &crate::domain::CorrelationId::new(),
-        )
-        .await;
-
-        assert!(
-            matches!(exit, CliExit::DataFormatError(_)),
-            "expected CliExit::DataFormatError, got {exit:?}"
-        );
-    }
-}
+#[path = "batch_flow_tests.rs"]
+mod tests;
