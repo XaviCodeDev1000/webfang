@@ -352,3 +352,26 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   delivery — the recorded base `52e4395b` is historical; the delivered
   lineage sits on `main@3ae03d5f` (branch HEAD after the golden regen).
   The batch_flow facade figure in L10 was corrected from 480 to 481.
+- L12 (2026-11-22, T4/O3-B7 progress, batch issue #2969): batch O3-B7 of the
+  Ola 3 band split in worktree `refactor-ola3-b7` (base `52e4395b`, rebased onto `main@2592333a` before delivery).
+  `infrastructure/ssrf.rs` (1287, tests-majority, security carve-out S5)
+  and `infrastructure/persistence/sqlite.rs` (1432, needs-review, churn 15)
+  both closed in the ratchet via `--remove` in the same commit as the split
+  that produced them; every resulting part measures <= 500. `ssrf.rs`
+  keeps its 448-line production region byte-identical (guard stages 3b/3c
+  untouched) while the inline test mod regroups at its own section seams
+  into three themed siblings through `split_tests.sh` with the multiset
+  proof (28 = 12 + 16, then 16 = 9 + 7, then 7 = 0 + 7):
+  `ssrf_tests.rs` 315, `ssrf_resolver_env_tests.rs` 142,
+  `ssrf_wiring_tests.rs` 329; the wiremock allow/deny parity pairs stay in
+  one file and every negative test stays adjacent to its positive.
+  `sqlite.rs` decision recorded on the issue before the first cut (glued
+  modules, not a declarative unit); the production region splits along its
+  section banners into `persistence/sqlite/` children (schema 159,
+  connection 77, blob 57, vector_repository 297, note_repository 302,
+  retention 48) with parent re-exports preserving every
+  `persistence::sqlite::*` path including fingerprint.rs's
+  `enforce_schema_version` call; the 490-line test mod extracts to
+  `sqlite_tests.rs` (proof 18 = 0 + 18). Work-unit commits `17087eb2`,
+  `2aa41b5d`, `559aa3c5`; full verification matrix green; no push yet
+  (serialized delivery per the Ola 3 plan).
