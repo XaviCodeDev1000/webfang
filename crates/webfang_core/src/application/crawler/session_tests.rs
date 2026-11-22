@@ -1,5 +1,6 @@
 use super::*;
 use crate::domain::persistence::CheckpointCfg;
+use crate::error::ScraperError;
 
 fn test_config() -> CrawlerConfig {
     CrawlerConfig::builder(url::Url::parse("https://example.com").expect("seed")).build()

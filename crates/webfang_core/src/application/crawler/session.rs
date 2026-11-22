@@ -18,7 +18,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, RwLock};
 
-use thiserror::Error;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio_util::sync::CancellationToken;
 use wreq_util::Profile;
@@ -36,12 +35,10 @@ use crate::domain::cookie_bridge::CookieBridge;
 use crate::domain::crawler_port::{RobotsPort, UrlQueuePort};
 use crate::domain::downloader_factory::DownloaderFactory;
 use crate::domain::downloader_port::Downloader;
-use crate::domain::error::CrawlError;
 use crate::domain::persistence::PersistenceMode;
 use crate::domain::post_load_wait::PostLoadWait;
 use crate::domain::session_port::SessionPort;
 use crate::domain::{CorrelationId, CrawlerConfig, DiscoveredUrl, JsStrategy};
-use crate::error::ScraperError;
 use crate::infrastructure::observability::log_scrape_error;
 
 /// Identity minted once per run and shared by every unit of work.
@@ -207,63 +204,10 @@ pub(crate) struct SessionClose {
     pub action: CheckpointAction,
 }
 
-/// Application-layer session failures (D-spec error stratification).
-///
-/// Maps into the existing chain via `From<CrawlSessionError> for ScraperError`
-/// — no new level (the `AppError` tier in AGENTS.md/README.md has zero
-/// production hits; inventing it here would match a stale doc). Every variant
-/// gains a row in `docs/error-classification-matrix.md` in the same change.
-#[derive(Debug, Error)]
-pub(crate) enum CrawlSessionError {
-    /// Run description failed validation — fail before any worker spawns.
-    #[error("invalid crawl session: {0}")]
-    InvalidConfiguration(String),
-    /// Checkpoint directory unwritable — degrades to no-checkpoint (logged).
-    #[error("checkpoint unwritable at {path}: {reason}")]
-    CheckpointUnwritable {
-        /// Directory that could not be created.
-        path: PathBuf,
-        /// OS error text.
-        reason: String,
-    },
-    /// Run cancelled through the session authority (surfaces only if a
-    /// future slice lets cancellation escape engine control flow; today it
-    /// is consumed there first — same defensive precedent as
-    /// `CrawlError::Cancelled`).
-    #[error("crawl cancelled")]
-    #[allow(dead_code)] // slice 2: constructed by the shutdown-verdict path
-    Cancelled,
-    /// Session invariant broken (bug indicator).
-    #[error("crawl session internal error: {0}")]
-    #[allow(dead_code)] // slice 2: constructed by future validation branches
-    Internal(String),
-}
+#[path = "session_error.rs"]
+mod session_error;
 
-impl From<CrawlSessionError> for ScraperError {
-    fn from(err: CrawlSessionError) -> Self {
-        match err {
-            // PermanentFatal / exit 78 via the Config row (matrix family 4).
-            CrawlSessionError::InvalidConfiguration(msg) => ScraperError::Config(msg),
-            CrawlSessionError::CheckpointUnwritable { path, reason } => ScraperError::Config(
-                format!("checkpoint unwritable at {}: {reason}", path.display()),
-            ),
-            // Defensive only: cancellation is consumed by engine control flow
-            // before any error surfaces (same precedent as CrawlError::Cancelled).
-            CrawlSessionError::Cancelled => {
-                ScraperError::Internal("crawl cancelled by session authority".to_string())
-            },
-            CrawlSessionError::Internal(msg) => ScraperError::Internal(msg),
-        }
-    }
-}
-
-impl From<CrawlSessionError> for CrawlError {
-    fn from(err: CrawlSessionError) -> Self {
-        // Row 33 (P6-2 slice 2): the rendered session error travels as the
-        // payload; upstream maps to `ScraperError::Config` (exit 78).
-        CrawlError::InvalidSession(err.to_string())
-    }
-}
+pub(crate) use session_error::CrawlSessionError;
 
 /// Builder for [`CrawlSession`] — the only construction site (D1: one place
 /// per run setting; adding a knob means adding one builder field).
