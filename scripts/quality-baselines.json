@@ -30,7 +30,6 @@
       "crates/webfang_core/src/cli/batch_flow.rs": 1250,
       "crates/webfang_core/src/cli/config.rs": 855,
       "crates/webfang_core/src/cli/discovery_phase.rs": 637,
-      "crates/webfang_core/src/cli/error.rs": 1117,
       "crates/webfang_core/src/cli/export_flow.rs": 753,
       "crates/webfang_core/src/cli/llm_wire.rs": 975,
       "crates/webfang_core/src/cli/scrape_flow.rs": 1444,
