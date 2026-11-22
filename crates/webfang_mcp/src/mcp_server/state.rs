@@ -566,12 +566,7 @@ impl CategorySemaphores {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use tempfile::TempDir;
-    use tracing::field::{Field, Visit};
-    use tracing::Level;
-    use tracing_subscriber::layer::{Context, Layer};
-    use tracing_subscriber::prelude::*;
     use webfang_core::domain::config::ScraperConfig;
     use webfang_core::domain::CrawlerConfig;
     use webfang_core::infrastructure::scraper::dom_inspector::NoOpInspector;
@@ -894,6 +889,19 @@ mod tests {
             "error must name the root violation, got: {msg}"
         );
     }
+}
+
+#[cfg(test)]
+mod export_roots_tests {
+    use super::*;
+    use serial_test::serial;
+    use tempfile::TempDir;
+    use tracing::field::{Field, Visit};
+    use tracing::Level;
+    use tracing_subscriber::layer::{Context, Layer};
+    use tracing_subscriber::prelude::*;
+    use webfang_core::domain::config::ScraperConfig;
+    use webfang_core::domain::CrawlerConfig;
 
     // --- with_export_roots startup consistency check (#769) ---
 
