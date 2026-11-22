@@ -71,7 +71,7 @@ Caveat: `fix/2859-body-cap-cause` also touches the golden and `docs/test-invento
 | C2 | Test extraction by theme into `connect/tests_*.rs`; `--list` invariant; commit | S2,S3 | inline | done | 11 / 6 / 18 tests; 35/35 pass; leaf set identical |
 | C3 | Production seam extraction(s); tests green; commit per seam | S2,S4 | inline | done | `toml_merge` 284 + `atomic_write` 193; hub 373; check green |
 | C4 | Ratchet `--remove`/`--update` + golden + inventory in the same commit | S5 | inline | done | entry removed; golden +9 sites post-fmt; inventory current |
-| C5 | Full verification + four lenses + `file_size_done.sh` | S5,S6,S8 | inline | verification done | check/clippy/fmt/doc/nextest/gates green; `file_size_done` exit 0 |
+| C5 | Full verification + native review decision + `file_size_done.sh` | S5,S6,S8 | inline | done | check/clippy/fmt/doc/nextest/gates green; `file_size_done` exit 0; assess medium/under_budget → no review due |
 | C6 | PR-ready state; push/PR owner decision | S7 | inline | pending | — |
 
 ## Log
@@ -118,3 +118,14 @@ current; `check_duplication.sh` at/below baseline (8173 vs 8219); `check_dead_te
 `file_size_done.sh` exit 0 for the target + six parts: hub 373, fixtures 119, atomic_write 193,
 toml_merge 284, tests_merge 454, tests_flow 173, tests_atomic 414 — all ≤ 500. Four lenses: pending
 native review; PR/push/merge remain the owner's decision (C6).
+
+L5 (2026-11-22, C5 review decision): `gentle-ai review assess --cwd <worktree> --agent opencode
+--base-ref 94de2c51 --committed-only --json` → `risk: medium`, `review_due: false`,
+`review_due_reason: under_budget` (changed_lines 3168 across 9 paths). The native RAR owns
+review applicability and the lens plan, so no four-lens review was started; the record is kept.
+The config write path is byte-identical (mechanical move), and no high-risk list item applies
+to a pure move with unchanged call order.
+
+L6 (2026-11-22, C6): PR-ready state reached on branch `refactor/ola2-connect` (4 local commits:
+C0 mission, 1 code/ratchet/golden, 2 evidence docs). Push, PR opening and merge are the owner's
+decision (S7); not executed by the agent.
