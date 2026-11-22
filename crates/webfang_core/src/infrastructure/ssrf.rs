@@ -471,11 +471,9 @@ mod tests;
 // whole test body is exactly what serializes env mutation across test
 // THREADS (issue #926).
 #[cfg(test)]
-#[allow(clippy::await_holding_lock)]
 #[path = "ssrf_resolver_env_tests.rs"]
 mod resolver_env_tests;
 
 #[cfg(test)]
-#[allow(clippy::await_holding_lock)]
 #[path = "ssrf_wiring_tests.rs"]
 mod wiring_tests;
