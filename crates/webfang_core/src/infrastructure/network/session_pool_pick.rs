@@ -45,3 +45,7 @@ pub(super) fn pick_start(domain: &str, now: Instant, len: usize) -> usize {
     let modulus = u64::try_from(len.max(1)).unwrap_or(1);
     usize::try_from(z % modulus).unwrap_or(0)
 }
+
+#[cfg(test)]
+#[path = "session_pool_pick_tests.rs"]
+mod tests;
