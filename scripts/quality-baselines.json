@@ -81,7 +81,6 @@
       "crates/webfang_mcp/src/mcp_server/path_gate.rs": 957,
       "crates/webfang_mcp/src/mcp_server/provenance.rs": 516,
       "crates/webfang_mcp/src/mcp_server/state.rs": 572,
-      "crates/webfang_mcp/src/mcp_server/validation.rs": 1163,
       "crates/webfang_test_utils/src/lib.rs": 1458,
       "crates/webfang_core/src/cli/batch_flush.rs": 527
     },
