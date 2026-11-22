@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::budget::MAX_TRACKED_DOMAINS;
 use crate::domain::clock::MockClock;
 
 /// Test constructor for the NonZero-gated Domain tier.

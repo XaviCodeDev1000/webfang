@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use tracing::{debug, instrument, warn};
 
-use crate::domain::budget::{DomainSlots, MAX_TRACKED_DOMAINS};
+use crate::domain::budget::DomainSlots;
 use crate::domain::clock::{Clock, SystemClock};
 use crate::domain::session_port::SessionId;
 
@@ -261,20 +261,6 @@ impl DomainSessionPool {
         Duration::from_millis(jittered.max(1))
     }
 
-    /// Reset sessions whose TTL has expired back to healthy.
-    fn evict_expired(&self, domain: &str, sessions: &mut [SessionState], now: Instant) {
-        for state in sessions.iter_mut() {
-            if let Some(last_failure) = state.last_failure_time {
-                if now.duration_since(last_failure) > self.config.ttl_duration
-                    && state.status != SessionStatus::Healthy
-                {
-                    debug!(domain, "evicting stale session (TTL expired)");
-                    *state = SessionState::healthy();
-                }
-            }
-        }
-    }
-
     /// Pick an available session with a hash-rotated scan (#1134).
     ///
     /// The scan starts at the slot derived from `hash(domain, now)` and wraps
@@ -322,38 +308,6 @@ impl DomainSessionPool {
         state
             .next_retry_time
             .is_some_and(|deadline| now >= deadline)
-    }
-
-    /// Soft cap on tracked domains (#1130): past the shared
-    /// [`MAX_TRACKED_DOMAINS`] bound (same value the MCP metrics breakdown
-    /// enforces, REQ-05), the least-recently-seen domains are removed
-    /// outright so a long-lived server's map stays bounded.
-    ///
-    /// MUST be called with no `sessions` shard guard held — it scans and
-    /// removes from the map (the same RefMut-dropped-BEFORE-scan invariant
-    /// as `acquire`). In steady state the excess is 1: one O(cap) scan per
-    /// insert past the cap, dominated by the network I/O it precedes.
-    fn enforce_domain_cap(&self) {
-        let tracked = self.sessions.len();
-        if tracked <= MAX_TRACKED_DOMAINS {
-            return;
-        }
-        let excess = tracked - MAX_TRACKED_DOMAINS;
-        let mut by_age: Vec<(String, Instant)> = self
-            .sessions
-            .iter()
-            .map(|e| (e.key().clone(), e.value().last_seen))
-            .collect();
-        by_age.sort_by_key(|(_, last_seen)| *last_seen);
-        for (domain, _) in by_age.into_iter().take(excess) {
-            self.sessions.remove(&domain);
-            debug!(
-                domain = %domain,
-                tracked = self.sessions.len(),
-                cap = MAX_TRACKED_DOMAINS,
-                "session-pool domain evicted (cap)"
-            );
-        }
     }
 
     /// Apply a failure to a session state, banning or retiring as appropriate.
@@ -551,6 +505,9 @@ impl crate::domain::session_port::SessionPort for DomainSessionPool {
 mod sealed {
     pub trait Sealed {}
 }
+
+#[path = "session_pool_eviction.rs"]
+mod eviction;
 
 #[cfg(test)]
 #[path = "session_pool_tests.rs"]
