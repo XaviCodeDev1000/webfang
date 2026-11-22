@@ -336,6 +336,27 @@ jobs:
       # Offline, no repo state touched.
       - name: File size close-out semantics harness
         run: bash scripts/test_file_size_done.sh
+      # File-size split-tests (F2 of the file-size policy v3; ODD
+      # odd/tasks/file-size-split-tests.md): extracts ONE named inline
+      # #[cfg(test)] mod into a child file with the multiset proof —
+      # multiset(source_before) == multiset(source_after) + multiset(dest) —
+      # so the mechanical test re-parenting step of a split mission is proven,
+      # not asserted. The span question is answered by file_size_preflight.sh
+      # --lex-span (ONE Rust lexer in the program). The tool WRITES files, so
+      # the step here is the --help smoke (usage, exit map, the span-owner
+      # note); the verdicts need a mission's file and dest. Offline, no repo
+      # state touched.
+      - name: File size split-tests smoke (--help)
+        run: bash scripts/split_tests.sh --help
+      # Semantics harness for the split-tests tool: hermetic mktemp sandboxes
+      # (the tool and its span owner exercised as COPIES) proving the green
+      # extraction (plain decl and #[path] decl shapes), the verbatim header,
+      # the dedent, one defect per named cause (rc=4), the fail-closed
+      # INDETERMINATE refusal, the broken-python3 named cause (rc=1), the
+      # closed key list and the harness's own --negation (#2056: a harness
+      # that cannot fail proves nothing). Offline, no repo state touched.
+      - name: File size split-tests semantics harness
+        run: bash scripts/test_split_tests.sh
       # Build-graph hygiene guard (issues #1799, #1797, #1796). The graph must
       # carry ONE source of RAM (`sysinfo`, never `sys-info`, whose unit was
       # undocumented), NO `built`/`git2`/`libgit2-sys` (they fed a function with

@@ -633,6 +633,19 @@ EOF
   else
     skip_step "file size close-out semantics" "no file-size close-out files changed"
   fi
+  # File-size split-tests harness (odd/tasks/file-size-split-tests.md, F2):
+  # hermetic mktemp-sandbox proof of the mod-tests extraction with the
+  # multiset partition proof (before == after + dest), the two decl shapes,
+  # one defect per named cause (rc=4), the fail-closed INDETERMINATE refusal
+  # and the --negation self-watch. Triggered by either the tool or its
+  # harness changing — both are `scripts/**`. The TOOL itself never runs in
+  # this lane: it WRITES files, so a live-tree guard run would mutate the
+  # tree; ci.yml runs its --help smoke instead. Offline, no cargo, <1s.
+  if grep -Eq '^(scripts/split_tests\.sh|scripts/test_split_tests\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+    run_step "file size split-tests semantics (offline)" bash scripts/test_split_tests.sh
+  else
+    skip_step "file size split-tests semantics" "no file-size split-tests files changed"
+  fi
   # Windows-platform check semantics (#1833): pins the guard's fail-closed
   # missing-target refusal (a PATH-stubbed rustup, so the case itself is
   # offline) and, where the MSVC std target is installed, the GREEN/RED/lint
