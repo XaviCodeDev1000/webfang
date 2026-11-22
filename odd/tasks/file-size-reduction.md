@@ -375,7 +375,6 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   `sqlite_tests.rs` (proof 18 = 0 + 18). Work-unit commits `17087eb2`,
   `2aa41b5d`, `559aa3c5`; full verification matrix green; no push yet
   (serialized delivery per the Ola 3 plan).
-
 - L13 (2026-11-22, T4/O3-B6 progress, batch issue #2968): batch O3-B6
   (umbrella #2584) split `application/crawler/session.rs` (1006 lines) and
   `application/crawler/bounded_sink.rs` (1103 lines) on `refactor/ola3-b6`
@@ -405,3 +404,58 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   green after every seam. `file_size_done.sh` exit 0 per split file
   (verdict `closed`, base `3ae03d5f`). Golden `real_tree_sites.txt`
   refreshed in every commit that added production files.
+- L12 (2026-11-22, O3-B10b progress entry — ENGLISH): batch O3-B10b
+  (issue #2973, umbrella #2584) split
+  `infrastructure/network/session_pool.rs` (1156 lines) and
+  `infrastructure/observability/file_trace_layer.rs` (1113 lines) on
+  `refactor/ola3-b10b` (base `origin/main@3ae03d5f`, rebased onto `main@2592333a` before delivery). Both are
+  tests-majority (mechanical first cut; no S5 carve-outs apply).
+  `session_pool.rs`: 605-line test mod extracted verbatim via
+  `split_tests.sh` (27 items, partition proof) to
+  `session_pool_tests.rs`; the extracted file (600) then split at the
+  config seam into `session_pool_tests.rs` (330) +
+  `session_pool_config_tests.rs` (273) (27 = 15 + 12, name multiset
+  identical). Production seams: bounded-eviction mechanics
+  (`evict_expired`, `enforce_domain_cap`) to `session_pool_eviction.rs`
+  (62) and the balanced-pick mechanism (`PICK_ANCHOR`, `pick_start`) to
+  `session_pool_pick.rs` (47); source 479 lines, `--remove`.
+  `file_trace_layer.rs`: 677-line test mod extracted via
+  `split_tests.sh` (24 items, partition proof), then split at the span
+  seam into `file_trace_layer_tests.rs` (293; event/file-record
+  contracts plus the five shared JSONL reader helpers) +
+  `file_trace_layer_span_tests.rs` (385; span lifecycle contracts incl.
+  span_close records) (24 = 12 + 12, name multiset identical); no
+  production byte changed, source 441 lines, `--remove`. All parts
+  <=500. Characterization: 71 session_pool/file_trace_layer-named unit
+  tests plus 24 tests across `session_pool_integration`,
+  `adversarial_stress_matrix` and `span_attribution_across_await`
+  green before the first cut; the same focused sets green after every
+  seam. Visibility corrections (declared two-hats): `evict_expired`,
+  `enforce_domain_cap`, `pick_start` and the shared test helpers
+  (`slots`, the five JSONL readers) -> `pub(super)`; the extracted
+  session_pool test file imports `MAX_TRACKED_DOMAINS` directly
+  instead of receiving it through the parent's use-glob. Golden
+  `real_tree_sites.txt`: +1 row (the `MAX_TRACKED_DOMAINS` use in
+  `session_pool_eviction.rs`) + 3 line-number shifts in
+  `session_pool.rs`; extracted test files emit no rows (#2980).
+- L13 (2026-11-22, correction to L12): the delivered hub figures are
+  `session_pool.rs` 483 (not 479) and `file_trace_layer.rs` 443 (not 441) —
+  the recorded values predate the appended `#[path]` test-wiring blocks.
+  The golden delta is net 0 rows: −1 (`session_pool.rs` MAX_TRACKED_DOMAINS
+  use relocated) +1 (`session_pool_eviction.rs`), plus 3 line-number shifts
+  in `session_pool.rs`. Follow-up noted, outside this slice: the TTL-heal
+  loop in `evict_expired` duplicates the inline loop in
+  `SessionManager::evict_stale` (pre-existing).
+- L14 (2026-11-22, correction to L12 in B10b): the B10b branch was synced
+  with `main@5b8e4130` (merge commits, not rebase) before delivery: first
+  O3-B5 + O3-B7 (`02aa7a8f`), then the mutants-gate fix
+  `fix(ci): count MISSED across every mutation shard` (`5b8e4130`). The
+  bookkeeping conflicts were resolved by removing both splits' closed
+  ratchet entries (`session_pool.rs`, `file_trace_layer.rs`, `sqlite.rs`);
+  the golden set was regenerated with `scripts/refresh_real_tree_golden.sh`
+  on the merged tree.
+- L15 (2026-11-22, correction to L12/L14 in B10b): the mutants-gate shards
+  found two TTL survivors in the eviction seam; the pin tests landed
+  (`a958e317`) and the branch was synced again with `main@76c72fcf`
+  (O3-B6 `e7965e08`, O3-B8 `76c72fcf`). The golden set was regenerated on
+  the new merged tree.
