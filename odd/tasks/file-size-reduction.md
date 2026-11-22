@@ -96,6 +96,37 @@ criterio que puso `engine.rs` al frente de la Ola 1.
     `needs-review` seam decisions for schema_bridge and validation — and the
     state.rs backpressure seam that the close-out tool demanded — are
     recorded on #2963 before each first cut.
+  - Progress (2026-11-22, batch O3-B5 / issue #2967, branch `refactor/ola3-b5`):
+    the two `application/crawler` entries of the band are closed.
+    `discovery.rs` 1026 → 453 `--remove` (production untouched, including the
+    band's single `allow(clippy::too_many_lines)` that stays F3 input; the
+    580-line inline test mod regrouped at its own section seams into two themed
+    mods, then extracted by `scripts/split_tests.sh` with the multiset proof —
+    19 = 9 + 10, 9 = 0 + 9 — into `discovery_tests.rs` 279 and
+    `discovery_scrape_tests.rs` 299). `sitemap_discovery.rs` 1400 → 407
+    `--remove`: the `needs-review` decision (glued modules, four
+    responsibilities) is recorded on #2967 before the first cut; the hub keeps
+    the crawl orchestration plus the URL-building/filter helpers and three
+    sibling seams move out — `sitemap_discovery_parser.rs` 122
+    (SitemapParserPort boundary + error mapping), `sitemap_discovery_probe.rs`
+    233 (robots.txt/fallback/sub-path URL probing) and
+    `sitemap_discovery_subpath.rs` 135 (sub-path crawl fallback) — every moved
+    item byte-verbatim except `pub(super)` on the four functions the hub
+    calls (build_sitemap_parser, parse_sitemap, discover_sitemap_url,
+    crawl_with_subpath_sitemaps); both public entry points stay in the hub so
+    the MCP full paths and
+    the `discovery.rs` → `lib.rs` re-export chain keep resolving unchanged. The
+    573-line inline test mod regrouped into three themed mods (the
+    `all(test, not(miri))` gate rewritten in its equivalent stacked
+    `#[cfg(test)]` + `#[cfg(not(miri))]` form because `split_tests.sh`'s mod
+    detection requires a `cfg(...test...)` attribute — semantics identical) and
+    extracted with the multiset proof — 15 = 8 + 7, 8 = 4 + 4, 4 = 0 + 4 — into
+    `sitemap_discovery_tests.rs` 217, `sitemap_discovery_entry_tests.rs` 148
+    and `sitemap_discovery_ssrf_tests.rs` 211. Every part ≤ 500, both baseline
+    entries removed in the same commit as the split that produced them, golden
+    `real_tree_sites.txt` refreshed per split. Behavior preserved: the 35
+    affected crawler discovery/sitemap tests green before and after every work
+    unit.
 
 ## Método por archivo (por misión, en su worktree)
 
