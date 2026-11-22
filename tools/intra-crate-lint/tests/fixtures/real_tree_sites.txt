@@ -267,9 +267,9 @@ application/crawl_options/mod.rs	351	inline	crate::domain::persistence::Persiste
 application/crawl_options/mod.rs	352	inline	crate::domain::persistence::PersistenceMode::from_config
 application/crawl_options/mod.rs	439	inline	crate::domain::ValidUrl::parse
 application/crawl_options/mod.rs	463	inline	crate::domain::budget::BudgetOverrides::default
-application/crawl_result_repository.rs	38	use	crate::domain::repositories::CrawlResultRepository
-application/crawl_result_repository.rs	39	use	crate::domain::CrawlError
-application/crawl_result_repository.rs	39	use	crate::domain::ScrapedContent
+application/crawl_result_repository.rs	37	use	crate::domain::repositories::CrawlResultRepository
+application/crawl_result_repository.rs	38	use	crate::domain::CrawlError
+application/crawl_result_repository.rs	38	use	crate::domain::ScrapedContent
 application/crawler/bounded_sink/reader.rs	11	use	crate::application::crawler::content_sink::CapturedPage
 application/crawler/bounded_sink_backlog.rs	15	use	crate::application::crawler::content_sink::CapturedPage
 application/crawler/bounded_sink_spool_writer.rs	18	use	crate::application::crawler::content_sink::CapturedPage

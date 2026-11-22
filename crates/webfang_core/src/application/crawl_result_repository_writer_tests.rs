@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Write;
 use tempfile::TempDir;
 
 /// #1121 flush truth: a failing flush must mark the writer errored and

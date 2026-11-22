@@ -12,7 +12,6 @@
     "grandfathered": {
       "crates/webfang_core/src/adapters/url_path.rs": 895,
       "crates/webfang_core/src/application/container.rs": 1071,
-      "crates/webfang_core/src/application/crawl_result_repository.rs": 1097,
       "crates/webfang_core/src/application/crawler/checkpoint.rs": 971,
       "crates/webfang_core/src/application/crawler/crawl_scheduler.rs": 645,
       "crates/webfang_core/src/application/crawler/ports.rs": 748,
