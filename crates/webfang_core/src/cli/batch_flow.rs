@@ -4,8 +4,9 @@
 //! decomposition (issue #1619, finding F1). The run lifecycle lives here: the
 //! per-URL crawl, content extraction and the elastic/resume wiring. The
 //! bounded capture spool's acquisition path (observe → decide → act) is the
-//! [`batch_spool`] child and the batch manager assembly — including the batch
-//! crawl-config projection — is the [`batch_manager`] child (Ola 3 B4, #2966).
+//! private `batch_spool` child and the batch manager assembly — including the
+//! batch crawl-config projection — is the private `batch_manager` child
+//! (Ola 3 B4, #2966).
 //!
 //! The module owns no new policy. The exit-code decision stays in
 //! [`crate::cli::exit_codes`], the canonical severity mapping in
