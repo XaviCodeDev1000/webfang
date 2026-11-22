@@ -613,6 +613,11 @@ application/crawler/sitemap_discovery_subpath.rs	8	use	crate::domain::crawler_po
 application/crawler/sitemap_discovery_subpath.rs	9	use	crate::domain::CorrelationId
 application/crawler/sitemap_discovery_subpath.rs	9	use	crate::domain::CrawlError
 application/crawler/sitemap_discovery_subpath.rs	9	use	crate::domain::DiscoveredUrl
+application/crawler/sitemap_discovery_tests.rs	2	use	crate::domain::error::WafDetectionKind
+application/crawler/sitemap_discovery_tests.rs	3	use	crate::infrastructure::observability::test_log_capture::LogBuffer
+application/crawler/sitemap_discovery_tests.rs	9	use	crate::domain::waf::set_waf_inspector
+application/crawler/sitemap_discovery_tests.rs	10	use	crate::infrastructure::http::waf_engine::WafInspector
+application/crawler/sitemap_discovery_tests.rs	15	inline	crate::domain::waf::WafInspectorPort
 application/crawler/sitemap_session.rs	18	use	crate::domain::persistence::PersistenceMode
 application/crawler/sitemap_session.rs	19	use	crate::domain::CorrelationId
 application/crawler/sitemap_session.rs	19	use	crate::domain::CrawlError

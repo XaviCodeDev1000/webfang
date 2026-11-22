@@ -18,7 +18,6 @@
       "crates/webfang_core/src/application/crawler/crawl_scheduler.rs": 645,
       "crates/webfang_core/src/application/crawler/ports.rs": 748,
       "crates/webfang_core/src/application/crawler/session.rs": 1006,
-      "crates/webfang_core/src/application/crawler/sitemap_discovery.rs": 1400,
       "crates/webfang_core/src/application/elastic_ingestion.rs": 878,
       "crates/webfang_core/src/application/http_client/client.rs": 1317,
       "crates/webfang_core/src/application/llm_extraction.rs": 677,
