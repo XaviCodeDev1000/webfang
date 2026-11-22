@@ -24,14 +24,6 @@
       "crates/webfang_core/src/application/http_client/client.rs": 1317,
       "crates/webfang_core/src/application/llm_extraction.rs": 677,
       "crates/webfang_core/src/application/rate_limiter.rs": 935,
-<<<<<<< HEAD
-      "crates/webfang_core/src/application/vault_search.rs": 1076,
-||||||| parent of f8b47877 (refactor(ai): extract vault_search test mods to sibling files)
-      "crates/webfang_core/src/application/vault_search.rs": 1076,
-      "crates/webfang_core/src/cli/args/crawler.rs": 1375,
-=======
-      "crates/webfang_core/src/cli/args/crawler.rs": 1375,
->>>>>>> f8b47877 (refactor(ai): extract vault_search test mods to sibling files)
       "crates/webfang_core/src/cli/args/mod.rs": 797,
       "crates/webfang_core/src/cli/batch_flow.rs": 1250,
       "crates/webfang_core/src/cli/config.rs": 855,
