@@ -83,6 +83,19 @@ criterio que puso `engine.rs` al frente de la Ola 1.
 - **T4 — Ola 3, cola [1000, 1499].** La banda oportunista [571, 999] queda
   cubierta por la regla de AGENTS.md "si lo tocás y ya las excede, partilo" —
   oportunista, no dedicada.
+  - Progress (2026-11-22, batch O3-B1 / issue #2963, branch `refactor/ola3-b1`):
+    the three `webfang_mcp` entries of the band are closed. `schema_bridge.rs`
+    1015 → 259, `validation.rs` 1163 → 341 and `state.rs` 1131 → 487 all
+    `--remove` (every part under the 500 limit: children
+    `schema_bridge/{properties,overrides}.rs`, `validation/{reason,path}.rs`,
+    `state/limits.rs`, plus the `*_tests.rs` siblings extracted by
+    `scripts/split_tests.sh` with the multiset proof — state.rs's 566-line
+    inline test mod was regrouped into two themed mods first so neither
+    extracted sibling becomes a new over-500 offender). Behavior preserved:
+    full `webfang_mcp` suite 648/648 green before and after the moves. The
+    `needs-review` seam decisions for schema_bridge and validation — and the
+    state.rs backpressure seam that the close-out tool demanded — are
+    recorded on #2963 before each first cut.
 
 ## Método por archivo (por misión, en su worktree)
 
