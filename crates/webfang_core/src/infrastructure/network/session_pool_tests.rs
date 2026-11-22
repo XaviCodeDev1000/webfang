@@ -156,6 +156,59 @@ fn stale_sessions_evicted_on_acquire() {
     assert!(id2.is_some(), "stale session should be evicted and retried");
 }
 
+/// The TTL comparison is strict (`>`): a failure exactly `ttl_duration` old
+/// has NOT expired. With a one-hour ban cooldown the single slot is still
+/// banned at the boundary, so a non-strict mutant hands it back early.
+#[test]
+fn ttl_boundary_is_not_expired() {
+    let clock = MockClock::new(Instant::now());
+    let pool = DomainSessionPool::new(
+        SessionPoolConfig {
+            pool_size: slots(1),
+            base_delay: Duration::from_secs(3600),
+            max_delay: Duration::from_secs(3600),
+            ttl_duration: Duration::from_millis(10),
+            ..Default::default()
+        },
+        clock.handle(),
+    );
+    let id = pool.acquire("boundary.example.com").expect("fresh session");
+    pool.report_failure("boundary.example.com", id, 429);
+
+    clock.advance(Duration::from_millis(10));
+    assert!(
+        pool.acquire("boundary.example.com").is_none(),
+        "a session exactly at the TTL boundary must not be healed"
+    );
+}
+
+/// TTL healing resets sessions that are NOT healthy: a banned slot whose
+/// cooldown is still an hour away comes back once the TTL is strictly
+/// exceeded. A status-negated mutant (`== Healthy`) never heals it.
+#[test]
+fn expired_ban_is_healed_before_its_retry_deadline() {
+    let clock = MockClock::new(Instant::now());
+    let pool = DomainSessionPool::new(
+        SessionPoolConfig {
+            pool_size: slots(1),
+            base_delay: Duration::from_secs(3600),
+            max_delay: Duration::from_secs(3600),
+            ttl_duration: Duration::from_millis(10),
+            ..Default::default()
+        },
+        clock.handle(),
+    );
+    let id = pool.acquire("heal.example.com").expect("fresh session");
+    pool.report_failure("heal.example.com", id, 429);
+
+    clock.advance(Duration::from_millis(11));
+    assert_eq!(
+        pool.acquire("heal.example.com"),
+        Some(id),
+        "an expired ban must be healed by TTL even with a far retry deadline"
+    );
+}
+
 /// #1130 contract: `evict_stale` no longer only resets session states —
 /// a domain idle past the TTL loses its entry outright.
 #[test]
