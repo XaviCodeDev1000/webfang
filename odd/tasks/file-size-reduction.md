@@ -321,3 +321,37 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   delivery — the recorded base `52e4395b` is historical; the delivered
   lineage sits on `main@3ae03d5f` (branch HEAD after the golden regen).
   The batch_flow facade figure in L10 was corrected from 480 to 481.
+- L12 (2026-11-22, O3-B10b progress entry — ENGLISH): batch O3-B10b
+  (issue #2973, umbrella #2584) split
+  `infrastructure/network/session_pool.rs` (1156 lines) and
+  `infrastructure/observability/file_trace_layer.rs` (1113 lines) on
+  `refactor/ola3-b10b` (base `origin/main@3ae03d5f`, rebased onto `main@2592333a` before delivery). Both are
+  tests-majority (mechanical first cut; no S5 carve-outs apply).
+  `session_pool.rs`: 605-line test mod extracted verbatim via
+  `split_tests.sh` (27 items, partition proof) to
+  `session_pool_tests.rs`; the extracted file (600) then split at the
+  config seam into `session_pool_tests.rs` (330) +
+  `session_pool_config_tests.rs` (273) (27 = 15 + 12, name multiset
+  identical). Production seams: bounded-eviction mechanics
+  (`evict_expired`, `enforce_domain_cap`) to `session_pool_eviction.rs`
+  (62) and the balanced-pick mechanism (`PICK_ANCHOR`, `pick_start`) to
+  `session_pool_pick.rs` (47); source 479 lines, `--remove`.
+  `file_trace_layer.rs`: 677-line test mod extracted via
+  `split_tests.sh` (24 items, partition proof), then split at the span
+  seam into `file_trace_layer_tests.rs` (293; event/file-record
+  contracts plus the five shared JSONL reader helpers) +
+  `file_trace_layer_span_tests.rs` (385; span lifecycle contracts incl.
+  span_close records) (24 = 12 + 12, name multiset identical); no
+  production byte changed, source 441 lines, `--remove`. All parts
+  <=500. Characterization: 71 session_pool/file_trace_layer-named unit
+  tests plus 24 tests across `session_pool_integration`,
+  `adversarial_stress_matrix` and `span_attribution_across_await`
+  green before the first cut; the same focused sets green after every
+  seam. Visibility corrections (declared two-hats): `evict_expired`,
+  `enforce_domain_cap`, `pick_start` and the shared test helpers
+  (`slots`, the five JSONL readers) -> `pub(super)`; the extracted
+  session_pool test file imports `MAX_TRACKED_DOMAINS` directly
+  instead of receiving it through the parent's use-glob. Golden
+  `real_tree_sites.txt`: +1 row (the `MAX_TRACKED_DOMAINS` use in
+  `session_pool_eviction.rs`) + 3 line-number shifts in
+  `session_pool.rs`; extracted test files emit no rows (#2980).
