@@ -111,8 +111,10 @@ criterio que puso `engine.rs` al frente de la Ola 1.
     (SitemapParserPort boundary + error mapping), `sitemap_discovery_probe.rs`
     233 (robots.txt/fallback/sub-path URL probing) and
     `sitemap_discovery_subpath.rs` 135 (sub-path crawl fallback) — every moved
-    item byte-verbatim except `pub(super)` on the three functions the hub
-    calls; both public entry points stay in the hub so the MCP full paths and
+    item byte-verbatim except `pub(super)` on the four functions the hub
+    calls (build_sitemap_parser, parse_sitemap, discover_sitemap_url,
+    crawl_with_subpath_sitemaps); both public entry points stay in the hub so
+    the MCP full paths and
     the `discovery.rs` → `lib.rs` re-export chain keep resolving unchanged. The
     573-line inline test mod regrouped into three themed mods (the
     `all(test, not(miri))` gate rewritten in its equivalent stacked
