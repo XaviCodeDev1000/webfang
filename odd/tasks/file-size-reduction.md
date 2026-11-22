@@ -263,3 +263,8 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   value parsers stay (full-path callers in `normalization.rs`/`args/mod.rs`).
   Full verification matrix green on the batch branch; no push yet (serialized
   delivery per the Ola 3 plan).
+- L8 (2026-11-22, correction to L7): the O3-B3 batch was rebased before
+  delivery — the recorded base `152add03` is historical; the delivered
+  lineage sits on `main@cecfd1b8` (branch HEAD `86892efc`). The two test
+  helper widenings in `crawler_spec_parity_tests.rs` were narrowed from
+  `pub(crate)` to `pub(super)` after the risk review (sibling-only use).

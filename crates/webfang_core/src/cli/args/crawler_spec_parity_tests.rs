@@ -35,7 +35,7 @@ const DEFERRED_FROM_SPEC: &[(&str, &str)] = &[
 ];
 
 /// All clap args generated for `CrawlerArgs`, keyed by arg id.
-pub(crate) fn command_args() -> Vec<clap::Arg> {
+pub(super) fn command_args() -> Vec<clap::Arg> {
     collect_args(CrawlerArgs::augment_args(clap::Command::new(
         "webfang-crawler",
     )))
@@ -43,7 +43,7 @@ pub(crate) fn command_args() -> Vec<clap::Arg> {
 
 /// Module-owner shorthand for the shared lookup so the pins below
 /// keep reading as `arg_by_id(&args, id)`.
-pub(crate) fn arg_by_id<'a>(args: &'a [clap::Arg], id: &str) -> &'a clap::Arg {
+pub(super) fn arg_by_id<'a>(args: &'a [clap::Arg], id: &str) -> &'a clap::Arg {
     crate::cli::args::test_support::arg_by_id(args, id, "CrawlerArgs")
 }
 
