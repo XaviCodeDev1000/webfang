@@ -21,7 +21,7 @@ Out: `panic = "abort"` (#1219 correctness), `wreq` vs reqwest, release `lto`/`co
 - [ ] T2 — ccache `max_size` 10G -> 50G.
 - [ ] T3 — `CFLAGS=-O0` for C/C++ build scripts.
 - [ ] T4 — toolchain 1.88.0 -> 1.99.0 (rust-lld default on Linux since 1.90).
-- [x] T5 — `[profile.dev.package."*"]` opt-level 3 -> 0, and add `[profile.dev.build-override] opt-level = 3`.
+- [x] T5 — `[profile.dev.package."*"]` opt-level 3 -> 0 (landed and measured: 99.2 s). The second half of the original checkbox — `[profile.dev.build-override] opt-level = 3` — was never added to Cargo.toml and never measured; it is NOT part of the accepted result (see finding #10).
 - [x] T6 — mold as local-only rustc linker.
 - [ ] T7 — `split-debuginfo`.
 - [ ] T8 — kache as RUSTC_WRAPPER.
@@ -73,6 +73,7 @@ The arg shapes that worried me most (`clippy ... -- -D warnings -W ratchet`) and
 7. **T6 (mold) is real but modest for `--workspace`**: -7% to -15%, two of two orderings. It only links 4 binaries here. The `--all-targets` measurements above (89 binaries, ~270 MB each) already exist — this finding predates those rows and is superseded by them. Those 89 binaries come from a local mold experiment, not from a CI job: no workflow passes `--all-targets` to `nextest`, so they are not "what cargo nextest needs".
 8. **T9 (mbx) is the first tool on this machine that produces cross-target-dir cache hits.** First virgin build 199.0 s / 0 hits / 2.8 GiB stored; second virgin build in a *different* dir 70.7 s with **722 hits and 209 misses**, at load 29.7. For comparison, ccache is proven ineffective across dirs (finding 4) and sccache was measured net-negative in #1447. `mbx doctor`: 0 failures, 1 warning — plain `cargo` bypasses it until `mbx setup` installs the shim, so the win requires a machine-global decision, not a repo change. Its defaults also attack the disk problem directly: 45 GiB budget, automatic GC, managed targets under `~/.cache/mbx/targets`. mise.toml was reverted: enabling it for plain cargo is a separate call.
 9. `mise use --tool-option mr_boxington=true rust mr-boxington` rewrites `rust = "1.88"` into `rust = { version = "latest", ... }`, which silently breaks the MSRV pin in the same file. Restore the pin immediately after.
+10. **T5 was only half-landed, and the missing half was never measured.** `[profile.dev.build-override] opt-level = 3` appears solely in the T5 checkbox, not in the results table, not in the root `Cargo.toml` and not in `.cargo/config.toml`. The `ACCEPTED (251.1 -> 99.2, -60%)` verdict belongs to `[profile.dev.package."*"] opt-level = 0` alone. There is no evidence that optimizing build scripts helps: T3 (`CFLAGS/CXXFLAGS=-O0`) was -2% (noise), and the root `Cargo.toml` records that the runtime cost of optimized dependencies is real. This is closed as documentation hygiene, not reopened as a performance fix — landing it would need its own cold measurement and would invalidate every unit hash (finding #6).
 
 ## Verification
 `cargo check --workspace` green with the new profile (69.9 s at load 6.2). The full pre-push gate (`scripts/ci_fast_gate.sh`) has not been run yet.
