@@ -1140,11 +1140,11 @@ cli/commands/blocks.rs	21	use	crate::domain::model_profile::ModelProfileRegistry
 cli/commands/blocks.rs	21	use	crate::domain::model_profile::ProfileProvenance
 cli/commands/blocks.rs	22	use	crate::domain::network_policy::NetworkPolicyMode
 cli/commands/blocks.rs	23	use	crate::domain::providers::ProviderConfig
-cli/commands/blocks.rs	108	inline	crate::domain::providers::ProviderConfig
-cli/commands/blocks.rs	109	inline	crate::domain::proxy_config::ProxyRegistry
-cli/commands/blocks.rs	154	inline	crate::domain::providers::ProviderConfig
-cli/commands/blocks.rs	155	inline	crate::domain::proxy_config::ProxyRegistry
-cli/commands/blocks.rs	185	inline	crate::domain::model_profile::ModelProfile
+cli/commands/blocks.rs	125	inline	crate::domain::providers::ProviderConfig
+cli/commands/blocks.rs	126	inline	crate::domain::proxy_config::ProxyRegistry
+cli/commands/blocks.rs	171	inline	crate::domain::providers::ProviderConfig
+cli/commands/blocks.rs	172	inline	crate::domain::proxy_config::ProxyRegistry
+cli/commands/blocks.rs	202	inline	crate::domain::model_profile::ModelProfile
 cli/commands/connect.rs	42	use	crate::application::crawl_options::CrawlOptions
 cli/commands/connect.rs	43	use	crate::cli::error::CliExit
 cli/commands/connect.rs	44	use	crate::cli::llm_wire
@@ -1928,7 +1928,7 @@ infrastructure/content_processing/aggressive.rs	11	use	crate::domain::content_pr
 infrastructure/content_processing/aggressive.rs	12	use	crate::infrastructure::converter::html_cleaner::clean_html
 infrastructure/content_processing/mcp.rs	10	use	crate::domain::content_processor::ContentProcessor
 infrastructure/content_processing/mcp.rs	11	use	crate::infrastructure::converter::html_cleaner::clean_html
-infrastructure/content_processing/semantic.rs	11	use	crate::domain::content_processor::ContentProcessor
+infrastructure/content_processing/semantic.rs	9	use	crate::domain::content_processor::ContentProcessor
 infrastructure/converter/htmd_converter.rs	9	use	crate::domain::html_extraction::fallback
 infrastructure/converter/htmd_converter.rs	10	use	crate::domain::ports::MarkdownConverter
 infrastructure/converter/htmd_converter.rs	42	inline	crate::infrastructure::converter::html_cleaner::clean_html
@@ -2351,6 +2351,7 @@ infrastructure/semantic_cleaner.rs	26	use	crate::domain::semantic_cleaner::Seman
 infrastructure/semantic_cleaner.rs	27	use	crate::domain::text_chunker::ByteSpan
 infrastructure/semantic_cleaner.rs	27	use	crate::domain::text_chunker::TextChunk
 infrastructure/semantic_cleaner.rs	28	use	crate::error::SemanticError
+infrastructure/semantic_cleaner.rs	29	use	crate::infrastructure::content_processing::aggressive::strip_html_tags
 infrastructure/ssrf.rs	65	use	crate::domain::network_policy::NetworkPolicy
 infrastructure/ssrf.rs	66	use	crate::domain::proxy_config::ClientSecurityProfile
 infrastructure/ssrf.rs	69	use	crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV
