@@ -79,18 +79,12 @@ binaries does not extend the copyleft beyond the files it always covered.
 No crate in either lockfile is licensed solely under the LGPL, and no LGPL
 obligation arises for the shipped binaries.
 
-Two points of record, because the `[licenses] allow` list in `deny.toml` reads
-as if it did:
+Two points of record:
 
-  * That allow list contains the entry `"LGPL-3.0",  # wreq-util (TLS
-    emulation)`. The inline justification is **stale**: `wreq-util 3.0.0-rc.14`
-    is licensed `Apache-2.0`
-    (`https://github.com/0x676e67/wreq-util`), measured from `cargo metadata`.
-    Keeping the entry is harmless — an allow-list entry is a permission, not a
-    claim — but the comment attributing it to `wreq-util` is wrong and is
-    reported for correction rather than silently edited here, because
-    `deny.toml` is owned by a different work unit of issue #1607.
-  * The full locked graph does contain `r-efi 5.3.0` and `r-efi 6.0.0`,
+  * The `[licenses] allow` list in `deny.toml` permits `LGPL-3.0` for
+    transitive dependencies. No crate in the current lockfiles is licensed
+    solely under LGPL-3.0.
+  * The full locked graph contains `r-efi 5.3.0` and `r-efi 6.0.0`,
     licensed `MIT OR Apache-2.0 OR LGPL-2.1-or-later`. They are tri-licensed
     with a permissive option, which is the option in use, and neither version is
     in the released binary's runtime graph.
