@@ -130,11 +130,22 @@ impl VectorExporter {
                 f.read_to_end(&mut buf)?;
 
                 let content = String::from_utf8_lossy(&buf);
-                if let Some(last_bracket) = content.rfind(']') {
-                    let truncate_pos = seek_start + last_bracket as u64;
-                    f.set_len(truncate_pos)?;
-                    f.seek(SeekFrom::Start(truncate_pos))?;
-                }
+                let last_bracket = content.rfind(']').ok_or_else(|| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        tail_bytes = buf.len(),
+                        "refusing to append: vector export has no closing bracket (torn document)"
+                    );
+                    ExporterError::WriteError(format!(
+                        "vector export {} has no closing bracket in the last {} bytes: \
+                         a torn document from an interrupted write; refusing to append",
+                        path.display(),
+                        buf.len()
+                    ))
+                })?;
+                let truncate_pos = seek_start + last_bracket as u64;
+                f.set_len(truncate_pos)?;
+                f.seek(SeekFrom::Start(truncate_pos))?;
             }
             f
         } else {

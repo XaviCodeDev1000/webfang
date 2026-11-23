@@ -9,19 +9,44 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 use crate::domain::exporter::{ExportResult, ExporterError};
 
-/// Number of leading bytes scanned to locate and patch the metadata header.
+/// Initial number of leading bytes scanned to locate the metadata header.
 ///
-/// The header line fits comfortably inside this window even with the reserved
-/// fields, so scanning a fixed prefix avoids reading whole files on close.
+/// Headers written by this exporter fit in this window, so the common case is
+/// one bounded read. A larger header (for example a legacy `created_at` copied
+/// from an external file) grows the window instead of truncating the markers.
 pub(super) const HEADER_SCAN_BYTES: usize = 512;
 
-/// Read up to [`HEADER_SCAN_BYTES`] leading bytes from the file.
+/// Hard ceiling of the adaptive header scan (#3000).
 ///
-/// Seeks to the start first. Returns fewer bytes when the file is shorter
-/// than the scan window.
+/// Beyond this point the prefix is not a header: scanning stops and the
+/// callers report their typed "missing field" error rather than reading an
+/// unbounded prefix on every append.
+pub(super) const MAX_HEADER_SCAN_BYTES: usize = 64 * 1024;
+
+const HEADER_END_MARKER: &[u8] = b"\"documents\": [";
+
+/// Read the leading bytes that contain the whole metadata header.
+///
+/// Starts at [`HEADER_SCAN_BYTES`] and doubles until the `documents` marker is
+/// visible, the file ends, or [`MAX_HEADER_SCAN_BYTES`] is reached. Always
+/// seeks to offset 0 first; returned offsets are absolute file offsets.
 pub(super) fn read_header_bytes(file: &mut File) -> ExportResult<Vec<u8>> {
+    let mut window = HEADER_SCAN_BYTES;
+    loop {
+        let head = read_prefix(file, window)?;
+        if find_subslice(&head, HEADER_END_MARKER).is_some()
+            || head.len() < window
+            || window >= MAX_HEADER_SCAN_BYTES
+        {
+            return Ok(head);
+        }
+        window = window.saturating_mul(2).min(MAX_HEADER_SCAN_BYTES);
+    }
+}
+
+fn read_prefix(file: &mut File, len: usize) -> ExportResult<Vec<u8>> {
     file.seek(SeekFrom::Start(0))?;
-    let mut head = vec![0_u8; HEADER_SCAN_BYTES];
+    let mut head = vec![0_u8; len];
     let mut filled = 0;
     while filled < head.len() {
         let read = file.read(&mut head[filled..])?;
@@ -118,4 +143,30 @@ pub(super) fn patch_header_field(
     file.seek(SeekFrom::Start(value_start as u64))?;
     file.write_all(value.as_bytes())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    #[test]
+    fn oversized_created_at_header_is_scanned_past_the_initial_window() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("oversized.json");
+        let created_at = "x".repeat(HEADER_SCAN_BYTES + 64);
+        let header = format!(
+            r#"{{"format_version": "1.0", "model_name": null, "dimensions": null, "total_documents": 0, "created_at": "{created_at}", "documents": ["#
+        );
+        let mut file = std::fs::File::create(&path).expect("create header fixture");
+        file.write_all(header.as_bytes()).expect("write header fixture");
+        drop(file);
+
+        let mut file = std::fs::File::open(&path).expect("open header fixture");
+        let head = read_header_bytes(&mut file).expect("read header");
+        assert!(
+            find_subslice(&head, b"\"documents\": [").is_some(),
+            "the documents marker must stay inside the scan window"
+        );
+    }
 }

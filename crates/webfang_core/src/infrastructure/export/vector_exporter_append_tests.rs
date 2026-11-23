@@ -401,3 +401,26 @@ fn test_dimensions_are_learned_and_written_to_header() {
         "header dimensions must reflect the learned embedding size"
     );
 }
+
+#[test]
+fn append_refuses_to_corrupt_a_file_with_a_torn_document() {
+    let temp_dir = tempfile::TempDir::new().expect("tempdir");
+    let path = temp_dir.path().join("test_export.json");
+    let original = "{\"format_version\": \"1.0\", \"total_documents\": 1, \"created_at\": \"2026-01-01T00:00:00+00:00\", \"documents\": [{\"id\":\"torn\"";
+    std::fs::write(&path, original).expect("write torn fixture");
+
+    let exporter = VectorExporter::new(append_config(temp_dir.path().to_path_buf()));
+    let err = exporter
+        .export(create_test_chunk())
+        .expect_err("append must fail instead of closing a torn document");
+
+    assert!(
+        format!("{err}").contains("no closing bracket"),
+        "unexpected error: {err}"
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("read torn fixture"),
+        original.as_bytes(),
+        "a refused append must leave the file byte-identical"
+    );
+}
