@@ -1,0 +1,5 @@
+---
+source: crates/webfang_core/tests/cleaning_pipelines_regression.rs
+expression: "redact_nondeterministic(std::path::Path::new(\"/webfang-no-temp-path\"),\n&format!(\"{emitted:?}\"))"
+---
+["x"]

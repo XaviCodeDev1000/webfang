@@ -26,6 +26,7 @@ use crate::domain::semantic_cleaner::private::Sealed;
 use crate::domain::semantic_cleaner::SemanticCleaner;
 use crate::domain::text_chunker::{ByteSpan, TextChunk};
 use crate::error::SemanticError;
+use crate::infrastructure::content_processing::aggressive::strip_html_tags;
 
 /// Threshold at which filtering is reported as aggressive (>50 % discarded).
 const AGGRESSIVE_FILTER_RATIO: f64 = 0.5;
@@ -214,28 +215,16 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Extract readable text from `html`, falling back to a tag-strip when
-/// `legible` fails or yields nothing but whitespace.
+/// Extract readable text from `html`, falling back to the shared block-dropping
+/// stripper when `legible` fails or yields nothing but whitespace.
+///
+/// The fallback is an embedding boundary: it must drop script/style/noscript
+/// bodies before any text reaches [`EmbeddingPort::embed_batch`] (#3009).
 fn extract_text_content(html: &str) -> String {
     match legible::parse(html, None, None) {
         Ok(article) if !article.content.trim().is_empty() => article.content,
         _ => strip_html_tags(html),
     }
-}
-
-/// Strip HTML tags, returning only text content.
-fn strip_html_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut inside_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => inside_tag = true,
-            '>' => inside_tag = false,
-            c if !inside_tag => result.push(c),
-            _ => {},
-        }
-    }
-    result
 }
 
 /// Split `text` into chunks joined from non-empty paragraphs, staying under

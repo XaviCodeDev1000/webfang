@@ -2,12 +2,10 @@
 //!
 //! Wraps the `clean.rs` pipeline logic into a [`ContentProcessor`] impl:
 //! 1. `legible::parse` — Mozilla Readability port for main content extraction
-//! 2. Naive `strip_html_tags` — char-by-char `<`/`>` tag stripping
+//! 2. Shared `aggressive::strip_html_tags` — drops script/style/noscript blocks
 //! 3. `normalize_whitespace` — `split_whitespace().join(" ")` for Unicode-aware collapse
-//!
-//! Self-contained: copies the logic rather than importing private functions
-//! from `clean.rs`, so each adapter is independent.
 
+use super::aggressive::strip_html_tags;
 use crate::domain::content_processor::ContentProcessor;
 
 /// Semantic content processor for the pipeline scraper.
@@ -45,21 +43,6 @@ fn extract_readability(html: &str) -> String {
         },
         Err(_) => html.to_string(),
     }
-}
-
-/// Strip HTML tags, returning only text content.
-fn strip_html_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut inside_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => inside_tag = true,
-            '>' => inside_tag = false,
-            c if !inside_tag => result.push(c),
-            _ => {},
-        }
-    }
-    result
 }
 
 /// Collapse runs of whitespace (spaces, tabs, newlines) into a single space
