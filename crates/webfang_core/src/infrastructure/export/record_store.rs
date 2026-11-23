@@ -54,6 +54,16 @@ fn now_millis() -> i64 {
         .unwrap_or_default()
 }
 
+/// Monotonic per-process suffix for crash-sensitive sibling filenames.
+///
+/// A clock reading can repeat and a PID is not unique inside one process, so
+/// both the temp file and the v1 backup name use this counter instead.
+pub(crate) fn unique_suffix() -> String {
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nonce = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}-{}", std::process::id(), nonce)
+}
+
 /// JSON-per-domain v2 persistence (D2).
 ///
 /// Construction is deliberately lazy/infallible (#393 contract): strictness
@@ -121,18 +131,13 @@ impl RecordStore {
     }
 
     fn tmp_path(&self, final_path: &std::path::Path) -> PathBuf {
-        // `pid` alone is not unique inside a multi-threaded process, and
-        // `subsec_nanos` can repeat: two writers entering the critical section
-        // a nanosecond apart produced the SAME tmp name, one renamed it away, and
-        // the other's rename failed with ENOENT. A monotonic per-process counter
-        // makes the name unique for the lifetime of the process.
-        static TMP_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let nonce = TMP_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // Shared with the v1 backup name: both siblings must stay unique even
+        // when two writers enter the critical section in the same clock tick.
         let mut name = final_path.file_name().map_or_else(
             || "state.json".to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        name.push_str(&format!(".tmp-{}-{}", std::process::id(), nonce));
+        name.push_str(&format!(".tmp-{}", unique_suffix()));
         final_path.with_file_name(name)
     }
 

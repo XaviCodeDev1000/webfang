@@ -14,7 +14,7 @@ use crate::domain::exporter::{DomainRecords, RawRecord, RecordStoreError};
 use crate::domain::page_state::{PageStatus, MIGRATED_V1_RUN_ID};
 use crate::domain::record_transition;
 
-use super::{now_millis, RecordStore};
+use super::{now_millis, unique_suffix, RecordStore};
 
 /// Versioned on-disk envelope (D2, frozen).
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,7 +71,11 @@ pub(crate) struct StoreLock {
 }
 
 impl StoreLock {
-    /// Acquire an exclusive OS file lock at `<state>.lock`.
+    /// Acquire an exclusive OS file lock at the owner-only `<state>.lock`.
+    ///
+    /// On Unix the permanent sentinel is created and kept at mode `0o600`: it
+    /// holds the owning PID, which must not be readable by other users. This
+    /// does not change the advisory nature of the lock described below.
     ///
     /// Semantics differ by platform (XP-F-04, #1608) — the lock is
     /// "advisory" only on POSIX:
@@ -89,11 +93,31 @@ impl StoreLock {
         let mut lock_path = state_path.as_os_str().to_owned();
         lock_path.push(".lock");
         let lock_path = PathBuf::from(lock_path);
-        let mut lock_file =
-            fs::File::create(&lock_path).map_err(|source| RecordStoreError::Io {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut lock_file = options
+            .open(&lock_path)
+            .map_err(|source| RecordStoreError::Io {
                 path: lock_path.clone(),
                 source,
             })?;
+        #[cfg(unix)]
+        {
+            // The sentinel is permanent: mode() only applies at creation, so
+            // tighten sentinels left behind by older versions on every acquire.
+            use std::os::unix::fs::PermissionsExt as _;
+            lock_file
+                .set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|source| RecordStoreError::Io {
+                    path: lock_path.clone(),
+                    source,
+                })?;
+        }
         let _ = write!(lock_file, "pid={}", std::process::id());
         lock_file
             .lock_exclusive()
@@ -187,8 +211,9 @@ impl RecordStore {
         // (1) Backup BEFORE anything else touches the live file.
         let stamp = now_millis();
         let backup_path = path.with_file_name(format!(
-            "{}.v1.bak.{stamp}",
-            path.file_name().unwrap_or_default().to_string_lossy()
+            "{}.v1.bak.{stamp}.{}",
+            path.file_name().unwrap_or_default().to_string_lossy(),
+            unique_suffix()
         ));
         fs::copy(path, &backup_path).map_err(|source| RecordStoreError::Backup {
             path: backup_path.clone(),
@@ -211,5 +236,66 @@ impl RecordStore {
             "v1 state file migrated to v2 record store"
         );
         Ok(Self::validate_and_quarantine(records, path))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod lock_permission_tests {
+    use super::*;
+
+    #[test]
+    fn preexisting_world_readable_sentinel_is_tightened_on_acquire() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let state = dir.path().join("state.json");
+        let mut os_lock = state.as_os_str().to_owned();
+        os_lock.push(".lock");
+        let lock_path = std::path::PathBuf::from(os_lock);
+        std::fs::write(&lock_path, b"").expect("seed sentinel");
+        std::fs::set_permissions(&lock_path, std::fs::Permissions::from_mode(0o644))
+            .expect("set seed mode");
+
+        let lock = StoreLock::acquire(&state).expect("acquire lock");
+        let mode = std::fs::metadata(&lock_path)
+            .expect("lock metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "lock sentinel must not be readable by group or others"
+        );
+        drop(lock);
+    }
+}
+
+#[cfg(test)]
+mod backup_name_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn repeated_migrations_keep_distinct_backup_names() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path().join("state.json");
+        let legacy = br#"{"processed_urls":["https://example.com/a"]}"#;
+        std::fs::write(&path, legacy).expect("write legacy state");
+        let store = RecordStore::with_fs("test", dir.path().to_path_buf(), Arc::new(RealFs));
+
+        for _ in 0..20 {
+            store.migrate_v1(&path, legacy).expect("migration");
+        }
+
+        let backups: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read state dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".v1.bak."))
+            .collect();
+        assert_eq!(
+            backups.len(),
+            20,
+            "each migration must keep its own backup, even within one millisecond"
+        );
     }
 }

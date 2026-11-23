@@ -129,12 +129,9 @@ impl VectorExporter {
                 let mut buf = Vec::new();
                 f.read_to_end(&mut buf)?;
 
-                let content = String::from_utf8_lossy(&buf);
-                if let Some(last_bracket) = content.rfind(']') {
-                    let truncate_pos = seek_start + last_bracket as u64;
-                    f.set_len(truncate_pos)?;
-                    f.seek(SeekFrom::Start(truncate_pos))?;
-                }
+                vector_exporter_header::truncate_at_closing_bracket(
+                    &mut f, &path, seek_start, &buf,
+                )?;
             }
             f
         } else {
