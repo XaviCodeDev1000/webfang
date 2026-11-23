@@ -3,9 +3,8 @@
 # Lines starting with '#' are comments. A row FAILS when the forbidden string
 # is still present at `path`. Rows are path-scoped: the same string may be
 # legitimate in a different file (for example deny.toml is out of scope here).
-# Pending activation after PR #3001 merges (do NOT enable before then):
-# crates/webfang_core/src/error.rs	from reqwest-middleware	Cargo.lock	PR #3001 removes this doc-comment; not on main yet.
-# crates/webfang_core/src/error.rs	a local ONNX model	ADR-0004	PR #3001 removes this doc-comment; not on main yet.
+crates/webfang_core/src/error.rs	from reqwest-middleware	Cargo.lock	reqwest-middleware is in neither lockfile; PR #3001 removed the stale doc-comment.
+crates/webfang_core/src/error.rs	a local ONNX model	ADR-0004	Local inference was removed; PR #3001 removed the stale doc-comment.
 NOTICE	selectors 0.35.0	Cargo.lock	Only selectors 0.37.0 and 0.38.0 are locked.
 NOTICE	--features "ai mcp"	crates/webfang_cli/Cargo.toml	No `ai` feature exists; release uses --features mcp.
 NOTICE	ring 0.17.14	Cargo.lock	ring is in neither lockfile.
