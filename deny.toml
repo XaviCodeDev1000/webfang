@@ -55,12 +55,14 @@ unmaintained = "all"
 unsound = "all"
 yanked = "deny"
 # Kept at "warn" ON PURPOSE, and deliberately not "deny". cargo-deny's
-# advisory-not-detected diagnostics are known to drift from cargo-audit's: two
-# ids below (RUSTSEC-2026-0221/0253) are reported as not-detected by
-# cargo-deny while cargo-audit matches them against the same lock. Promoting
-# this to an error would turn `cargo deny check` red and regress a positive
-# control, so the drift surfaces as a warning and is reconciled instead by the
-# script's `-D warnings` audit, which is the stricter of the two.
+# advisory-not-detected diagnostics are known to drift from cargo-audit's: which
+# ids are reported as not-detected changes with the advisory DB and the lock
+# graph, so they are NOT enumerated here. The authoritative set is the [advisories]
+# ignore list below intersected with what `cargo deny --offline check` reports as
+# `warning[advisory-not-detected]`, enforced by scripts/check_advisory_policy.sh.
+# Promoting this knob to an error would turn `cargo deny check` red and regress a
+# positive control, so the drift surfaces as a warning and is reconciled instead
+# by the script's `-D warnings` audit, which is the stricter of the two.
 unused-ignored-advisory = "warn"
 
 # The ignore list below is the only sanctioned suppression mechanism, and every

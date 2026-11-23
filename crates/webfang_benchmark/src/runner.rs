@@ -121,7 +121,7 @@ fn run_strategy(
         ..EngineOptions::default()
     };
 
-    let ram_cost_bytes = ram_proxy(strategy)?;
+    let declared_ram_cost_bytes = ram_proxy(strategy)?;
 
     // FRESH CORPUS PER MEASUREMENT (NFR-1): the simulated-WAF sequence is
     // stateful (403→429→200 atomic counter). Serving its own corpus instance
@@ -148,7 +148,7 @@ fn run_strategy(
     // disk before parsing reads the file.
     let records = aggregate::parse_file(&trace_path)?;
     let summary = aggregate::summary_of(&records, "<run trace>")?.clone();
-    let metrics = aggregate::compute(&records, strategy, ram_cost_bytes)?;
+    let metrics = aggregate::compute(&records, strategy, declared_ram_cost_bytes)?;
 
     drop(tmp); // aggregation done; absolute path dies here
 
@@ -159,12 +159,13 @@ fn run_strategy(
     })
 }
 
-/// Capture the static RAM proxy for a strategy by building a mirror
+/// Capture the declared RAM cost for a strategy by building a mirror
 /// downloader through the [`Container`] single-graph seam and reading
 /// [`memory_cost`](webfang_core::infrastructure::downloader::Downloader::memory_cost).
-/// The engine still does not expose the cost of
-/// the downloader it builds, so this parallel construction remains the only
-/// seam that observes it without touching core.
+/// This is a static per-downloader estimate, not a measured RSS reading. The
+/// engine still does not expose the cost of the downloader it builds, so this
+/// parallel construction remains the only seam that observes it without
+/// touching core.
 fn ram_proxy(strategy: JsStrategy) -> Result<usize> {
     let cookie_bridge = Arc::new(RwLock::new(CookieBridge::default()));
     let tls_emulation = EngineOptions::default().tls_emulation;

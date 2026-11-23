@@ -2,8 +2,8 @@
 //!
 //! Wraps the `bridge.rs` pipeline logic into a [`ContentProcessor`] impl:
 //! 1. `clean_html` (lol_html) — element-level boilerplate removal + attribute stripping
-//! 2. Aggressive `strip_html_tags` — lowercases HTML, removes complete script/style
-//!    blocks, skips to `>` for other tags, joins with whitespace
+//! 2. Aggressive `strip_html_tags` — lowercases HTML, removes complete
+//!    script/style/noscript blocks, skips to `>` for other tags, joins with whitespace
 //!
 //! Self-contained: copies the logic rather than importing private functions
 //! from `bridge.rs`, so each adapter is independent.
@@ -30,9 +30,19 @@ impl ContentProcessor for AggressiveProcessor {
     }
 }
 
-/// Aggressive tag stripper that removes complete script/style blocks
+/// Block elements whose bodies must never reach an embedding provider (#3009).
+const BLOCK_TAGS: &[(&str, &str)] = &[
+    ("<script", "</script>"),
+    ("<style", "</style>"),
+    ("<noscript", "</noscript>"),
+];
+
+/// Aggressive tag stripper that removes complete script/style/noscript blocks
 /// and lowercases HTML for case-insensitive block detection.
-fn strip_html_tags(html: &str) -> String {
+///
+/// `pub(crate)` so the semantic cleaner's degraded fallback and the semantic
+/// processor share one block-dropping definition at the embedding boundary.
+pub(crate) fn strip_html_tags(html: &str) -> String {
     let lower = html.to_ascii_lowercase();
     let lbytes = lower.as_bytes();
     let n = html.len();
@@ -41,21 +51,12 @@ fn strip_html_tags(html: &str) -> String {
     while i < n {
         if lbytes[i] == b'<' {
             let rest = &lower[i..];
-            if rest.starts_with("<script") {
-                if let Some(rel) = rest.find("</script>") {
-                    i += rel + "</script>".len();
+            if let Some((_, close)) = BLOCK_TAGS.iter().find(|(open, _)| rest.starts_with(open)) {
+                if let Some(rel) = rest.find(close) {
+                    i += rel + close.len();
                     continue;
-                } else {
-                    break; // unterminated script: drop the rest
                 }
-            }
-            if rest.starts_with("<style") {
-                if let Some(rel) = rest.find("</style>") {
-                    i += rel + "</style>".len();
-                    continue;
-                } else {
-                    break;
-                }
+                break; // unterminated block: drop the rest
             }
             // Regular tag: skip to '>'.
             i += 1;
@@ -107,6 +108,16 @@ mod tests {
         assert!(
             !result.contains("color:red"),
             "style content removed: {result}"
+        );
+        assert!(result.contains("Content"), "text preserved: {result}");
+    }
+
+    #[test]
+    fn strip_removes_noscript_blocks() {
+        let result = strip_html_tags("<p>Content</p><noscript>Enable JS</noscript>");
+        assert!(
+            !result.contains("Enable JS"),
+            "noscript body removed: {result}"
         );
         assert!(result.contains("Content"), "text preserved: {result}");
     }

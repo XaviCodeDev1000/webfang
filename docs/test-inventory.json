@@ -95,7 +95,7 @@
       "path": "crates/webfang_benchmark/tests/report_test.rs",
       "crate": "webfang_benchmark",
       "area": "tests",
-      "test_count": 6,
+      "test_count": 7,
       "ignored_count": 0,
       "snapshot_usage": false,
       "tier": "integration_mock"
@@ -509,10 +509,10 @@
       "path": "crates/webfang_core/tests/cleaning_pipelines_regression.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 41,
+      "test_count": 42,
       "ignored_count": 0,
       "snapshot_usage": true,
-      "tier": "integration_mock"
+      "tier": "ai_model_semantic"
     },
     {
       "path": "crates/webfang_core/tests/cli_binary_test.rs",
@@ -1202,7 +1202,7 @@
       "path": "crates/webfang_core/tests/show_provider_identity_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 7,
+      "test_count": 9,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "ai_model_semantic"

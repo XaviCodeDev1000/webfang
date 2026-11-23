@@ -615,3 +615,93 @@ mod content_processor_regression {
         );
     }
 }
+
+// ─── Issue #3009: embedding boundary must never receive raw block bodies ──
+
+#[cfg(all(test, not(miri)))]
+mod embedding_boundary_regression {
+    use std::any::Any;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+
+    use webfang_core::domain::embedding_port::EmbeddingPort;
+    use webfang_core::domain::semantic_cleaner::SemanticCleaner;
+    use webfang_core::error::SemanticError;
+    use webfang_core::infrastructure::semantic_cleaner::SemanticCleanerImpl;
+    use webfang_test_utils::redact_nondeterministic;
+
+    type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+    /// Captures the exact strings handed to `embed_batch` — the embedding boundary.
+    #[derive(Default)]
+    struct CapturingPort {
+        batches: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl EmbeddingPort for CapturingPort {
+        fn embed<'a>(&'a self, _text: &'a str) -> BoxFuture<'a, Result<Vec<f32>, SemanticError>> {
+            Box::pin(async { Ok(vec![1.0, 0.0, 0.0]) })
+        }
+
+        fn embed_batch<'a>(
+            &'a self,
+            texts: &'a [String],
+        ) -> BoxFuture<'a, Result<Vec<Vec<f32>>, SemanticError>> {
+            self.batches
+                .lock()
+                .expect("test capture lock")
+                .push(texts.to_vec());
+            Box::pin(async move { Ok(vec![vec![1.0, 0.0, 0.0]; texts.len()]) })
+        }
+
+        fn embedding_dim(&self) -> usize {
+            3
+        }
+
+        fn model_id(&self) -> &str {
+            "capturing-test-port"
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// #3009: when `legible` finds no article the cleaner degrades to a tag
+    /// stripper. That fallback must drop script/style/noscript bodies before
+    /// any text reaches `embed_batch`.
+    #[tokio::test]
+    async fn degraded_stripper_drops_script_style_noscript_before_embed_batch() {
+        // No readable article: `legible::parse` returns Err and the fallback runs.
+        let html = r#"<html><head><title>x</title></head><body><script>LEAK_SCRIPT</script><style>LEAK_STYLE</style><noscript>LEAK_NOSCRIPT</noscript></body></html>"#;
+        let port = Arc::new(CapturingPort::default());
+        let cleaner = SemanticCleanerImpl::new(port.clone(), 1000, 0.3);
+        let _ = cleaner
+            .clean("https://example.test", html)
+            .await
+            .expect("clean must succeed on degraded input");
+
+        let batches = port.batches.lock().expect("test capture lock");
+        let emitted: Vec<&String> = batches.iter().flatten().collect();
+        assert!(!emitted.is_empty(), "the fallback must still emit text");
+        for text in &emitted {
+            assert!(
+                !text.contains("LEAK_SCRIPT"),
+                "script body reached embedding: {text}"
+            );
+            assert!(
+                !text.contains("LEAK_STYLE"),
+                "style body reached embedding: {text}"
+            );
+            assert!(
+                !text.contains("LEAK_NOSCRIPT"),
+                "noscript body reached embedding: {text}"
+            );
+        }
+        insta::assert_snapshot!(redact_nondeterministic(
+            std::path::Path::new("/webfang-no-temp-path"),
+            &format!("{emitted:?}")
+        ));
+    }
+}

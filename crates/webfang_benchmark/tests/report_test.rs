@@ -116,6 +116,31 @@ fn methodology_notes_present() {
     );
 }
 
+/// S2 (#3007) — the RAM figure is a declared `Downloader::memory_cost()`
+/// constant, not a measured RSS value. The rendered metric must say so, both
+/// in the column label and in the methodology, so a reader never mistakes a
+/// declared estimate for a measurement.
+#[test]
+fn ram_metric_is_labeled_as_declared_estimate() {
+    let out = rendered();
+    let header = out
+        .lines()
+        .find(|line| line.contains("success rate"))
+        .expect("deterministic table header");
+    assert!(
+        header.contains("Declared RAM bytes (estimate)"),
+        "RAM column must be labeled as a declared estimate, got: {header}"
+    );
+    assert!(
+        !header.ends_with("| RAM bytes |"),
+        "bare 'RAM bytes' column presents a declared constant as measured, got: {header}"
+    );
+    assert!(
+        out.contains("not a measured RSS value"),
+        "methodology must state the RAM figure is declared, not measured"
+    );
+}
+
 /// ADR-B4 — volatile quantities are wrapped in exactly one pair of
 /// `<!-- volatile -->` sentinels, and live inside it.
 #[test]

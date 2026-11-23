@@ -165,8 +165,8 @@ a chain of wrappers: `DomainError`, `InfraError`, `CrawlError` and `DownloadErro
 - `CliError` (`cli/error.rs`) is **independent** of `ScraperError`; it maps to exit codes
   (`EXIT_CONFIG = 78` for a configuration error).
 - `HttpError` is a **domain** enum (`domain/http_error.rs`), not an `InfraError` variant.
-  `WafError` is **not an error type** — it is a `FetchBehavior` variant
-  (`application/crawler/crawl_task.rs`). `ParseError` does not exist here.
+  WAF: `DownloadError::WafChallenge` / `CrawlError::WafChallenge` in production;
+  `FetchBehavior::WafError` is test-only. No `ParseError`.
 - A new variant enters through `From` towards `ScraperError`; its user-facing message is in English.
   Full matrix and exit-code rules: `docs/error-classification-matrix.md`.
 
