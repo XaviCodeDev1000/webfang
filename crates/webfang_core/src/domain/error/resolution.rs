@@ -106,18 +106,20 @@ impl ResolutionTracker {
     /// the abandonment is the evidence (#2784).
     pub fn begin(&self, host: &str) -> ResolutionGuard<'_> {
         let started = std::time::Instant::now();
-        if let Ok(mut marks) = self.marks.lock() {
-            self.drop_expired(&mut marks);
-            let host_marks = marks.entry(host.to_owned()).or_default();
-            host_marks.unfinished.push(started);
-            // Bounded: only the most recent unfinished resolutions are evidence
-            // worth keeping.
-            if host_marks.unfinished.len() > MAX_MARKS_PER_HOST {
-                let excess = host_marks.unfinished.len() - MAX_MARKS_PER_HOST;
-                host_marks.unfinished.drain(..excess);
-            }
-            self.enforce_host_cap(&mut marks);
+        let mut marks = self
+            .marks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.drop_expired(&mut marks);
+        let host_marks = marks.entry(host.to_owned()).or_default();
+        host_marks.unfinished.push(started);
+        // Bounded: only the most recent unfinished resolutions are evidence
+        // worth keeping.
+        if host_marks.unfinished.len() > MAX_MARKS_PER_HOST {
+            let excess = host_marks.unfinished.len() - MAX_MARKS_PER_HOST;
+            host_marks.unfinished.drain(..excess);
         }
+        self.enforce_host_cap(&mut marks);
         ResolutionGuard {
             tracker: self,
             host: host.to_owned(),
@@ -148,9 +150,10 @@ impl ResolutionTracker {
     /// `unknown`: never a wrong attribution.
     #[must_use]
     pub fn state(&self, host: &str, request_started: std::time::Instant) -> ResolutionState {
-        let Ok(marks) = self.marks.lock() else {
-            return ResolutionState::None;
-        };
+        let marks = self
+            .marks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(host_marks) = marks.get(host) else {
             return ResolutionState::None;
         };
@@ -224,20 +227,22 @@ impl ResolutionTracker {
     #[cfg(test)]
     #[must_use]
     pub fn tracked_hosts(&self) -> usize {
-        match self.marks.lock() {
-            Ok(marks) => marks.len(),
-            Err(_) => 0,
-        }
+        let marks = self
+            .marks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        marks.len()
     }
 
     /// How many unfinished marks the tracker holds for `host`.
     #[cfg(test)]
     #[must_use]
     pub fn unfinished_marks(&self, host: &str) -> usize {
-        match self.marks.lock() {
-            Ok(marks) => marks.get(host).map_or(0, |host| host.unfinished.len()),
-            Err(_) => 0,
-        }
+        let marks = self
+            .marks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        marks.get(host).map_or(0, |host| host.unfinished.len())
     }
 }
 
@@ -258,14 +263,17 @@ impl ResolutionGuard<'_> {
     /// is what separates two requests for the same host (#2784).
     pub fn finished(&mut self, succeeded: bool) {
         self.completed = true;
-        if let Ok(mut marks) = self.tracker.marks.lock() {
-            if let Some(host_marks) = marks.get_mut(&self.host) {
-                host_marks
-                    .unfinished
-                    .retain(|started| *started != self.started);
-                if succeeded {
-                    host_marks.last_success = Some(std::time::Instant::now());
-                }
+        let mut marks = self
+            .tracker
+            .marks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(host_marks) = marks.get_mut(&self.host) {
+            host_marks
+                .unfinished
+                .retain(|started| *started != self.started);
+            if succeeded {
+                host_marks.last_success = Some(std::time::Instant::now());
             }
         }
     }
@@ -433,6 +441,52 @@ mod tests {
                 true,
             ),
             NetworkCause::ConnectRefused
+        );
+    }
+
+    /// A poisoned mark mutex must not drop the resolution evidence: recovery
+    /// keeps the mark recorded, readable, and clearable (#3008).
+    #[test]
+    fn a_poisoned_mark_mutex_still_records_and_clears_marks() {
+        let tracker = ResolutionTracker::default();
+        // Poisoning happens when a guard is dropped during unwinding.
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = tracker
+                    .marks
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                panic!("poison the local tracker's mark mutex");
+            }))
+            .is_err(),
+            "the closure must panic to poison the mutex"
+        );
+        assert!(
+            tracker.marks.is_poisoned(),
+            "the local mutex must be poisoned"
+        );
+
+        let request_started = Instant::now();
+        // begin() must recover the poisoned lock and still record the mark.
+        let _mark = tracker.begin("poisoned.test");
+        assert_eq!(
+            tracker.unfinished_marks("poisoned.test"),
+            1,
+            "begin must record the mark even after lock poisoning"
+        );
+        // state() must recover the poisoned lock and still read the mark.
+        assert_eq!(
+            tracker.state("poisoned.test", request_started),
+            ResolutionState::ThisRequest,
+            "state must read the mark even after lock poisoning"
+        );
+        // finished() must recover the poisoned lock and still clear the mark.
+        let mut completing = tracker.begin("poisoned-finish.test");
+        completing.finished(true);
+        assert_eq!(
+            tracker.unfinished_marks("poisoned-finish.test"),
+            0,
+            "finished must clear the mark even after lock poisoning"
         );
     }
 }
