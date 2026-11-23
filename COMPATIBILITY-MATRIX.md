@@ -51,7 +51,7 @@ Roadmap stale claim "7 sitemap tests ignored" is **incorrect**. Reality: **1 ign
 
 ## Versioning note (StateStore)
 
-`ExportState { version:1 }` (see `crates/webfang_core/src/domain/entities/export.rs`). Old JSON without `version` loads via `#[serde(default="default_version")] → 1` (no crash); stale `version:0` is discarded with `warn!` + fresh state, and the pre-migration file is preserved as a `.bak` sibling (#1587). Checkpoints viejos se invalidan en v-next por `version` mismatch — recrea estado (re-scrape) sin crash; migración no requerida en Sprint 0. `CrawlCheckpoint` (JSON+CRC32, `checkpoint_interval=100`) is engine-internal, not wired to `--resume`.
+`ExportState { version:1 }` (see `crates/webfang_core/src/domain/entities/export.rs`). Old JSON without `version` loads via `#[serde(default="default_version")] → 1` (no crash); stale `version:0` is discarded with `warn!` + fresh state, and the pre-migration file is preserved as a `.bak` sibling (#1587). Checkpoints viejos se invalidan en v-next por `version` mismatch — recrea estado (re-scrape) sin crash; migración no requerida en Sprint 0. `CrawlCheckpoint` (JSON+CRC32, `checkpoint_interval=100`) is engine-internal scheduling state: `run()` restores it through `restore_checkpoint_state` on `--resume`, while per-URL export progress is tracked separately by `StateStore` / `ExportState` (JSON).
 
 ## Persisted version markers (#1617)
 
