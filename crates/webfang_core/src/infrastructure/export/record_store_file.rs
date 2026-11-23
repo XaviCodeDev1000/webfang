@@ -239,11 +239,10 @@ impl RecordStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod lock_permission_tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn preexisting_world_readable_sentinel_is_tightened_on_acquire() {
         use std::os::unix::fs::PermissionsExt as _;
