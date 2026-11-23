@@ -18,7 +18,7 @@ S4 — Close with evidence: `cargo check`, `ci_fast_gate.sh` GREEN with the cove
 ## Tasks
 
 - T1 · S1 — route inline — residual stale strings, line counts preserved — status done — commit pending
-- T2 · S2-S3 — route inline — runner + manifest + harnesses + gate wiring — status pending — commit pending
+- T2 · S2-S3 — route inline — runner + manifest + harnesses + gate wiring — status done — commit pending
 - T3 · S4 — route inline — verification, independent verifier, mirror, ODD close — status pending — commit pending
 
 ## Log
@@ -34,3 +34,5 @@ L4 — Parent spot check confirmed the map's anomaly: `embedding_port.rs` trait 
 L5 — Worktree bootstrap verified: `/home/xavi/Projects/Rust/webfang-worktrees/docs-claims-manifest-runner`, branch `docs/claims-manifest-runner`, target `$HOME/.cache/cargo-target/docs-claims-manifest-runner`, both indexes at b80247e1, identity gate OK, name proxy OK.
 
 L6 — T1 evidence: RED observed as the three strings present on main; GREEN after replacing the `EmbeddingPort` trait doc with the remote-endpoint contract and the `InfraError::Middleware` attribution with the HTTP stack. `git diff --numstat` is 3/3 and 1/1 — line counts preserved, so the intra-crate-lint golden test stays green (`2 passed`, `cargo test --manifest-path tools/intra-crate-lint/Cargo.toml --locked --test real_tree`). `cargo check -q` exit 0.
+
+L7 — T2 evidence: `scripts/claims-manifest.tsv` has 10 active path-scoped rows (seven already-fixed NOTICE/README/COMPATIBILITY rows plus the three residuals fixed in T1; the wreq-util self-flag is excluded by scope). The two `error.rs` strings remain commented as pending activation until PR #3001 merges — they were still present on this branch's base. Reused the retired-claim loop of `check_docs_claims.sh` and the fail-closed reporting of `check_data_flow_doc.sh`; added out-of-scope and empty-manifest guards. Harness RED repro: inject `selectors 0.35.0` into a mktemp fixture → exit 1; restore → exit 0. `bash -n` clean; shellcheck with the gate exclusion list exit 0; semantics harness 8/8 and wiring harness 9/9; `ci_fast_gate.sh` GREEN (PASS=49 FAIL=0 SKIP=3). `.github/`, `deny.toml`, `docs/` and `CHANGELOG.md` untouched.

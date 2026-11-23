@@ -423,6 +423,11 @@ EOF
   # reintroduce a false claim without touching a line of code.
   run_guard "docs claims gate (README truth)" scripts/check_docs_claims.sh \
     bash scripts/check_docs_claims.sh
+  # Shared claim manifest (#2995): one registered list of already-debunked
+  # strings across the surviving claim surfaces, instead of a denylist in
+  # every per-document guard. Blocking, like the guards beside it.
+  run_guard "shared claim manifest gate (#2995)" scripts/check_claim_manifest.sh \
+    bash scripts/check_claim_manifest.sh
   # AGENTS.md size/structure gate (#2839): this lane is where a markdown-only
   # edit lands — exactly the edit that regrew the router 740 -> 862 lines.
   # Blocking, like the required CI step it mirrors: the budget (agents_doc in
@@ -694,11 +699,13 @@ EOF
   # exactly what a `scripts/**`-only change can break. It asserts that
   # `repo-guards` stays unfiltered and unconditional, that `gate` waits on it in
   # both scopes, and that both steps below are still wired into this block.
-  if grep -Eq '^(scripts/check_docs_version_pins\.sh|scripts/test_docs_version_pins\.sh|scripts/test_docs_version_pins_wiring\.sh|scripts/check_docs_claims\.sh|scripts/test_docs_claims\.sh|scripts/test_docs_claims_wiring\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
+  if grep -Eq '^(scripts/check_docs_version_pins\.sh|scripts/test_docs_version_pins\.sh|scripts/test_docs_version_pins_wiring\.sh|scripts/check_docs_claims\.sh|scripts/test_docs_claims\.sh|scripts/test_docs_claims_wiring\.sh|scripts/check_claim_manifest\.sh|scripts/test_claim_manifest\.sh|scripts/test_claim_manifest_wiring\.sh)$' "$UNION_TMP" 2>/dev/null || [[ "$CI_HARNESS_MODE" == "always" ]]; then
     run_step "docs version pins semantics (offline)" bash scripts/test_docs_version_pins.sh
     run_step "docs version pins wiring (offline)" bash scripts/test_docs_version_pins_wiring.sh
     run_step "docs claims semantics (offline)" bash scripts/test_docs_claims.sh
     run_step "docs claims wiring (offline)" bash scripts/test_docs_claims_wiring.sh
+    run_step "claim manifest semantics (offline)" bash scripts/test_claim_manifest.sh
+    run_step "claim manifest wiring (offline)" bash scripts/test_claim_manifest_wiring.sh
   else
     skip_step "docs claims gates" "no docs claims or version-pins files changed"
   fi
@@ -1113,6 +1120,10 @@ lane_fmt_and_guards() {
   # that only saw docs would miss it. Same guard as lane_docs, same block.
   run_guard "docs claims gate (README truth)" scripts/check_docs_claims.sh \
     bash scripts/check_docs_claims.sh
+  # Shared claim manifest (#2995): the code side of the same drift. A doc
+  # string can be reintroduced by a code edit that never reaches lane_docs.
+  run_guard "shared claim manifest gate (#2995)" scripts/check_claim_manifest.sh \
+    bash scripts/check_claim_manifest.sh
   # AGENTS.md size/structure gate (#2839): the baseline side of the same
   # drift — a quality-baselines.json edit (or any code-lane change) never
   # reaches lane_docs, and the budget lives in that JSON. Same guard as
