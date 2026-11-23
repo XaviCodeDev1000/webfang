@@ -135,6 +135,48 @@ rest of the database keeps working is SQLite's own behaviour — *not covered
 by a test*. The recovery is the same as above: the file itself is not
 damaged.
 
+### A damaged write-ahead log
+
+The `-wal` and `-shm` sidecars are SQLite's own artifacts. These steps are
+SQLite's recovery practice, run **by you with `sqlite3`** — webfang itself
+never runs `PRAGMA wal_checkpoint` and never deletes a sidecar by name. The
+one behaviour webfang does pin is that every pooled connection applies the
+WAL pragmas (`test_wal_pragmas_applied_to_every_pooled_connection`) and that
+the schema setup is idempotent, so a reopened database re-applies them
+(`test_setup_schema_is_idempotent`).
+
+Use this when a run fails on pool setup with `database disk image is
+malformed` or a persistence error, and steps 3 and 4 above did not explain it.
+
+1. **Stop every webfang process.** Same precondition as the procedure above:
+   the file is only safe to touch with no run holding it open.
+2. **Back the three files up together** — the database and both sidecars.
+3. **Checkpoint what is recoverable:**
+
+   ```bash
+   sqlite3 ~/.webfang/crawl.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+   ```
+
+4. **If the checkpoint itself fails, drop the sidecars.** Losing `-wal`
+   discards only transactions that were never checkpointed into the database
+   file; the committed database is untouched.
+
+   ```bash
+   rm ~/.webfang/crawl.db-wal ~/.webfang/crawl.db-shm
+   ```
+
+   Reopen by running webfang again: it re-applies the pragmas and re-runs the
+   idempotent schema setup.
+5. **If the database is still unreadable,** restore it from your backup and
+   re-ingest. The vector index is not a commit point: it is rebuilt from the
+   ingestion tables, so a restored database only costs the ingestion you
+   re-run.
+
+A `.lock` file left next to a state file after a `SIGKILL` is **not** damage.
+It is the expected state: the `flock` died with the file descriptor and the
+empty sentinel is re-acquired automatically on the next open. Never delete it
+as a fix.
+
 ### Retention
 
 | Behaviour | Pinned by |
