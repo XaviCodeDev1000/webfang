@@ -22,11 +22,22 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use tempfile::TempDir;
 
-use common::cli_harness::cmd;
+use common::cli_harness::{cmd, redact_nondeterministic};
+use insta::assert_snapshot;
 
 /// One embedding-capable provider: the identity a run would dial.
 const KNOWN_PROVIDER_TOML: &str = "[[providers]]\nid = \"known\"\ndisplay_name = \"Known\"\n\
      kind = \"open_ai_compatible\"\nbase_url = \"https://api.example.test/v1\"\n\
+     auth = { source = \"none\" }\ncapabilities = [\"embedding\"]\n\
+     model = \"nomic-embed-text\"\n";
+
+/// A provider whose `base_url` embeds a credential in the URL authority.
+/// `alice:s3cr3t-do-not-print` is the leak marker; the endpoint after the `@`
+/// must stay identifiable (S1 / issue #3006).
+const USERINFO_PROVIDER_TOML: &str =
+    "[[providers]]\nid = \"userinfo\"\ndisplay_name = \"Userinfo\"\n\
+     kind = \"open_ai_compatible\"\n\
+     base_url = \"https://alice:s3cr3t-do-not-print@api.example.test:8443/v1?key=public\"\n\
      auth = { source = \"none\" }\ncapabilities = [\"embedding\"]\n\
      model = \"nomic-embed-text\"\n";
 
@@ -237,5 +248,47 @@ fn show_and_doctor_agree_on_the_effective_provider() {
     assert!(
         doctor_stdout.contains("id: known"),
         "doctor must name the same provider, got:\n{doctor_stdout}"
+    );
+}
+
+// ============================================================================
+// credential redaction (S1 / issue #3006)
+// ============================================================================
+
+/// The shared provider block a command renders through `print_provider_block`.
+///
+/// Both `show` and `doctor` emit it; slicing it out keeps the snapshot focused
+/// on the diagnostic surface under test and away from `doctor`'s reachability
+/// prose, which is a different code path.
+fn provider_block_of(stdout: &str) -> String {
+    let body = stdout
+        .split_once("Provider configurado:")
+        .map(|(_, rest)| rest)
+        .expect("provider block must be rendered");
+    let mut lines = vec!["Provider configurado:".to_string()];
+    lines.extend(
+        body.lines()
+            .skip_while(|line| line.trim().is_empty())
+            .take_while(|line| line.starts_with("  "))
+            .map(str::to_string),
+    );
+    lines.join("\n")
+}
+
+/// A credential embedded in a provider `base_url` must never be rendered by
+/// the `doctor` / `show` diagnostics, while the endpoint (scheme, host, port,
+/// path, query) stays identifiable. This is a diagnostic-render fix only:
+/// config load and request egress keep the configured URL unchanged.
+#[test]
+fn show_and_doctor_redact_provider_base_url_userinfo() {
+    let (dir, config) = seeded_config(USERINFO_PROVIDER_TOML);
+
+    let show = provider_block_of(&stdout_of(&run_with_config(&["show"], &config)));
+    let doctor = provider_block_of(&stdout_of(&run_with_config(&["doctor"], &config)));
+    let rendered = format!("--- show ---\n{show}\n--- doctor ---\n{doctor}\n");
+
+    assert_snapshot!(
+        "provider_base_url_userinfo_is_redacted",
+        redact_nondeterministic(dir.path(), &rendered)
     );
 }
