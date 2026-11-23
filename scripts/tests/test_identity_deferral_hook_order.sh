@@ -41,7 +41,7 @@ rm "$R/.git/REVERT_HEAD"
 git -C "$R" symbolic-ref HEAD refs/heads/main
 mkdir -p "$TMP/hooks" "$TMP/lib"
 cp "$ROOT/scripts/githooks/pre-commit" "$ROOT/scripts/githooks/identity-gate.sh" "$TMP/hooks/"
-cp "$ROOT/scripts/lib/worktree_paths.sh" "$TMP/lib/"
+cp "$ROOT/scripts/lib/worktree_paths.sh" "$ROOT/scripts/lib/identity_attestation.sh" "$TMP/lib/"
 printf '#!/usr/bin/env bash\n: > "%s/reached"\n' "$TMP" >"$TMP/hooks/review-gate.sh"
 chmod +x "$TMP/hooks/"*
 
