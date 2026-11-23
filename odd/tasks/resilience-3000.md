@@ -20,11 +20,11 @@ Objective: disposition the 5 advisory resilience findings of issue #3000; branch
 
 ## Tasks
 
-- `T1` — S1: bound `created_at` to the header scan window with a typed error + test — inline — pending
-- `T2` — S3: fail fast on a vector file without a closing bracket + test — inline — pending
-- `T3` — S4: `0o600` lock sentinel on Unix + test — inline — pending
-- `T4` — S5: monotonic nonce in v1 backup names + test — inline — pending
-- `T5` — S2 + disposition record: ADR 0023 + `docs/adr/README.md` index row — inline — pending
+- `T1` — S1: adaptive header scan up to a 64 KiB cap + test — inline — completed in `189426c4`
+- `T2` — S3: fail fast on a vector file without a closing bracket + test — inline — completed in `189426c4`
+- `T3` — S4: `0o600` lock sentinel on Unix + test — inline — completed in `3f6eae69`
+- `T4` — S5: monotonic nonce in v1 backup names + test — inline — completed in `3f6eae69`
+- `T5` — S2 + disposition record: ADR 0023 + `docs/adr/README.md` index row — inline — completed in this work unit
 - `T6` — full verification: pre-commit gate, `cargo nextest run` (affected targets), `ci_fast_gate.sh`, one independent verifier (Risk: S4 item 2) — inline — pending
 
 Route evidence: each task is one small, understood unit with its code and test; no parallel units (shared files, disjointness not available), no context backstop. Parent writes inline. Risk line for the feature: item 2 (S4 touches file permissions); S1/S3/S4/S5 have regression tests, S2 is documentation-only. Verification timing: one independent verifier at feature end, after the focused checks.
@@ -36,3 +36,7 @@ Route evidence: each task is one small, understood unit with its code and test; 
 **L2 — 2026-11-23, investigation.** Issue #3000 tracked five non-blocking R4 findings from PR #2998 review lineage `review-a5a258b012f152bb`. Read-only mapping delegated to `gentle-ai-explore` (handoff saved as Engram obs #3301). Parent spot-checked `VectorExporter::writer` / `read_append_state` / `close_json` and confirmed S3 is silent corruption, stronger than the issue text. Official Rust std docs consulted via Context7: `OpenOptionsExt::mode` (default 0o666 & umask) and `File::sync_all` / `flush` (no-op on Unix and Windows) — basis for S4 and S2 respectively.
 
 **L3 — 2026-11-23, setup.** Mission worktree `/home/xavi/Projects/Rust/webfang-worktrees/chore-resilience-3000`, branch `chore/resilience-3000` off `origin/main` at `491e77b2`. Bootstrap: 5-line `.envrc` with `CARGO_TARGET_DIR=.../chore-resilience-3000`, `direnv allow`, `.env` copied, `.worktree-identity` written; CodeGraph and CodeDB indexed on the worktree. Isolation verified: activation exports the worktree target, CodeGraph project is the worktree, CodeDB head equals `git rev-parse HEAD`, `identity-gate.sh` exit 0.
+
+**L4 — 2026-11-23, T1/T2 evidence.** RED observed first: `oversized_created_at_header_is_scanned_past_the_initial_window` failed because the marker fell outside the 512-byte prefix; `append_refuses_to_corrupt_a_file_with_a_torn_document` failed with `Ok(())` — empirical proof of the silent corruption. GREEN after the fix: `cargo nextest run -p webfang_core --lib` → 3123 passed, 6 skipped. T1 implemented as an adaptive doubling scan (512 B → 64 KiB cap) instead of a hard length rejection, so a genuinely bigger header is handled, which is what S1 asks. T2 implemented as fail-closed with a typed `ExporterError::WriteError`, a structured warning and byte-identical preservation. Work unit committed as `189426c4`.
+
+**L5 — 2026-11-23, T3/T4/T5.** RED observed for both remaining fixes: the seeded 0o644 sentinel stayed world-readable, and 20 migrations produced fewer than 20 backup files. GREEN after the fixes: `cargo nextest run -p webfang_core --lib` → 3125 passed, 6 skipped. T3/T4 committed as `3f6eae69`. T5 records all five dispositions in `docs/adr/0023-resilience-findings-disposition.md`, with the index row and updated file count in `docs/adr/README.md` in the same commit. ADR-0023 is the explicit acceptance of the no-fsync constraint and documents why torn vector appends fail closed instead of auto-recovering.

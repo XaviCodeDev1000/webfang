@@ -37,8 +37,9 @@ cannot be cited cannot be audited.
 | `ADR-0020` | [0020-shared-llm-transport-primitives.md](0020-shared-llm-transport-primitives.md) | Shared transport primitives with per-port policies for OpenAI-compatible clients | Accepted |
 | `ADR-0021` | [0021-explicit-ai-egress-proxy.md](0021-explicit-ai-egress-proxy.md) | Explicit per-provider proxy for AI egress with SSRF policies separated by type and no environment reading | Proposed — draft (decision of `#2551`) |
 | `ADR-0022` | [0022-boringssl-tls-stack.md](0022-boringssl-tls-stack.md) | BoringSSL via wreq stays the TLS stack; CMake is an upstream build requirement | Accepted |
+| `ADR-0023` | [0023-resilience-findings-disposition.md](0023-resilience-findings-disposition.md) | Five R4 advisory findings from #3000: four fixed, no-fsync accepted as a constraint | Accepted |
 
-**Total: 20 files, 19 decisions + 1 runbook.**
+**Total: 21 files, 20 decisions + 1 runbook.**
 
 ## Numbering gaps
 
