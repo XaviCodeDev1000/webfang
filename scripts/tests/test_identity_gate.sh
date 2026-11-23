@@ -181,6 +181,25 @@ expect_code 1 run_gate "$REPO" CARGO_TARGET_DIR="$MAIN_TARGET"
 git -C "$REPO" symbolic-ref HEAD refs/heads/main
 rm -f "$REPO_ATT"
 
+# A spent record left behind by a failed delete cannot authorize another commit.
+valid_attestation
+printf 'spent=1\n' >>"$ATT"
+expect_code 1 run_gate "$MISMATCH_WT" CARGO_TARGET_DIR="$MISMATCH_TARGET"
+
+# A worktree reached through a symlink binds through canonicalised paths on both sides.
+SYMLINK_REAL="$TMP/symlink-real"
+SYMLINK_WT="$TMP/link-tree"
+mkdir -p "$SYMLINK_REAL"
+ln -s "$SYMLINK_REAL" "$SYMLINK_WT"
+git -C "$REPO" worktree add -q "$SYMLINK_WT" -b feat/symlink
+SYMLINK_TARGET="$HOME/.cache/cargo-target/link-tree"
+mkdir -p "$SYMLINK_TARGET"
+printf 'export CARGO_TARGET_DIR=%s\n' "$SYMLINK_TARGET" >"$SYMLINK_REAL/.envrc"
+(cd "$SYMLINK_WT" && "$HELPER" >/dev/null)
+SYM_ATT="$(git -C "$SYMLINK_WT" rev-parse --absolute-git-dir)/webfang-identity-attestation"
+write_attestation "$SYM_ATT" feat/symlink "$(git -C "$SYMLINK_WT" rev-parse HEAD)" "$((NOW + 900))"
+expect_code 0 run_gate "$SYMLINK_WT" CARGO_TARGET_DIR="$SYMLINK_TARGET"
+
 # post-commit consumes only a matching tree; a stale tree leaves it alive.
 valid_attestation
 expect_code 0 run_gate "$MISMATCH_WT" CARGO_TARGET_DIR="$MISMATCH_TARGET"

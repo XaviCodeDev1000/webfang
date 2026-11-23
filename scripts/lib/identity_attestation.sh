@@ -39,12 +39,15 @@ ia_set_field() {
 
 ia_validate() {
     local file="$1" branch="$2" worktree_canon="$3"
-    local version recorded anchored expires evidence now sha
+    local version recorded anchored expires evidence now sha spent wt_line wt_path wt_canon
 
     [[ -f "$file" ]] || { echo "identity-attestation: attestation file is missing" >&2; return 1; }
 
     version="$(ia_field "$file" version)" || return 1
     [[ "$version" == "1" ]] || { echo "identity-attestation: unsupported version '$version'" >&2; return 1; }
+
+    spent="$(ia_field "$file" spent 2>/dev/null || true)"
+    [[ "$spent" != "1" ]] || { echo "identity-attestation: attestation was already spent" >&2; return 1; }
 
     recorded="$(ia_field "$file" branch)" || return 1
     [[ "$recorded" == "$branch" ]] || {
@@ -75,15 +78,30 @@ ia_validate() {
     fi
 
     # Condition 2: path -> branch binding, from git's own worktree registry.
-    if ! git worktree list --porcelain | awk -v p="$worktree_canon" -v b="refs/heads/$branch" '
-        $0 == "worktree " p { here=1; next }
-        here && $0 == "branch " b { ok=1; exit }
-        here && /^worktree / { exit }
-        END { exit(ok ? 0 : 1) }
-    '; then
+    # git reports the registered path, which can be a symlink to the tree we are
+    # standing in; canonicalise BOTH sides before comparing.
+    wt_path=""
+    local matched=0
+    while IFS= read -r wt_line; do
+        case "$wt_line" in
+        worktree\ *)
+            wt_path="${wt_line#worktree }"
+            ;;
+        branch\ *)
+            if [[ "${wt_line#branch }" == "refs/heads/$branch" ]]; then
+                wt_canon="$(realpath -m -- "$wt_path" 2>/dev/null)" || continue
+                if [[ "$wt_canon" == "$worktree_canon" ]]; then
+                    matched=1
+                    break
+                fi
+            fi
+            ;;
+        esac
+    done < <(git worktree list --porcelain 2>/dev/null) || return 1
+    (( matched == 1 )) || {
         echo "identity-attestation: git worktree list does not bind this path to '$branch'" >&2
         return 1
-    fi
+    }
 
     return 0
 }

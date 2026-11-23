@@ -39,8 +39,15 @@ BRANCH="$(ia_field "$PATH_FILE" branch 2>/dev/null || true)"
 COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
 GIT_DIR="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
 
+# Mark spent BEFORE deleting: if the delete fails, the gate refuses the record
+# on the next commit instead of silently reusing it for the same tree.
+if ! ia_set_field "$PATH_FILE" spent 1; then
+    log "cannot mark attestation spent; it stays bound to $BOUND and its expiry"
+    exit 0
+fi
+
 if ! rm -f "$PATH_FILE"; then
-    log "consumption failed for $PATH_FILE; attestation remains bound to $BOUND and its expiry"
+    log "consumption failed for $PATH_FILE; attestation was marked spent and stays bound to $BOUND and its expiry"
     exit 0
 fi
 
