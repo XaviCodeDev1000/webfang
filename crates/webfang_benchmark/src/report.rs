@@ -123,6 +123,11 @@ fn write_methodology(out: &mut String) -> Result<()> {
         "- Wall-clock quantities are volatile by nature and excluded from byte-compared output."
     )
     .map_err(|e| crate::error::BenchmarkError::Render(e.to_string()))?;
+    writeln!(
+        out,
+        "- RAM bytes are a declared per-downloader `Downloader::memory_cost()` cost constant, not a measured RSS value."
+    )
+    .map_err(|e| crate::error::BenchmarkError::Render(e.to_string()))?;
     writeln!(out).map_err(|e| crate::error::BenchmarkError::Render(e.to_string()))?;
     Ok(())
 }
@@ -180,7 +185,7 @@ fn write_deterministic_table(out: &mut String, metrics: &[StrategyMetrics]) -> R
             "extraction",
             "internal",
             "panic",
-            "RAM bytes",
+            "Declared RAM bytes (estimate)",
         ],
     )?;
     for m in metrics {

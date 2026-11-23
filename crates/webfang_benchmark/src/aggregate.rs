@@ -301,7 +301,9 @@ pub struct StrategyMetrics {
     pub wall_clock_secs: f64,
     /// Per-bucket error breakdown lifted from the engine summary.
     pub error_buckets: ErrorBuckets,
-    /// `Downloader::memory_cost()` captured by the runner.
+    /// Declared per-downloader memory cost from `Downloader::memory_cost()`,
+    /// captured by the runner. This is a static estimate, not measured RSS.
+    /// The field name stays stable because the harness cost model consumes it.
     pub ram_cost_bytes: usize,
 }
 
@@ -317,7 +319,7 @@ pub struct StrategyMetrics {
 pub fn compute(
     records: &[TraceRecord],
     strategy: JsStrategy,
-    ram_cost_bytes: usize,
+    declared_ram_cost_bytes: usize,
 ) -> Result<StrategyMetrics> {
     let summary = summary_of(records, "<records>")?;
 
@@ -361,7 +363,7 @@ pub fn compute(
             internal: summary.errors_internal,
             panic: summary.errors_panic,
         },
-        ram_cost_bytes,
+        ram_cost_bytes: declared_ram_cost_bytes,
     })
 }
 
