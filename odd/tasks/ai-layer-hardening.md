@@ -146,3 +146,8 @@ unit moves a seam of the container and gets its own.
   single budget unit for T2, and whether the seal on `SemanticCleaner` may eventually be removed instead of
   only re-documented (this plan recommends documentation only). Native review per work-unit commit depends
   on the user-owned RDD switch being on for this clone.
+- L6: Bootstrap completed by the human (`.envrc` with the five exact lines, `$TREE` substituted and `$HOME`
+  literal; `direnv allow`; `.env` copied). Isolation verified with `scripts/check_target_isolation.sh`:
+  `reason=own-registered-target`, declared by this tree's own `.envrc`. Commit 8f646367..36219d0a lands this
+  mission document and unblocks every later work unit; the identity gate and the review gate both pass. L3
+  is superseded: the half it reported as blocked is now done.
