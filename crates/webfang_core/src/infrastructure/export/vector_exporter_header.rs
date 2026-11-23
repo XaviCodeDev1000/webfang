@@ -159,7 +159,8 @@ mod tests {
             r#"{{"format_version": "1.0", "model_name": null, "dimensions": null, "total_documents": 0, "created_at": "{created_at}", "documents": ["#
         );
         let mut file = std::fs::File::create(&path).expect("create header fixture");
-        file.write_all(header.as_bytes()).expect("write header fixture");
+        file.write_all(header.as_bytes())
+            .expect("write header fixture");
         drop(file);
 
         let mut file = std::fs::File::open(&path).expect("open header fixture");

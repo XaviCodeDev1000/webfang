@@ -100,10 +100,12 @@ impl StoreLock {
             use std::os::unix::fs::OpenOptionsExt as _;
             options.mode(0o600);
         }
-        let mut lock_file = options.open(&lock_path).map_err(|source| RecordStoreError::Io {
-            path: lock_path.clone(),
-            source,
-        })?;
+        let mut lock_file = options
+            .open(&lock_path)
+            .map_err(|source| RecordStoreError::Io {
+                path: lock_path.clone(),
+                source,
+            })?;
         #[cfg(unix)]
         {
             // The sentinel is permanent: mode() only applies at creation, so
