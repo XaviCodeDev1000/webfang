@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.2.3] - 2026-11-23
+
+
+### 🏗️ Architecture Improvements
+
+- Split schema_bridge, validation and state by seams (Ola 3 B1) ([#2975](https://github.com/XaviCodeDev1000/webfang/pull/2975))
+- Split test_utils harness and cli/error tests by seams (Ola 3 B2) ([#2976](https://github.com/XaviCodeDev1000/webfang/pull/2976))
+- Split scrape_flow and crawler args by seams (Ola 3 B3) ([#2977](https://github.com/XaviCodeDev1000/webfang/pull/2977))
+- Split options_spec and vault_search by seams (Ola 3 B9) ([#2981](https://github.com/XaviCodeDev1000/webfang/pull/2981))
+- Split batch_flow and the content entity by seams (Ola 3 B4) ([#2982](https://github.com/XaviCodeDev1000/webfang/pull/2982))
+- Split discovery and sitemap_discovery by seams (Ola 3 B5) ([#2984](https://github.com/XaviCodeDev1000/webfang/pull/2984))
+- Split ssrf and sqlite storage by seams (Ola 3 B7) ([#2990](https://github.com/XaviCodeDev1000/webfang/pull/2990))
+- Split session and bounded_sink by seams (Ola 3 B6) ([#2991](https://github.com/XaviCodeDev1000/webfang/pull/2991))
+- Split client inline tests into themed sibling files (Ola 3 B8) ([#2994](https://github.com/XaviCodeDev1000/webfang/pull/2994))
+- Split session_pool and file_trace_layer by seams (Ola 3 B10b) ([#2983](https://github.com/XaviCodeDev1000/webfang/pull/2983))
+- Split record_store and vector_exporter by seams (Ola 3 B10a) ([#2998](https://github.com/XaviCodeDev1000/webfang/pull/2998))
+- Complete Ola 3 B8 splits for client, crawl repository and stream ([#2999](https://github.com/XaviCodeDev1000/webfang/pull/2999))
+
+### 📖 Documentation
+
+- Fix stale CrawlCheckpoint and EmbeddingPort claims ([#2997](https://github.com/XaviCodeDev1000/webfang/pull/2997))
+- Remove stale reqwest and ONNX references from error docs ([#3001](https://github.com/XaviCodeDev1000/webfang/pull/3001))
+- Add shared claim-manifest guard for doc truth ([#3004](https://github.com/XaviCodeDev1000/webfang/pull/3004))
+
+### 📦 Dependencies
+
+- Update Cargo.lock dependencies
+
+### 🔧 Fixed
+
+- Harden credential redaction and audit findings ([#3015](https://github.com/XaviCodeDev1000/webfang/pull/3015))
+
+### 🔧 Other
+
+- Disposition five R4 resilience findings from #3000 ([#3016](https://github.com/XaviCodeDev1000/webfang/pull/3016))
 ## [9.2.2] - 2026-11-22
 
 
