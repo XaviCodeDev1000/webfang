@@ -226,7 +226,7 @@ allow = [
     "OpenSSL",
     "Zlib",
     "CDLA-Permissive-2.0",
-    "LGPL-3.0",  # wreq-util (TLS emulation)
+    "LGPL-3.0",  # permitted for transitive dependencies; none in the current lockfiles is solely LGPL-3.0
 ]
 
 [bans]

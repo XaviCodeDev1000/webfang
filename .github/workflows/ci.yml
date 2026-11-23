@@ -752,6 +752,16 @@ jobs:
       # so the edges are pinned by their own harness.
       - name: Docs claims wiring harness
         run: bash scripts/test_docs_claims_wiring.sh
+      # Shared claim-manifest guard (#2995): path-scoped rows in
+      # scripts/claims-manifest.tsv cover NOTICE, README, the compatibility
+      # matrix and Rust doc-comments.
+      # guard-required
+      - name: Claim manifest gate (#2995)
+        run: bash scripts/check_claim_manifest.sh
+      - name: Claim manifest semantics harness
+        run: bash scripts/test_claim_manifest.sh
+      - name: Claim manifest wiring harness
+        run: bash scripts/test_claim_manifest_wiring.sh
       # AGENTS.md size/structure gate (#2839): the always-loaded router regrew
       # 740 -> 862 lines after the 2026-10-21 routerization because agents
       # append runbook prose on every commit; #2834 pruned it back under the
