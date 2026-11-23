@@ -43,7 +43,7 @@ pub enum ScraperError {
     #[error("error de red: {0}")]
     Network(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// Middleware error (from reqwest-middleware, e.g., retry failures)
+    /// Middleware error (e.g., retry failures)
     #[error("error de middleware: {0}")]
     Middleware(String),
 
@@ -241,9 +241,9 @@ pub enum SemanticError {
     ///
     /// This occurs when a single chunk of content is longer than the
     /// configured `--max-chars` budget. The unit is CHARACTERS, not tokens
-    /// (ADR-0004): the cleaner no longer tokenizes, and the same budget has to
-    /// mean the same thing for a local ONNX model and a remote embedding
-    /// endpoint.
+    /// (ADR-0004): the cleaner no longer tokenizes, and the same budget has
+    /// to mean the same thing for every remote embedding adapter — the unit
+    /// is characters, never tokens.
     ///
     /// # Fields
     ///
