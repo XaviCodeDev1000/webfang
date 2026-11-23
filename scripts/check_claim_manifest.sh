@@ -35,12 +35,16 @@ while IFS= read -r line || [[ -n $line ]]; do
   rationale="${cols[3]}"
 
   ROWS=$((ROWS + 1))
+  # A cosmetic ./ prefix must not bypass the scope and traversal checks.
+  while [[ $path == ./* ]]; do
+    path="${path#./}"
+  done
   case "$path" in
     .github/*|deny.toml|docs/*|CHANGELOG.md)
       fail "claim manifest row targets out-of-scope path '$path' (issue #2995): $rationale"
       continue
       ;;
-    ../*|*/../*|/*)
+    ../*|*/../*|..|*/..|/*)
       fail "claim manifest row escapes the base directory: '$path'"
       continue
       ;;

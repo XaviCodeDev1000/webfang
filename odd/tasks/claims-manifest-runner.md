@@ -19,7 +19,7 @@ S4 — Close with evidence: `cargo check`, `ci_fast_gate.sh` GREEN with the cove
 
 - T1 · S1 — route inline — residual stale strings, line counts preserved — status done — commit pending
 - T2 · S2-S3 — route inline — runner + manifest + harnesses + gate wiring — status done — commit pending
-- T3 · S4 — route inline — verification, independent verifier, mirror, ODD close — status pending — commit pending
+- T3 · S4 — route inline — verification, independent verifier, mirror, ODD close — status done — commit pending
 
 ## Log
 
@@ -36,3 +36,9 @@ L5 — Worktree bootstrap verified: `/home/xavi/Projects/Rust/webfang-worktrees/
 L6 — T1 evidence: RED observed as the three strings present on main; GREEN after replacing the `EmbeddingPort` trait doc with the remote-endpoint contract and the `InfraError::Middleware` attribution with the HTTP stack. `git diff --numstat` is 3/3 and 1/1 — line counts preserved, so the intra-crate-lint golden test stays green (`2 passed`, `cargo test --manifest-path tools/intra-crate-lint/Cargo.toml --locked --test real_tree`). `cargo check -q` exit 0.
 
 L7 — T2 evidence: `scripts/claims-manifest.tsv` has 10 active path-scoped rows (seven already-fixed NOTICE/README/COMPATIBILITY rows plus the three residuals fixed in T1; the wreq-util self-flag is excluded by scope). The two `error.rs` strings remain commented as pending activation until PR #3001 merges — they were still present on this branch's base. Reused the retired-claim loop of `check_docs_claims.sh` and the fail-closed reporting of `check_data_flow_doc.sh`; added out-of-scope and empty-manifest guards. Harness RED repro: inject `selectors 0.35.0` into a mktemp fixture → exit 1; restore → exit 0. `bash -n` clean; shellcheck with the gate exclusion list exit 0; semantics harness 8/8 and wiring harness 9/9; `ci_fast_gate.sh` GREEN (PASS=49 FAIL=0 SKIP=3). `.github/`, `deny.toml`, `docs/` and `CHANGELOG.md` untouched.
+
+L8 — Native RDD review (global switch on, risk escalated as item 5): assess `risk=high`, `review_due=true`; consent granted by the owner for this candidate; lenses risk/readability/reliability; `review-d59a78986e9ffd6d` approved and acknowledged (`gentle-ai.review-acknowledged/v1`, authority burned). No blocker. One readability WARNING claimed the commented pending rows point to a nonexistent path — parent check showed BOTH `crates/webfang_core/src/error.rs` and `crates/webfang_core/src/infrastructure/error.rs` exist, so the finding is a false positive and no change was made. Remaining review notes are informational.
+
+L9 — Independent verifier (obs #3307) found one real S2 blocker: a leading `./` bypassed the out-of-scope guard (`./deny.toml`, `./CHANGELOG.md`, `./.github/workflows/ci.yml` all exited 0). One correction batch: strip repeated leading `./` before the scope/traversal checks, harden the traversal case with trailing `..`, and add the seven verifier boundary probes to `scripts/test_claim_manifest.sh`. Recheck limited to the blocker: semantics 15/15, wiring 9/9, `bash -n` and shellcheck clean, runner 10 rows verified, `ci_fast_gate.sh` GREEN (PASS=49 FAIL=0 SKIP=3). Scratch `/tmp/webfang-verify-wjCXEN` removed by parent after the verifier returned. S4 gate was unverified in the verifier's no-`.git` scratch copy; the parent's real-worktree run above is the evidence.
+
+L10 — Verdicts: S1 MET, S2 MET after the single correction, S3 MET, S4 MET. Delivery still needs a fresh owner decision for push/PR; no merge was performed.
