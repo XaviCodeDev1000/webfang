@@ -10,9 +10,9 @@ Branch: docs/doc-accuracy-slice2 · issue: #2995 (umbrella) · delivery: one wor
 
 ## Tasks
 
-- T1 · S1 — route inline — COMPATIBILITY-MATRIX correction — status pending — commit pending
-- T2 · S2 — route inline — EmbeddingPort doc-comments — status pending — commit pending
-- T3 · S1-S4 — route inline — verification, mirror, ODD close — status pending — commit pending
+- T1 · S1 — route inline — COMPATIBILITY-MATRIX correction — status done — commit ef269df7
+- T2 · S2 — route inline — EmbeddingPort doc-comments — status done — commit 136ae766
+- T3 · S1-S4 — route inline — verification, mirror, ODD close — status done — commit pending
 
 Route declaration: all inline. Risk: none — prose and doc-comments only; no behavior, API, dependency or CI change. Rust skill `rust-best-practices` loaded before touching `.rs`.
 
@@ -25,3 +25,11 @@ L2 — Authorized plan (verbatim from the preceding answer): "Cuando se mergee, 
 L3 — Verification before edit: `codedb callers load_checkpoint_state` → `engine/checkpoint.rs::with_checkpoint`; `codedb callers restore_checkpoint_state` → `engine/lifecycle.rs::run`; `StateStore::load_or_default` and `ExportState` confirmed in `infrastructure/export/state_store.rs` / `domain/entities/export.rs`. The COMPATIBILITY-MATRIX sentence contradicts this and the corrected AGENTS.md audit.
 
 L4 — Post-merge cleanup of slice 1 done from main before this worktree: ff-only to f0b524c, worktree/branch/target removed. A foreign untracked file (`odd/tasks/docs-consolidation.md`, another agent's planning doc) was present in main and deliberately left untouched.
+
+L5 — T1 evidence: RED check found 4/4 stale strings (`RED_EXIT=1`). COMPATIBILITY-MATRIX now states the verified split — `CrawlCheckpoint` is engine-internal scheduling state restored by `run()` through `restore_checkpoint_state` on `--resume`; per-URL export progress belongs to `StateStore` / `ExportState` (JSON). Commit ef269df7.
+
+L6 — T2 evidence: three `EmbeddingPort` doc-comments now describe adapter-declared dimension and backend batching, with no model names, numbers or local-inference claims; the intra-doc link `[`embed`](Self::embed)` is preserved. `cargo check` exit 0. Commit 136ae766.
+
+L7 — T3 verification: same 4-string check GREEN (`GREEN_EXIT=0`). RDD assess `risk: medium` (`executable_change` on the `.rs` file), `review_due: false`, `under_budget`. `ci_fast_gate.sh` code lane GREEN (PASS=46 FAIL=0 SKIP=3); because `test-core` was partial in that lane, `cargo nextest run -p webfang_core --lib embedding_port` was run separately: 7 passed / 0 failed / 3126 filtered. RANGE: 3 files + ODD record; doc-comments only, no behavior change.
+
+L8 — New finding for a later slice (not edited here): `crates/webfang_core/src/error.rs` still has a `ScraperError::Middleware` doc attributing the variant to `reqwest-middleware` and a `SemanticError::ChunkTooLarge` doc referring to "a local ONNX model and a remote embedding endpoint". Same ONNX-removal / dependency-root class; tracked in #2995.
