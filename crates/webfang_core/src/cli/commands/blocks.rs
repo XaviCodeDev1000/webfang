@@ -31,11 +31,11 @@ use crate::domain::providers::ProviderConfig;
 /// query stay identifiable.
 fn redacted_base_url(base_url: &url::Url) -> String {
     let mut redacted = base_url.clone();
-    // Both setters only fail for cannot-be-a-base URLs; a provider base URL is
-    // an absolute http(s) URL with a host, so failure is unreachable here. Such
-    // URLs cannot carry userinfo either, so no credential can survive this.
-    let _ = redacted.set_username("");
-    let _ = redacted.set_password(None);
+    // A cannot-be-a-base URL has no authority to strip: credential-looking
+    // text can remain in its path. Never fail open by printing it verbatim.
+    if redacted.set_username("").is_err() || redacted.set_password(None).is_err() {
+        return "<redacted provider url>".to_owned();
+    }
     redacted.to_string()
 }
 
