@@ -12,6 +12,11 @@ check:
 check-fast:
     cargo check
 
+# Registered false-claim regressions from issue #2995.
+check-docs-truth:
+    bash scripts/check_claim_manifest.sh
+    bash scripts/test_claim_manifest.sh
+
 # -- Tests --
 
 # Refresca el índice de CodeDB (el agente lo necesita para saber qué cambió)

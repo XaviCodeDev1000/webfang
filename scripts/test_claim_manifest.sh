@@ -38,6 +38,7 @@ printf '.github/workflows/ci.yml\tselectors 0.35.0\tCargo.lock\tout of scope\n' 
 printf '%s\n' '# only comments' >"$TMP/empty.tsv"
 
 expect 'clean manifest passes' 0 "$TMP/clean.tsv"
+# NEGATION: a stale claim injected into the fixture must make the runner fail.
 printf 'selectors 0.35.0\n' >>"$TMP/base/doc.md"
 expect 'stale claim fails (RED repro)' 1 "$TMP/stale.tsv"
 printf '# clean fixture\n' >"$TMP/base/doc.md"
