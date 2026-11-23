@@ -395,6 +395,7 @@ make_fixture() {
     test_file_size_done.sh test_split_tests.sh \
     test_bug_discovery_report.sh \
     test_docs_claims.sh test_docs_claims_wiring.sh \
+    test_claim_manifest.sh test_claim_manifest_wiring.sh \
     test_agents_doc.sh test_agents_doc_wiring.sh; do
     mkdir -p "$dir/scripts/$(dirname "$harness")"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$dir/scripts/$harness"
