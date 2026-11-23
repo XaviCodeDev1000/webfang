@@ -499,3 +499,35 @@ deuda y riesgos reales, no para reescribir el sistema dentro del PR.
   the new child. The existing `#![allow(clippy::incompatible_msrv)]` stays in
   the parent (no new allow). Golden `real_tree_sites.txt` refreshed in the
   same commit (+2 sites); 25/25 focused tests green.
+
+- L18 (2026-11-22, O3-T9 / issue #2970 remainder, worktree
+  `refactor-ola3-b8-remainder`, base `origin/main@919a70a4`) — seam decisions
+  recorded BEFORE the first cut, per S5/S6. (a) `client.rs` (627 after PR
+  #2994's already-landed test extraction, which is NOT redone): driver =
+  glued response-processing concerns inside one `impl HttpClient`; strategy =
+  extract the three status handlers (`handle_success`, `handle_rate_limited`,
+  `handle_server_error`) together with the two WAF helpers (`waf_block_error`,
+  `inspection_context`) into sibling `client_response.rs`. Byte-verbatim move;
+  only `pub(super)` on the `client`/`config` fields, and the imports that follow
+  the moved code, are declared corrections. (b) `crawl_result_repository.rs`
+  (1097): driver = tests-majority plus a glued background-writer responsibility;
+  strategy = regroup the inline test mod at its section banners into two themed
+  mods (`tests`, `writer_tests`) so neither extracted sibling exceeds 500, then
+  extract both through `split_tests.sh` (multiset proof), and move
+  `BackgroundWriter` + `AppendSink` + `WriteCommand` into
+  `crawl_result_repository_writer.rs` with facade re-exports. The poisoned-mutex
+  policy in `shutdown()` (`PoisonError::into_inner`, never an early return, never
+  a panic, never a silent drop) stays byte-identical in the hub. (c)
+  `infrastructure/stream/mod.rs` (1014, needs-review): decision = GLUED MODULES,
+  not a declarative unit (three distinct responsibilities: JSONL record schema,
+  sink construction, `VectorRepository` port impl). Strategy = extract the
+  record/format types (`VectorRecord`, `EmbeddingProvenance`, `SinkPath` + their
+  impls) to sibling `record.rs` with `pub use` facade re-exports preserving every
+  `infrastructure::stream::*` path; extract the inline `mod tests` through
+  `split_tests.sh` to `stream_tests.rs`. The `Arc<Mutex<…>>` fields, `lock_error`
+  and the `spawn_blocking` critical sections in `impl StreamRepository` /
+  `impl VectorRepository` are NOT moved: every poisoned lock still maps to a
+  typed `ScraperError::Io`, no recovered write is ever a silent drop, and no
+  lock guard is held across an await. Characterization before the first cut:
+  64/64 affected unit tests green; `cargo nextest list` = 5633 tests; duplication
+  8131 <= 8219.
