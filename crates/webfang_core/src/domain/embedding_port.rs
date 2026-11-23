@@ -50,7 +50,8 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub trait EmbeddingPort: Send + Sync {
     /// Generate an embedding vector for a single text.
     ///
-    /// Returns a fixed-dimension vector (384d for both Granite models).
+    /// Returns a vector whose dimension is defined by the concrete adapter;
+    /// remote adapters take it from the provider endpoint.
     ///
     /// # Errors
     ///
@@ -61,8 +62,8 @@ pub trait EmbeddingPort: Send + Sync {
     /// Generate embedding vectors for multiple texts in a batch.
     ///
     /// The default implementation calls [`embed`](Self::embed) sequentially.
-    /// Implementations may override this to use batched ONNX inference for
-    /// better throughput.
+    /// Implementations may override this to batch requests against their
+    /// backend; the port makes no assumption about local inference.
     ///
     /// Returns one vector per input text, in the same order.
     ///
@@ -82,9 +83,8 @@ pub trait EmbeddingPort: Send + Sync {
         })
     }
 
-    /// The dimensionality of embedding vectors produced by this port.
-    ///
-    /// Both supported models (Granite-97M and Granite-311M) return 384.
+    /// The dimensionality of embedding vectors produced by this port, as
+    /// declared by the concrete adapter.
     fn embedding_dim(&self) -> usize;
 
     /// Stable identifier of the model behind this port (e.g. `"granite-97m"`,
