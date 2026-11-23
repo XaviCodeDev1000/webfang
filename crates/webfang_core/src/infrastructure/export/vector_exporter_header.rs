@@ -99,6 +99,37 @@ pub(super) fn count_documents(file: &mut File) -> ExportResult<usize> {
     Ok(newlines)
 }
 
+/// Truncate an existing export at the documents-array closing `]`.
+///
+/// A missing bracket means a previous write was interrupted mid-document:
+/// fail closed instead of appending after a torn fragment. No byte is written
+/// before the bracket is found (ADR-0023).
+pub(super) fn truncate_at_closing_bracket(
+    file: &mut File,
+    path: &std::path::Path,
+    seek_start: u64,
+    tail: &[u8],
+) -> ExportResult<()> {
+    let content = String::from_utf8_lossy(tail);
+    let last_bracket = content.rfind(']').ok_or_else(|| {
+        tracing::warn!(
+            path = %path.display(),
+            tail_bytes = tail.len(),
+            "refusing to append: vector export has no closing bracket (torn document)"
+        );
+        ExporterError::WriteError(format!(
+            "vector export {} has no closing bracket in the last {} bytes: \
+             a torn document from an interrupted write; refusing to append",
+            path.display(),
+            tail.len()
+        ))
+    })?;
+    let insertion_point = seek_start + last_bracket as u64;
+    file.set_len(insertion_point)?;
+    file.seek(SeekFrom::Start(insertion_point))?;
+    Ok(())
+}
+
 /// Extract the `created_at` value from a header scan, if present.
 pub(super) fn extract_created_at(head: &[u8]) -> Option<String> {
     let marker = b"\"created_at\": \"";
