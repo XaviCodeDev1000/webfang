@@ -81,7 +81,7 @@ run of the workflow.
 With `release_commits` active, a commit that changes **only** `Cargo.lock` reports
 `no commit matches the 'release_commits' regex` and does not release — even when its subject
 matches (`chore(deps):`, or `fix:`). Measured on release-plz 0.3.168 and 0.3.169, with a clean
-window (a single lock-only commit on top of `v9.2.2`): without `release_commits` the same
+window (a single lock-only commit on top of `v9.2.3`): without `release_commits` the same
 commit produces `next version is 7.7.2`; with the filter, nothing. `release-plz` decides by the
 files of each package, and `Cargo.lock` lives at the workspace root, outside every package.
 
