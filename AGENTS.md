@@ -372,9 +372,9 @@ shells must run `eval "$(direnv export bash)"` or an inherited `CARGO_TARGET_DIR
 
 ### Identity-exception protocol
 
-A mismatch commit is allowed only under the three-condition protocol (external anchor +
-verifiable binding + ancestry, not equality), with the `Worktree-Identity-Exception` trailer in
-the commit body. Any failed condition is a hard stop. Full text: **Engram #3201**.
+A mismatch needs a valid owner-issued attestation in the per-worktree git dir. It replaces only
+the basename proxy: manifest, `.envrc`/target, `main`, detached HEAD and git-state checks still
+deny. Conditions and trailers: `docs/worktree-identity-exception.md`.
 
 ### Per-worktree bootstrap
 

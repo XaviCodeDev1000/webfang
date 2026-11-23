@@ -36,8 +36,8 @@ intelligence tools appear to resolve to `main`. Skip for trivial in-place edits.
   `pre-commit` and fail-closed. Bootstrap writes the ignored per-tree `.worktree-identity` via
   `scripts/worktree_identity.sh`; without it feature-worktree commits are denied. In non-interactive
   shells load the tree env (`eval "$(direnv export bash)"`) or an inherited `CARGO_TARGET_DIR` is
-  denied. A mismatch is a hard stop unless the 3-condition exception protocol holds (Engram #3201);
-  record the trailer.
+  denied. A mismatch is a hard stop unless a valid owner-issued attestation exists
+  (`../../../docs/worktree-identity-exception.md`); the four trailers are audit only.
 - Four reserved identities under `~/.cache/cargo-target/`: `seeds/`, `seeds-webfang/`,
   `quarantine/`, `quarantine-webfang/` — canonical identity, never a build target, never collected.
 - `scripts/sweep_orphan_targets.sh` is dry-run by default. Its live registry is the
@@ -52,7 +52,7 @@ intelligence tools appear to resolve to `main`. Skip for trivial in-place edits.
 | Situation | Action |
 | --- | --- |
 | New branch needed | `git worktree add <sibling> -b <type/desc> origin/main`; bootstrap + index + identity manifest |
-| Proxy mismatch | Verify exception protocol (Engram #3201); if any condition fails, hard stop |
+| Proxy mismatch | Verify the owner attestation and its three conditions (`../../../docs/worktree-identity-exception.md`); if any fails, hard stop |
 | Commit denied by identity gate | Write the manifest with `scripts/worktree_identity.sh`; load direnv in non-interactive shells. Never bypass the hook |
 | Orphan target dirs after merges | Run the sweep dry-run; reserve the four identities; execute only with explicit owner token |
 | Merge landed | Run post-merge cleanup from main (verify MERGED → ff-only sync → remove worktree → delete branch → prune → remove target dir by ownership) |
