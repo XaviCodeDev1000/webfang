@@ -211,6 +211,15 @@ TEST-COMPARISON-*.md
 REALITY.md
 verify-report-*.md
 
+# An Obsidian vault directory passed to `--obsidian` under a name nobody
+# anticipated: it receives `_inbox/` content and is run output, never source.
+# (The generic `output/` rule for scraper output lives above.)
+stark_vault/
+
+# Python/Rust linter caches (ruff, rumdl). Tool state, no project meaning.
+.ruff_cache/
+.rumdl_cache/
+
 # CodeDB snapshot
 codedb.snapshot
 
