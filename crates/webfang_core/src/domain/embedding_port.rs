@@ -36,9 +36,9 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Domain trait for text embedding generation.
 ///
-/// Implementations wrap an ONNX inference pool to produce fixed-dimension
-/// embedding vectors. The default model (Granite-97M) produces 384-dimensional
-/// vectors; both supported models output 384d via Matryoshka truncation.
+/// Implementations call a remote embedding endpoint to produce vectors whose
+/// dimension is declared by the concrete adapter. No local inference runtime
+/// is compiled into the crate; model identity is reported by `model_id`.
 ///
 /// # Errors
 ///

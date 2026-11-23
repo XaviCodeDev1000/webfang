@@ -1,0 +1,18 @@
+# Shared claim manifest — issue #2995.
+# TAB-separated: path <TAB> forbidden-string <TAB> source-of-truth <TAB> rationale.
+# Lines starting with '#' are comments. A row FAILS when the forbidden string
+# is still present at `path`. Rows are path-scoped: the same string may be
+# legitimate in a different file (for example deny.toml is out of scope here).
+# Pending activation after PR #3001 merges (do NOT enable before then):
+# crates/webfang_core/src/error.rs	from reqwest-middleware	Cargo.lock	PR #3001 removes this doc-comment; not on main yet.
+# crates/webfang_core/src/error.rs	a local ONNX model	ADR-0004	PR #3001 removes this doc-comment; not on main yet.
+NOTICE	selectors 0.35.0	Cargo.lock	Only selectors 0.37.0 and 0.38.0 are locked.
+NOTICE	--features "ai mcp"	crates/webfang_cli/Cargo.toml	No `ai` feature exists; release uses --features mcp.
+NOTICE	ring 0.17.14	Cargo.lock	ring is in neither lockfile.
+NOTICE	rustls-webpki	Cargo.lock	Neither rustls-webpki nor untrusted is locked; the bundle is generated from the lockfiles.
+README.md	--features full	crates/webfang_cli/Cargo.toml	No `full` feature exists.
+README.md	DomainError, InfraError → ScraperError (dual wrapping)	AGENTS.md error stratification	ScraperError is a four-input funnel, not a dual wrapper.
+COMPATIBILITY-MATRIX.md	is engine-internal, not wired to `--resume`	application/crawler/engine.rs	run() restores checkpoints via restore_checkpoint_state.
+crates/webfang_core/src/domain/embedding_port.rs	Implementations wrap an ONNX inference pool	ADR-0004	Local inference was removed; the port calls a remote endpoint.
+crates/webfang_core/src/domain/embedding_port.rs	384d via Matryoshka truncation	ADR-0004	Dimension is declared by the concrete remote adapter.
+crates/webfang_core/src/infrastructure/error.rs	from reqwest-middleware	Cargo.lock	reqwest-middleware is in neither lockfile.

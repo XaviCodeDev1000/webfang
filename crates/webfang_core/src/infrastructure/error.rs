@@ -23,7 +23,7 @@ pub enum InfraError {
     #[error("error de red: {0}")]
     Network(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    /// Middleware error (from reqwest-middleware, e.g., retry failures)
+    /// Middleware error reported by the HTTP stack (e.g., retry failures)
     #[error("error de middleware: {0}")]
     Middleware(String),
 
