@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "generated_at": "2026-11-22T02:21:06+00:00",
-  "head_sha": "152add039ac730a27a4e17dfcf14d70b9f04ceb6",
-  "head_date": "2026-11-22T02:17:36Z",
-  "head_subject": "chore(support): declare the pending publication of v9.2.2",
-  "workspace_version": "9.2.2",
+  "generated_at": "2026-11-23T19:01:52+00:00",
+  "head_sha": "48ae7deeb384f5dffb05b9eb52f5332632b00ac6",
+  "head_date": "2026-11-23T18:14:41Z",
+  "head_subject": "chore(support): declare the pending publication of v9.2.3",
+  "workspace_version": "9.2.3",
   "toolchain": {
     "channel": "1.91.1",
     "rust_version": "1.91",
@@ -43,7 +43,7 @@
   },
   "support": {
     "stable": "9.2",
-    "stable_latest": "9.2.2",
+    "stable_latest": "9.2.3",
     "stable_initial": "9.2.0",
     "maintenance": "9.1",
     "maintenance_latest": "9.1.0",
@@ -154,13 +154,13 @@
     "nightly_explicit_count": 3
   },
   "counts": {
-    "rust_files": 791,
+    "rust_files": 880,
     "assert_matches": 498,
     "lossy_into_owned": 28,
     "lossy_to_string": 12,
     "all_into_owned": 91,
     "strip_prefix_unwrap_or": 14,
-    "if_let": 646,
+    "if_let": 643,
     "allow_unsafe_code": 9,
     "unsafe_blocks": 15,
     "static_mut": 0,
@@ -168,7 +168,7 @@
     "gen_ident": 0,
     "cfg_if": 0,
     "env_mutations": 25,
-    "snapshots": 110,
+    "snapshots": 113,
     "trybuild_stderr": 5,
     "workflows": 18
   },
@@ -178,9 +178,9 @@
     "InFlightGuard": "crates/webfang_core/src/adapters/downloader/cache.rs",
     "HandlerGuard": "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs",
     "HandlerGuard::join": "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs",
-    "env_set": "crates/webfang_test_utils/src/lib.rs",
-    "env_remove": "crates/webfang_test_utils/src/lib.rs",
-    "EnvGuard": "crates/webfang_test_utils/src/lib.rs",
+    "env_set": "crates/webfang_test_utils/src/env.rs",
+    "env_remove": "crates/webfang_test_utils/src/env.rs",
+    "EnvGuard": "crates/webfang_test_utils/src/env.rs",
     "env_invariant_scan": "crates/webfang_test_utils/tests/env_invariant_scan.rs",
     "McpHandler::call_tool": "crates/webfang_mcp/src/mcp_server/mod.rs",
     "CatchPanicLayer": "crates/webfang_mcp/src/mcp_server/server.rs"
