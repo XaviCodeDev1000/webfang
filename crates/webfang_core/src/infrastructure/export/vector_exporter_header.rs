@@ -148,7 +148,6 @@ pub(super) fn patch_header_field(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as _;
 
     #[test]
     fn oversized_created_at_header_is_scanned_past_the_initial_window() {
