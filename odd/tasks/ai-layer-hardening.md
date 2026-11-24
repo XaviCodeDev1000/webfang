@@ -573,3 +573,17 @@ changes in this revision.
   / 8 skipped, check + clippy all-targets/all-features `-D warnings` + fmt --check + doc
   `-D warnings` PASS. All newly authored strings are English; the pre-existing Spanish operator
   messages were preserved verbatim inside the tagged wrappers, not translated or newly written.
+- L21: Native review of the T6 candidate (lineage `review-783f62c4b50e7506`) was granted by the
+  human; four lenses were collected (readability needed a retry plus an explicit `capture-result`
+  submission because its first payload had an invalid multi-range location). The refuter corroborated
+  one CRITICAL readability finding (`R2-1`: `parse_kind` hand-parsed the tag, duplicating the format
+  and mishandling URLs with special characters) and opened ONE bounded correction. Correction
+  `306b7e06` (`fix(ai): serialize AI failure tags with serde`) replaced the manual split with
+  `serde_json` serialization/deserialization, the single format definition, and added
+  `url_with_special_characters_round_trips`. Targeted validation passed; the native review then
+  returned `state: approved` with all remaining findings informational/refuted, and the exact
+  `review.acknowledge-approved` invocation burned authority (`action: acknowledged`,
+  `authority: burned`; lineage `review-783f62c4b50e7506`). Delivery still follows ordinary
+  repository policy. Final verification after the correction: check + clippy all-targets/all-features
+  `-D warnings` + fmt --check + doc `-D warnings` PASS, full `nextest run -p webfang_core -p
+  webfang_cli` 4910 passed / 8 skipped. Next: T7, then T8 in its own session.
