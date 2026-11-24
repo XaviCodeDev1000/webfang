@@ -143,6 +143,21 @@ UB_SURFACE_EXEMPT=(
 #     line count and the DESCENDING ratchet leaves no room for the two gates
 #     alone: the duplicated 6-line write blocks became one line each, which
 #     pays for them.
+#   - `MockServer::start` (`application/http_client/retry.rs`): an interpreter
+#     limit rather than aliasing. The wiremock-backed
+#     `Client::builder` reaches `TLS_method` in btls FFI, which Miri cannot
+#     call. Dispatch 45490558291 aborted `Miri (core)` there on
+#     `exhaustion_after_status_failures_stays_bare` before any `cli::` test
+#     ran; the test was contributed by 8726aa7d (2026-11-16). The marker names
+#     the wiremock setup that separates this test from the pure backoff cases
+#     and the loopback-refused dial beside it.
+#   - `migrate_v1` (`infrastructure/export/record_store_file.rs`): the same
+#     `copy_file_range` (syscall 326) surface the `V1_ONE_PROCESSED_URL` entry
+#     reaches, here called directly by
+#     `backup_name_tests`. Contributed by c472c8d7 (2026-11-23); the same
+#     dispatch aborted on `repeated_migrations_keep_distinct_backup_names`.
+#     Both surfaces are interpreter limits, so the honest fix is a per-test
+#     gate — the aliasing model stays on.
 #
 # Why `application/extraction.rs` itself is NOT an entry: a marker matches the
 # TEXT of a test body, and there the tests that reach the rewrite
@@ -171,6 +186,8 @@ UB_SURFACE_ENTRIES=(
   "crates/webfang_core/src/cli/preflight/tests_obscura_version.rs~write_obscura_with_version|hybrid_opts_with_version_script~0~check_obscura_version → probe_obscura_version → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
   "crates/webfang_core/src/cli/preflight/tests_version_probe.rs~run_version_probe_with_timeout~0~run_version_probe_with_timeout → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
   "crates/webfang_core/src/cli/scrape_flow_tests.rs~V1_ONE_PROCESSED_URL~0~RecordStore::load → migrate_v1 → fs::copy → copy_file_range (syscall 326), unsupported by Miri (upstream miri#4183)"
+  "crates/webfang_core/src/application/http_client/retry.rs~MockServer::start~0~Client::builder → TLS_method (btls FFI) via the wiremock-backed wreq client, unsupported by Miri"
+  "crates/webfang_core/src/infrastructure/export/record_store_file.rs~migrate_v1~0~migrate_v1 → fs::copy → copy_file_range (syscall 326), unsupported by Miri (upstream miri#4183)"
 )
 
 # ---------------------------------------------------------------------------
