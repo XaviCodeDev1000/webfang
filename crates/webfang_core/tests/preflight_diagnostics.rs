@@ -41,7 +41,7 @@ use webfang_core::cli::error as cli_error;
 /// Chosen to NOT match the routine `scrape rate limiter wired … burst: N`
 /// line, which also mentions "burst" on every run: the assertion must fire on
 /// the validation error, never on the wiring summary.
-const INVALID_FRAGMENT: &str = "no es un número";
+const INVALID_FRAGMENT: &str = "is not a number";
 
 /// Every `EXIT_*` constant in `cli::error`. Both published exit tables — the
 /// `--help` `EXIT CODES` section and the `docs/src/cli-reference.md` mirror —

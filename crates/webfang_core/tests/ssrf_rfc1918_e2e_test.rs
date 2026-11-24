@@ -10,7 +10,7 @@
 //!
 //! | Row | Target class                          | Pinned outcome |
 //! |-----|---------------------------------------|----------------|
-//! | 1   | `192.168.x.x` (RFC1918)               | exit 69, Spanish typed error, entry-level log, 0 outbound |
+//! | 1   | `192.168.x.x` (RFC1918)               | exit 69, typed error, entry-level log, 0 outbound |
 //! | 2   | `10.x.x.x` + abbreviated `10.1`       | as row 1 (same literal parser) |
 //! | 3   | `172.16-31.x.x` + hex `0xC0A80101`    | as row 1 (WHATWG/aton encodings normalize first) |
 //! | 4   | CGNAT `100.64.0.0/10`                 | as row 1 |
@@ -91,7 +91,7 @@ async fn run_production(url: &str) -> (Output, MockServer) {
 
 /// Assert the pinned rejection contract for a forbidden IP literal:
 /// exit 69 (EX_UNAVAILABLE — CLI classifies the typed InvalidUrl as a hard
-/// scrape failure), Spanish user-facing SSRF message, and zero outbound.
+/// scrape failure), user-facing SSRF message, and zero outbound.
 async fn assert_rejected_literal(url: &str, expected_ip: &str, deny_reason: &str) {
     let (output, mock_server) = run_production(url).await;
     let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
@@ -103,8 +103,8 @@ async fn assert_rejected_literal(url: &str, expected_ip: &str, deny_reason: &str
     let code = output.status.code().unwrap_or(0);
     assert_eq!(code, 69, "exit code contract (EX_UNAVAILABLE): {stderr}");
     assert!(
-        stderr.contains("SSRF detectado") && stderr.contains(expected_ip),
-        "typed Spanish rejection naming the offending IP missing. {deny_reason}\nstderr: {stderr}"
+        stderr.contains("SSRF detected") && stderr.contains(expected_ip),
+        "typed rejection naming the offending IP missing. {deny_reason}\nstderr: {stderr}"
     );
     let requests = mock_server
         .received_requests()
@@ -266,7 +266,7 @@ async fn row7_hostname_answering_private_range_is_blocked_at_connect() {
         "loopback-resolving hostname must fail at connect: {stderr}"
     );
     assert!(
-        stderr.contains("error de red") && stderr.contains("name resolution failed"),
+        stderr.contains("network error") && stderr.contains("name resolution failed"),
         "connect-time SSRF resolver failure must surface as the typed DNS error:\n{stderr}"
     );
 }

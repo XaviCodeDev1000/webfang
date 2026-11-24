@@ -134,17 +134,17 @@ impl NetworkCause {
         Self::ALL.into_iter().find(|cause| cause.as_str() == value)
     }
 
-    /// The user-facing message, in Spanish.
+    /// The user-facing message.
     #[must_use]
     pub fn message(self) -> &'static str {
         match self {
-            Self::DnsResolution => "no se pudo resolver el nombre del dominio",
-            Self::ConnectRefused => "el servidor rechazó la conexión",
-            Self::ConnectTimeout => "la conexión no se completó a tiempo",
-            Self::ReadTimeout => "el servidor no respondió a tiempo",
-            Self::ConnectionClosed => "el servidor cerró la conexión antes de responder",
-            Self::TlsHandshake => "falló el handshake TLS",
-            Self::Unknown => "fallo de red no clasificado",
+            Self::DnsResolution => "could not resolve the domain name",
+            Self::ConnectRefused => "the server refused the connection",
+            Self::ConnectTimeout => "the connection did not complete in time",
+            Self::ReadTimeout => "the server did not respond in time",
+            Self::ConnectionClosed => "the server closed the connection before responding",
+            Self::TlsHandshake => "the TLS handshake failed",
+            Self::Unknown => "unclassified network failure",
         }
     }
 }

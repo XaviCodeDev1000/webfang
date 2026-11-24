@@ -56,7 +56,7 @@ pub fn run(args: &SubcommandArgs, config_path: &Path) -> CliExit {
             Ok(registry) => registry,
             Err(e) => return CliExit::ConfigError(e.to_string()),
         };
-    println!("\n=== show: provider de embeddings efectivo ===\n");
+    println!("\n=== show: effective embeddings provider ===\n");
     match resolve_effective_provider(args, &defaults) {
         Ok(Some(provider)) => {
             crate::cli::commands::blocks::print_proxy_posture(Some(&provider), &proxy_registry);
@@ -77,7 +77,7 @@ pub fn run(args: &SubcommandArgs, config_path: &Path) -> CliExit {
     }
 
     let registry = ModelProfileRegistry::new(defaults.model_profiles.clone());
-    println!("\n=== show: metadata histórica de perfiles de modelo (ADR-0004 paso 4) ===\n");
+    println!("\n=== show: historical model-profile metadata (ADR-0004 step 4) ===\n");
     crate::cli::commands::blocks::print_historical_profiles(&registry);
 
     print_notes();
@@ -108,11 +108,11 @@ fn resolve_effective_provider(
 
 /// No embedding provider is configured: say so, and say what a run would do.
 fn print_no_provider() {
-    println!("(sin provider de embeddings configurado)");
+    println!("(no embeddings provider configured)");
     println!();
-    println!("Ninguna corrida puede limpiar semánticamente: `--clean-ai` exige un provider");
-    println!("remoto de embeddings (`--embedding-provider <id>` o WEBFANG_EMBEDDING_PROVIDER,");
-    println!("con el provider declarado en la config) y falla con ConfigError (exit 78) sin él.");
+    println!("No run can clean semantically: `--clean-ai` requires a remote");
+    println!("embeddings provider (`--embedding-provider <id>` or WEBFANG_EMBEDDING_PROVIDER,");
+    println!("with the provider declared in the config) and fails with ConfigError (exit 78) without it.");
 }
 
 /// The budget the cleaner is CONFIGURED with, with its provenance.
@@ -122,32 +122,32 @@ fn print_no_provider() {
 /// relevance threshold remains a purely argv knob.
 fn print_budget(max_chars: usize, args: &SubcommandArgs) {
     let max_chars_origin = if args.max_chars_explicit {
-        "operatorio (--max-chars o WEBFANG_MAX_CHARS)"
+        "operator (--max-chars or WEBFANG_MAX_CHARS)"
     } else {
         "profile (default granite-97m, derived from context x chars_per_token)"
     };
 
     let threshold = args.threshold_value.unwrap_or(0.3);
     let threshold_origin = if args.threshold_explicit {
-        "operatorio (--threshold)"
+        "operator (--threshold)"
     } else {
-        "default del spec"
+        "spec default"
     };
 
-    println!("\n=== show: budget efectivo ===\n");
+    println!("\n=== show: effective budget ===\n");
     println!("max_chars: {max_chars}");
-    println!("  origen: {max_chars_origin}");
+    println!("  origin: {max_chars_origin}");
     println!("threshold: {threshold}");
-    println!("  origen: {threshold_origin}");
+    println!("  origin: {threshold_origin}");
 }
 
 /// Closing notes: what the numbers are, and what they are not.
 fn print_notes() {
-    println!("\nNotas:");
-    println!("  - La sección de metadata histórica es lo único que queda de los perfiles de");
-    println!("    modelo: ninguna corrida los consume (ADR-0004 paso 6 retiró el runtime local).");
+    println!("\nNotes:");
+    println!("  - The historical metadata section is all that remains of the model");
+    println!("    profiles: no run consumes them (ADR-0004 step 6 retired the local runtime).");
     println!(
-        "  - Ningún valor viene de models.dev: los números salen del repo (profile.citation)."
+        "  - No value comes from models.dev: the numbers come from the repo (profile.citation)."
     );
 }
 
@@ -231,7 +231,7 @@ mod tests {
                     "the error must name the missing embedding capability, got: {msg}"
                 );
                 assert!(
-                    !msg.contains("perfil de modelo"),
+                    !msg.contains("model profile"),
                     "the error must not talk about a model profile — the id names a \
                      provider, got: {msg}"
                 );

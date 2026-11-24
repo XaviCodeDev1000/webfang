@@ -68,7 +68,7 @@ impl NoteRepository for InMemoryNoteRepo {
     ) -> BoxFuture<'a, Result<i64, ScraperError>> {
         Box::pin(async move {
             let hash = Sha256Hex::try_from(content_hash)
-                .map_err(|e| ScraperError::persistence(format!("hash inválido: {e}")))?;
+                .map_err(|e| ScraperError::persistence(format!("invalid hash: {e}")))?;
             let mut notes = self.notes.lock().unwrap();
             // Update existing or insert new.
             if let Some(existing) = notes.iter_mut().find(|n| n.path == path) {
@@ -117,7 +117,7 @@ impl NoteRepository for InMemoryNoteRepo {
     ) -> BoxFuture<'a, Result<i64, ScraperError>> {
         Box::pin(async move {
             let hash = Sha256Hex::try_from(content_hash)
-                .map_err(|e| ScraperError::persistence(format!("hash inválido: {e}")))?;
+                .map_err(|e| ScraperError::persistence(format!("invalid hash: {e}")))?;
             let mut notes = self.notes.lock().unwrap();
             let id = if let Some(existing) = notes.iter_mut().find(|n| n.path == path) {
                 existing.content_hash = hash;

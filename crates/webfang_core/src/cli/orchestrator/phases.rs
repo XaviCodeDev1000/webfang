@@ -110,7 +110,7 @@ pub(super) async fn run_dry_run(
     // Reuses the `NetworkError` message/exit 69 the `Err` arm already uses.
     if discovered.is_empty() && output.errors > 0 {
         return CliExit::NetworkError(format!(
-            "URL discovery failed: la semilla no respondió ({} error(es) de rastreo, 0 URLs descubiertas)",
+            "URL discovery failed: the seed did not respond ({} crawl error(s), 0 URLs discovered)",
             output.errors
         ));
     }
@@ -124,7 +124,7 @@ pub(super) async fn run_dry_run(
     // set (above) and still exits as a failure — never a silent exit 0.
     if let Some(reason) = output.truncated_by {
         return CliExit::NetworkError(format!(
-            "el preview terminó anticipadamente (URLs parciales listadas arriba): {reason}"
+            "the preview ended early (partial URLs listed above): {reason}"
         ));
     }
     CliExit::Success
@@ -172,7 +172,7 @@ pub(super) async fn scrape_phase(
 
 /// The prepare + resume route of [`super::run`]: resolve the persistence
 /// mode, run discovery/preparation, apply the resume filter, and evaluate
-/// the "nothing pending" (#705 Paso 2) and truncated-discovery (#2338)
+/// the "nothing pending" (#705 Step 2) and truncated-discovery (#2338)
 /// short-circuits.
 ///
 /// On success returns the prepared phase result — with the resume-FILTERED
@@ -225,7 +225,7 @@ pub(super) async fn prepare_resume_route(
         Err(e) => return Err(e),
     };
 
-    // #705 Paso 2: a --resume run where every discovered URL was already
+    // #705 Step 2: a --resume run where every discovered URL was already
     // processed by a prior run is a technical success ("nothing pending").
     // #2338: a TRUNCATED discovery never reports Success — the run failed
     // even when nothing is pending (the prior run's output stays on disk, so
@@ -236,7 +236,7 @@ pub(super) async fn prepare_resume_route(
     {
         if let Some(reason) = &discovery_truncated_by {
             return Err(truncated_discovery_exit(
-                "nada pendiente de reprocesar, pero el descubrimiento no completó",
+                "nothing pending to reprocess, but discovery did not complete",
                 reason,
             ));
         }
@@ -358,7 +358,7 @@ pub(crate) fn parse_asset_h2_profile(s: &str) -> wreq_util::Profile {
 /// pipelines, class S1).
 ///
 /// - `output_vectors && !opts.ai` → `DataFormatError` (exit 65, `EX_DATA`)
-///   with a Spanish user-facing message.
+///   with a user-facing message.
 ///
 /// Returns `Some(exit)` when the run must be aborted, `None` to proceed.
 pub(crate) fn output_vectors_gate(opts: &CrawlOptions) -> Option<CliExit> {
@@ -369,7 +369,8 @@ pub(crate) fn output_vectors_gate(opts: &CrawlOptions) -> Option<CliExit> {
     }
     warn!("--output-vectors refused without --clean-ai; no vectors to export");
     Some(CliExit::DataFormatError(
-        "No hay vectores para exportar: '--output-vectors' requiere '--clean-ai' para generar embeddings".to_string(),
+        "No vectors to export: '--output-vectors' requires '--clean-ai' to generate embeddings"
+            .to_string(),
     ))
 }
 

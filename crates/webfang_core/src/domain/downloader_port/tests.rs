@@ -58,7 +58,8 @@ fn a_clone_keeps_the_class_and_the_cause() {
         "the class must not move: the retry rule reads it"
     );
     assert!(
-        copy.to_string().contains("el servidor rechazó la conexión"),
+        copy.to_string()
+            .contains("the server refused the connection"),
         "the message must survive the copy: {copy}"
     );
     assert_eq!(

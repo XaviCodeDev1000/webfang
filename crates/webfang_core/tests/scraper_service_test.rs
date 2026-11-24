@@ -104,7 +104,7 @@ fn assert_policy_refusal(err: &ScraperError) {
     }
     let msg = err.to_string();
     assert!(
-        msg.contains("SSRF detectado"),
+        msg.contains("SSRF detected"),
         "the carried guard cause must surface verbatim, got: {msg}"
     );
     assert!(!msg.contains("WAF/CAPTCHA"), "no phantom WAF, got: {msg}");

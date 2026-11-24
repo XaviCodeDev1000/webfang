@@ -112,7 +112,7 @@ impl HttpClientConfig {
 /// [`wreq_util::Profile`] variant), per the project's user-facing-error
 /// convention.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
-#[error("Perfil TLS desconocido: '{name}'. Opciones válidas: {}", crate::domain::profile::valid_profile_names().join(", "))]
+#[error("Unknown TLS profile: '{name}'. Valid options: {}", crate::domain::profile::valid_profile_names().join(", "))]
 pub struct UnknownProfileError {
     /// The unrecognized profile name supplied by the user.
     pub name: String,
@@ -228,7 +228,7 @@ mod tests {
     fn test_unknown_profile_error_display_is_spanish() {
         let err = HttpClientConfig::profile_from_name("Firefox").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Perfil TLS desconocido: 'Firefox'"));
+        assert!(msg.contains("Unknown TLS profile: 'Firefox'"));
         assert!(msg.contains("Chrome131"));
         assert!(msg.contains("Chrome145"));
     }

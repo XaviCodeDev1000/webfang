@@ -131,7 +131,7 @@ pub(crate) fn parse_ram_budget(s: &str) -> Result<u64, String> {
     let value = crate::infrastructure::autotuning::parse_ram_bytes(s)
         .ok_or_else(|| export_specs::RAM_BUDGET.parse_error(s).to_string())?;
     // Issue #948 F7: `check_bound` now returns a typed `BoundError`. The
-    // CLI parity path needs the Spanish verbatim message, so we look up
+    // CLI parity path needs the verbatim message, so we look up
     // the spec policy here (one access, locally scoped).
     let policy = match export_specs::RAM_BUDGET.kind {
         crate::domain::options_spec::ValueKind::MemorySize { policy: Some(p) } => p,
@@ -294,25 +294,22 @@ mod spec_parity_tests {
     #[test]
     fn out_of_bounds_and_malformed_inputs_error_exactly_as_before() {
         let err = parse_args_hermetic(&["--cpu-cores", "0"]).expect_err("zero cores rejected");
-        assert!(err.contains("cpu-cores debe ser > 0"), "got: {err}");
+        assert!(err.contains("cpu-cores must be > 0"), "got: {err}");
 
         let err = parse_args_hermetic(&["--cpu-cores", "abc"]).expect_err("text rejected");
-        assert!(
-            err.contains("`abc` no es un número entero válido"),
-            "got: {err}"
-        );
+        assert!(err.contains("`abc` is not a valid integer"), "got: {err}");
 
         let err = parse_args_hermetic(&["--ram-budget", "nope"]).expect_err("bad size rejected");
         assert!(
-            err.contains("`nope` no es un tamaño de memoria válido"),
+            err.contains("`nope` is not a valid memory size"),
             "got: {err}"
         );
 
         let err = parse_args_hermetic(&["--ram-budget", "0"]).expect_err("zero budget rejected");
-        assert!(err.contains("ram-budget debe ser > 0"), "got: {err}");
+        assert!(err.contains("ram-budget must be > 0"), "got: {err}");
 
         let err = parse_args_hermetic(&["--batch-concurrency", "0"])
             .expect_err("zero concurrency rejected");
-        assert!(err.contains("batch-concurrency debe ser > 0"), "got: {err}");
+        assert!(err.contains("batch-concurrency must be > 0"), "got: {err}");
     }
 }

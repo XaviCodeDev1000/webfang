@@ -1,4 +1,4 @@
-//! Versioned model profiles (ADR-0004 §"Perfiles de modelo").
+//! Versioned model profiles (ADR-0004 §"Model profiles").
 //!
 //! Domain-only: a declarative record plus pure resolution. No I/O, no HTTP,
 //! no client wiring — the HTTP payload is built by the adapter that owns the
@@ -53,7 +53,7 @@ pub use builtins::{builtin_profiles, GRANITE_311M_PROFILE_ID, GRANITE_97M_PROFIL
 
 /// Schema version of the profile records this build understands.
 ///
-/// Pinned by ADR-0004 §"Perfiles de modelo" (Tramo D). A profile carrying any
+/// Pinned by ADR-0004 §"Model profiles" (Stage D). A profile carrying any
 /// other version is rejected rather than reinterpreted — a profile is a
 /// record whose meaning a future build may change, so guessing is the one
 /// thing that must not happen.
@@ -67,7 +67,7 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 1;
 ///
 /// The literals that pinned it (`AiModel::embedding_dim` → 384/768 and
 /// `AiModel::output_dim` → 384) lived in the local inference stack that
-/// ADR-0004 paso 6 deleted; `CITATION_DIMENSIONS` names the authority that
+/// ADR-0004 step 6 deleted; `CITATION_DIMENSIONS` names the authority that
 /// survives and the tag where the original code is recoverable.
 pub const MATRYOSHKA_OUTPUT_DIM: usize = 384;
 
@@ -85,12 +85,12 @@ pub enum ProfileProvenance {
 
 /// Failure modes of [`ModelProfileRegistry::resolve`].
 ///
-/// Every message is Spanish: they reach the operator through CLI and MCP
+/// Every message is in English: they reach the operator through CLI and MCP
 /// surfaces, per the repo's error-stratification rule.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProfileError {
     /// No shipped profile carries the requested id.
-    #[error("perfil de modelo '{profile_id}' desconocido; perfiles disponibles: {available}")]
+    #[error("unknown model profile '{profile_id}'; available profiles: {available}")]
     ProfileNotFound {
         /// The id that was requested.
         profile_id: String,
@@ -99,8 +99,8 @@ pub enum ProfileError {
     },
     /// The profile declares a `schema_version` this build does not understand.
     #[error(
-        "el perfil '{profile_id}' declara schema_version {found} y esta versión de webfang \
-         sólo entiende {expected}; actualizá webfang o quitá ese override"
+        "profile '{profile_id}' declares schema_version {found} but this version of webfang \
+         only understands {expected}; update webfang or remove that override"
     )]
     UnknownSchemaVersion {
         /// The id of the offending profile.
@@ -111,7 +111,7 @@ pub enum ProfileError {
         expected: u32,
     },
     /// A field carries a value the profile cannot be used with.
-    #[error("el perfil '{profile_id}' tiene '{field}' inválido: {reason}")]
+    #[error("profile '{profile_id}' has invalid '{field}': {reason}")]
     InvalidField {
         /// The id of the offending profile.
         profile_id: String,
@@ -181,8 +181,8 @@ impl ModelProfile {
     /// Dimension the vectors actually carry into the vault.
     ///
     /// The truncated width for a Matryoshka profile, the native
-    /// [`Self::dim`] otherwise — the distinction ADR-0004 §"Migración de
-    /// vaults" depends on, kept explicit instead of flattened into one field.
+    /// [`Self::dim`] otherwise — the distinction ADR-0004 §"Vault
+    /// migration" depends on, kept explicit instead of flattened into one field.
     #[must_use]
     pub fn output_dim(&self) -> usize {
         self.dimensions().unwrap_or(self.dim)
@@ -190,7 +190,7 @@ impl ModelProfile {
 
     /// Character budget derived from `context × chars_per_token`.
     ///
-    /// This is the per-profile input for the chunk budget (ADR-0004 Tramo D):
+    /// This is the per-profile input for the chunk budget (ADR-0004 Stage D):
     /// steps 2 and 3 consume it instead of the hard-coded ratio
     /// ([`DEFAULT_CHARS_PER_TOKEN`](crate::domain::options_spec::ai::DEFAULT_CHARS_PER_TOKEN)).
     /// Rounds rather than truncates, and saturates on cast, so a large
@@ -264,20 +264,23 @@ impl ModelProfile {
         if self.dim == 0 {
             return Err(invalid(
                 "dim",
-                "una dimensión 0 no se puede indexar en ningún vault",
+                "a dimension of 0 cannot be indexed in any vault",
             ));
         }
         if self.context == 0 {
             return Err(invalid(
                 "context",
-                "un contexto 0 rechaza cualquier entrada, incluso una sola",
+                "a context of 0 rejects any input, even a single one",
             ));
         }
         if self.batch_max.is_some_and(|max| max == 0) {
-            return Err(invalid("batch_max", "el tope debe ser >= 1"));
+            return Err(invalid("batch_max", "the cap must be >= 1"));
         }
         if !self.chars_per_token.is_finite() || self.chars_per_token <= 0.0 {
-            return Err(invalid("chars_per_token", "la razón debe ser finita y > 0"));
+            return Err(invalid(
+                "chars_per_token",
+                "the ratio must be finite and > 0",
+            ));
         }
         Ok(())
     }

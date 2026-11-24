@@ -146,7 +146,7 @@ async fn completion_407_distinguishes_a_configured_proxy_credential() {
         .await
         .expect_err("407 must fail");
     assert!(
-        err.to_string().contains("credencial configurada"),
+        err.to_string().contains("configured credential"),
         "a configured proxy credential must be named without printing it: {err}"
     );
     assert_eq!(
@@ -172,7 +172,7 @@ async fn status_407_distinguishes_a_configured_proxy_credential() {
         .expect_err("407 must fail");
     let message = err.to_string();
     assert!(
-        message.contains("credencial configurada"),
+        message.contains("configured credential"),
         "a configured proxy credential must be named without printing it: {message}"
     );
     assert_eq!(

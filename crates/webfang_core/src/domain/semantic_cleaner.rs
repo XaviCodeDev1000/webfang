@@ -67,7 +67,7 @@ pub mod private {
 /// - Implementations MUST be thread-safe (`Send + Sync`)
 /// - Implementations hold no model of their own: embeddings come from the
 ///   [`EmbeddingPort`](crate::domain::embedding_port::EmbeddingPort) the
-///   composition root injects (ADR-0004 paso 6)
+///   composition root injects (ADR-0004 step 6)
 pub trait SemanticCleaner: private::Sealed + Send + Sync {
     /// Clean HTML content and split into semantic chunks
     ///

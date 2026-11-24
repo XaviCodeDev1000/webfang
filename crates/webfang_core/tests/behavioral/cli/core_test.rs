@@ -189,7 +189,7 @@ fn invalid_url_stderr_mentions_invalid() {
         .arg("--url")
         .arg("not-a-url")
         .assert()
-        .stderr(predicate::str::contains("URL inválida"));
+        .stderr(predicate::str::contains("Invalid URL"));
 }
 
 #[test]

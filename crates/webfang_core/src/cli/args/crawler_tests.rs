@@ -11,14 +11,14 @@ fn parse_timeout_secs_rejects_zero() {
     let err = parse_timeout_secs("0").unwrap_err();
     assert_eq!(
         err,
-        "--timeout-secs debe ser >= 1 (0 hace que cada request falle al instante)"
+        "--timeout-secs must be >= 1 (0 makes every request fail instantly)"
     );
 }
 
 #[test]
 fn parse_timeout_secs_rejects_non_numeric() {
     let err = parse_timeout_secs("abc").unwrap_err();
-    assert_eq!(err, "'abc' no es un número válido para --timeout-secs");
+    assert_eq!(err, "'abc' is not a valid number for --timeout-secs");
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn parse_rate_limit_burst_rejects_zero_with_spanish_error() {
     let err = parse_rate_limit_burst("0").unwrap_err();
     assert_eq!(
         err,
-        "--rate-limit-burst debe ser >= 1 (0 no permite ningún request en ráfaga)"
+        "--rate-limit-burst must be >= 1 (0 allows no requests in a burst)"
     );
 }
 
@@ -53,7 +53,7 @@ fn parse_rate_limit_burst_non_numeric_fails_closed_with_spanish_error() {
             .err()
             .unwrap_or_else(|| panic!("{raw} must be rejected, not defaulted"));
         assert!(
-            err.starts_with("--rate-limit-burst") && err.contains("no es un número"),
+            err.starts_with("--rate-limit-burst") && err.contains("is not a number"),
             "expected a Spanish not-a-number error for {raw}, got: {err}"
         );
     }
@@ -140,7 +140,7 @@ fn parse_rate_limit_burst_rejects_out_of_u32_range_with_spanish_error() {
             .err()
             .unwrap_or_else(|| panic!("{raw} must be rejected, not defaulted"));
         assert!(
-            err.starts_with("--rate-limit-burst") && err.contains("fuera del rango admitido"),
+            err.starts_with("--rate-limit-burst") && err.contains("is outside the allowed range"),
             "expected a Spanish range error for {raw}, got: {err}"
         );
     }
@@ -186,14 +186,14 @@ fn parse_max_pages_rejects_zero() {
     let err = parse_max_pages("0").unwrap_err();
     assert_eq!(
         err,
-        "--max-pages debe ser >= 1 (0 no deja páginas para scrapear)"
+        "--max-pages must be >= 1 (0 leaves no pages to scrape)"
     );
 }
 
 #[test]
 fn parse_max_pages_rejects_non_numeric() {
     let err = parse_max_pages("abc").unwrap_err();
-    assert_eq!(err, "'abc' no es un número válido para --max-pages");
+    assert_eq!(err, "'abc' is not a valid number for --max-pages");
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn parse_selector_rejects_invalid_css() {
     // parse time (clap error -> exit 64), not at scrape time (30s timeout).
     let err = parse_selector(":::invalid").unwrap_err();
     assert!(
-        err.contains("selector CSS inválido"),
+        err.contains("invalid CSS selector"),
         "expected Spanish invalid-selector message, got: {err}"
     );
 }

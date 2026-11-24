@@ -84,11 +84,11 @@ impl LlmExtractionService {
         let llm = self
             .llm_port
             .clone()
-            .ok_or_else(|| ScraperError::Config("no hay proveedor LLM configurado".to_string()))?;
+            .ok_or_else(|| ScraperError::Config("no LLM provider is configured".to_string()))?;
 
         // [1]-[3] Gates before any I/O.
         validate_schema(schema)
-            .map_err(|e| ScraperError::Validation(format!("esquema inválido: {e}")))?;
+            .map_err(|e| ScraperError::Validation(format!("invalid schema: {e}")))?;
         ssrf_gate(&config.base_url)?; // [2]
         enforce_robots_policy(url, self.robots.as_deref(), false).await?; // [3] fail-open (#697)
 
@@ -117,7 +117,9 @@ impl LlmExtractionService {
         // [9] Schema-validate every merged record — never a silent null.
         for record in &records {
             validate_record(record, schema).map_err(|e| {
-                ScraperError::Validation(format!("la salida del LLM no cumple el esquema: {e}"))
+                ScraperError::Validation(format!(
+                    "the LLM output does not conform to the schema: {e}"
+                ))
             })?;
         }
 
@@ -152,7 +154,7 @@ impl LlmExtractionService {
             for sub_chunk in self.chunker.chunk_text(&chunk.content)? {
                 if sub_chunk.text().chars().count() > char_budget {
                     return Err(ScraperError::Validation(format!(
-                        "el fragmento {index} supera el presupuesto ({char_budget} caracteres)"
+                        "chunk {index} exceeds the budget ({char_budget} characters)"
                     )));
                 }
                 sub_chunks.push(sub_chunk.text().to_owned());
@@ -197,7 +199,7 @@ fn merge_records(
     response: LlmResponse,
 ) -> Result<()> {
     let parsed: Value = serde_json::from_str(&response.content).map_err(|e| {
-        ScraperError::Extraction(format!("la respuesta del LLM no es JSON válido: {e}"))
+        ScraperError::Extraction(format!("the LLM response is not valid JSON: {e}"))
     })?;
     let batch: Vec<Value> = match parsed {
         Value::Array(items) => items,
@@ -206,7 +208,7 @@ fn merge_records(
         // be echoed into an error that aggregate paths log or hand to MCP.
         _ => {
             return Err(ScraperError::Extraction(
-                "la respuesta del LLM no es un objeto ni un array JSON".to_string(),
+                "the LLM response is neither a JSON object nor a JSON array".to_string(),
             ));
         },
     };
@@ -245,7 +247,7 @@ impl LlmConfig {
     /// `LLM_API_KEY` is missing/empty.
     pub fn from_env(base_url: &str, max_tokens: usize, char_budget: usize) -> Result<Self> {
         let base_url = Url::parse(base_url)
-            .map_err(|e| ScraperError::Config(format!("URL base del LLM inválida: {e}")))?;
+            .map_err(|e| ScraperError::Config(format!("invalid LLM base URL: {e}")))?;
         match std::env::var("LLM_API_KEY") {
             Ok(key) if !key.is_empty() => Ok(Self {
                 base_url,
@@ -254,7 +256,7 @@ impl LlmConfig {
                 char_budget,
             }),
             _ => Err(ScraperError::Config(
-                "LLM_API_KEY no está definida: configure la clave del proveedor LLM".into(),
+                "LLM_API_KEY is not set: configure the LLM provider key".into(),
             )),
         }
     }
@@ -310,15 +312,15 @@ pub fn ssrf_gate(url: &Url) -> Result<()> {
     let scheme = url.scheme();
     if scheme != "http" && scheme != "https" {
         return Err(ScraperError::Config(format!(
-            "esquema '{scheme}' no permitido para el LLM (solo http/https)"
+            "scheme '{scheme}' not allowed for the LLM (only http/https)"
         )));
     }
     let host = url
         .host_str()
-        .ok_or_else(|| ScraperError::Config("el URL del LLM no tiene host".to_string()))?;
+        .ok_or_else(|| ScraperError::Config("the LLM URL has no host".to_string()))?;
     if crate::domain::ssrf_guard::is_forbidden_literal_host(host) {
         return Err(ScraperError::Config(format!(
-            "URL del LLM bloqueada por SSRF: el host '{host}' pertenece a una red interna (#703)"
+            "LLM URL blocked by SSRF: host '{host}' belongs to an internal network (#703)"
         )));
     }
     Ok(())
@@ -607,7 +609,7 @@ mod service_tests {
         LlmExtractionService::new(
             Arc::new(FakeHttp {
                 status: 200,
-                body: "<html><body><p>página</p></body></html>".into(),
+                body: "<html><body><p>page</p></body></html>".into(),
             }),
             Arc::new(FakeCleaner {
                 chunks: cleaner_chunks,
@@ -627,9 +629,9 @@ mod service_tests {
         ]));
         let svc = service(
             vec![
-                chunk_with("Texto uno."),
-                chunk_with("Texto dos."),
-                chunk_with("Texto tres."),
+                chunk_with("Text one."),
+                chunk_with("Text two."),
+                chunk_with("Text three."),
             ],
             Arc::clone(&llm),
         );
@@ -694,7 +696,7 @@ mod service_tests {
     async fn extraction_error_never_echoes_the_model_payload() {
         let payload = "UNTRUSTED_MODEL_PAYLOAD_9f3a";
         let llm = Arc::new(FakeLlm::new(&[payload]));
-        let svc = service(vec![chunk_with("texto limpio")], Arc::clone(&llm));
+        let svc = service(vec![chunk_with("clean text")], Arc::clone(&llm));
 
         let err = match svc
             .extract(&target_url(), &extraction_schema(), "m", &test_config())
@@ -714,7 +716,7 @@ mod service_tests {
     async fn request_bodies_never_carry_html_tags() {
         let llm = Arc::new(FakeLlm::new(&[r#"[{"name":"a"}]"#]));
         let svc = service(
-            vec![chunk_with("Texto limpio sin etiquetas.")],
+            vec![chunk_with("Clean text without tags.")],
             Arc::clone(&llm),
         );
 

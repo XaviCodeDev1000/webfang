@@ -15,7 +15,7 @@
 //! # The provider is the run identity; the profile block is history
 //!
 //! The provider block IS the identity of the run. The `[[model_profiles]]`
-//! metadata is historical — ADR-0004 paso 6 retired the local ONNX runtime —
+//! metadata is historical — ADR-0004 step 6 retired the local ONNX runtime —
 //! and no run consumes it (issue #2106). Reachability is measured by the SAME
 //! preflight the scrape path uses ([`llm_wire::build_embedding_provider`]).
 
@@ -26,7 +26,7 @@ use crate::cli::error::CliExit;
 use crate::cli::llm_wire;
 use crate::domain::model_profile::{
     ModelProfileRegistry,
-    ModelProfilesConfig, // sin el id del perfil (ADR-0004 paso 6)
+    ModelProfilesConfig, // without the profile id (ADR-0004 step 6)
 };
 use crate::domain::providers::{Capability, ProviderConfig, ProviderRegistry, ProvidersConfig};
 
@@ -65,13 +65,13 @@ pub async fn run(config_path: &Path, args: &SubcommandArgs) -> CliExit {
                 diagnose_provider(&provider.clone(), args, &profiles, &proxy_registry).await
             },
             Err(e) => {
-                println!("\n=== doctor: ruta de embeddings ===\n");
+                println!("\n=== doctor: embeddings path ===\n");
                 crate::cli::commands::blocks::print_proxy_posture(None, &proxy_registry);
                 println!();
-                println!("Estado: provider '{id}' no resoluble");
+                println!("Status: provider '{id}' could not be resolved");
                 println!("  {e}");
                 CliExit::ConfigError(format!(
-                    "el provider de embeddings '{id}' no existe o no declara la capacidad `embedding`: {e}"
+                    "the embeddings provider '{id}' does not exist or does not declare the `embedding` capability: {e}"
                 ))
             },
         },
@@ -90,16 +90,16 @@ fn diagnose_no_usable_provider(
     providers: &[ProviderConfig],
     proxy_registry: &crate::domain::proxy_config::ProxyRegistry,
 ) -> CliExit {
-    println!("\n=== doctor: ruta de embeddings ===\n");
+    println!("\n=== doctor: embeddings path ===\n");
     crate::cli::commands::blocks::print_proxy_posture(None, proxy_registry);
     println!();
     if providers.is_empty() {
-        println!("Estado: sin provider configurado");
-        println!("  No hay ningún provider en el archivo de configuración.");
-        println!("  Conectá uno con:");
-        println!("\n    webfang connect <url del endpoint> --model <modelo>\n");
-        println!("  O declaralo a mano bajo [[providers]].\n");
-        return CliExit::ConfigError("no hay ningún provider de embeddings configurado".into());
+        println!("Status: no provider configured");
+        println!("  There is no provider in the configuration file.");
+        println!("  Connect one with:");
+        println!("\n    webfang connect <endpoint url> --model <model>\n");
+        println!("  Or declare it manually under [[providers]].\n");
+        return CliExit::ConfigError("no provider is configured for embeddings".into());
     }
 
     let embedding_capable = providers
@@ -107,24 +107,24 @@ fn diagnose_no_usable_provider(
         .filter(|p| p.has_capability(Capability::Embedding))
         .count();
     if embedding_capable == 0 {
-        println!("Estado: sin provider de embeddings");
+        println!("Status: no embeddings provider");
         println!(
-            "  Hay {} provider(s) en el archivo, pero ninguno declara la capacidad \"embedding\".",
+            "  There are {} provider(s) in the file, but none declares the \"embedding\" capability.",
             providers.len()
         );
-        println!("  Añadí `capabilities = [\"embedding\"]` a uno de ellos.\n");
+        println!("  Add `capabilities = [\"embedding\"]` to one of them.\n");
         return CliExit::ConfigError(
-            "no hay ningún provider con capacidad `embedding` en la configuración".into(),
+            "no provider is configured with the `embedding` capability".into(),
         );
     }
 
     // There ARE embedding providers, but none resolved as the default remote
     // slot — today that means none is `open_ai_compatible`.
-    println!("Estado: hay providers de embeddings, pero ninguno remoto por defecto");
-    println!("  El slot remoto exige `kind = \"open_ai_compatible\"`. Forzá uno con:");
+    println!("Status: there are embeddings providers, but none remote by default");
+    println!("  The remote slot requires `kind = \"open_ai_compatible\"`. Force one with:");
     println!("\n    webfang --embedding-provider <id>\n");
     CliExit::ConfigError(
-        "no hay un provider de embeddings remoto (open_ai_compatible) por defecto".into(),
+        "no remote embeddings provider (open_ai_compatible) is configured by default".into(),
     )
 }
 
@@ -135,7 +135,7 @@ async fn diagnose_provider(
     profiles: &ModelProfilesConfig,
     proxy_registry: &crate::domain::proxy_config::ProxyRegistry,
 ) -> CliExit {
-    println!("\n=== doctor: ruta de embeddings ===\n");
+    println!("\n=== doctor: embeddings path ===\n");
     crate::cli::commands::blocks::print_proxy_posture(Some(provider), proxy_registry);
     println!();
     crate::cli::commands::blocks::print_provider_block(provider, args.provider_id.is_some());
@@ -161,22 +161,22 @@ fn check_credential(provider: &ProviderConfig) -> Result<(), CliExit> {
     match provider.auth.resolve() {
         Ok(Some(_)) => {
             println!(
-                "Credencial: resuelta (fuente: {}, valor no mostrado)",
+                "Credential: resolved (source: {}, value not shown)",
                 provider.auth.label()
             );
             Ok(())
         },
         Ok(None) => {
-            println!("Credencial: ninguna (endpoint anónimo por diseño)");
+            println!("Credential: none (anonymous endpoint by design)");
             Ok(())
         },
         Err(e) => {
             println!(
-                "Credencial: NO resoluble (fuente: {}) — {e}",
+                "Credential: NOT resolvable (source: {}) — {e}",
                 provider.auth.label()
             );
             Err(CliExit::ConfigError(format!(
-                "no se pudo resolver la credencial del provider '{}': {e}",
+                "could not resolve the credential for provider '{}': {e}",
                 provider.id
             )))
         },
@@ -195,26 +195,26 @@ async fn diagnose_reachability(provider: &ProviderConfig) -> CliExit {
 
     match llm_wire::build_embedding_provider(&opts, &providers, false).await {
         Ok(Some(conn)) => {
-            println!("Conexión: OK — endpoint alcanzable");
-            println!("  Dimensión servida: {}", conn.embedding_dim());
+            println!("Connection: OK — endpoint reachable");
+            println!("  Dimension served: {}", conn.embedding_dim());
             CliExit::Success
         },
         Ok(None) => {
             // `Ok(None)` means the slot produced no remote endpoint at all.
             // It used to also mean "the local ONNX pool serves this provider",
             // and that reading is what made `doctor` exit 0 for a backend that
-            // no longer existed (ADR-0004 paso 6). With the `local_onnx` kind
+            // no longer existed (ADR-0004 step 6). With the `local_onnx` kind
             // gone, an explicit id that resolves to nothing is a config error.
-            println!("Conexión: el provider no se resolvió como endpoint remoto de embeddings");
+            println!("Connection: the provider did not resolve as a remote embeddings endpoint");
             CliExit::ConfigError(format!(
-                "el provider '{}' no es un endpoint remoto de embeddings",
+                "the provider '{}' is not a remote embeddings endpoint",
                 provider.id
             ))
         },
         Err(CliExit::ConfigError(msg)) => {
-            println!("Conexión: NO alcanzable — {msg}");
+            println!("Connection: NOT reachable — {msg}");
             CliExit::NetworkError(format!(
-                "el provider de embeddings '{}' no es alcanzable: {msg}",
+                "the embeddings provider '{}' is not reachable: {msg}",
                 provider.id
             ))
         },
@@ -227,7 +227,7 @@ async fn diagnose_reachability(provider: &ProviderConfig) -> CliExit {
 /// The budget block keeps ONLY what the run really honours: `--max-chars`
 /// (or `WEBFANG_MAX_CHARS`) and the relevance threshold, each with its
 /// origin. The `[[model_profiles]]` numbers are **historical metadata** —
-/// they describe the local ONNX models ADR-0004 paso 6 retired, and no run
+/// they describe the local ONNX models ADR-0004 step 6 retired, and no run
 /// consumes them, so they are printed with the profiles and labelled as
 /// history (issue #2106).
 ///
@@ -240,25 +240,25 @@ fn print_profile_and_budget(
 ) -> Result<(), CliExit> {
     let max_chars = crate::cli::commands::blocks::governing_budget(args, profiles)?;
     let max_chars_origin = if args.max_chars_explicit {
-        "operatorio"
+        "operator"
     } else {
         "profile (default granite-97m)"
     };
     let threshold_origin = if args.threshold_explicit {
-        "operatorio"
+        "operator"
     } else {
-        "default del spec"
+        "spec default"
     };
 
-    println!("\nBudget del cleaner:");
-    println!("  --max-chars (o WEBFANG_MAX_CHARS): {max_chars} ({max_chars_origin})");
+    println!("\nCleaner budget:");
+    println!("  --max-chars (or WEBFANG_MAX_CHARS): {max_chars} ({max_chars_origin})");
     println!(
-        "  umbral de relevancia: {} ({threshold_origin})\n",
+        "  relevance threshold: {} ({threshold_origin})\n",
         args.threshold_value.unwrap_or(0.3)
     );
 
     let registry = ModelProfileRegistry::new(profiles.clone());
-    println!("\nMetadata histórica de perfiles de modelo (ADR-0004 paso 4):\n");
+    println!("\nHistorical model-profile metadata (ADR-0004 step 4):\n");
     crate::cli::commands::blocks::print_historical_profiles(&registry);
     Ok(())
 }

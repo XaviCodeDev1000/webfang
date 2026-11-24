@@ -5,4 +5,4 @@ expression: redacted
   <TIMESTAMP> ERROR <MODULE>: Failed to parse sitemap, error: <PARSE_FAILURE>
     at <FILE>.rs:<LINE>
 
-Error: URL discovery failed: error interno: parse: <PARSE_FAILURE>
+Error: URL discovery failed: internal error: parse: <PARSE_FAILURE>

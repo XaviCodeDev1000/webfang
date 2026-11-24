@@ -112,21 +112,21 @@ pub(crate) fn parse_rate_limit_burst(s: &str) -> Result<Option<u32>, String> {
         return Ok(None);
     }
     match s.parse::<u32>() {
-        Ok(0) => Err(
-            "--rate-limit-burst debe ser >= 1 (0 no permite ningún request en ráfaga)".to_string(),
-        ),
+        Ok(0) => {
+            Err("--rate-limit-burst must be >= 1 (0 allows no requests in a burst)".to_string())
+        },
         Ok(v) => Ok(Some(v)),
         // Spelled as a whole number but too wide for u32: an explicit request
         // we cannot honour, so fail rather than substitute a different value.
         Err(_) if looks_like_integer(s) => Err(format!(
-            "--rate-limit-burst «{s}» está fuera del rango admitido (debe estar entre 1 y {})",
+            "--rate-limit-burst «{s}» is outside the allowed range (must be between 1 and {})",
             u32::MAX
         )),
         // Not a number and not a keyword (#1813): a typo. Same rejection
         // shape as the out-of-range arm so the operator sees one consistent
         // Spanish message for every invalid burst.
         Err(_) => Err(format!(
-            "--rate-limit-burst «{s}» no es un número (debe estar entre 1 y {})",
+            "--rate-limit-burst «{s}» is not a number (must be between 1 and {})",
             u32::MAX
         )),
     }
@@ -153,7 +153,7 @@ fn looks_like_integer(s: &str) -> bool {
 /// timeout), so reject them up front with a clear Spanish usage error (exit 64
 /// once `parse_args` maps the clap error). See issue #797.
 pub(crate) fn parse_selector(s: &str) -> Result<String, String> {
-    Selector::parse(s).map_err(|e| format!("selector CSS inválido «{s}»: {e}"))?;
+    Selector::parse(s).map_err(|e| format!("invalid CSS selector «{s}»: {e}"))?;
     Ok(s.to_string())
 }
 
@@ -167,8 +167,8 @@ pub(crate) fn parse_selector(s: &str) -> Result<String, String> {
 /// credentials through `CrawlOptions::url`.
 pub(crate) fn parse_seed_url(s: &str) -> Result<ValidUrl, String> {
     // The ScraperError display is already the Spanish user-facing message
-    // ("URL inválida: …") and clap names the offending value itself, so no
-    // extra prefix is added (which would duplicate "URL inválida").
+    // (the domain layer rejects the URL with a formatted error) and clap names
+    // the offending value itself, so no extra prefix is added.
     ValidUrl::parse(s).map_err(|e| e.to_string())
 }
 

@@ -68,12 +68,12 @@ fn redacted_base_url(base_url: &url::Url) -> String {
 /// operator typed is never presented as a default.
 pub fn print_provider_block(provider: &ProviderConfig, explicit: bool) {
     if explicit {
-        println!("(origen: operatorio — --embedding-provider / WEBFANG_EMBEDDING_PROVIDER)");
+        println!("(origin: operator — --embedding-provider / WEBFANG_EMBEDDING_PROVIDER)");
     } else {
-        println!("(origen: default de la config — primer provider con capacidad 'embedding')");
+        println!("(origin: config default — first provider with the 'embedding' capability)");
     }
 
-    println!("Provider configurado:");
+    println!("Configured provider:");
     println!("  id: {}", provider.id);
     println!("  display_name: {}", provider.display_name);
     println!("  kind: {:?}", provider.kind);
@@ -87,10 +87,10 @@ pub fn print_provider_block(provider: &ProviderConfig, explicit: bool) {
             .collect::<Vec<_>>()
     );
     match provider.model.as_deref() {
-        Some(model) => println!("  model: {model} (declarado en la config)"),
+        Some(model) => println!("  model: {model} (declared in the config)"),
         None => println!(
-            "  model: NO declarado — el endpoint remoto lo exige en cada request \
-             (un provider remoto sin `model` falla al construir el adapter)"
+            "  model: NOT declared — the remote endpoint requires it on every request \
+             (a remote provider without `model` fails when building the adapter)"
         ),
     }
     // `allow_loopback` is the PROVIDER's own network policy — "may this
@@ -101,9 +101,9 @@ pub fn print_provider_block(provider: &ProviderConfig, explicit: bool) {
     println!(
         "  allow_loopback: {}",
         if provider.allow_loopback {
-            "true (política de red del provider: permite un endpoint en loopback)"
+            "true (provider network policy: allows a loopback endpoint)"
         } else {
-            "false (política de red del provider: loopback bloqueado por defecto)"
+            "false (provider network policy: loopback blocked by default)"
         }
     );
 
@@ -123,14 +123,14 @@ pub fn print_provider_block(provider: &ProviderConfig, explicit: bool) {
             println!("    allow_host: {h}");
         }
     } else {
-        println!("  network_policy: restringida (solo endpoints públicos, con guard SSRF)");
+        println!("  network_policy: restricted (public endpoints only, with SSRF guard)");
     }
 
     println!("  auth: {}", provider.auth.label());
     match provider.embedding_dim {
-        Some(dim) => println!("  dim declarada: {dim}"),
+        Some(dim) => println!("  declared dim: {dim}"),
         None => println!(
-            "  dim declarada: no declarada en la config — el endpoint la fija en cada request"
+            "  declared dim: not declared in the config — the endpoint fixes it on each request"
         ),
     }
 }
@@ -149,36 +149,36 @@ pub fn proxy_posture_lines(
         .and_then(|p| p.proxy.as_ref())
         .and_then(|spec| registry.resolve(spec).ok());
     let mut lines = vec![
-        "Proxy: no se usa — el entorno HTTP_PROXY/HTTPS_PROXY/ALL_PROXY se ignora por diseño;"
+        "Proxy: not used — the HTTP_PROXY/HTTPS_PROXY/ALL_PROXY environment is ignored by design;"
             .to_string(),
     ];
     match proxy {
         None => lines.push(
-            "  el egreso es directo y el guard SSRF resuelve siempre el destino real (#2500)."
+            "  egress is direct and the SSRF guard always resolves the real destination (#2500)."
                 .to_string(),
         ),
         Some(p) => {
             lines.push(format!(
-                "  proxy efectivo: origen '{}' ({}), sin credenciales en la salida",
+                "  effective proxy: origin '{}' ({}), no credentials in the output",
                 p.origin(),
                 p.proxy_id()
-                    .map(|id| format!("catálogo [[proxies]] id '{id}'"))
-                    .unwrap_or_else(|| "tabla inline del provider".to_string())
+                    .map(|id| format!("[[proxies]] catalog id '{id}'"))
+                    .unwrap_or_else(|| "provider inline table".to_string())
             ));
             let policy = p.endpoint_policy();
             lines.push(format!(
-                "  política del proxy: allow_loopback={}, cidrs={}, hosts={}",
+                "  proxy policy: allow_loopback={}, cidrs={}, hosts={}",
                 policy.allow_loopback,
                 policy.network_policy.allow_cidrs.len(),
                 policy.network_policy.allow_hosts.len()
             ));
             lines.push(format!(
-                "  autenticación del proxy: {}",
-                p.auth().map(|a| a.password.label()).unwrap_or("anónima")
+                "  proxy authentication: {}",
+                p.auth().map(|a| a.password.label()).unwrap_or("anonymous")
             ));
             lines.push(
-                "  DNS: la resolución del destino la delega el proxy (sin resolución local);\
-                 el guard SSRF valida cada dial del proxy."
+                "  DNS: destination resolution is delegated to the proxy (no local resolution);\
+                 the SSRF guard validates every proxy dial."
                     .to_string(),
             );
         },
@@ -211,7 +211,7 @@ pub fn print_historical_profiles(registry: &ModelProfileRegistry) {
     for id in registry.ids() {
         match registry.resolve(id) {
             Ok(profile) => print_historical_profile(&profile),
-            Err(e) => println!("perfil: {id} (no se pudo resolver: {e})"),
+            Err(e) => println!("profile: {id} (could not resolve: {e})"),
         }
     }
 
@@ -226,22 +226,25 @@ fn print_historical_profile(profile: &crate::domain::model_profile::ModelProfile
         ProfileProvenance::OperatorOverride => "operator-override",
     };
 
-    println!("perfil: {} ({provenance_label})", profile.id);
+    println!("profile: {} ({provenance_label})", profile.id);
     println!("  citation: {}", profile.citation);
     println!("  schema_version: {}", profile.schema_version);
-    println!("  dim (nativa): {}", profile.dim);
-    println!("  output_dim (efectiva en vault): {}", profile.output_dim());
+    println!("  dim (native): {}", profile.dim);
+    println!(
+        "  output_dim (effective in vault): {}",
+        profile.output_dim()
+    );
     println!("  context: {} tokens", profile.context);
     println!("  chars_per_token: {}", profile.chars_per_token);
     println!(
-        "  budget derivado (contexto × chars_per_token): {} caracteres",
+        "  derived budget (context × chars_per_token): {} characters",
         profile.max_chars()
     );
 
     if profile.provenance == ProfileProvenance::OperatorOverride {
-        println!("  ATENCIÓN: el operador sobrescribió la identidad auditada (dim / matryoshka).");
-        println!("  El perfil ya no es repo-verified; la cita sigue siendo del repo por");
-        println!("  rastreabilidad, y el valor declarado es el del operador.");
+        println!("  WARNING: the operator overrode the audited identity (dim / matryoshka).");
+        println!("  The profile is no longer repo-verified; the citation is still from the");
+        println!("  repo for traceability, and the declared value is the operator's.");
     }
 }
 
@@ -273,8 +276,8 @@ mod tests {
     fn direct_posture_keeps_the_2500_wording() {
         let registry = ProxyRegistry::default();
         let lines = proxy_posture_lines(None, &registry);
-        assert!(lines[0].contains("se ignora por diseño"));
-        assert!(lines.join("\n").contains("el egreso es directo"));
+        assert!(lines[0].contains("ignored by design"));
+        assert!(lines.join("\n").contains("egress is direct"));
     }
 
     fn budget_args(explicit: bool, value: Option<usize>) -> crate::cli::args::SubcommandArgs {
@@ -341,9 +344,12 @@ mod tests {
         let registry = ProxyRegistry::default();
         let lines = proxy_posture_lines(Some(&config), &registry).join("\n");
         assert!(lines.contains("127.0.0.1:8888"), "origin: {lines}");
-        assert!(lines.contains("tabla inline"), "provenance: {lines}");
         assert!(
-            lines.contains("autenticación del proxy: env"),
+            lines.contains("provider inline table"),
+            "provenance: {lines}"
+        );
+        assert!(
+            lines.contains("proxy authentication: env"),
             "label: {lines}"
         );
         assert!(lines.contains("DNS:"), "delegation notice: {lines}");

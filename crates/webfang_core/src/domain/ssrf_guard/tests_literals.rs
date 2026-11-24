@@ -139,7 +139,7 @@ fn reject_url_blocks_forbidden_literals_all_forms() {
         let err = reject_forbidden_literal_url(&url)
             .expect_err("forbidden literal must be rejected at entry");
         assert!(
-            err.to_string().contains("SSRF detectado"),
+            err.to_string().contains("SSRF detected"),
             "rejection of {raw} must carry the SSRF contract text, got: {err}"
         );
     }

@@ -29,12 +29,11 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// Substantial body: the shared minimum-content guard (#706) rejects tiny
 /// pages, so the fixture must carry real content for the batch reference run
 /// to actually produce a `.md`.
-const PAGE_BODY: &str =
-    "contenido de prueba sustancial para superar el guardia de contenido mínimo del extractor. ";
+const PAGE_BODY: &str = "substantial test content to pass the extractor's minimum content guard. ";
 
 fn page_html() -> String {
     format!(
-        "<html><body><article><h1>Guía de prueba</h1><p>{}</p></article></body></html>",
+        "<html><body><article><h1>Test guide</h1><p>{}</p></article></body></html>",
         PAGE_BODY.repeat(12)
     )
 }
@@ -189,18 +188,18 @@ async fn recover_skips_corrupt_lines_and_exits_zero_without_strict() {
     assert_eq!(exit_code(&output), 0, "corrupt lines must not fail recover");
     let stdout = stdout_of(&output);
     assert!(
-        stdout.contains("Convertidas: 1"),
+        stdout.contains("Converted: 1"),
         "one page recovered, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("Corruptas: 1"),
+        stdout.contains("Corrupted: 1"),
         "the corrupt line must be counted, got:\n{stdout}"
     );
     let tree = md_tree(&out);
     assert_eq!(tree.len(), 1, "only the valid page was written");
 }
 
-/// A spool that cannot be opened exits `74` with the Spanish message.
+/// A spool that cannot be opened exits `74` with the error message.
 #[tokio::test]
 async fn recover_missing_spool_exits_74() {
     let scratch = TempDir::new().expect("temp dir");
@@ -211,8 +210,8 @@ async fn recover_missing_spool_exits_74() {
 
     assert_eq!(exit_code(&output), 74, "missing spool is an I/O error");
     assert!(
-        stderr_of(&output).contains("No se pudo abrir el spool"),
-        "the error must name the failure in Spanish"
+        stderr_of(&output).contains("Could not open the spool"),
+        "the error must name the failure"
     );
 }
 

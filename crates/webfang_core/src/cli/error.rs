@@ -43,7 +43,7 @@ pub const EXIT_CONFIG: u8 = 78;
 #[derive(Error, Debug)]
 pub enum CliError {
     /// Configuration file error (invalid TOML, missing fields, etc.)
-    #[error("Configuración: {msg}\n  Sugerencia: {suggestion}")]
+    #[error("Configuration: {msg}\n  Suggestion: {suggestion}")]
     ConfigFile {
         /// Error message describing the issue
         msg: String,
@@ -52,7 +52,7 @@ pub enum CliError {
     },
 
     /// Network-related error (DNS, connection, timeout)
-    #[error("Red: {msg}\n  Sugerencia: {suggestion}")]
+    #[error("Network: {msg}\n  Suggestion: {suggestion}")]
     NetworkError {
         /// Error message describing the network failure
         msg: String,
@@ -61,7 +61,7 @@ pub enum CliError {
     },
 
     /// Some URLs succeeded, others failed
-    #[error("Éxito parcial: {success} exitosos, {failed} fallidos\n  Sugerencia: {suggestion}")]
+    #[error("Partial success: {success} succeeded, {failed} failed\n  Suggestion: {suggestion}")]
     PartialSuccess {
         /// Number of successfully scraped URLs
         success: u32,
@@ -72,7 +72,7 @@ pub enum CliError {
     },
 
     /// Pre-flight validation failed (e.g., unreachable seed URL)
-    #[error("Verificación previa fallida: {msg}\n  Sugerencia: {suggestion}")]
+    #[error("Pre-flight check failed: {msg}\n  Suggestion: {suggestion}")]
     PreflightFailed {
         /// Error message describing the failure
         msg: String,
@@ -85,10 +85,10 @@ impl CliError {
     /// Get the human-readable category name for this error.
     pub fn category(&self) -> &'static str {
         match self {
-            CliError::ConfigFile { .. } => "Configuración",
-            CliError::NetworkError { .. } => "Red",
-            CliError::PartialSuccess { .. } => "Éxito parcial",
-            CliError::PreflightFailed { .. } => "Verificación previa",
+            CliError::ConfigFile { .. } => "Configuration",
+            CliError::NetworkError { .. } => "Network",
+            CliError::PartialSuccess { .. } => "Partial success",
+            CliError::PreflightFailed { .. } => "Pre-flight check",
         }
     }
 
@@ -117,12 +117,12 @@ pub fn format_cli_error(err: &CliError, no_color: bool) -> String {
         CliError::NetworkError { msg, .. } => msg,
         CliError::PartialSuccess {
             success, failed, ..
-        } => &format!("{success} exitosos, {failed} fallidos"),
+        } => &format!("{success} succeeded, {failed} failed"),
         CliError::PreflightFailed { msg, .. } => msg,
     };
     let suggestion = err.suggestion();
 
-    format!("{prefix} {category}\n  {msg}\n  Sugerencia: {suggestion}")
+    format!("{prefix} {category}\n  {msg}\n  Suggestion: {suggestion}")
 }
 
 // ============================================================================
@@ -219,7 +219,7 @@ pub fn forbidden_exit_when_all_blocked(
 ) -> Option<CliExit> {
     (results_len == 0 && failures_len == 0 && blocked > 0).then(|| {
         CliExit::Forbidden(format!(
-            "{blocked} URL(s) bloqueadas por robots.txt. Usa --ignore-robots para omitir esta verificación."
+            "{blocked} URL(s) blocked by robots.txt. Use --ignore-robots to skip this check."
         ))
     })
 }
@@ -241,7 +241,7 @@ pub fn data_format_error_exit_when_extraction_failed(
         .count();
     (extraction_failed > 0).then(|| {
         CliExit::DataFormatError(format!(
-            "extracción sin contenido útil: {extraction_failed} URL(s) devolvieron contenido insuficiente o requieren renderizado de JavaScript"
+            "extraction found no usable content: {extraction_failed} URL(s) returned insufficient content or require JavaScript rendering"
         ))
     })
 }
@@ -302,10 +302,10 @@ pub fn empty_discovery_exit_for(error: &ScraperError) -> Option<CliExit> {
 pub fn empty_discovery_exit_when_seed_refused(seed: &Url) -> Option<CliExit> {
     crate::domain::ssrf_guard::seed_guard_refusal(seed).map(|refusal| {
             CliExit::EmptyDiscovery(format!(
-                "{refusal}. La vista previa no descubrió URLs porque el guard cortó la semilla antes \
-                 de abrir conexión. Para un destino interno de confianza: \
-                 {entry}=1 (IP literal) y {resolver}=1 (nombre que resuelve a una dirección interna). \
-                 Capas y variables: docs/ssrf-layers.md",
+                "{refusal}. The preview discovered no URLs because the guard cut off the seed before \
+                 opening a connection. For a trusted internal destination: \
+                 {entry}=1 (IP literal) and {resolver}=1 (hostname resolving to an internal address). \
+                 Layers and variables: docs/ssrf-layers.md",
                 entry = crate::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV,
                 resolver = crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
             ))
@@ -368,7 +368,7 @@ pub fn permanent_io_error_exit_for(error: &std::io::Error) -> Option<CliExit> {
 ///    variant-dependent classes have no ingestion-reachable variant today.
 #[must_use]
 pub fn ingestion_exit_for(error: &ScraperError) -> CliExit {
-    let message = format!("Falló la ingesta de vectores: {error}");
+    let message = format!("Vector ingestion failed: {error}");
     if let Some(exit) = config_error_exit_for(error) {
         return exit;
     }

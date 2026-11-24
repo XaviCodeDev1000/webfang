@@ -36,7 +36,7 @@ use crate::domain::ssrf_guard::is_forbidden_literal_host_with_policy;
 pub enum ProxyConfigError {
     /// Two `[[proxies]]` entries declare the same `id` — the catalog is
     /// addressed by id, so a duplicate would make the reference ambiguous.
-    #[error("id '{id}' duplicado en [[proxies]]; cada entrada del catálogo necesita un id único")]
+    #[error("duplicate id '{id}' in [[proxies]]; every catalog entry needs a unique id")]
     DuplicateProxyId {
         /// The duplicated catalog id.
         id: String,
@@ -44,7 +44,7 @@ pub enum ProxyConfigError {
     /// A provider references a `[[proxies]]` id that the catalog does not
     /// declare.
     #[error(
-        "el provider referencia el proxy '{proxy_id}' pero ninguna entrada de [[proxies]] lo declara; corregí el id o escribí la tabla inline"
+        "the provider references proxy '{proxy_id}' but no [[proxies]] entry declares it; fix the id or write the inline table"
     )]
     UnknownProxyReference {
         /// The referenced-but-undeclared catalog id.
@@ -55,7 +55,7 @@ pub enum ProxyConfigError {
     /// SOCKS hop would conflate proxy and destination resolution on a single
     /// resolver slot).
     #[error(
-        "esquema '{scheme}' no soportado para el proxy '{origin}' (solo proxies forward http:// y https://, con túnel CONNECT para destinos https); socks5/socks5h no están disponibles en esta versión"
+        "scheme '{scheme}' is not supported for proxy '{origin}' (only http:// and https:// forward proxies, with CONNECT tunneling for https destinations); socks5/socks5h are unavailable in this version"
     )]
     UnsupportedScheme {
         /// The rejected scheme, as written in the config.
@@ -68,7 +68,7 @@ pub enum ProxyConfigError {
     /// authentication composes a plain `user` with an `AuthSource` password
     /// instead (ADR-0021 Decision 1).
     #[error(
-        "la URL del proxy '{origin}' lleva credenciales inline (userinfo); declará el usuario y la password en proxy.auth (auth = {{ user = …, password = {{ source = … }} }})"
+        "proxy URL '{origin}' carries inline credentials (userinfo); declare the user and password in proxy.auth (auth = {{ user = …, password = {{ source = … }} }})"
     )]
     UserInfoNotAllowed {
         /// The offending proxy URL.
@@ -88,7 +88,7 @@ pub enum ProxyConfigError {
     /// The FIN-017 never-allowable ranges stay denied even when a policy
     /// allowlist would otherwise cover them.
     #[error(
-        "el host del proxy '{host}' está prohibido por el guard SSRF (rango never-allowable o literal privado sin opt-in del propio proxy); ajustá allow_loopback / network_policy de la entrada de [[proxies]]"
+        "proxy host '{host}' is forbidden by the SSRF guard (never-allowable range or private literal without the proxy's own opt-in); adjust allow_loopback / network_policy of the [[proxies]] entry"
     )]
     ForbiddenProxyTarget {
         /// The forbidden proxy host.

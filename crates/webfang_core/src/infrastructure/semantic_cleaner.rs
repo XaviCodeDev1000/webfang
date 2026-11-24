@@ -452,7 +452,7 @@ mod tests {
             Box::pin(async move {
                 if texts.len() > fail_gt.unwrap_or(usize::MAX) {
                     return Err(SemanticError::Inference(
-                        "el endpoint de embeddings devolvió el estado 413".to_string(),
+                        "embedding endpoint returned status 413".to_string(),
                     ));
                 }
                 Ok(texts.iter().map(|_| vec![1.0, 2.0, 3.0]).collect())

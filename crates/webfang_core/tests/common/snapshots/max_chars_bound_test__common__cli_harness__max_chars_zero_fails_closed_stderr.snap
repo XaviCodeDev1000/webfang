@@ -1,8 +1,8 @@
 ---
-source: crates/webfang_core/tests/max_chars_bound_test.rs
+source: crates/webfang_core/tests/common/cli_harness.rs
 expression: redacted
 ---
-error: invalid value '0' for '--max-chars <MAX_CHARS>': --max-chars debe ser >= 1 (0 rechazaría todos los chunks)
+error: invalid value '0' for '--max-chars <MAX_CHARS>': --max-chars must be >= 1 (0 would reject every chunk)
 
 For more information, try '--help'.
 

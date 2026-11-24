@@ -105,7 +105,7 @@ async fn issue_1381_dry_run_refused_loopback_seed_exits_2_and_names_the_hatches(
         .arg("--quiet")
         .assert()
         .code(2)
-        .stderr(predicates::str::contains("SSRF detectado"))
+        .stderr(predicates::str::contains("SSRF detected"))
         .stderr(predicates::str::contains("WEBFANG_DISABLE_SSRF_RESOLVER"));
 
     let requests = t.server.received_requests().await.unwrap_or_default();

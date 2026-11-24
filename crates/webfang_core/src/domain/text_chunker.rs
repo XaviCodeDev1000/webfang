@@ -2,7 +2,7 @@
 //!
 //! Defines the contract for splitting text into semantic, located chunks.
 //! The concrete Markdown implementation moved to `webfang_core` when ADR-0004
-//! paso 6 removed the `webfang_ai` crate; the HTML implementation uses
+//! step 6 removed the `webfang_ai` crate; the HTML implementation uses
 //! `HtmlChunker`.
 //!
 //! This trait enables the application layer to orchestrate chunking

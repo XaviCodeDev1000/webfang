@@ -439,7 +439,7 @@ async fn issue_1381_guard_refused_preview_maps_to_exit_2_while_the_library_stays
             panic!("a policy refusal is a null result (2), never a network failure: {exit:?}");
         };
         assert!(
-            reason.contains("prohibida")
+            reason.contains("forbidden")
                 && reason.contains(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
                 // The resolver hatch is still `pub(crate)` in the domain guard, so this
                 // target names its canonical string the way `SSRF_BYPASS` above does.

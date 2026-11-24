@@ -8,15 +8,15 @@
 //! answers "unexpected argument" (exit 64) on the other build, naming
 //! neither the capability nor how to get it. So `--clean-ai`,
 //! `--threshold` and `--offline` render in EVERY cargo
-//! configuration. Post-ADR-0004 paso 6 there is no local-ONNX build any
+//! configuration. Post-ADR-0004 step 6 there is no local-ONNX build any
 //! more: a requested `--clean-ai` whose cleaner wiring failed surfaces at
-//! run time as the export flow's Spanish ConfigError naming
+//! run time as the export flow's ConfigError naming
 //! `--embedding-provider` (exit 78).
 //!
 //! `threshold` is HONESTLY DEFERRED to a hand-built `clap::Arg` in
 //! `spec_command::ai_args` because its parser rejects out-of-range `f32`
-//! values (range 0.0..=1.0, error message "fuera de rango (rango válido:
-//! 0.0 a 1.0)"). The spec SSOT does not carry a `ValueKind::Float` yet;
+//! values (range 0.0..=1.0, error message "out of range (valid range:
+//! 0.0 to 1.0)"). The spec SSOT does not carry a `ValueKind::Float` yet;
 //! modeling it would need both a new kind AND `{value}` substitution
 //! inside `below_min_message`, breaking the existing `Uint` policy
 //! contract. The spec entry below records the identity (id/long/env/
@@ -54,12 +54,12 @@ pub const DEFAULT_THRESHOLD: f32 = 0.3;
 /// the entry is intentionally NOT routed through `build_arg` — the
 /// `ai_args` builder uses its dedicated `AiSlot::Manual` slot so the
 /// custom parser, `allow_negative_numbers = true`, and the verbatim
-/// Spanish range message all stay intact.
+/// range message all stay intact.
 ///
 /// UNGATED: the relevance filter it configures is the cleaner's own logic
 /// and computes over vectors from whatever `EmbeddingPort` the run built.
 ///
-/// # The default is orphaned (ADR-0004, `Umbral por defecto huérfano`)
+/// # The default is orphaned (ADR-0004, "Orphaned default threshold")
 ///
 /// [`DEFAULT_THRESHOLD`] is calibrated for Granite — the local ONNX model
 /// that this ADR removes. Any remote endpoint retains differently under the
@@ -126,7 +126,7 @@ pub const MAX_CHARS: OptionSpec = OptionSpec {
     help: "Maximum characters per chunk before rejection, >= 1 (a chunk-size guard, not a context-window setting; the effective ceiling is the embedding backend's own limit, which a remote endpoint enforces server-side as HTTP 400/413)",
     heading: Some("AI Settings"),
     kind: ValueKind::uint(NumericPolicy::positive(
-        "--max-chars debe ser >= 1 (0 rechazaría todos los chunks)",
+        "--max-chars must be >= 1 (0 would reject every chunk)",
     )),
     visible_aliases: &[],
     feature_gate: None,

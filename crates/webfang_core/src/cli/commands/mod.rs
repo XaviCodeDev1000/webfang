@@ -44,8 +44,8 @@ pub fn validate_vault_output_conflict(opts: &CrawlOptions) -> Result<(), CliExit
         && opts.export.output_dir != std::path::Path::new("output")
     {
         return Err(CliExit::UsageError(format!(
-            "--vault y un directorio de output personalizado ({}) no pueden combinarse: \
-             usá --vault <path> solo (redirige todo el output al vault) o -o <dir> sin --vault",
+            "--vault and a custom output directory ({}) cannot be combined: \
+             use --vault <path> alone (redirects all output to the vault) or -o <dir> without --vault",
             opts.export.output_dir.display()
         )));
     }
@@ -83,8 +83,8 @@ mod tests {
                     "usage error must name the --vault flag: {msg}"
                 );
                 assert!(
-                    msg.contains("no pueden combinarse"),
-                    "usage error must state the contradiction in Spanish: {msg}"
+                    msg.contains("cannot be combined"),
+                    "usage error must state the contradiction in English: {msg}"
                 );
             },
             other => panic!("expected CliExit::UsageError, got {other:?}"),

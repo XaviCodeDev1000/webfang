@@ -2,7 +2,7 @@
 //!
 //! Defines the contract for generating embedding vectors from text.
 //! The concrete implementation lives in `infrastructure::semantic_cleaner`
-//! (ADR-0004 paso 6 removed the local ONNX stack). The trait uses `BoxFuture`
+//! (ADR-0004 step 6 removed the local ONNX stack). The trait uses `BoxFuture`
 //! for dyn-compatibility, matching the pattern established in
 //! [`super::semantic_inspector`] and [`super::repository::VectorRepository`].
 //!
@@ -125,7 +125,7 @@ pub trait EmbeddingPort: Send + Sync {
 ///
 /// # What it does NOT carry
 ///
-/// The "origin" axis (local stack vs remote provider) is gone: ADR-0004 paso 6
+/// The "origin" axis (local stack vs remote provider) is gone: ADR-0004 step 6
 /// removed the local ONNX stack, so the only producer today is a remote
 /// provider the operator consented to — consent is the caller's contract
 /// (`build_tier2_embedding_provider` in `crate::cli::llm_wire` refuses before

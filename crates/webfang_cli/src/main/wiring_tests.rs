@@ -100,7 +100,7 @@ async fn wired_engine_resolves_repair_through_tier2() {
     )
     .expect("engine must exist when adaptive_selectors is enabled");
 
-    let html = "<div class='semantic-hit'>Contenido real</div>".to_owned();
+    let html = "<div class='semantic-hit'>Actual content</div>".to_owned();
     let outcome = engine
         .select_sync_aware(html, ".missing".to_owned(), None)
         .await
@@ -127,7 +127,7 @@ async fn wired_engine_resolves_repair_through_tier2() {
 /// foreign trait for `Arc<T>` — and `Arc<CountingEmbedder>` would be the
 /// otherwise-natural shape.
 ///
-/// Ungated since ADR-0004 paso 6: the fixture needs only the core
+/// Ungated since ADR-0004 step 6: the fixture needs only the core
 /// `EmbeddingPort` trait, and the test it serves (the Tier 2 slot stays
 /// bound to the port it was handed) is a TYPE-level invariant that
 /// outlived the local ONNX pool.
@@ -217,7 +217,7 @@ impl webfang_core::domain::embedding_port::EmbeddingPort for CountingEmbedder {
 /// first if `semantic_inspector` or `EmbeddingSemanticInspector::new`
 /// started resolving its own port.
 ///
-/// The LOCAL pool this test used to model is gone (ADR-0004 paso 6); what
+/// The LOCAL pool this test used to model is gone (ADR-0004 step 6); what
 /// the test still pins is the TYPE separation — the Tier 2 slot and the
 /// vault slot are different types, so the vault slot can never reach the
 /// inspector by accident (issue #1977).
@@ -241,8 +241,8 @@ fn tier2_inspector_stays_bound_to_the_port_it_was_handed() {
 
     // Drive one Tier 2 call through the port-backed inspector.
     let ctx = SemanticContext {
-        target_text: "contenido real".to_owned(),
-        dom_fragments: vec![".contenido".to_owned()],
+        target_text: "actual content".to_owned(),
+        dom_fragments: vec![".content".to_owned()],
         domain_hint: None,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()

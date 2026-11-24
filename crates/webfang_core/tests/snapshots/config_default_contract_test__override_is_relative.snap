@@ -2,4 +2,4 @@
 source: crates/webfang_core/tests/config_default_contract_test.rs
 expression: stderr
 ---
-Error: WEBFANG_CONFIG debe ser una ruta absoluta: webfang/config.toml
+Error: WEBFANG_CONFIG must be an absolute path: webfang/config.toml

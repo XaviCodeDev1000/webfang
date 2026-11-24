@@ -9,8 +9,8 @@ fn test_format_cli_error_config_file() {
         suggestion: "Check syntax".into(),
     };
     let formatted = format_cli_error(&err, false);
-    // CliError::ConfigFile renders its category in Spanish (user-facing).
-    assert!(formatted.contains("Configuración"));
+    // CliError::ConfigFile renders its category in English (user-facing).
+    assert!(formatted.contains("Configuration"));
     assert!(formatted.contains("invalid TOML"));
     assert!(formatted.contains("Check syntax"));
 }
@@ -53,8 +53,8 @@ fn test_format_cli_error_network_error() {
         suggestion: "Check your network".into(),
     };
     let formatted = format_cli_error(&err, false);
-    // CliError::NetworkError renders its category in Spanish (user-facing).
-    assert!(formatted.contains("Red"));
+    // CliError::NetworkError renders its category in English (user-facing).
+    assert!(formatted.contains("Network"));
     assert!(formatted.contains("connection refused"));
 }
 

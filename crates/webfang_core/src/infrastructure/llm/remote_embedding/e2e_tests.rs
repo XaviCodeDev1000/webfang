@@ -81,7 +81,7 @@ async fn wire_shape_matches_contract_golden() {
     impl Respond for Capture {
         fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
             *self.0.lock().unwrap_or_else(|p| p.into_inner()) =
-                Some(serde_json::from_slice(&request.body).expect("body es JSON"));
+                Some(serde_json::from_slice(&request.body).expect("body is JSON"));
             // Single-vector body: the golden posts one input, and the
             // 1:1 count check holds the wire honest.
             ResponseTemplate::new(200).set_body_string(load_fixture("embeddings_tolerant.json"))
@@ -106,15 +106,15 @@ async fn wire_shape_matches_contract_golden() {
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .clone()
-        .expect("el mock debió capturar el body");
+        .expect("the mock must have captured the body");
     let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/remote_embedding/embed_request.golden.json");
     let golden: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&golden_path).expect("golden legible"))
-            .expect("golden es JSON válido");
+        serde_json::from_str(&std::fs::read_to_string(&golden_path).expect("golden is readable"))
+            .expect("golden is valid JSON");
     assert_eq!(
         body, golden,
-        "wire shape cambió: actualizá el golden en commit separado con justificación"
+        "wire shape changed: update the golden in a separate commit with justification"
     );
 }
 
@@ -132,7 +132,7 @@ async fn status_429_then_success_recovers() {
         .respond_with(
             ResponseTemplate::new(429)
                 .insert_header("retry-after", "0")
-                .set_body_string("lento"),
+                .set_body_string("slow"),
         )
         .up_to_n_times(1)
         .mount(&server)
@@ -160,7 +160,7 @@ async fn status_429_then_success_recovers() {
 async fn status_500_exhausts_and_reports_last_status() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    let _guard = mount_embeddings(&server, 500, "caído").await;
+    let _guard = mount_embeddings(&server, 500, "unavailable").await;
     let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let err = adapter
@@ -186,7 +186,7 @@ async fn status_500_exhausts_and_reports_last_status() {
 async fn status_400_is_terminal_without_retry() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
-    let _guard = mount_embeddings(&server, 400, "mala petición").await;
+    let _guard = mount_embeddings(&server, 400, "bad request").await;
     let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let err = adapter
@@ -313,7 +313,7 @@ async fn timeout_is_retried_and_recovery_is_served() {
 // read that fails — the arm that a mid-stream abort would land in.
 
 #[tokio::test]
-async fn body_read_error_maps_to_spanish_inference_error() {
+async fn body_read_error_maps_to_inference_error() {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

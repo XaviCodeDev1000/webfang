@@ -217,10 +217,10 @@ fn feature_gated_flags_keep_identity_across_cfg_combinations() {
     //   of it by tripping exit 78 at runtime.
     // - Un-hiding it is what lets the same operator read what the flag
     //   does BEFORE running anything.
-    // - Post-ADR-0004 paso 6 there is no `ai` cargo feature to reject by
+    // - Post-ADR-0004 step 6 there is no `ai` cargo feature to reject by
     //   name: a requested `--clean-ai` whose wiring could not build a
-    //   cleaner surfaces at run time as the export flow's Spanish
-    //   ConfigError naming `--embedding-provider`.
+    //   cleaner surfaces at run time as the export flow's ConfigError
+    //   naming `--embedding-provider`.
     //
     // Keeping the help text identical in both builds is the point of the
     // assertion: the flag means the same thing whichever build renders it.
@@ -290,40 +290,40 @@ fn help_of(arg: &clap::Arg) -> String {
 fn out_of_bounds_and_malformed_inputs_error_exactly_as_before() {
     let err = parse_args_hermetic(&["--max-pages", "0"]).expect_err("zero pages rejected");
     assert!(
-        err.contains("--max-pages debe ser >= 1 (0 no deja páginas para scrapear)"),
+        err.contains("--max-pages must be >= 1 (0 leaves no pages to scrape)"),
         "got: {err}"
     );
 
     let err = parse_args_hermetic(&["--max-pages", "abc"]).expect_err("text rejected");
     assert!(
-        err.contains("'abc' no es un número válido para --max-pages"),
+        err.contains("'abc' is not a valid number for --max-pages"),
         "got: {err}"
     );
 
     let err = parse_args_hermetic(&["--timeout-secs", "0"]).expect_err("zero timeout rejected");
     assert!(
-        err.contains("--timeout-secs debe ser >= 1 (0 hace que cada request falle al instante)"),
+        err.contains("--timeout-secs must be >= 1 (0 makes every request fail instantly)"),
         "got: {err}"
     );
 
     let err =
         parse_args_hermetic(&["--timeout-secs", "9x"]).expect_err("malformed timeout rejected");
     assert!(
-        err.contains("'9x' no es un número válido para --timeout-secs"),
+        err.contains("'9x' is not a valid number for --timeout-secs"),
         "got: {err}"
     );
 
     let err = parse_args_hermetic(&["--download-concurrency", "0"])
         .expect_err("zero concurrency rejected");
     assert!(
-        err.contains("--download-concurrency debe ser >= 1 (0 causa un deadlock / hang infinito)"),
+        err.contains("--download-concurrency must be >= 1 (0 causes a deadlock / infinite hang)"),
         "got: {err}"
     );
 
     let err = parse_args_hermetic(&["--download-concurrency", "muchas"])
         .expect_err("malformed concurrency rejected");
     assert!(
-        err.contains("'muchas' no es un número válido para --download-concurrency"),
+        err.contains("'muchas' is not a valid number for --download-concurrency"),
         "got: {err}"
     );
 }
@@ -337,7 +337,7 @@ fn download_timeout_zero_and_malformed_error_like_timeout_secs() {
         .expect_err("zero download timeout rejected");
     assert!(
         err.contains(
-            "--download-timeout debe ser >= 1 (0 hace que cada descarga de assets falle al instante)"
+            "--download-timeout must be >= 1 (0 makes every asset download fail instantly)"
         ),
         "got: {err}"
     );
@@ -345,7 +345,7 @@ fn download_timeout_zero_and_malformed_error_like_timeout_secs() {
     let err = parse_args_hermetic(&["--download-timeout", "fast"])
         .expect_err("malformed download timeout rejected");
     assert!(
-        err.contains("'fast' no es un número válido para --download-timeout"),
+        err.contains("'fast' is not a valid number for --download-timeout"),
         "got: {err}"
     );
 }

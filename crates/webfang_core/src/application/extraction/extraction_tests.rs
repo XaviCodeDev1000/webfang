@@ -223,7 +223,7 @@ async fn test_extract_content_poor_fallback_keeps_min_fallback_authority() {
     match &result {
         ScraperError::ExtractionFailed { reason, .. } => {
             assert!(
-                reason.contains("contenido pobre del fallback"),
+                reason.contains("poor fallback content"),
                 "fallback branch error must come from MIN_FALLBACK_CONTENT, got: {reason}"
             );
             assert!(

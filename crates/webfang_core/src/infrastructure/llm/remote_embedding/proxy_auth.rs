@@ -8,7 +8,7 @@
 use crate::error::ai_failure::remote_status;
 use crate::error::SemanticError;
 
-/// Build the Spanish, credential-free 407 diagnostic.
+/// Build the English, credential-free 407 diagnostic.
 #[must_use]
 pub(super) fn proxy_auth_error(
     provider_id: &str,
@@ -25,8 +25,8 @@ pub(super) fn proxy_auth_error(
         );
         remote_status(
             format!(
-                "el proxy del provider '{provider_id}' devolvió {status}: rechazó la credencial \
-                 configurada en proxy.auth (no se reintenta)"
+                "provider '{provider_id}' proxy returned {status}: rejected the configured \
+                 credential in proxy.auth (no retry)"
             ),
             status,
             url,
@@ -41,8 +41,8 @@ pub(super) fn proxy_auth_error(
         );
         remote_status(
             format!(
-                "el proxy del provider '{provider_id}' devolvió {status}: exige autenticación pero no \
-                 se declaró proxy.auth (no se reintenta)"
+                "provider '{provider_id}' proxy returned {status}: requires authentication but no \
+                 proxy.auth was declared (no retry)"
             ),
             status,
             url,

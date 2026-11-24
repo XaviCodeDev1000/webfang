@@ -6,17 +6,17 @@
 
 /// Error raised by spec-driven validators.
 ///
-/// Messages are user-facing (Spanish) and must render byte-identically to
-/// the pre-migration clap parsers — pinned by the parity tests in
+/// Messages are user-facing and must render byte-identically to
+/// the spec-driven clap parsers — pinned by the parity tests in
 /// `cli::args::export`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OptionSpecError {
     /// Raw input cannot be parsed into the option's value kind.
-    #[error("`{raw}` no es {detail}")]
+    #[error("`{raw}` is not {detail}")]
     Parse {
         /// The offending raw input.
         raw: String,
-        /// Completes the Spanish message ("un número entero válido", …).
+        /// Completes the message ("a valid integer", …).
         detail: &'static str,
     },
     /// Raw input cannot be parsed; the option's policy supplied a verbatim
@@ -63,7 +63,7 @@ pub struct OwnedParseMessage {
 /// MCP-stable English wording ("must be at least N" / "must be at most N")
 /// without re-comparing the value or re-reading the spec's
 /// [`crate::domain::options_spec::NumericPolicy`]. The `Display` impl IS the
-/// MCP-stable wording; the Spanish verbatim message stays in
+/// MCP-stable wording; the verbatim CLI message stays in
 /// [`crate::domain::options_spec::NumericPolicy`] and is reached via
 /// [`OptionSpecError::Bound`] for CLI consumers that need it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

@@ -3,8 +3,8 @@ use crate::domain::error::CrawlError;
 
 #[test]
 fn test_invalid_url_error() {
-    let err = ScraperError::invalid_url("URL vacía");
-    assert_eq!(err.to_string(), "URL inválida: URL vacía");
+    let err = ScraperError::invalid_url("empty URL");
+    assert_eq!(err.to_string(), "Invalid URL: empty URL");
 }
 
 #[test]
@@ -19,10 +19,7 @@ fn test_http_error() {
 #[test]
 fn test_readability_error() {
     let err = ScraperError::readability("Failed to parse HTML");
-    assert_eq!(
-        err.to_string(),
-        "Error de legibilidad: Failed to parse HTML"
-    );
+    assert_eq!(err.to_string(), "Readability error: Failed to parse HTML");
 }
 
 #[test]
@@ -76,13 +73,13 @@ fn classify_io_permanent_kind_is_permanent_fatal() {
 #[test]
 fn test_persistence_error_message() {
     let err = ScraperError::persistence("disco lleno");
-    assert_eq!(err.to_string(), "Error de persistencia: disco lleno");
+    assert_eq!(err.to_string(), "Persistence error: disco lleno");
 }
 
 #[test]
 fn test_ingestion_error_message() {
-    let err = ScraperError::ingestion("pipeline abortó");
-    assert_eq!(err.to_string(), "Error de ingestión: pipeline abortó");
+    let err = ScraperError::ingestion("pipeline aborted");
+    assert_eq!(err.to_string(), "Ingestion error: pipeline aborted");
 }
 
 // `rusqlite` is only linked under the `persistence` feature; this triangulation
@@ -100,8 +97,8 @@ fn test_persistence_error_from_rusqlite() {
     let msg = scraper_err.to_string();
     // Display contract: triangulation test — verify real rusqlite error text appears
     assert!(
-        msg.contains("persistencia"),
-        "missing Spanish prefix: {msg}"
+        msg.contains("Persistence error"),
+        "missing English prefix: {msg}"
     );
     assert!(
         msg.contains("no such table"),
@@ -162,7 +159,7 @@ fn inference_message_does_not_name_onnx() {
     let msg = SemanticError::Inference("HTTP 503".to_string()).to_string();
     assert!(!msg.contains("ONNX"), "the message still names ONNX: {msg}");
     assert!(
-        msg.contains("embeddings"),
+        msg.contains("Embedding pipeline"),
         "the message must name the pipeline that failed: {msg}"
     );
 }

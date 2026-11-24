@@ -202,7 +202,7 @@ async fn all_urls_blocked_by_robots_exits_77() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("bloqueadas por robots.txt"),
+        stderr.contains("blocked by robots.txt"),
         "stderr must carry the Spanish robots message, got: {stderr}"
     );
     assert!(

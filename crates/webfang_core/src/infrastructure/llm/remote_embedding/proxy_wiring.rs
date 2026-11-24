@@ -63,7 +63,7 @@ impl RemoteEmbeddingAdapter {
             .ok_or_else(|| ProviderInitError::InvalidBaseUrl {
                 provider_id: config.id.clone(),
                 source: crate::error::ScraperError::Config(format!(
-                    "el provider '{}' no declara `model`: el endpoint remoto lo exige en cada request",
+                    "provider '{}' does not declare `model`: the remote endpoint requires it on every request",
                     config.id
                 )),
             })?;
