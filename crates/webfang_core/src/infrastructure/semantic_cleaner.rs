@@ -20,7 +20,7 @@
 
 use uuid::Uuid;
 
-use crate::domain::embedding_port::EmbeddingPort;
+use crate::domain::embedding_port::{cosine_similarity_fail_closed, EmbeddingPort};
 use crate::domain::entities::content::DocumentChunk;
 use crate::domain::semantic_cleaner::private::Sealed;
 use crate::domain::semantic_cleaner::SemanticCleaner;
@@ -114,6 +114,16 @@ impl SemanticCleanerImpl {
                 embeddings.len()
             )));
         }
+        // One batch shares one embedding space. A dimension-disagreeing vector
+        // used to be truncated by the private zip-based cosine and could WIN a
+        // ranking; reject the batch instead of silently degrading it (S9).
+        let width = embeddings.first().map_or(0, Vec::len);
+        if embeddings.iter().any(|emb| emb.len() != width) {
+            return Err(SemanticError::Inference(format!(
+                "Dimension mismatch in relevance batch: expected {width}, got {:?}",
+                embeddings.iter().map(Vec::len).collect::<Vec<_>>()
+            )));
+        }
         let distances = distances_to_centroid(&embeddings)?;
         let chunks_before = chunks.len();
         let kept = z_score_filter(chunks, embeddings, self.relevance_threshold, &distances);
@@ -143,10 +153,19 @@ fn distances_to_centroid(embeddings: &[Vec<f32>]) -> Result<Vec<f32>, SemanticEr
     for val in &mut centroid {
         *val /= n;
     }
-    Ok(embeddings
+    embeddings
         .iter()
-        .map(|emb| 1.0 - cosine_similarity(emb, &centroid))
-        .collect())
+        .map(|emb| {
+            cosine_similarity_fail_closed(emb, &centroid)
+                .map(|similarity| 1.0 - similarity)
+                .ok_or_else(|| {
+                    SemanticError::Inference(format!(
+                        "Dimension mismatch in relevance scoring: vector {} vs centroid {dim}",
+                        emb.len()
+                    ))
+                })
+        })
+        .collect()
 }
 
 /// Z-score adaptive filtering: chunks whose centroid distance sits more than
@@ -200,18 +219,6 @@ fn warn_aggressive_filter(url: &str, chunks_before: usize, chunks_after: usize) 
             loss_ratio = format!("{:.0}%", loss_ratio * 100.0),
             "Relevance filter discarded >50% of chunks for this page — possible over-aggressive threshold"
         );
-    }
-}
-
-/// Cosine similarity of two non-empty vectors; zero-norm degenerates to 0.0.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        dot / (norm_a * norm_b)
     }
 }
 
@@ -510,6 +517,27 @@ mod tests {
             );
             assert!(!chunk.content.is_empty());
         }
+    }
+
+    /// S9: a mixed-dimension batch must be rejected, never ranked with the
+    /// shorter vector silently truncated to the first vector's width.
+    #[test]
+    fn mixed_dimension_batch_is_rejected_not_ranked() {
+        let cleaner = SemanticCleanerImpl::new(Arc::new(MockEmbeddingPort::new()), 1000, 0.3);
+        let chunks = vec![
+            DocumentChunk::new(Uuid::new_v4(), "", "", "alpha".to_string()),
+            DocumentChunk::new(Uuid::new_v4(), "", "", "beta".to_string()),
+        ];
+        let mixed = vec![vec![1.0, 0.0], vec![1.0, 0.0, 0.0]];
+
+        let err = match cleaner.filter_by_relevance("https://e.test/page", chunks, mixed) {
+            Ok(_) => panic!("a dimension-disagreeing batch must not be ranked"),
+            Err(err) => err,
+        };
+        assert!(
+            matches!(err, SemanticError::Inference(_)),
+            "dimension mismatch must fail closed with Inference, got: {err:?}"
+        );
     }
 
     #[tokio::test]

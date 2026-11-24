@@ -132,13 +132,16 @@ spec and blocks its commit.
   newlines for T10), the fallback keeps `strip_html_tags`. Verified: focused test PASS;
   `infrastructure::semantic_cleaner` + `cleaning_pipelines_regression` PASS; check/clippy/fmt/doc
   gate PASS. Risk: item 2 (what leaves the process) + item 6 (no test covered the real path) —
-  independent RDD review applies to Commit 1.
+  independent RDD review applies to Commit 1 (`0b1de600`; native outcome recorded in L13).
 - T1 `S9` route: inline — RED first: a mixed-dimension batch must error, not rank. Delete the private
   `cosine_similarity`, route `distances_to_centroid`/`filter_by_relevance` through the domain's
   `cosine_similarity_fail_closed`, and reject a dimension-disagreeing batch. Risk: item 3 (the filter
   decides which chunks survive for every caller — export, batch, MCP clean, vault — so a stricter batch
   decision changes their output) + item 6 (no existing test pins reject-vs-degrade on mixed dimensions).
-  Commit 2.
+  Commit 2. **DONE** — RED observed on `mixed_dimension_batch_is_rejected_not_ranked` (the mixed batch
+  was ranked), then GREEN after adding the batch width check and routing `distances_to_centroid`
+  through the domain `cosine_similarity_fail_closed`; the private zip-based cosine was deleted.
+  Verification: full `infrastructure::semantic_cleaner` suite PASS, `ai_boundary_test` PASS.
 - T2 `S10` route: inline — RED first: multi-byte tests (accented Spanish, CJK, emoji) prove the budget is
   counted in characters in `split_into_chunks` and in `build_sub_chunks`. Decide `chars` as the unit of the
   contract: the accepted number changes for non-ASCII text, and that is the contract change.
@@ -464,3 +467,11 @@ changes in this revision.
   two `EnvGuard`s initially stacked in the test deadlocked on the shared `ENV_LOCK` (one guard for
   both variables is the fix); wiremock's loopback is spelled `localhost` so `ssrf_gate` stays armed.
   Commit 1 holds T11; its SHA is recorded at the next task transition.
+- L13: Native RDD review of Commit 1 (`0b1de600`, lineage `review-06c2ce3c9aa4f569`, lenses risk +
+  reliability) was granted by the human and ran to completion. The final capture escalated with
+  `unknown_causality` on findings R3-1 and R3-2; exact-lineage STATUS returned `action: stop`,
+  `reason_code: native_stop_required`, `replayability: manual_action_required`. The transaction is
+  TERMINAL: no scoped correction was offered, no authority was burned, and the escalation neither
+  approves nor blocks delivery — maintainer inspection of the lineage is the only review action,
+  and ordinary repository policy still owns commit/push/PR. R3-1/R3-2 details stay with the review
+  authority; they are not silently reclassified here. Commit 1 SHA: `0b1de600`.
