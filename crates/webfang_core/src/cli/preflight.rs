@@ -274,28 +274,31 @@ pub fn icon(emoji: &str, ascii: &str) -> String {
     }
 }
 
-#[cfg(all(test, not(miri)))] // Command::spawn unsupported by Miri (#775)
+// Miri exclusion is now per test (#2723): only tests that spawn a process
+// carry #[cfg_attr(miri, ignore)] with the #775 reason, so the pure tests
+// in these modules keep running under Miri.
+#[cfg(test)]
 mod tests_adaptive_selectors;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_export_format;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_js_strategy;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_obscura_binary;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_obscura_version;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_path_resolution;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_sink_gates;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_version_probe;
 
 // ============================================================================

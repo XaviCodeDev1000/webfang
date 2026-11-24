@@ -18,12 +18,12 @@ S6 (scope decision, from the accepted suggestion and the user's verbatim accepta
 
 ## Tasks
 
-T1 (S3) — inline — pending — add per-test `#[cfg_attr(miri, ignore)]` gates to the three spawners that lack them, then local guard.
-T2 (S3) — inline — pending — repoint the two stale `UB_SURFACE_ENTRIES` rows from preflight.rs to the child files with discriminating ERE markers + nominal exemptions for pure tests.
-T3 (S3) — inline — pending — verify `check_miri_lane_invariants.sh` no longer short-circuits on `module_gated` and that `test_miri_lane_invariants.sh` is green.
-T4 (S4) — inline — pending — replace the 8 `#[cfg(all(test, not(miri)))]` mod declarations with `#[cfg(test)]`.
-T5 (S5) — inline — pending — scoped Miri run over `cli::preflight::` and record passed/ignored counts.
-T6 (S5) — inline — pending — `workflow_dispatch` ci.yml against the branch and compare Miri (core) test count with baseline run 43897369587.
+T1 (S3) — inline — done in bf7d8f3a — added per-test `#[cfg_attr(miri, ignore)]` gates to the three spawners that lacked them.
+T2 (S3) — inline — done in bf7d8f3a — repointed the two stale `UB_SURFACE_ENTRIES` rows from preflight.rs to four child-file entries with discriminating ERE markers; no nominal exemption was needed (markers match only gated spawners).
+T3 (S3) — inline — done in bf7d8f3a — `bash -n`, guard and harness green; guard output no longer contains `preflight.rs is gated at the module level`, so it inspects the new entries. `cargo check`, clippy and fmt --check green.
+T4 (S4) — inline — done in <pending commit> — replaced the 8 `#[cfg(all(test, not(miri)))]` mod declarations with `#[cfg(test)]`; zero remain in preflight.rs and the guard/harness stayed green.
+T5 (S5) — inline — done in <pending commit> — isolated scoped Miri (`RUSTUP_TOOLCHAIN=nightly-2026-08-27`, the job's MIRIFLAGS, `cargo miri test --lib -- cli::preflight:: --test-threads=1`) reports 61 passed, 0 failed, 18 ignored, 2618 filtered out; CARGO_TARGET_DIR confirmed as the worktree's own.
+T6 (S5) — inline — pending — `workflow_dispatch` ci.yml against the branch and compare Miri (core) test count with baseline run 43897369587 (1067 passed, 100 ignored). Blocked on explicit push authorization.
 T7 (S6) — inline — pending — open the umbrella issue for project-wide Miri gate recovery.
 
 ## Log
