@@ -32,7 +32,7 @@ impl OptionSpec {
     /// Unknown gates fail closed (inactive) until wired here.
     const fn gate_active(gate: &[u8]) -> bool {
         if Self::bytes_eq(gate, b"ai") {
-            // ADR-0004 paso 6: the `ai` Cargo feature is GONE, so this gate
+            // ADR-0004 step 6: the `ai` Cargo feature is GONE, so this gate
             // has a FIXED value. The decision recorded here is `false` — the
             // value the default (feature-off) build already produced — so a
             // spec that still names `ai` stays INACTIVE instead of silently
@@ -163,13 +163,13 @@ impl OptionSpec {
             },
             _ => OptionSpecError::Parse {
                 raw: raw.to_string(),
-                detail: "un valor válido",
+                detail: "a valid value",
             },
         }
     }
 
     /// Render the parse-failure error per the policy: verbatim template with
-    /// `{value}` substitution when present, default `` `{raw}` no es … ``
+    /// `{value}` substitution when present, default `` `{raw}` is not … ``
     /// shape otherwise. Unbounded entries (`None`) render the canonical
     /// integer message.
     fn parse_failure_error(&self, raw: &str, policy: Option<&NumericPolicy>) -> OptionSpecError {

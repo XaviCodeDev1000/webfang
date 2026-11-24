@@ -12,12 +12,12 @@ pub struct ForbiddenLiteral {
 
 impl std::fmt::Display for ForbiddenLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Spanish user-facing copy; the `SSRF detectado` prefix is the contract
+        // English user-facing copy; the `SSRF detected` prefix is the contract
         // the MCP probe suite asserts (`ssrf_probe_test.rs`).
         write!(
             f,
-            "SSRF detectado: la IP {} del host '{}' está prohibida \
-             (acceso a red interna/cloud metadata bloqueado)",
+            "SSRF detected: IP {} of host '{}' is forbidden \
+             (internal network/cloud metadata access blocked)",
             self.ip, self.host
         )
     }

@@ -18,11 +18,9 @@ use super::chosen_by_operator;
 pub(crate) fn parse_threshold(s: &str) -> Result<f32, String> {
     let val: f32 = s
         .parse()
-        .map_err(|_| format!("'{s}' no es un número válido"))?;
+        .map_err(|_| format!("'{s}' is not a valid number"))?;
     if !(0.0..=1.0).contains(&val) {
-        return Err(format!(
-            "'{s}' está fuera de rango (rango válido: 0.0 a 1.0)"
-        ));
+        return Err(format!("'{s}' is out of range (valid range: 0.0 to 1.0)"));
     }
     Ok(val)
 }
@@ -59,7 +57,7 @@ pub(crate) fn parse_threshold(s: &str) -> Result<f32, String> {
 ///
 /// # Errors
 ///
-/// Returns the Spanish below-min message from the spec policy for `0`, and the
+/// Returns the below-min message from the spec policy for `0`, and the
 /// canonical parse-failure message for anything that is not a number. clap
 /// renders it as a usage error (exit 64) before any network I/O.
 pub(crate) fn parse_max_chars(s: &str) -> Result<usize, String> {
@@ -112,7 +110,7 @@ pub struct AiArgs {
 
     /// Reject every embeddings provider (remote or loopback) with exit 78: no local model since 3.0.0
     ///
-    /// UNGATED. Since ADR-0004 paso 6 there is no local backend to constrain:
+    /// UNGATED. Since ADR-0004 step 6 there is no local backend to constrain:
     /// the flag is read by the embeddings preflight, which rejects EVERY
     /// embeddings provider — loopback included — with exit 78 (#2166).
     pub offline: bool,
@@ -337,7 +335,7 @@ mod spec_parity_tests {
 
     /// Slice 5a pin: the hand-built `threshold` slot's surface stays
     /// byte-exact against the pre-migration derive. Custom f32 parser
-    /// plus range check plus verbatim Spanish error messages plus the
+    /// plus range check plus verbatim error messages plus the
     /// `allow_negative_numbers` escape hatch (#759, range 0.0..=1.0).
     #[test]
     fn manual_threshold_surface_is_pinned() {
@@ -381,21 +379,21 @@ mod spec_parity_tests {
     #[test]
     fn out_of_bounds_and_malformed_inputs_error_exactly_as_before() {
         // The pre-migration `parse_threshold` produced:
-        //   `'{s}' no es un número válido`                  on parse failure
-        //   `'{s}' está fuera de rango (rango válido: 0.0 a 1.0)` on range
+        //   `'{s}' is not a valid number`                    on parse failure
+        //   `'{s}' is out of range (valid range: 0.0 to 1.0)` on range
         // Both messages must round-trip through the spec-built command.
         let err = parse_args_hermetic(&["--threshold", "abc"]).expect_err("non-numeric rejected");
-        assert!(err.contains("'abc' no es un número válido"), "got: {err}");
+        assert!(err.contains("'abc' is not a valid number"), "got: {err}");
 
         let err = parse_args_hermetic(&["--threshold", "1.5"]).expect_err("above range rejected");
         assert!(
-            err.contains("'1.5' está fuera de rango (rango válido: 0.0 a 1.0)"),
+            err.contains("'1.5' is out of range (valid range: 0.0 to 1.0)"),
             "got: {err}"
         );
 
         let err = parse_args_hermetic(&["--threshold", "-0.1"]).expect_err("below range rejected");
         assert!(
-            err.contains("'-0.1' está fuera de rango (rango válido: 0.0 a 1.0)"),
+            err.contains("'-0.1' is out of range (valid range: 0.0 to 1.0)"),
             "got: {err}"
         );
     }

@@ -3,5 +3,5 @@ source: crates/webfang_mcp/tests/mcp_behavioral_test.rs
 assertion_line: 873
 expression: "redact_path(&text, container_tmp.path())"
 ---
-Exportación completada: 1 documentos → [OUT_DIR]/export.jsonl
-Se escribió además un archivo de procedencia ([OUT_DIR]/export.jsonl.provenance.json), que acompaña al contenido exportado.
+Export completed: 1 documents → [OUT_DIR]/export.jsonl
+A provenance file ([OUT_DIR]/export.jsonl.provenance.json) was also written, accompanying the exported content.

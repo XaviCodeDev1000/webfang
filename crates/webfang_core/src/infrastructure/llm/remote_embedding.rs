@@ -2,15 +2,15 @@
 //!
 //! Implements [`EmbeddingPort`] for
 //! [`ProviderKind::OpenAiCompatible`](crate::domain::providers::ProviderKind)
-//! so vault search works with non-384d dims. Since ADR-0004 paso 6 it is the
+//! so vault search works with non-384d dims. Since ADR-0004 step 6 it is the
 //! only embedding adapter with a production producer: it is selected through
 //! the embedding provider slot (`--embedding-provider` / default resolution).
 //!
 //! Wire contract (`fixtures/remote_embedding/`):
-//! - request `{model, input}` to `{base_url}/embeddings`, con cabecera
-//!   `Authorization: Bearer` **sólo si** la fuente configurada aporta
-//!   credencial: `auth: {source: "none"}` envía la petición anónima, sin
-//!   sintetizar ni una cabecera vacía;
+//! - request `{model, input}` to `{base_url}/embeddings`, with an
+//!   `Authorization: Bearer` header **only if** the configured source provides
+//!   a credential: `auth: {source: "none"}` sends the request anonymously,
+//!   without synthesizing even an empty header;
 //! - response vectors map 1:1 to inputs in order;
 //! - tolerant parse (never `deny_unknown_fields`, `usage` is `Option` +
 //!   `#[serde(default)]`); missing `data` / empty vectors are
@@ -81,6 +81,8 @@ pub struct EmbeddingRunMetrics {
     pub total_tokens: u64,
     /// Number of embedding requests made in this run.
     pub request_count: u64,
+    /// Number of vectors rejected by the declared-width guard in this run.
+    pub dimension_rejections: u64,
 }
 
 /// Remote embedding adapter: `EmbeddingPort` over `POST {base_url}/embeddings`.
@@ -98,35 +100,36 @@ pub struct RemoteEmbeddingAdapter {
     http: wreq::Client,
     base_url: Url,
     model: String,
-    /// La credencial resuelta, o [`None`] cuando el provider declara
-    /// `auth: {source: "none"}` — es decir, un endpoint anónimo por diseño.
+    /// The resolved credential, or [`None`] when the provider declares
+    /// `auth: {source: "none"}` — that is, an anonymous endpoint by design.
     ///
-    /// `Option` y no una `ApiKey` vacía: la ausencia de credencial se
-    /// expresa como **ausencia de cabecera**, nunca como `Bearer ` — que un
-    /// servidor puede rechazar como key inválida en vez de entender como
-    /// petición anónima (invariante 2 de [`crate::domain::auth_source`]).
+    /// `Option` rather than an empty `ApiKey`: the absence of a credential is
+    /// expressed as **absence of a header**, never as `Bearer ` — which a
+    /// server may reject as an invalid key instead of understanding it as an
+    /// anonymous request (invariant 2 of [`crate::domain::auth_source`]).
     api_key: Option<ApiKey>,
-    /// Etiqueta de la fuente declarada (`"none"`, `"env"`, `"keyring"`,
-    /// `"encrypted_file"`), para que un 401 pueda decir en el log si se
-    /// mandó credencial o no. Nunca deriva del secreto.
+    /// Label of the declared source (`"none"`, `"env"`, `"keyring"`,
+    /// `"encrypted_file"`), so a 401 can state in the log whether a
+    /// credential was sent or not. Never derived from the secret.
     auth_source: &'static str,
     /// ADR-0021 proxy-auth provenance for the 407 diagnostic; never a secret.
     proxy_auth_configured: bool,
     provider_id: String,
     pinned_dim: Option<usize>,
     dim: OnceLock<usize>,
-    /// Acumuladores de usage por corrida (thread-safe).
-    /// prompt_tokens + total_tokens + request_count se incrementan en cada
-    /// llamada exitosa a post_embeddings. Se leen vía `metrics()` al final
-    /// de la corrida para el ScrapeSummary.
+    /// Per-run usage accumulators (thread-safe).
+    /// prompt_tokens + total_tokens + request_count are incremented on every
+    /// successful post_embeddings call. They are read via `metrics()` at the
+    /// end of the run for the ScrapeSummary.
     usage_prompt_tokens: std::sync::atomic::AtomicU64,
     usage_total_tokens: std::sync::atomic::AtomicU64,
     usage_request_count: std::sync::atomic::AtomicU64,
+    dimension_rejections: std::sync::atomic::AtomicU64,
 }
 
 /// Render an error together with its `source` chain.
 ///
-/// The SSRF resolver's diagnosis (including the Spanish message that names
+/// The SSRF resolver's diagnosis (including the message that names
 /// the missing `allow_hosts` field) lives at the END of the transport error's
 /// source chain, not in its top-level `Display`: measured, a refused dial
 /// renders as `error sending request for uri (…) → client error (Connect) →
@@ -177,18 +180,16 @@ fn parse_embedding_body(
     expected_inputs: usize,
 ) -> Result<ParsedEmbeddingBody, SemanticError> {
     let parsed: EmbeddingResponse = serde_json::from_str(body).map_err(|e| {
-        SemanticError::Inference(format!(
-            "el endpoint de embeddings devolvió un cuerpo inválido: {e}"
-        ))
+        SemanticError::Inference(format!("embedding endpoint returned an invalid body: {e}"))
     })?;
     if parsed.data.is_empty() {
         return Err(SemanticError::Inference(
-            "el endpoint de embeddings devolvió `data` vacío".to_string(),
+            "embedding endpoint returned empty `data`".to_string(),
         ));
     }
     if parsed.data.len() != expected_inputs {
         return Err(SemanticError::Inference(format!(
-            "el endpoint de embeddings devolvió {} vectores para {expected_inputs} textos",
+            "embedding endpoint returned {} vectors for {expected_inputs} texts",
             parsed.data.len()
         )));
     }
@@ -196,7 +197,7 @@ fn parse_embedding_body(
     for datum in &parsed.data {
         if datum.embedding.is_empty() {
             return Err(SemanticError::Inference(
-                "el endpoint de embeddings devolvió un vector vacío".to_string(),
+                "embedding endpoint returned an empty vector".to_string(),
             ));
         }
         vecs.push(datum.embedding.clone());
@@ -269,7 +270,7 @@ impl RemoteEmbeddingAdapter {
         if let Some(pinned) = self.pinned_dim {
             if actual != pinned {
                 return Err(SemanticError::Inference(format!(
-                    "dimensión declarada {pinned} != remota {actual} para provider '{}'",
+                    "declared dimension {pinned} != remote dimension {actual} for provider '{}'",
                     self.provider_id
                 )));
             }
@@ -309,9 +310,7 @@ impl EmbeddingPort for RemoteEmbeddingAdapter {
                     .embed_batch_impl(std::slice::from_ref(&text.to_owned()), request_id)
                     .await?;
                 batch.into_iter().next().ok_or_else(|| {
-                    SemanticError::Inference(
-                        "el endpoint de embeddings devolvió `data` vacío".to_string(),
-                    )
+                    SemanticError::Inference("embedding endpoint returned empty `data`".to_string())
                 })
             }
             .instrument(span),
@@ -369,7 +368,26 @@ impl RemoteEmbeddingAdapter {
             if texts.is_empty() {
                 return Ok(Vec::new());
             }
-            self.post_embeddings(texts).await
+            let declared = self.embedding_dim();
+            if declared == 0 {
+                // A cold adapter has no contract width. Never adopt one from
+                // a response: cut before any provider request is sent.
+                return Err(dimension::rejection_error(&self.provider_id, 0));
+            }
+            let vectors = self.post_embeddings(texts).await?;
+            let rejected = dimension::rejected_count(&vectors, declared);
+            if rejected > dimension::MAX_TOLERATED_REJECTIONS {
+                self.dimension_rejections
+                    .fetch_add(rejected as u64, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!(
+                    provider_id = %self.provider_id,
+                    declared,
+                    rejected,
+                    "remote embedding batch aborted on dimension mismatch"
+                );
+                return Err(dimension::rejection_error(&self.provider_id, declared));
+            }
+            Ok(vectors)
         }
         .instrument(span)
         .await
@@ -391,10 +409,14 @@ impl RemoteEmbeddingAdapter {
             request_count: self
                 .usage_request_count
                 .load(std::sync::atomic::Ordering::Relaxed),
+            dimension_rejections: self
+                .dimension_rejections
+                .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
 
+pub(crate) mod dimension;
 #[cfg(test)]
 mod fixtures;
 mod gate;

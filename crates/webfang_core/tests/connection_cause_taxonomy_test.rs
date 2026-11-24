@@ -215,11 +215,11 @@ async fn the_user_facing_message_names_the_cause() {
     let dns = run_batch("http://webfang-lab-nonexistent.invalid/").errors;
 
     assert!(
-        refused.contains("el servidor rechazó la conexión"),
+        refused.contains("the server refused the connection"),
         "the refused connection's message must name its cause; messages: {refused}"
     );
     assert!(
-        dns.contains("no se pudo resolver el nombre del dominio"),
+        dns.contains("could not resolve the domain name"),
         "the resolution failure's message must name its cause; messages: {dns}"
     );
     assert_ne!(

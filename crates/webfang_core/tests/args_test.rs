@@ -81,13 +81,9 @@ fn test_cpu_cores_and_reject_invalid_values() {
     clean_env();
 
     let cases: &[(&str, &str, &str)] = &[
-        ("--cpu-cores", "0", "cpu-cores debe ser > 0"),
-        ("--ram-budget", "0", "ram-budget debe ser > 0"),
-        (
-            "--ram-budget",
-            "banana",
-            "no es un tamaño de memoria válido",
-        ),
+        ("--cpu-cores", "0", "cpu-cores must be > 0"),
+        ("--ram-budget", "0", "ram-budget must be > 0"),
+        ("--ram-budget", "banana", "is not a valid memory size"),
     ];
 
     for (flag, value, expected_msg) in cases {
@@ -331,7 +327,7 @@ fn test_args_to_crawl_options_full_parity() {
 
 /// EVERY AI flag reaches `AiConfig` in EVERY cargo configuration.
 ///
-/// ADR-0004 paso 6 removed the `ai` Cargo feature and the whole local-ONNX
+/// ADR-0004 step 6 removed the `ai` Cargo feature and the whole local-ONNX
 /// stack with it, so there is no configuration left where the semantic
 /// cleaner is unreachable: the cleaner runs over whatever `EmbeddingPort` the
 /// run built, remote included. The `AiConfig` projection is therefore ONE
@@ -502,8 +498,8 @@ fn malformed_seed_url_is_a_usage_error_not_a_panic() {
     let err = result.expect_err("malformed URL must be rejected at the argv boundary");
     assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
     assert!(
-        err.to_string().contains("URL inválida"),
-        "the Spanish boundary error must surface in the usage message: {err}"
+        err.to_string().contains("Invalid URL"),
+        "the English boundary error must surface in the usage message: {err}"
     );
 }
 

@@ -104,7 +104,7 @@ fn assert_policy_refusal(err: &ScraperError) {
     }
     let msg = err.to_string();
     assert!(
-        msg.contains("SSRF detectado"),
+        msg.contains("SSRF detected"),
         "the carried guard cause must surface verbatim, got: {msg}"
     );
     assert!(!msg.contains("WAF/CAPTCHA"), "no phantom WAF, got: {msg}");
@@ -632,8 +632,8 @@ async fn test_mock_empty_body_graceful_handling() {
     match &err {
         ScraperError::ExtractionFailed { reason, .. } => {
             assert!(
-                reason.contains("contenido insuficiente"),
-                "Spanish reason must state insufficient content: {reason}"
+                reason.contains("insufficient content"),
+                "English reason must state insufficient content: {reason}"
             );
         },
         other => panic!("expected ExtractionFailed, got: {other}"),
@@ -642,7 +642,7 @@ async fn test_mock_empty_body_graceful_handling() {
 
 /// MCP funnel over the deterministic `js_shell.html` fixture (#706): a JS-only
 /// shell (`<div id="root">` + `__NEXT_DATA__`, <50 text chars) must yield the
-/// typed `ExtractionFailed` error, and its Spanish reason must call out the
+/// typed `ExtractionFailed` error, and its English reason must call out the
 /// JavaScript-rendering cause (marker variant) — never an Ok near-empty scrape.
 #[cfg_attr(miri, ignore)] // legible/servo_arc Tree-Borrows UB
 #[tokio::test]
@@ -663,7 +663,7 @@ async fn test_js_shell_body_fails_with_typed_error() {
         } => {
             assert_eq!(failed_url, url.as_str(), "url must be preserved");
             assert!(
-                reason.contains("renderizado de JavaScript"),
+                reason.contains("JavaScript rendering"),
                 "marker-bearing shell must report the JS-rendering cause: {reason}"
             );
         },
@@ -1692,7 +1692,7 @@ async fn scrape_mocked_with_selector(
 /// `--selector h3` on a short heading is a legitimate answer, so
 /// `build_scraped_content` returns the fragment without calling
 /// `validate_min_content`. Delete that bypass and this test fails with
-/// `ExtractionFailed` ("contenido insuficiente"), because "Short" is far below
+/// `ExtractionFailed` ("insufficient content"), because "Short" is far below
 /// `MIN_CONTENT_CHARS`.
 #[cfg_attr(miri, ignore)] // legible/servo_arc Tree-Borrows UB
 #[tokio::test]
@@ -1738,7 +1738,7 @@ async fn issue_2553_body_selector_still_runs_the_min_content_guard() {
         .expect_err("a near-empty page under --selector body must fail the guard");
 
     assert!(
-        err.to_string().contains("contenido insuficiente"),
+        err.to_string().contains("insufficient content"),
         "the guard's own reason must surface, got: {err}"
     );
 }

@@ -365,6 +365,85 @@ fn test_crawl_http_503_classifies_as_transient_retriable() {
     );
 }
 
+// ========================================================================
+// S11/T6: an AI remote failure is converted ONCE at the adapter boundary
+// into the existing ScraperError taxonomy. A local consistency failure stays
+// a Semantic error (InternalFatal).
+// ========================================================================
+
+#[test]
+fn ai_remote_5xx_classifies_transient_retriable() {
+    let semantic = super::ai_failure::remote_status(
+        "endpoint returned 503",
+        503,
+        "https://api.example.test/v1",
+        None,
+    );
+    let scraper: ScraperError = semantic.into();
+    assert!(
+        matches!(&scraper, ScraperError::Http { status: 503, url } if url == "https://api.example.test/v1"),
+        "5xx must carry the observed status and endpoint, got: {scraper}"
+    );
+    assert_eq!(scraper.classify(), ErrorClass::TransientRetriable);
+    assert!(
+        !scraper.to_string().contains("ai-remote"),
+        "the classification tag must not leak into the displayed error, got: {scraper}"
+    );
+}
+
+#[test]
+fn ai_remote_401_and_407_classify_permanent_fatal() {
+    for status in [401, 407] {
+        let semantic = super::ai_failure::remote_status(
+            format!("endpoint returned {status}"),
+            status,
+            "https://api.example.test/v1",
+            None,
+        );
+        let scraper: ScraperError = semantic.into();
+        assert!(matches!(&scraper, ScraperError::Http { status: s, .. } if *s == status));
+        assert_eq!(scraper.classify(), ErrorClass::PermanentFatal);
+    }
+}
+
+#[test]
+fn ai_remote_429_becomes_rate_limited_with_retry_after() {
+    let semantic = super::ai_failure::remote_status(
+        "endpoint returned 429",
+        429,
+        "https://api.example.test/v1",
+        Some(60),
+    );
+    let scraper: ScraperError = semantic.into();
+    assert!(
+        matches!(&scraper, ScraperError::RateLimited(60)),
+        "retry_after must survive conversion, got: {scraper}"
+    );
+    assert_eq!(scraper.classify(), ErrorClass::TransientBackoff);
+}
+
+#[test]
+fn ai_remote_transport_classifies_transient_retriable() {
+    let semantic = super::ai_failure::remote_transport("transport error against embeddings");
+    let scraper: ScraperError = semantic.into();
+    assert!(
+        matches!(&scraper, ScraperError::Network(_)),
+        "transport/timeout must become Network, got: {scraper}"
+    );
+    assert_eq!(scraper.classify(), ErrorClass::TransientRetriable);
+}
+
+#[test]
+fn ai_local_consistency_failure_stays_internal_fatal() {
+    let semantic = SemanticError::Inference("chunks and vectors disagree".into());
+    let scraper: ScraperError = semantic.into();
+    assert!(
+        matches!(&scraper, ScraperError::Semantic(_)),
+        "an untagged local failure must keep the Semantic variant, got: {scraper}"
+    );
+    assert_eq!(scraper.classify(), ErrorClass::InternalFatal);
+}
+
 #[test]
 fn test_crawl_http_429_classifies_as_transient_backoff() {
     let crawl_err = crate::domain::error::CrawlError::Http {

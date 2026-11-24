@@ -109,8 +109,8 @@ async fn refused_literal_seed_costs_zero_arrivals() {
         "a forbidden-literal seed must fail with the typed rejection (69): {stderr}"
     );
     assert!(
-        stderr.contains("SSRF detectado") && stderr.contains("127.0.0.2"),
-        "the rejection must name the offending IP in Spanish: {stderr}"
+        stderr.contains("SSRF detected") && stderr.contains("127.0.0.2"),
+        "the rejection must name the offending IP: {stderr}"
     );
     assert_eq!(
         log.count(),

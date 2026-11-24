@@ -281,7 +281,7 @@ mod tests {
             Some(NetworkCause::ReadTimeout),
             "the cause must reach the boundary: {scraper}"
         );
-        assert_eq!(scraper.to_string(), "error de red: request timeout");
+        assert_eq!(scraper.to_string(), "network error: request timeout");
         assert_eq!(
             scraper.classify(),
             crate::error::ErrorClass::TransientRetriable,
@@ -312,7 +312,7 @@ mod tests {
         );
         assert_eq!(
             http.to_string(),
-            "Transport Error: falló el handshake TLS: tls alert"
+            "Transport Error: the TLS handshake failed: tls alert"
         );
         let scraper: crate::error::ScraperError =
             crate::domain::error::CrawlError::from(http).into();

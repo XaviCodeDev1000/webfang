@@ -2,7 +2,7 @@
 source: crates/webfang_core/tests/cli_binary_test.rs
 expression: "redact_nondeterministic(Path::new(\"__no_temp__\"), &stderr)"
 ---
-error: invalid value 'not-a-url' for '--url <URL>': URL inválida: relative URL without a base
+error: invalid value 'not-a-url' for '--url <URL>': Invalid URL: relative URL without a base
 
 For more information, try '--help'.
 

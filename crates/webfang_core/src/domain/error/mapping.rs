@@ -300,7 +300,7 @@ mod tests {
         );
         assert_eq!(
             error.to_string(),
-            "DNS error: no se pudo resolver el nombre del dominio: name resolution failed"
+            "DNS error: could not resolve the domain name: name resolution failed"
         );
     }
 }

@@ -25,12 +25,12 @@ pub enum WafTier {
 }
 
 impl WafTier {
-    /// Spanish user-facing label for the evidence chain (REQ-WAF-08).
+    /// User-facing label for the evidence chain (REQ-WAF-08).
     #[must_use]
     pub const fn label_es(self) -> &'static str {
         match self {
-            Self::Challenge => "desafío",
-            Self::Fingerprint => "huella",
+            Self::Challenge => "challenge",
+            Self::Fingerprint => "fingerprint",
         }
     }
 }
@@ -42,7 +42,7 @@ impl WafTier {
 /// is ubiquitous diagnostic noise and does not block, whereas the same Fingerprint
 /// tier sourced from a control HEADER ([`EvidenceSource::Header`], e.g.
 /// `cf-mitigated`) signals active mitigation and still blocks. Internal to the
-/// verdict — it is deliberately NOT part of the Spanish evidence chain.
+/// verdict — it is deliberately NOT part of the evidence chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvidenceSource {
     /// Evidence matched in the response body (signatures or entropy).
@@ -65,7 +65,7 @@ pub struct WafEvidence {
     pub matched_pattern: &'static str,
     /// Where the evidence was observed (body or header) — drives the 5xx
     /// body-vs-header carve-out in the verdict policy; not surfaced in the
-    /// Spanish evidence chain.
+    /// evidence chain.
     pub source: EvidenceSource,
 }
 
@@ -85,9 +85,9 @@ impl WafVerdict {
         Self::default()
     }
 
-    /// Spanish user-facing evidence chain for the block error (REQ-WAF-08).
+    /// User-facing evidence chain for the block error (REQ-WAF-08).
     ///
-    /// Each evidence renders as `provider (patrón: <pattern>, tier: <label_es>)`,
+    /// Each evidence renders as `provider (pattern: <pattern>, tier: <label_es>)`,
     /// joined by `; `. Falls back to a generic label when the verdict carries no
     /// evidence. Callers that raise a block error (HTTP client, scraper service,
     /// crawler discovery, MCP) pass this string as the `provider` payload so the
@@ -95,13 +95,13 @@ impl WafVerdict {
     #[must_use]
     pub fn evidence_chain(&self) -> String {
         if self.evidences.is_empty() {
-            return "WAF desconocido".to_string();
+            return "Unknown WAF".to_string();
         }
         self.evidences
             .iter()
             .map(|e| {
                 format!(
-                    "{} (patrón: {}, tier: {})",
+                    "{} (pattern: {}, tier: {})",
                     e.provider,
                     e.matched_pattern,
                     e.tier.label_es()
@@ -351,7 +351,7 @@ mod tests {
         let v = WafVerdict::clean();
         assert!(!v.is_blocked);
         assert!(v.evidences.is_empty());
-        assert_eq!(v.evidence_chain(), "WAF desconocido");
+        assert_eq!(v.evidence_chain(), "Unknown WAF");
     }
 
     #[test]
@@ -361,16 +361,16 @@ mod tests {
         let chain = v.evidence_chain();
         assert!(chain.contains("Cloudflare"));
         assert!(chain.contains("cf-turnstile"));
-        assert!(chain.contains("desafío"));
+        assert!(chain.contains("challenge"));
         assert!(chain.contains("Akamai"));
-        assert!(chain.contains("huella"));
+        assert!(chain.contains("fingerprint"));
         assert!(chain.contains("; "));
     }
 
     #[test]
     fn waf_tier_label_es_spanish() {
-        assert_eq!(WafTier::Challenge.label_es(), "desafío");
-        assert_eq!(WafTier::Fingerprint.label_es(), "huella");
+        assert_eq!(WafTier::Challenge.label_es(), "challenge");
+        assert_eq!(WafTier::Fingerprint.label_es(), "fingerprint");
     }
 
     #[test]

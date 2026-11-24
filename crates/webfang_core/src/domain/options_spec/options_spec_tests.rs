@@ -31,7 +31,7 @@ fn parse_uint_rejects_non_numeric_input_with_exact_message() {
     let err = export::CPU_CORES
         .parse_uint("abc")
         .expect_err("must reject text");
-    assert_eq!(err.to_string(), "`abc` no es un número entero válido");
+    assert_eq!(err.to_string(), "`abc` is not a valid integer");
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn parse_uint_rejects_zero_with_exact_message() {
     let err = export::CPU_CORES
         .parse_uint("0")
         .expect_err("zero cores is invalid");
-    assert_eq!(err.to_string(), "cpu-cores debe ser > 0");
+    assert_eq!(err.to_string(), "cpu-cores must be > 0");
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn parse_uint_accepts_positive_values() {
 #[test]
 fn memory_size_bound_rejects_zero_with_structured_error() {
     // F7: `check_bound` returns a typed `BoundError`, not the verbose
-    // Spanish message the CLI path uses. The English wording IS the
+    // message the CLI path uses. The English wording IS the
     // MCP-stable rendering every MCP validator relies on.
     let err = export::RAM_BUDGET
         .check_bound(0)
@@ -66,10 +66,10 @@ fn memory_size_bound_rejects_zero_with_structured_error() {
     assert_eq!(err.to_string(), "must be at least 1");
     assert_eq!(export::RAM_BUDGET.check_bound(2048).expect("valid"), 2048);
 
-    // The CLI path keeps the Spanish verbatim message via
+    // The CLI path keeps the verbatim message via
     // `parse_uint` (which goes through `OptionSpecError::Bound`).
     // `RAM_BUDGET` is a `MemorySize`, not `Uint`, so the CLI path is
-    // `parse_error` instead — we cover the same Spanish wording via
+    // `parse_error` instead — we cover the same English wording via
     // `parse_uint` on a `Uint` entry below.
 }
 
@@ -103,9 +103,9 @@ fn feature_gated_entries_mirror_the_compile_time_cfg() {
     // `CLEAN_AI` left this loop in ADR-0004 slice C: the semantic cleaner no
     // longer needs ONNX to exist, so `--clean-ai` is ungated and renders in
     // every build. Its capability half has no cargo feature left to name
-    // (paso 6 removes the `ai` feature): a requested `--clean-ai` whose
+    // (step 6 removes the `ai` feature): a requested `--clean-ai` whose
     // cleaner wiring failed surfaces at run time as the export flow's
-    // Spanish ConfigError naming `--embedding-provider` (exit 78).
+    // ConfigError naming `--embedding-provider` (exit 78).
     let gated: Vec<&'static super::OptionSpec> = crawler::GROUP
         .iter()
         .chain(ai::GROUP.iter())
@@ -131,7 +131,7 @@ fn feature_gated_entries_mirror_the_compile_time_cfg() {
         assert_eq!(
             opt.active(),
             match gate {
-                // Same FIXED value as `gate_active` (ADR-0004 paso 6):
+                // Same FIXED value as `gate_active` (ADR-0004 step 6):
                 // the `ai` feature no longer exists, so the gate is
                 // inactive in EVERY configuration.
                 "ai" => false,
@@ -186,7 +186,7 @@ fn verbatim_template_renders_byte_exactly_for_migrated_crawler_flags() {
         .expect_err("must reject text");
     assert_eq!(
         parse_err.to_string(),
-        "'abc' no es un número válido para --max-pages"
+        "'abc' is not a valid number for --max-pages"
     );
 
     let bound_err = crawler::MAX_PAGES
@@ -194,13 +194,13 @@ fn verbatim_template_renders_byte_exactly_for_migrated_crawler_flags() {
         .expect_err("zero pages is invalid");
     assert_eq!(
         bound_err.to_string(),
-        "--max-pages debe ser >= 1 (0 no deja páginas para scrapear)"
+        "--max-pages must be >= 1 (0 leaves no pages to scrape)"
     );
 
     let timeout_parse = crawler::TIMEOUT_SECS.parse_error("xyz");
     assert_eq!(
         timeout_parse.to_string(),
-        "'xyz' no es un número válido para --timeout-secs"
+        "'xyz' is not a valid number for --timeout-secs"
     );
 }
 
@@ -219,7 +219,7 @@ fn metadata_only_numeric_entries_accept_zero_and_any_value() {
     let err = crawler::DELAY_MS
         .parse_uint("abc")
         .expect_err("must reject text");
-    assert_eq!(err.to_string(), "`abc` no es un número entero válido");
+    assert_eq!(err.to_string(), "`abc` is not a valid integer");
 }
 
 #[test]
@@ -231,12 +231,12 @@ fn crawler_max_depth_keeps_zero_valid_and_enforces_the_shared_cap() {
     let err = crawler::MAX_DEPTH
         .parse_uint("11")
         .expect_err("above the shared cap");
-    assert_eq!(err.to_string(), "--max-depth debe ser <= 10");
+    assert_eq!(err.to_string(), "--max-depth must be <= 10");
     // Parse failures keep the canonical integer message.
     let err = crawler::MAX_DEPTH
         .parse_uint("abc")
         .expect_err("must reject text");
-    assert_eq!(err.to_string(), "`abc` no es un número entero válido");
+    assert_eq!(err.to_string(), "`abc` is not a valid integer");
 }
 
 #[test]
@@ -251,7 +251,7 @@ fn crawler_max_pages_enforces_the_shared_upper_cap() {
     let err = crawler::MAX_PAGES
         .parse_uint("100001")
         .expect_err("above the shared cap");
-    assert_eq!(err.to_string(), "--max-pages debe ser <= 100000");
+    assert_eq!(err.to_string(), "--max-pages must be <= 100000");
 }
 
 #[test]

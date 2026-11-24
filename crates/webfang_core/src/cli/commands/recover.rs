@@ -57,10 +57,7 @@ pub async fn run(spool: &Path, output: &Path, strict: bool) -> CliExit {
         Ok(reader) => reader,
         Err(e) => {
             warn!(error = %e, "recover could not open the spool");
-            return CliExit::IoError(format!(
-                "No se pudo abrir el spool {}: {e}",
-                spool.display()
-            ));
+            return CliExit::IoError(format!("Could not open the spool {}: {e}", spool.display()));
         },
     };
 
@@ -73,7 +70,7 @@ pub async fn run(spool: &Path, output: &Path, strict: bool) -> CliExit {
         // Unreachable from convert_spool (only save_converted produces it),
         // but the match must stay total and honest.
         Err(e) => {
-            return CliExit::IoError(format!("No se pudo convertir el spool: {e}"));
+            return CliExit::IoError(format!("Could not convert the spool: {e}"));
         },
     };
 
@@ -87,8 +84,8 @@ pub async fn run(spool: &Path, output: &Path, strict: bool) -> CliExit {
     {
         warn!(error = %e, converted = outcome.converted.len(), "recover output write failed");
         return CliExit::IoError(format!(
-            "No se pudieron escribir los archivos de salida en {}: {e}. \
-             El spool queda en disco; reintentá más tarde con webfang recover.",
+            "Could not write the output files to {}: {e}. \
+             The spool remains on disk; retry later with webfang recover.",
             output.display()
         ));
     }
@@ -162,18 +159,18 @@ async fn read_failure_exit(
     .await;
     let saved_note = match saved {
         Ok(()) => format!(
-            " Se escribieron {} páginas convertidas antes del fallo.",
+            " {} converted pages were written before the failure.",
             partial.converted.len()
         ),
         Err(save_err) => format!(
-            " Además, no se pudieron escribir las {} páginas ya convertidas: {save_err}",
+            " Additionally, the {} already converted pages could not be written: {save_err}",
             partial.converted.len()
         ),
     };
     warn!(error = %source, converted = partial.converted.len(), "recover spool read failed");
     CliExit::IoError(format!(
-        "No se pudo leer el spool {}: {source}.{saved_note} \
-         El spool queda en disco; reintentá más tarde con webfang recover.",
+        "Could not read the spool {}: {source}.{saved_note} \
+         The spool remains on disk; retry later with webfang recover.",
         spool.display()
     ))
 }
@@ -186,13 +183,13 @@ fn exit_for_outcome(spool: &Path, outcome: &SpoolExportOutcome, strict: bool) ->
         let saw_input = !outcome.failed.is_empty() || outcome.skipped_corrupt > 0;
         if saw_input {
             return CliExit::ScraperFailure(format!(
-                "Ninguna página pudo recuperarse del spool {}: {} fallidas, {} corruptas",
+                "No pages could be recovered from the spool {}: {} failed, {} corrupt",
                 spool.display(),
                 outcome.failed.len(),
                 outcome.skipped_corrupt
             ));
         }
-        println!("  El spool está vacío — no hay páginas para recuperar.");
+        println!("  The spool is empty — no pages to recover.");
         return CliExit::Success;
     }
 
@@ -206,17 +203,17 @@ fn exit_for_outcome(spool: &Path, outcome: &SpoolExportOutcome, strict: bool) ->
     CliExit::Success
 }
 
-/// Operator-facing summary (Spanish): what was recovered, where, and what
+/// Operator-facing summary: what was recovered, where, and what
 /// did not make it.
 fn print_summary(
     spool: &Path,
     output: &Path,
     outcome: &crate::application::batch::spool_export::SpoolExportOutcome,
 ) {
-    println!("Recuperación de spool completada");
+    println!("Spool recovery complete");
     println!("  Spool: {}", spool.display());
-    println!("  Destino: {}", output.display());
-    println!("  Convertidas: {}", outcome.converted.len());
-    println!("  Fallidas: {}", outcome.failed.len());
-    println!("  Corruptas: {}", outcome.skipped_corrupt);
+    println!("  Destination: {}", output.display());
+    println!("  Converted: {}", outcome.converted.len());
+    println!("  Failed: {}", outcome.failed.len());
+    println!("  Corrupted: {}", outcome.skipped_corrupt);
 }

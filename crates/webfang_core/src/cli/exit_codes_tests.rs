@@ -13,7 +13,7 @@ fn format_failure_default_hides_source_chain() {
     let msg = format_failure("https://example.com", &network_error(), 0);
 
     assert!(
-        msg.contains("error de red"),
+        msg.contains("network error"),
         "missing top-level message: {msg}"
     );
     assert!(
@@ -53,13 +53,13 @@ fn scraped(url: &str) -> crate::domain::ScrapedContent {
 #[test]
 fn report_phase_all_blocked_returns_forbidden() {
     // Nothing scraped, nothing failed, but URLs were blocked by robots.txt:
-    // exit 77 with the Spanish hint, not a misleading network error (#705).
+    // exit 77 with the English hint, not a misleading network error (#705).
     let exit = report_phase(&[], &[], 2, 0);
 
     match exit {
         Some(CliExit::Forbidden(msg)) => {
             assert!(
-                msg.contains("2 URL(s) bloqueadas por robots.txt"),
+                msg.contains("2 URL(s) blocked by robots.txt"),
                 "missing blocked count: {msg}"
             );
             assert!(
@@ -145,7 +145,7 @@ fn http_err(status: u16, url: &str) -> crate::error::ScraperError {
 fn extraction_failed(url: &str) -> crate::error::ScraperError {
     crate::error::ScraperError::ExtractionFailed {
         url: url.to_string(),
-        reason: "contenido insuficiente (0 caracteres) — la página devolvió muy poco contenido extraíble"
+        reason: "insufficient content (0 characters) — the page returned very little extractable content"
             .to_string(),
     }
 }
@@ -231,7 +231,7 @@ fn batch_exit_code_internal_fatal_outranks_permanent_io() {
 #[test]
 fn report_phase_all_extraction_failed_returns_data_format_error() {
     // CE-1: a JS-only batch — every failure is the typed ExtractionFailed
-    // — must exit 65 (DataFormatError) with the Spanish message.
+    // — must exit 65 (DataFormatError) with the English message.
     let failures = vec![
         (
             "https://js1.example.com".to_string(),
@@ -248,8 +248,8 @@ fn report_phase_all_extraction_failed_returns_data_format_error() {
     match exit {
         Some(CliExit::DataFormatError(msg)) => {
             assert!(
-                msg.contains("extracción sin contenido útil"),
-                "Spanish message expected, got: {msg}"
+                msg.contains("extraction found no usable content"),
+                "English message expected, got: {msg}"
             );
             assert!(
                 msg.contains("2 URL(s)"),
@@ -324,8 +324,8 @@ fn batch_exit_code_all_extraction_failed_returns_data_format_error() {
     match exit {
         CliExit::DataFormatError(msg) => {
             assert!(
-                msg.contains("extracción sin contenido útil"),
-                "Spanish message expected, got: {msg}"
+                msg.contains("extraction found no usable content"),
+                "English message expected, got: {msg}"
             );
         },
         other => panic!("expected DataFormatError, got: {other:?}"),

@@ -32,7 +32,7 @@ async fn every_export_writes_a_provenance_sidecar_naming_its_content_as_untruste
         .expect("export_file returns a tool result");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "the export must have succeeded: {text}"
     );
 

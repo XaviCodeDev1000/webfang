@@ -92,7 +92,7 @@ fn socks_schemes_are_rejected_with_the_v1_diagnostic() {
             "got: {err}"
         );
         assert!(
-            err.to_string().contains("http:// y https://"),
+            err.to_string().contains("http:// and https://"),
             "diagnostic must name the supported surface, got: {err}"
         );
     }

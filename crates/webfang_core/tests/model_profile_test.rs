@@ -6,7 +6,7 @@
 //! deliberately written against the public API only:
 //!
 //! - a profile resolves by `id` with repo defaults layered under the user's
-//!   config-file overrides, and an unknown `id` fails with a **Spanish** error;
+//!   config-file overrides, and an unknown `id` fails with a typed error;
 //! - `schema_version` is always present, and a profile declaring a version this
 //!   build does not understand is rejected instead of being used silently;
 //! - the two Granite profiles carry the values this repo can actually verify
@@ -258,7 +258,7 @@ fn dimensions_follows_the_override_not_the_builtin() {
 }
 
 // ---------------------------------------------------------------------------
-// Resolution: defaults + overrides, Spanish failures
+// Resolution: defaults + overrides, typed failures
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -297,8 +297,8 @@ fn resolve_unknown_id_fails_with_a_spanish_error() {
     assert!(matches!(err, ProfileError::ProfileNotFound { .. }), "{err}");
     let message = err.to_string();
     assert!(
-        message.contains("desconocido"),
-        "user-facing error must be Spanish, got: {message}"
+        message.contains("unknown model profile"),
+        "user-facing error must name the unknown profile, got: {message}"
     );
     assert!(
         message.contains("granite-97m") && message.contains("granite-311m"),
@@ -351,8 +351,8 @@ fn invalid_chars_per_token_fails_with_a_spanish_error() {
     assert!(matches!(err, ProfileError::InvalidField { .. }), "{err}");
     let message = err.to_string();
     assert!(
-        message.contains("chars_per_token") && message.contains("inválido"),
-        "the error must name the offending field, in Spanish, got: {message}"
+        message.contains("chars_per_token") && message.contains("invalid"),
+        "the error must name the offending field, got: {message}"
     );
 }
 

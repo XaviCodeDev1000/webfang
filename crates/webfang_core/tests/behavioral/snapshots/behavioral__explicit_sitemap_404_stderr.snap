@@ -8,4 +8,4 @@ expression: redacted
   <TIMESTAMP> ERROR <MODULE>: Failed to parse sitemap, error: http request failed: 404: server returned 404 Not Found, url: http://127.0.0.1:<PORT>/sitemap.xml, stage: sitemap.discovery
     at <FILE>.rs:<LINE>
 
-Error: URL discovery failed: http error 404 al acceder a server returned 404 Not Found
+Error: URL discovery failed: http error 404 accessing server returned 404 Not Found

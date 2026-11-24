@@ -227,11 +227,11 @@ async fn batch_transient_ingestion_failure_exits_unavailable() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    // The user-facing message must stay in Spanish and name the phase that
-    // failed — the operator reads this line to decide whether to retry.
+    // The user-facing message names the failed phase so the operator can
+    // decide whether to retry.
     assert!(
-        stderr.contains("Falló la ingesta de vectores"),
-        "the user-facing message must name the failed ingestion in Spanish: {stderr}"
+        stderr.contains("Vector ingestion failed"),
+        "the user-facing message must name the failed ingestion: {stderr}"
     );
 
     let redacted = redact_nondeterministic(t.out.path(), &stderr);

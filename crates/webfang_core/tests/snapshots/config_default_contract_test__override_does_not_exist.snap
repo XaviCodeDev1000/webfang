@@ -2,4 +2,4 @@
 source: crates/webfang_core/tests/config_default_contract_test.rs
 expression: redacted
 ---
-Error: no existe el archivo de configuración: <OUT_DIR>/typo.toml
+Error: the configuration file does not exist: <OUT_DIR>/typo.toml

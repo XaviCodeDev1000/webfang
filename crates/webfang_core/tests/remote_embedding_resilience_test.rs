@@ -1,38 +1,37 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-//! Resiliencia de `RemoteEmbeddingAdapter` contra un endpoint remoto hostil.
+//! Resilience of `RemoteEmbeddingAdapter` against a hostile remote endpoint.
 //!
-//! ## Por qué estas filas son de integración y no unitarias
+//! ## Why these rows are integration tests and not unit tests
 //!
-//! `remote_embedding.rs` ya tiene un módulo de tests unitarios que cubre la
-//! capa pura (parseo del cuerpo, política de backoff) y varias filas de wire.
-//! Lo que **no** cubría — y lo que el ADR-0004 exige — es la mitad de la
-//! cadena de guarda del lado del servidor: la clasificación de reintentos
-//! cuando el endpoint responde 429 con `Retry-After`, 5xx sostenido, cuerpo
-//! degenerado, orden de batch y nombre ilegible. Estas filas entran por el
-//! puerto público (`EmbeddingPort` sobre `webfang_core`), que es lo que el
-//! CLI y el MCP usan de verdad, y por eso una regresión en la firma o en el
-//! cable las rompe aunque el módulo interno siga verde.
+//! `remote_embedding.rs` already has a unit-test module covering the pure layer
+//! (body parsing, backoff policy) and several wire rows. What it **did not**
+//! cover — and what ADR-0004 requires — is the server-side half of the guard
+//! chain: retry classification when the endpoint answers 429 with
+//! `Retry-After`, sustained 5xx, a degenerate body, batch order and an
+//! unreadable name. These rows enter through the public port (`EmbeddingPort`
+//! over `webfang_core`), which is what the CLI and the MCP actually use, so a
+//! regression in the signature or on the wire breaks them even while the
+//! internal module stays green.
 //!
-//! ## Qué fijan (ADR-0004 §Condición de revisión, suite wiremock del PR-8)
+//! ## What these rows pin (ADR-0004 §Review condition, PR-8 wiremock suite)
 //!
-//! 1. 429 con `Retry-After` en segundos → recupera tras respetarlo.
-//! 2. 429 con `Retry-After` en fecha HTTP → se honra por el cable: una fecha
-//!    ya pasada se recorta a cero (y el reintento sale en ~1s, el suelo
-//!    exponencial) en vez de dormirse los ~32 años que pide la cabecera; una
-//!    cabecera inservible degrada a backoff exponencial sin convertir el
-//!    reintento en un error. La conversión pura —las dos formas de RFC 9110
-//!    §10.2.3, con `now` inyectado— está cubierta en el módulo de tests
-//!    in-crate de `remote_embedding.rs`, que es donde una función pura y
-//!    privada se prueba; aquí lo que se afirma es el comportamiento
-//!    observable a través del puerto público.
-//! 3. 5xx sostenido → agota exactamente `EMBEDDING_MAX_ATTEMPTS` intentos y
-//!    reporta el **último** estado observado, nunca uno fijo.
-//! 4. Respuesta malformada (JSON inválido, `data` vacío, descuadre de
-//!    conteo) → `SemanticError::Inference` con el mensaje en español.
-//! 5. Orden de batch → `input` conserva el orden de entrada y los vectores
-//!    vuelven posicionalmente 1:1; `index` se parsea pero **no** reordena.
-//! 6. DNS → nombre de TLD reservado: error de transporte, nunca un panic.
+//! 1. 429 with `Retry-After` in seconds → recovers after honoring it.
+//! 2. 429 with `Retry-After` as an HTTP date → honored on the wire: an
+//!    already-past date clamps to zero (and the retry leaves in ~1s, the
+//!    exponential floor) instead of sleeping for the ~32 years the header
+//!    asks for; an unusable header degrades to exponential backoff without
+//!    turning the retry into an error. The pure conversion —both RFC 9110
+//!    §10.2.3 forms, with `now` injected— is covered in the in-crate test
+//!    module of `remote_embedding.rs`, where a pure private function belongs;
+//!    what is asserted here is the behavior observable through the public port.
+//! 3. Sustained 5xx → spends exactly `EMBEDDING_MAX_ATTEMPTS` attempts and
+//!    reports the **last** observed status, never a fixed one.
+//! 4. Malformed response (invalid JSON, empty `data`, count mismatch) →
+//!    `SemanticError::Inference` with the user-facing English message.
+//! 5. Batch order → `input` keeps the input order and vectors come back
+//!    positionally 1:1; `index` is parsed but **does not** re-sort.
+//! 6. DNS → reserved TLD name: transport error, never a panic.
 
 use std::time::Duration;
 
@@ -44,22 +43,22 @@ use webfang_core::infrastructure::llm::remote_embedding::RemoteEmbeddingAdapter;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-/// Ruta del endpoint de embeddings, compartida por los mocks y por el
-/// `path()` matcher: una cadena repetida en dos sitios es una cadena que
-/// puede desincronizarse sin que nada falle.
+/// Path of the embedding endpoint, shared by the mocks and by the `path()`
+/// matcher: a string repeated in two places is a string that can drift out of
+/// sync without anything failing.
 const EMBEDDINGS_PATH: &str = "/embeddings";
 
-/// TLD reservado por RFC 2606: `nonexistent.invalid` **no** resuelve nunca,
-/// así que la fila de DNS no depende de la red real ni de un wildcard del
-/// entorno. (A diferencia de un nombre inventado en `.com`, que sí podría
-/// ser capturado por un resolver con wildcard.)
+/// TLD reserved by RFC 2606: `nonexistent.invalid` **never** resolves, so the
+/// DNS row depends neither on the real network nor on an environment wildcard.
+/// (Unlike an invented `.com` name, which could be captured by a wildcard
+/// resolver.)
 const UNRESOLVABLE_HOST: &str = "http://nonexistent.invalid/v1";
 
-/// `ProviderConfig` de embeddings apuntando al wiremock, anónimo.
+/// Anonymous embedding `ProviderConfig` pointing at the wiremock.
 ///
-/// `AuthSource::None` y no un `EnvGuard`: esta suite no afirma nada sobre
-/// credenciales (eso es territorio de `auth_source_none_test.rs`), así que
-/// evita mutar el entorno y se queda con un Arrange de una línea.
+/// `AuthSource::None` rather than an `EnvGuard`: this suite asserts nothing
+/// about credentials (that is `auth_source_none_test.rs` territory), so it
+/// avoids mutating the environment and keeps a one-line Arrange.
 fn anonymous_config(base_url: String) -> ProviderConfig {
     ProviderConfig {
         id: "resilience-endpoint".to_string(),
@@ -69,16 +68,18 @@ fn anonymous_config(base_url: String) -> ProviderConfig {
         auth: AuthSource::None,
         capabilities: vec![Capability::Embedding],
         model: Some("nomic-embed-text".to_string()),
-        embedding_dim: None,
-        // Loopback es el wiremock; el opt-in de config es lo que lo permite.
+        // T7: a cold adapter now fails closed before dialing. These cases
+        // use the one-dimensional `one_d` fixture, so the contract width is 1.
+        embedding_dim: Some(1),
+        // Loopback is the wiremock; the config opt-in is what allows it.
         allow_loopback: true,
         network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
         proxy: None,
     }
 }
 
-/// Un vector de una dimensión, con el valor que lo identifica: la ordenación
-/// posicional se afirma sobre valores distintos, no sobre longitudes iguales.
+/// A one-dimensional vector, with a value that identifies it: positional
+/// ordering is asserted over distinct values, not over equal lengths.
 fn one_d(scalar: f32) -> String {
     format!(r#"{{"data":[{{"embedding":[{scalar}]}}]}}"#)
 }
@@ -88,12 +89,12 @@ async fn request_count(server: &MockServer) -> usize {
     server.received_requests().await.unwrap_or_default().len()
 }
 
-/// El adapter anónimo bajo prueba, ya construido contra el servidor.
+/// The anonymous adapter under test, already built against the server.
 fn adapter_for(server: &MockServer) -> RemoteEmbeddingAdapter {
     RemoteEmbeddingAdapter::new(anonymous_config(server.uri())).expect("anonymous adapter builds")
 }
 
-/// Monta un `status` constante en el endpoint de embeddings.
+/// Mounts a constant `status` on the embedding endpoint.
 async fn mount_status(server: &MockServer, status: u16, body: &str) {
     Mock::given(method("POST"))
         .and(path(EMBEDDINGS_PATH))
@@ -102,12 +103,12 @@ async fn mount_status(server: &MockServer, status: u16, body: &str) {
         .await;
 }
 
-/// Monta un 429 de **un solo intento** seguido de un 200 de cortesía.
+/// Mounts a **one-shot** 429 followed by a courtesy 200.
 ///
-/// El 429 se monta primero porque wiremock evalúa los mocks en orden de
-/// montaje: la primera petición recibe el 429 y el reintento cae en el 200
-/// montado después. `retry_after` es el valor crudo de la cabecera —
-/// `None` la omite, que es el caso de un servidor que no la manda.
+/// The 429 is mounted first because wiremock evaluates mocks in mount order:
+/// the first request receives the 429 and the retry falls through to the 200
+/// mounted afterwards. `retry_after` is the raw header value — `None` omits
+/// it, which is the case of a server that does not send one.
 async fn mount_429_then_ok(server: &MockServer, retry_after: Option<&str>) {
     let mut throttled = ResponseTemplate::new(429);
     if let Some(value) = retry_after {
@@ -115,7 +116,7 @@ async fn mount_429_then_ok(server: &MockServer, retry_after: Option<&str>) {
     }
     Mock::given(method("POST"))
         .and(path(EMBEDDINGS_PATH))
-        .respond_with(throttled.set_body_string("límite alcanzado"))
+        .respond_with(throttled.set_body_string("rate limit reached"))
         .up_to_n_times(1)
         .mount(server)
         .await;
@@ -123,20 +124,20 @@ async fn mount_429_then_ok(server: &MockServer, retry_after: Option<&str>) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. 429 con Retry-After en segundos
+// 1. 429 with Retry-After in seconds
 // ---------------------------------------------------------------------------
 
-/// Un 429 con `Retry-After` en delay-seconds se respeta **por encima** del
-/// suelo exponencial, y el reintento recupera cuando el endpoint pasa a 200.
+/// A 429 with `Retry-After` in delay-seconds is honored **above** the
+/// exponential floor, and the retry recovers when the endpoint returns 200.
 ///
-/// El valor es `2`, no `1`, por una razón que la fila tiene que demostrar:
-/// el backoff exponencial del primer intento es exactamente 1000 ms, así que
-/// un `Retry-After: 1` sería indistinguible de ignorarlo — la fila pasaría
-/// igual con el arreglo dentro que fuera. Con `2` las dos hipótesis divergen
-/// (2000 ms honrado contra 1000 ms si se descarta) y la aserción del suelo
-/// inferior decide entre ellas. Por eso el test mide tiempo: es la única
-/// señal por la que el honor del wire es observable desde fuera, ya que la
-/// conversión pura vive en un módulo in-crate.
+/// The value is `2`, not `1`, for a reason this row must demonstrate: the
+/// exponential backoff of the first attempt is exactly 1000 ms, so a
+/// `Retry-After: 1` would be indistinguishable from ignoring it — the row
+/// would pass whether the fix was in place or not. With `2` the two hypotheses
+/// diverge (2000 ms honored versus 1000 ms discarded) and the lower-floor
+/// assertion decides between them. That is why the test measures time: it is
+/// the only signal through which honoring the wire is observable from the
+/// outside, since the pure conversion lives in an in-crate module.
 #[tokio::test]
 async fn status_429_with_retry_after_seconds_recovers_on_retry() {
     let server = MockServer::start().await;
@@ -163,23 +164,22 @@ async fn status_429_with_retry_after_seconds_recovers_on_retry() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 429 con Retry-After en fecha HTTP
+// 2. 429 with Retry-After as an HTTP date
 // ---------------------------------------------------------------------------
 
-/// La fila de wire de la fecha HTTP: un 429 que manda una fecha **ya
-/// pasada** debe recortar a cero y recuperar, en vez de intentar dormir los
-/// ~32 años de diferencia (o, en el código viejo, caerse al backoff sin
-/// decir nada). El aserto es de dos lados: por debajo, un segundo es el suelo
-/// exponencial y prueba que **hubo** un reintento real y no un bucle
-/// instantáneo; por arriba, treinta segundos son el techo —un orden de
-/// magnitud por encima del ~1s real, con hueco para un runner de CI cargado—
-/// y prueban que no se respetó la fecha al pie de la letra: si se respetara,
-/// el test no terminaría nunca.
+/// The HTTP-date wire row: a 429 sending an **already-past** date must clamp
+/// to zero and recover, instead of trying to sleep for the ~32-year delta (or,
+/// in the old code, falling back to backoff without saying anything). The
+/// assertion is two-sided: on the lower side, one second is the exponential
+/// floor and proves there **was** a real retry and not a hot loop; on the
+/// upper side, thirty seconds is the ceiling —an order of magnitude above the
+/// real ~1s, with headroom for a loaded CI runner— and proves the date was not
+/// honored literally: if it were, the test would never finish.
 ///
-/// Lo que la fila **no** puede ver es si el recorte fue a cero o una caída a
-/// backoff exponencial: por el cable ambos producerán ~1s. Esa distinción la
-/// fija el test puro del módulo in-crate, con `now` inyectado; aquí se afirma
-/// el comportamiento observable.
+/// What this row **cannot** see is whether the clamp was to zero or a fall
+/// back to exponential backoff: on the wire both produce ~1s. That distinction
+/// is pinned by the pure test in the in-crate module, with `now` injected;
+/// what is asserted here is the observable behavior.
 #[tokio::test]
 async fn status_429_with_past_http_date_clamps_and_recovers() {
     let server = MockServer::start().await;
@@ -207,10 +207,10 @@ async fn status_429_with_past_http_date_clamps_and_recovers() {
     assert_eq!(request_count(&server).await, 2);
 }
 
-/// Una cabecera de `Retry-After` inservible degrada a backoff exponencial y
-/// **se dice** — el `warn!` estructurado lleva `provider_id`, `raw` y
-/// `reason`. Lo observable desde fuera es que la fila no se cuelga ni falla:
-/// la degradación es un reintento, nunca un error.
+/// An unusable `Retry-After` header degrades to exponential backoff and
+/// **says so** — the structured `warn!` carries `provider_id`, `raw` and
+/// `reason`. What is observable from the outside is that the row neither hangs
+/// nor fails: the degradation is a retry, never an error.
 #[tokio::test]
 async fn unparsable_retry_after_degrades_without_failing_the_request() {
     let server = MockServer::start().await;
@@ -225,21 +225,22 @@ async fn unparsable_retry_after_degrades_without_failing_the_request() {
     assert_eq!(request_count(&server).await, 2);
 }
 
-/// La fila que **sí** distingue el arreglo de la regresión.
+/// The row that **does** distinguish the fix from the regression.
 ///
-/// Las otras dos filas de esta sección usan valores que no separan las dos
-/// hipótesis: un `retry-after: "1"` coincide con el suelo exponencial, y una
-/// fecha ya pasada produce ~1s tanto si se recorta a cero como si se
-/// descarta. Lo que separa "se honra" de "se ignora" es una fecha **futura**:
-/// honrada duerme lo que pide, ignorada cae al backoff exponencial.
+/// The other two rows in this section use values that do not separate the two
+/// hypotheses: a `retry-after: "1"` coincides with the exponential floor, and
+/// an already-past date produces ~1s whether it is clamped to zero or
+/// discarded. What separates "honored" from "ignored" is a **future** date:
+/// honored it sleeps for what it asks, ignored it falls back to exponential
+/// backoff.
 ///
-/// El header se construye a `now + 4s` con `chrono`, y la aserción pide al
-/// menos 3s. Ese margen absorbe el truncamiento a segundos del formato
-/// IMF-fixdate y los milisegundos entre construir el header y leerlo, sin
-/// dar margen al bug (que produciría ~1s).
+/// The header is built at `now + 4s` with `chrono`, and the assertion asks for
+/// at least 3s. That margin absorbs the IMF-fixdate format's truncation to
+/// seconds and the milliseconds between building the header and reading it,
+/// without leaving room for the bug (which would produce ~1s).
 #[tokio::test]
 async fn status_429_with_future_http_date_waits_what_the_server_asked() {
-    // RFC 9110 §10.2.3: IMF-fixdate es la forma que los servidores envían.
+    // RFC 9110 §10.2.3: IMF-fixdate is the form servers send.
     let future = chrono::Utc::now() + Duration::from_secs(4);
     let header = future.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
 
@@ -264,19 +265,19 @@ async fn status_429_with_future_http_date_waits_what_the_server_asked() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. 5xx sostenido
+// 3. Sustained 5xx
 // ---------------------------------------------------------------------------
 
-/// Un 5xx se clasifica como reintentable y agota el presupuesto completo de
-/// intentos (4: el inicial más 3 reintentos). El error nombra el estado
-/// **último observado**: es la regla de la cadena de guarda ("retries
-/// exhausted report the LAST observed status, never a hardcoded one"), y por
-/// eso el mock devuelve 503 — un código distinto del 500 de otras filas —:
-/// si el adapter quemara un estado fijo, esta fila lo delataría.
+/// A 5xx is classified as retryable and spends the full attempt budget
+/// (4: the initial try plus 3 retries). The error names the **last observed**
+/// status: that is the guard-chain rule ("retries exhausted report the LAST
+/// observed status, never a hardcoded one"), which is why the mock returns
+/// 503 — a code different from the 500 used by other rows —: if the adapter
+/// burned a fixed status, this row would expose it.
 #[tokio::test]
 async fn persistent_5xx_spends_full_budget_and_names_the_last_status() {
     let server = MockServer::start().await;
-    mount_status(&server, 503, "no disponible").await;
+    mount_status(&server, 503, "unavailable").await;
 
     let err = adapter_for(&server)
         .embed_batch(&["uno".to_string()])
@@ -299,40 +300,40 @@ async fn persistent_5xx_spends_full_budget_and_names_the_last_status() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Respuesta malformada
+// 4. Malformed response
 // ---------------------------------------------------------------------------
 
-/// Un cuerpo degenerado es un [`SemanticError::Inference`] con el mensaje en
-/// español que ve el usuario final — no un `unwrap`, no un `panic`, y no un
-/// `200` que se reporta como éxito con cero vectores.
+/// A degenerate body is a [`SemanticError::Inference`] with the English message
+/// the end user sees — not an `unwrap`, not a `panic`, and not a `200` reported
+/// as a success with zero vectors.
 ///
-/// Se afirma el texto exacto de cada caso porque es la superficie que el
-/// usuario lee; un matcher genérico ("contains Inference") no distinguiría
-/// un cuerpo vacío de un descuadre de conteo.
+/// The exact text of each case is asserted because that is the surface the
+/// user reads; a generic matcher ("contains Inference") would not distinguish
+/// an empty body from a count mismatch.
 #[tokio::test]
-async fn malformed_body_names_its_own_failure_in_spanish() {
-    // 1. JSON inválido: ni siquiera hay documento que parsear.
-    assert_malformed("esto no es json", "cuerpo inválido").await;
+async fn malformed_body_names_its_own_failure() {
+    // 1. Invalid JSON: there is not even a document to parse.
+    assert_malformed("this is not json", "invalid body").await;
 
-    // 2. `data` vacío: un 200 que no trae nada que servir.
-    assert_malformed(r#"{"data":[]}"#, "`data` vacío").await;
+    // 2. Empty `data`: a 200 that brings nothing to serve.
+    assert_malformed(r#"{"data":[]}"#, "empty `data`").await;
 
-    // 3. Descuadre de conteo: 2 vectores para 1 texto. El mensaje nombra el
-    //    conteo servido *y* el esperado, que es lo que permite al operador
-    //    ver si el vendor truncó.
+    // 3. Count mismatch: 2 vectors for 1 text. The message names the served
+    //    count *and* the expected one, which is what lets the operator see
+    //    whether the vendor truncated.
     assert_malformed(
         r#"{"data":[{"embedding":[0.1]},{"embedding":[0.2]}]}"#,
-        "2 vectores para 1 textos",
+        "2 vectors for 1 texts",
     )
     .await;
 }
 
-/// Monta un 200 con `body`, invoca el puerto y comprueba que el fallo es
-/// `Inference` y que el mensaje contiene `expected_message`.
+/// Mounts a 200 with `body`, invokes the port and checks that the failure is
+/// `Inference` and that the message contains `expected_message`.
 ///
-/// Es un helper y no tres tests porque el Arrange (montar el mismo mock y
-/// repetir la misma invocación) es idéntico en los tres casos: lo que varía
-/// —el cuerpo degenerado— es el dato, no el escenario.
+/// This is a helper rather than three tests because the Arrange (mounting the
+/// same mock and repeating the same invocation) is identical in all three
+/// cases: what varies —the degenerate body— is the data, not the scenario.
 async fn assert_malformed(body: &str, expected_message: &str) {
     let server = MockServer::start().await;
     mount_status(&server, 200, body).await;
@@ -353,18 +354,17 @@ async fn assert_malformed(body: &str, expected_message: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Orden de batch
+// 5. Batch order
 // ---------------------------------------------------------------------------
 
-/// El orden es **posicional**: `input` viaja en el orden en que se le pasó y
-/// los vectores vuelven en el mismo orden de la respuesta.
+/// Order is **positional**: `input` travels in the order it was passed and the
+/// vectors come back in the same order as the response.
 ///
-/// El cuerpo que devuelve el mock trae los índices `index` **invertidos**
-/// (`2, 1, 0`) a propósito. `EmbeddingDatum::index` se parsea para tolerar
-/// el wire de cada vendor pero está deliberadamente sin uso: si algún día
-/// alguien lo usara para reordenar, esta fila —que devuelve 0.3, 0.2, 0.1 en
-/// ese orden de cable— lo delataría, porque el resultado esperado es
-/// posicional y no indexado.
+/// The body returned by the mock deliberately carries **reversed** `index`
+/// values (`2, 1, 0`). `EmbeddingDatum::index` is parsed to tolerate each
+/// vendor's wire but is intentionally unused: if anyone ever used it to
+/// re-sort, this row —which returns 0.3, 0.2, 0.1 in that wire order— would
+/// expose it, because the expected result is positional, not indexed.
 #[tokio::test]
 async fn batch_preserves_input_order_and_returns_vectors_positionally() {
     let server = MockServer::start().await;
@@ -385,7 +385,7 @@ async fn batch_preserves_input_order_and_returns_vectors_positionally() {
         .await
         .expect("a well-formed batch is served");
 
-    // El request sale en el orden de entrada.
+    // The request leaves in the input order.
     let requests = server.received_requests().await.unwrap_or_default();
     assert_eq!(
         requests.len(),
@@ -400,8 +400,8 @@ async fn batch_preserves_input_order_and_returns_vectors_positionally() {
         "input must travel in the caller's order"
     );
 
-    // Y los vectores vuelven posicionalmente: en el orden del cable, no en el
-    // de `index` (que aquí está deliberadamente invertido).
+    // And the vectors come back positionally: in wire order, not `index`
+    // order (which is deliberately reversed here).
     assert_eq!(
         vecs,
         vec![vec![0.3], vec![0.2], vec![0.1]],
@@ -413,20 +413,20 @@ async fn batch_preserves_input_order_and_returns_vectors_positionally() {
 // 6. DNS
 // ---------------------------------------------------------------------------
 
-/// Un nombre de TLD reservado no resuelve: la petición falla en transporte y
-/// se reporta con el mensaje en español que nombra el endpoint.
+/// A reserved TLD name does not resolve: the request fails in transport and
+/// is reported with the English message that names the endpoint.
 ///
-/// `entry_gate` deja pasar el host porque sólo comprueba esquema e IP
-/// literal; la resolución es trabajo del resolver validado del cliente
-/// guardado, así que el fallo aparece en la capa de transporte — el mismo
-/// brazo que un connection refused.
+/// `entry_gate` lets the host through because it only checks the scheme and a
+/// literal IP; resolution is the job of the guarded client's validated
+/// resolver, so the failure appears in the transport layer — the same arm as
+/// a connection refused.
 ///
-/// Nota de entorno: `.invalid` está reservado por RFC 2606 y no puede
-/// resolver, así que la fila no depende de la red real ni de un wildcard del
-/// entorno. Lo único dependiente del entorno es la *rapidez* del NXDOMAIN: un
-/// resolver que demorase la respuesta llevaría el intento al
-/// `connect_timeout` de 10s — y un timeout sí es reintentable, así que la
-/// fila tardaría más sin cambiar de veredicto.
+/// Environment note: `.invalid` is reserved by RFC 2606 and cannot resolve,
+/// so the row depends neither on the real network nor on an environment
+/// wildcard. The only environment-dependent thing is the *speed* of the
+/// NXDOMAIN: a resolver that delayed its answer would take the attempt to the
+/// 10s `connect_timeout` — and a timeout is retryable, so the row would take
+/// longer without changing its verdict.
 #[tokio::test]
 async fn unresolvable_host_reports_a_transport_error() {
     let adapter = RemoteEmbeddingAdapter::new(anonymous_config(UNRESOLVABLE_HOST.to_string()))
@@ -443,7 +443,7 @@ async fn unresolvable_host_reports_a_transport_error() {
     );
     let rendered = err.to_string();
     assert!(
-        rendered.contains("error de transporte"),
+        rendered.contains("transport error"),
         "a resolution failure belongs to the transport arm, got: {rendered}"
     );
     assert!(

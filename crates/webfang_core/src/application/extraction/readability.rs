@@ -141,7 +141,7 @@ pub(crate) async fn adaptive_selector_repair(
     }
 }
 
-/// Pipeline de extracción de contenido: clean → selector → adaptive → readability/fallback.
+/// Content-extraction pipeline: clean → selector → adaptive → readability/fallback.
 ///
 /// Recibe HTML ya fetchado y validado (post-WAF). No conoce el transporte.
 ///
@@ -160,7 +160,7 @@ pub(crate) async fn adaptive_selector_repair(
 /// clean_html. ORDER MATTERS: html_cleaner strips non-preserved attributes
 /// — including `style` — so the pruner must see raw HTML while the
 /// display:none / visibility:hidden signals are still intact.
-/// Pipeline de extracción de contenido: clean → selector → adaptive → readability/fallback.
+/// Content-extraction pipeline: clean → selector → adaptive → readability/fallback.
 ///
 /// Recibe HTML ya fetchado y validado (post-WAF). No conoce el transporte.
 ///
@@ -341,7 +341,7 @@ pub async fn extract_content(
             const MIN_FALLBACK_CONTENT: usize = 100;
             if fallback_content.len() < MIN_FALLBACK_CONTENT {
                 let msg = format!(
-                    "contenido pobre del fallback: {} bytes (mín {} bytes). Readability: {}",
+                    "poor fallback content: {} bytes (minimum {} bytes). Readability: {}",
                     fallback_content.len(),
                     MIN_FALLBACK_CONTENT,
                     e

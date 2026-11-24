@@ -84,13 +84,19 @@ fn stderr_of(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// The part of the output that comes BEFORE the historical-metadata section.
+/// The part of the output that comes BEFORE the budget section.
 ///
-/// The section header is the only place the word "histórica" appears, so the
-/// split is exact. Everything before it is what the command claims the run
-/// uses — the part that must never name a retired local model.
-fn before_historical_section(stdout: &str) -> &str {
-    stdout.split("histórica").next().unwrap_or(stdout)
+/// The provider block is the run's identity and must never name a retired
+/// local model. The budget block that follows legitimately names the default
+/// profile (T2b), so the identity assertion has to stop at the budget header.
+fn before_budget_section(stdout: &str) -> &str {
+    stdout
+        .split("=== show: effective budget ===")
+        .next()
+        .unwrap_or(stdout)
+        .split("Cleaner budget:")
+        .next()
+        .unwrap_or(stdout)
 }
 
 // ============================================================================
@@ -106,7 +112,7 @@ fn show_names_the_effective_embeddings_provider() {
     let stdout = stdout_of(&output);
 
     assert!(
-        stdout.contains("=== show: provider de embeddings efectivo ==="),
+        stdout.contains("=== show: effective embeddings provider ==="),
         "show must title the effective-provider section, got:\n{stdout}"
     );
     assert!(
@@ -128,18 +134,22 @@ fn show_never_presents_a_retired_local_model_as_the_run_profile() {
     let output = run_with_config(&["show"], &config);
     let stdout = stdout_of(&output);
 
-    let run_identity = before_historical_section(&stdout);
+    let run_identity = before_budget_section(&stdout);
     assert!(
         !run_identity.contains("granite-97m"),
         "the run's identity must not name a retired local model, got:\n{run_identity}"
     );
     assert!(
-        stdout.contains("metadata histórica"),
-        "the profile numbers must survive as labelled historical metadata, got:\n{stdout}"
+        stdout.contains("historical metadata"),
+        "the profile numbers must survive as labelled metadata, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("Ninguna corrida los consume"),
-        "the historical section must say that no run consumes it, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "the profile block must say it is not the run identity, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("max_chars: 98304"),
+        "the printed budget must be the governing profile budget, got:\n{stdout}"
     );
 }
 
@@ -157,7 +167,7 @@ fn show_resolves_the_explicitly_named_provider() {
         "show must resolve the named provider, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("origen: operatorio"),
+        stdout.contains("origin: operator"),
         "show must say the provider came from the operator, got:\n{stdout}"
     );
 }
@@ -183,7 +193,7 @@ fn show_with_an_unknown_provider_id_is_a_config_error_naming_the_id() {
         "the error must name the unknown id, got:\n{stderr}"
     );
     assert!(
-        !stderr.contains("perfil de modelo"),
+        !stderr.contains("model profile"),
         "the error must not talk about a model profile — the id names a \
          provider, got:\n{stderr}"
     );
@@ -199,10 +209,10 @@ fn show_without_any_provider_reports_no_embeddings_provider() {
     let stdout = stdout_of(&output);
 
     assert!(
-        stdout.contains("sin provider de embeddings configurado"),
+        stdout.contains("no embeddings provider configured"),
         "show must report the empty slot, got:\n{stdout}"
     );
-    let run_identity = before_historical_section(&stdout);
+    let run_identity = before_budget_section(&stdout);
     assert!(
         !run_identity.contains("granite-97m"),
         "an empty slot must not be filled with a retired local model, got:\n{run_identity}"
@@ -225,17 +235,21 @@ fn doctor_labels_the_profile_numbers_as_historical_metadata() {
         stdout.contains("id: known"),
         "doctor must name the resolved provider, got:\n{stdout}"
     );
-    // Pre-existing contract (issue #1933): the Tramo D boundary stays
-    // disclosed, because it is still true — no run consumes the profile.
+    // T2b: the profile now supplies the GOVERNING character budget, but it is
+    // still not the run's identity (no endpoint is dialed from it).
     assert!(
-        stdout.contains("Tramo D"),
-        "doctor must keep naming the Tramo D boundary, got:\n{stdout}"
+        stdout.contains("now governs the cleaner"),
+        "doctor must name the budget boundary the run actually consumes, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("no está cableado al run"),
-        "doctor must keep saying the profile is not wired to the run, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "doctor must say the profile is not the run identity, got:\n{stdout}"
     );
-    let run_identity = before_historical_section(&stdout);
+    assert!(
+        stdout.contains("--max-chars (or WEBFANG_MAX_CHARS): 98304"),
+        "the printed budget must be the governing profile budget, got:\n{stdout}"
+    );
+    let run_identity = before_budget_section(&stdout);
     assert!(
         !run_identity.contains("granite-97m"),
         "the run's identity must not name a retired local model, got:\n{run_identity}"
@@ -272,10 +286,10 @@ fn show_and_doctor_agree_on_the_effective_provider() {
 /// prose, which is a different code path.
 fn provider_block_of(stdout: &str) -> String {
     let body = stdout
-        .split_once("Provider configurado:")
+        .split_once("Configured provider:")
         .map(|(_, rest)| rest)
         .expect("provider block must be rendered");
-    let mut lines = vec!["Provider configurado:".to_string()];
+    let mut lines = vec!["Configured provider:".to_string()];
     lines.extend(
         body.lines()
             .skip_while(|line| line.trim().is_empty())

@@ -10,7 +10,7 @@
 //! The embedding slot (#1462) mirrors the completion path: resolve the
 //! selected (or default embedding-capable) provider, construct the remote
 //! adapter, and verify the served dimension with a startup probe. Every
-//! resolved embedding provider is remote — ADR-0004 paso 6 removed the local
+//! resolved embedding provider is remote — ADR-0004 step 6 removed the local
 //! ONNX pool, and with it the `local_onnx` kind.
 
 use std::sync::Arc;
@@ -31,7 +31,7 @@ use crate::CliExit;
 /// (or default completion-capable) provider and **constructs it here**:
 /// `OpenAiCompatibleProvider::new` performs `AuthSource::resolve()` once in
 /// its constructor, so a missing credential/identity file fails startup
-/// immediately with a Spanish `ProviderInitError` — never on the first
+/// immediately with a `ProviderInitError` — never on the first
 /// invocation at runtime.
 ///
 /// The returned provider is ready to inject into the Container with
@@ -58,7 +58,7 @@ pub use proxy::build_llm_provider_with_registry;
 /// Sync and probe-free: returns `Ok(None)` only when no embedding provider is
 /// configured at all, and `Ok(Some(config))` when an `OpenAiCompatible`
 /// provider must be constructed + probed by [`build_embedding_provider`].
-/// There is no local arm: ADR-0004 paso 6 removed the ONNX pool, and the
+/// There is no local arm: ADR-0004 step 6 removed the ONNX pool, and the
 /// `local_onnx` kind with it.
 ///
 /// # Errors
@@ -73,8 +73,8 @@ pub fn resolve_embedding_config(
     let config = match opts.embedding_provider.as_deref() {
         Some(id) => registry.resolve(id, Capability::Embedding).map_err(|e| {
             CliExit::ConfigError(format!(
-                "'--embedding-provider' requiere un provider con capacidad `embedding` \
-                 en el archivo de configuración: {e}"
+                "'--embedding-provider' requires a provider with the `embedding` capability \
+                 in the configuration file: {e}"
             ))
         })?,
         None => match registry.resolve_default_embedding() {
@@ -84,7 +84,7 @@ pub fn resolve_embedding_config(
             // but a future registry variant must fail loud, never local.
             Err(other) => {
                 return Err(CliExit::ConfigError(format!(
-                    "no se pudo resolver el provider de embeddings por defecto: {other}"
+                    "could not resolve the default embeddings provider: {other}"
                 )));
             },
         },
@@ -102,7 +102,7 @@ pub fn resolve_embedding_config(
 /// The `--offline` guard below is UNCONDITIONAL and fires BEFORE the endpoint
 /// is inspected: every resolved embeddings provider is refused with exit 78,
 /// a loopback one included. The published texts used to promise the opposite
-/// ("loopback permitido, remoto público -> exit 78"); the implementation
+/// ("loopback allowed, public remote -> exit 78"); the implementation
 /// never had that carve-out, so the texts were the defect (#2166).
 pub async fn build_embedding_provider(
     opts: &CrawlOptions,
@@ -129,8 +129,8 @@ pub async fn build_embedding_provider_with_registry(
     };
     if offline {
         // The head of the sentence is a STABLE contract: the integration test
-        // `crates/webfang_core/tests/exit_code_integration.rs` asserts it
-        // verbatim (only the remedy tail is free to change). Keep it.
+        // `crates/webfang_core/tests/exit_code_integration.rs` asserts its
+        // wording, so that assertion must move with any wording change here.
         //
         // The remedies are the two REAL ones. `--clean-ai` is NOT one of
         // them: the guard runs on the SELECTION of an embeddings provider
@@ -139,13 +139,14 @@ pub async fn build_embedding_provider_with_registry(
         // selection does not depend on `--clean-ai` — so dropping the flag
         // alone leaves the run failing with exit 78.
         return Err(CliExit::ConfigError(
-            "modo offline con provider remoto de embeddings: sin red no hay vectores. \
-             El guard de `--offline` rechaza cualquier provider de embeddings \
-             (endpoint remoto o loopback) y sale con exit 78. \
-             Quitá `--offline` para usar el provider configurado, o quitá la \
-             selección del provider de embeddings (sin `--embedding-provider` y sin \
-             ningún provider con capacidad `embedding` en la config) para correr sin \
-             limpieza semántica: la inferencia ONNX local se retiró en 3.0.0."
+            "offline mode with a remote embeddings provider: no vectors without a network. \
+             The `--offline` guard rejects every embeddings provider \
+             (remote endpoint or loopback) and exits with 78. \
+             Remove `--offline` to use the configured provider, or remove the \
+             embeddings provider selection (no `--embedding-provider` and no \
+             provider with the `embedding` capability in the config) to run without \
+             semantic cleanup and keep using the `chat/completions` path: \
+             local ONNX inference was retired in 3.0.0."
                 .to_string(),
         ));
     }
@@ -174,12 +175,12 @@ pub async fn build_embedding_provider_with_registry(
     .await
     .map_err(|e| {
         CliExit::ConfigError(format!(
-            "la construcción del provider de embeddings falló en el pool de bloqueo: {e}"
+            "embedding provider construction failed in the blocking pool: {e}"
         ))
     })??;
     adapter.probe_dim().await.map_err(|e| {
         CliExit::ConfigError(format!(
-            "el provider de embeddings '{}' no pasó la verificación inicial: {e}",
+            "embeddings provider '{}' failed initial verification: {e}",
             adapter.id()
         ))
     })?;
@@ -240,16 +241,16 @@ pub async fn build_tier2_embedding_provider(
         ..Default::default()
     };
     // Resolution only, no I/O. An explicit id that resolves is a remote
-    // endpoint by construction: ADR-0004 paso 6 removed the local pool, so
+    // endpoint by construction: ADR-0004 step 6 removed the local pool, so
     // there is no arm left that could serve this slot without egress.
     if resolve_embedding_config(&resolve_opts, providers)?.is_none() {
         return Err(CliExit::ConfigError(format!(
-            "el provider de embeddings '{id}' no se resolvió a un endpoint remoto"
+            "embeddings provider '{id}' did not resolve to a remote endpoint"
         )));
     }
     if !consent {
         return Err(CliExit::ConfigError(
-            "Tier 2 remoto requiere consentimiento explícito: use --tier2-consent o WEBFANG_TIER2_CONSENT=1".to_string(),
+            "Tier 2 remote requires explicit consent: use --tier2-consent or WEBFANG_TIER2_CONSENT=1".to_string(),
         ));
     }
     // Deliberate second resolution: `build_embedding_provider` owns its own
@@ -584,8 +585,8 @@ mod tests {
     /// BEFORE the endpoint is inspected, so the run refuses with exit 78 and
     /// never dials.
     ///
-    /// The published texts used to promise the opposite ("loopback permitido,
-    /// remoto público -> exit 78"), so this case was the one the notice
+    /// The published texts used to promise the opposite ("loopback allowed,
+    /// public remote -> exit 78"), so this case was the one the notice
     /// contradicted. The MESSAGE is therefore part of the contract: it must
     /// name the rule that covers loopback, must NOT send the operator to a
     /// local model that was removed in 3.0.0, and must offer only remedies
@@ -595,7 +596,7 @@ mod tests {
     /// of an embeddings provider, not on `--clean-ai`. `resolve_embedding_config`
     /// resolves `--embedding-provider`, or else the first `embedding`-capable
     /// provider in the config — either way the provider is selected without
-    /// `--clean-ai`, so "quitá `--clean-ai`" would leave the run failing with
+    /// `--clean-ai`, so "remove `--clean-ai`" would leave the run failing with
     /// the same exit 78. A remedy that does not work is a false promise, and
     /// this message exists to stop publishing those.
     #[tokio::test]
@@ -630,7 +631,7 @@ mod tests {
             "the message must state that the guard covers loopback providers too: {message}"
         );
         assert!(
-            !message.contains("modelo local"),
+            !message.contains("local model"),
             "the message must not send the operator to a local model removed in 3.0.0: {message}"
         );
         assert!(

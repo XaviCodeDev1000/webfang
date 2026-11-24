@@ -22,12 +22,13 @@ use std::pin::Pin;
 use crate::domain::DocumentChunk;
 use crate::error::SemanticError;
 
-/// Sealed trait to prevent external implementations
+/// Sealed trait controlling the in-tree implementor set.
 ///
-/// Following `api-sealed-trait` rust-skill: This module is sealed so that
-/// only crates within webfang can implement `SemanticCleaner`.
-/// This prevents users from creating invalid implementations that could
-/// violate memory safety or caching invariants.
+/// Every consumer holds `Box<dyn SemanticCleaner>` / `Arc<dyn SemanticCleaner>`,
+/// so an out-of-tree implementation could change the cleaning and embedding
+/// contract those consumers rely on. The seal keeps that set under this
+/// crate's control. It protects no `unsafe` code and no cache — there is
+/// neither in this trait.
 pub mod private {
     /// Marker trait for the sealed pattern — only implementable within this crate.
     pub trait Sealed {}
@@ -66,7 +67,7 @@ pub mod private {
 /// - Implementations MUST be thread-safe (`Send + Sync`)
 /// - Implementations hold no model of their own: embeddings come from the
 ///   [`EmbeddingPort`](crate::domain::embedding_port::EmbeddingPort) the
-///   composition root injects (ADR-0004 paso 6)
+///   composition root injects (ADR-0004 step 6)
 pub trait SemanticCleaner: private::Sealed + Send + Sync {
     /// Clean HTML content and split into semantic chunks
     ///

@@ -137,6 +137,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/ai_boundary_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 1,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "ai_model_semantic"
+    },
+    {
       "path": "crates/webfang_core/tests/ai_error_propagation.rs",
       "crate": "webfang_core",
       "area": "core",

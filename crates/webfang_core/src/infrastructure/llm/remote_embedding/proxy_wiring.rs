@@ -63,7 +63,7 @@ impl RemoteEmbeddingAdapter {
             .ok_or_else(|| ProviderInitError::InvalidBaseUrl {
                 provider_id: config.id.clone(),
                 source: crate::error::ScraperError::Config(format!(
-                    "el provider '{}' no declara `model`: el endpoint remoto lo exige en cada request",
+                    "provider '{}' does not declare `model`: the remote endpoint requires it on every request",
                     config.id
                 )),
             })?;
@@ -80,6 +80,7 @@ impl RemoteEmbeddingAdapter {
             usage_prompt_tokens: std::sync::atomic::AtomicU64::new(0),
             usage_total_tokens: std::sync::atomic::AtomicU64::new(0),
             usage_request_count: std::sync::atomic::AtomicU64::new(0),
+            dimension_rejections: std::sync::atomic::AtomicU64::new(0),
         })
     }
 }

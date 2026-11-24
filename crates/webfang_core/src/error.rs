@@ -15,11 +15,11 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ScraperError {
     /// URL is invalid or cannot be parsed
-    #[error("URL inválida: {0}")]
+    #[error("Invalid URL: {0}")]
     InvalidUrl(String),
 
     /// HTTP request failed with a status code
-    #[error("http error {status} al acceder a {url}")]
+    #[error("http error {status} accessing {url}")]
     Http {
         /// The HTTP status code
         status: u16,
@@ -28,11 +28,11 @@ pub enum ScraperError {
     },
 
     /// Content extraction failed (Readability algorithm)
-    #[error("Error de legibilidad: {0}")]
+    #[error("Readability error: {0}")]
     Readability(String),
 
     /// I/O error (file system, etc.)
-    #[error("Error de I/O: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
     /// Network error (connection failed, timeout, etc.)
@@ -40,69 +40,69 @@ pub enum ScraperError {
     /// Carries the underlying error as `#[source]` so the root-cause chain
     /// (e.g. `wreq::Error` → I/O → timeout) is preserved for `Error::source()`
     /// traversal instead of being flattened to a `String` (D4).
-    #[error("error de red: {0}")]
+    #[error("network error: {0}")]
     Network(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// Middleware error (e.g., retry failures)
-    #[error("error de middleware: {0}")]
+    #[error("middleware error: {0}")]
     Middleware(String),
 
     /// Serialization/Deserialization error (JSON, YAML, etc.)
-    #[error("Error de serialización: {0}")]
+    #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
     /// URL parse error
-    #[error("Error de parseo de URL: {0}")]
+    #[error("URL parse error: {0}")]
     UrlParse(#[from] url::ParseError),
 
     /// Asset extraction failed
-    #[error("Error de extracción: {0}")]
+    #[error("Extraction error: {0}")]
     Extraction(String),
 
     /// Asset download failed
     ///
     /// Carries the underlying error as `#[source]` to preserve the root-cause
     /// chain (D4). Previously flattened to a `String`.
-    #[error("Error de descarga: {0}")]
+    #[error("Download error: {0}")]
     Download(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// Configuration error
-    #[error("Error de configuración: {0}")]
+    #[error("Configuration error: {0}")]
     Config(String),
 
     /// Feature not yet implemented (gated for future release)
-    #[error("funcionalidad no disponible: {0}")]
+    #[error("functionality unavailable: {0}")]
     FeatureGated(String),
 
     /// WAF/CAPTCHA challenge detected — on any response status, not only 200.
     ///
-    /// The `provider` field carries the full Spanish evidence chain
-    /// (`provider (patrón: …, tier: …)` per evidence, joined by `; `) when raised
+    /// The `provider` field carries the full evidence chain
+    /// (`provider (pattern: …, tier: …)` per evidence, joined by `; `) when raised
     /// from a context-aware inspection verdict (REQ-WAF-08); legacy callers may
     /// still pass a bare provider name.
-    #[error("WAF/CAPTCHA detectado en {url}: {provider}")]
+    #[error("WAF/CAPTCHA detected on {url}: {provider}")]
     WafBlocked {
         /// URL that was blocked
         url: String,
         /// Detected WAF provider or formatted evidence chain (e.g. `"Cloudflare"`,
-        /// or `"Cloudflare (patrón: cf-turnstile, tier: desafío); …"`)
+        /// or `"Cloudflare (pattern: cf-turnstile, tier: challenge); …"`)
         provider: String,
     },
 
     /// URL validation failed
-    #[error("Validación de URL falló: {0}")]
+    #[error("URL validation failed: {0}")]
     Validation(String),
 
     /// Conversion error (HTML to Markdown, YAML, etc.)
-    #[error("Error de conversión: {0}")]
+    #[error("Conversion error: {0}")]
     Conversion(String),
 
     /// Export operation failed
-    #[error("Error de exportación: {0}")]
+    #[error("Export error: {0}")]
     Export(String),
 
     /// Content extraction failed (poor fallback content)
-    #[error("extracción falló para {url}: {reason}")]
+    #[error("extraction failed for {url}: {reason}")]
     ExtractionFailed {
         /// URL that failed
         url: String,
@@ -111,23 +111,23 @@ pub enum ScraperError {
     },
 
     /// Batch export failed (partial success)
-    #[error("Error de exportación en batch: {0}")]
+    #[error("Batch export error: {0}")]
     ExportBatch(String),
 
     /// Global download timeout (30s)
-    #[error("descarga superó tiempo global de 30 segundos")]
+    #[error("download exceeded global timeout of 30 seconds")]
     GlobalTimeout,
 
     /// Slowloris attack detected (per-chunk timeout)
-    #[error("descarga superó timeout de inactividad de 5 segundos por chunk")]
+    #[error("download exceeded inactivity timeout of 5 seconds per chunk")]
     SlowlorisTimeout,
 
     /// Payload exceeded 25MB limit
-    #[error("recurso superó límite de 25 MB")]
+    #[error("resource exceeded 25 MB limit")]
     PayloadTooLarge,
 
     /// Semaphore exhausted (backpressure)
-    #[error("semáforo agotado: no hay permisos disponibles")]
+    #[error("semaphore exhausted: no permits available")]
     SemaphoreInanition,
 
     /// Persistence error (SQLite storage layer — resources/chunks CRUD, pool).
@@ -135,23 +135,27 @@ pub enum ScraperError {
     /// Holds the underlying error rendered to a string so it uniformly covers
     /// both `rusqlite::Error` and `deadpool_sqlite` pool errors (which are
     /// different types) without forcing two `#[from]` variants.
-    #[error("Error de persistencia: {0}")]
+    #[error("Persistence error: {0}")]
     Persistence(String),
 
     /// Elastic ingestion pipeline error (orchestration / dispatch failures).
-    #[error("Error de ingestión: {0}")]
+    #[error("Ingestion error: {0}")]
     Ingestion(String),
 
     /// Semantic cleaning error (AI-powered content processing)
-    #[error("Error de limpieza semántica: {0}")]
-    Semantic(#[from] SemanticError),
+    ///
+    /// The `From<SemanticError>` conversion lives in [`ai_failure`]: a tagged
+    /// remote failure becomes `Http`/`RateLimited`/`Network` once, at the
+    /// adapter boundary; an untagged local failure stays `Semantic`.
+    #[error("Semantic cleaning error: {0}")]
+    Semantic(SemanticError),
 
     /// HTTP/2 configuration error (ALPN, settings, or handshake failure)
-    #[error("Error de configuración HTTP/2: {0}")]
+    #[error("HTTP/2 configuration error: {0}")]
     H2Config(String),
 
     /// Internal error from domain layer
-    #[error("error interno: {0}")]
+    #[error("internal error: {0}")]
     Internal(String),
 
     /// Rate limited by the server; carries the retry-after delay in seconds.
@@ -201,7 +205,7 @@ pub enum ScraperError {
 /// Semantic cleaning errors
 ///
 /// These errors occur while the semantic cleaner produces embeddings and
-/// filters chunks. Since ADR-0004 paso 6 the cleaner talks to a remote
+/// filters chunks. Since ADR-0004 step 6 the cleaner talks to a remote
 /// embedding endpoint, so there is no model to load, download or cache — the
 /// variants that described those failures were removed in 4.0.0 rather than
 /// left behind as dead surface.
@@ -225,7 +229,7 @@ pub enum SemanticError {
     /// Raised by the chunker for input it cannot segment — today the only
     /// producer is an empty text. There is no tokenizer to fail: the cleaner
     /// budgets in characters (ADR-0004).
-    #[error("Error tokenizando texto: {0}")]
+    #[error("Error tokenizing text: {0}")]
     Tokenize(String),
 
     /// The embedding pipeline failed
@@ -234,7 +238,7 @@ pub enum SemanticError {
     /// failed:
     /// - the remote endpoint (status, degenerate body, vector count, dimension)
     /// - the local consistency checks (chunks vs vectors, relevance filter)
-    #[error("Error del pipeline de embeddings: {0}")]
+    #[error("Embedding pipeline error: {0}")]
     Inference(String),
 
     /// Content chunk exceeds the configured character budget
@@ -250,7 +254,7 @@ pub enum SemanticError {
     /// * `chunk_id` - Identifier of the problematic chunk
     /// * `chars` - Actual character count
     /// * `max` - Maximum allowed characters
-    #[error("Chunk {chunk_id} excede límite de caracteres: {chars} > {max}")]
+    #[error("Chunk {chunk_id} exceeds character limit: {chars} > {max}")]
     ChunkTooLarge {
         /// Identifier of the chunk (UUID or index)
         chunk_id: String,
@@ -265,7 +269,7 @@ pub enum SemanticError {
     /// Raised when a chunker implementation would build a byte span with
     /// `start > end` — a programming bug in the implementation, never user
     /// input. See [`crate::domain::text_chunker::ByteSpan`].
-    #[error("Rango de bytes inválido para el chunk: inicio {start} > fin {end}")]
+    #[error("Invalid byte range for chunk: start {start} > end {end}")]
     InvalidSpan {
         /// Byte offset where the span starts.
         start: usize,
@@ -376,6 +380,7 @@ impl SemanticError {
     }
 }
 
+pub mod ai_failure;
 mod classification;
 mod conversions;
 

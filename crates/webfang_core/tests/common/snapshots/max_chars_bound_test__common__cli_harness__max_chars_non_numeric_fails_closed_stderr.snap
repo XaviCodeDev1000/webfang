@@ -1,8 +1,8 @@
 ---
-source: crates/webfang_core/tests/max_chars_bound_test.rs
+source: crates/webfang_core/tests/common/cli_harness.rs
 expression: redacted
 ---
-error: invalid value 'banana' for '--max-chars <MAX_CHARS>': `banana` no es un número entero válido
+error: invalid value 'banana' for '--max-chars <MAX_CHARS>': `banana` is not a valid integer
 
 For more information, try '--help'.
 

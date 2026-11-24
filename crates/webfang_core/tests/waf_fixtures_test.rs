@@ -53,7 +53,7 @@ fn verdict_summary(verdict: &WafVerdict) -> String {
     let mut lines = vec![format!("is_blocked: {}", verdict.is_blocked)];
     for e in &verdict.evidences {
         lines.push(format!(
-            "  - {} (patrón: {}, tier: {})",
+            "  - {} (pattern: {}, tier: {})",
             e.provider,
             e.matched_pattern,
             e.tier.label_es()
