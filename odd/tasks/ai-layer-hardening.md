@@ -90,9 +90,9 @@ spec and blocks its commit.
 | S2 | T3, T4 | Panicking default removed; sealing rationale made true. |
 | S3 | T10 | Cross-cutting by nature; the union of T1/T2/T10 is where the shared assumptions become owned contracts. Satisfied only by that union — its own row set goes stale in each unit's commit. |
 | S4 | T11 | The data/instruction boundary itself — no raw HTML and no credential on an unplanned channel, page text treated as data, never as prose. |
-| S5 | T9 (primary), T6, T11 | Shared limits, uniform typed errors, clean traces. |
+| S5 | T9 (primary), T6, T11 | Shared limits, uniform typed errors, clean traces; T9 completion retries remain OPEN pending provider semantics. |
 | S6 | T3 (panics), T10 (empty/malformed), T1 (malformed dims), T6 (network/API), T9 (slow responses), T11 (credential leaks) | Decomposed; each owner names the failure it closes. |
-| S7 | T5, T11 | Redaction, plus an assertion that span fields stay an allowlist. |
+| S7 | T5, T11 | Redaction; T11 pins the serialized sink output against page markers and credentials, not just field names. |
 | S9 | T1, T7 | Truncated ranking; the guard that stops one bad response becoming `n` calls. |
 | S10 | T2 | One budget, one unit, four consumers (cleaner, chunker, profile display, completion sub-chunks). |
 | S11 | T6 | Retryability distinct from a local consistency bug. |
@@ -106,28 +106,24 @@ spec and blocks its commit.
 ## Tasks
 
 - T11 `S4`, `S7`, `S5` route: inline — the data/instruction boundary, asserted at the two places content
-  leaves the process (embedding request, completion request). RED first, built from the same raw HTML the
-  CLI accepts: (a) no raw HTML reaches either model client — assert on the captured request body that a
-  tag sequence from the input document is absent, and locate the single strip site
-  (`content_processing::aggressive::strip_html_tags`, imported by `infrastructure/semantic_cleaner.rs`)
-  before claiming it is the only door; (b) the credential channel is single — the key appears only in the
-  `Authorization` header of its intended endpoint, in no body, URL, error string or trace event;
-  (c) untrusted page text is data — it travels in a delimited data field of the completion request and is
-  never interpolated into the instruction prose, and the instruction text is pinned as a constant that
-  cannot absorb page content; (d) tracing stays an allowlist — provider/model/dim/count/request_id/lengths
-  only, with a test that a known page substring never appears in the emitted span fields.
-  Verified before this task: (c) is already correct — `build_request` in `application/llm_extraction.rs`
-  places page text in a separate `user` `ChatMessage`, the system prompt carries only the constant
-  instruction and the schema, and `EmbeddingRequest` carries text in its `input` field. No untrusted page
-  text is interpolated into instruction prose; no provider-specific instruction channel may be added here.
-  Still unverified: (b) and (d). Both land as pinning tests — (b) asserts the key appears only in the
-  `Authorization` header (never body, URL, error string or trace event), (d) asserts a known page substring
-  never appears in emitted span fields and may need no code change. This task does NOT add tracing fields
-  to `EmbeddingPort` (that would reopen T3/T4) and does NOT change the empty-input contract (T10).
-  Risk: item 2 (what leaves the process toward an external model, and on which channel) + item 6 — no
-  test exercises (a) from raw HTML: `request_bodies_never_carry_html_tags` already asserts no `<` in
-  completion bodies, but feeds pre-cleaned chunks through `FakeCleaner`; EXTEND that test instead of
-  adding a parallel one. (b) and (d) have no pinning test; (c) is pinned, not discovered. Commit 1.
+  leaves the process (embedding request, completion request). RED first on the REAL path the CLI accepts:
+  HTML → `extract_text_content` (`legible` primary, `strip_html_tags` fallback) → the real
+  `SemanticCleanerImpl` → chunker → captured requests at BOTH model clients. Today's
+  `request_bodies_never_carry_html_tags` feeds pre-cleaned chunks through `FakeCleaner`, so extending it
+  with raw HTML alone would not exercise this boundary: replace that fake with the real cleaner, or add a
+  sibling test that does, and never count the fake as proof. (a) no raw HTML reaches either client — a tag
+  sequence from the input document is absent from the captured bodies; (b) credential channel single —
+  the key appears only in `Authorization` for its intended endpoint, never in body, URL, error string or
+  trace event; (c) REQUEST STRUCTURE — page text travels in a separate `user` `ChatMessage` and the system
+  instruction is pinned as a constant; this proves shape, NOT that the model treats the text as inert data
+  or is immune to prompt injection — no such semantic guarantee is claimed; (d) sinks — assert on the
+  SERIALIZED JSONL output of `FileTraceLayer` (and every other sink that actually exists) that a known page
+  marker and the credential never appear; a field-name allowlist is insufficient because VALUES may carry
+  untrusted text. Verified in code: `build_request` already separates the user message and
+  `EmbeddingRequest` carries text in `input`; keep that shape and add no provider-specific instruction
+  channel. This task does NOT add tracing fields to `EmbeddingPort` (that would reopen T3/T4) and does NOT
+  change the empty-input contract (T10). Risk: item 2 (what leaves the process, and on which channel) +
+  item 6 (no test exercises (a)-(d) on the real path; the existing one uses `FakeCleaner`). Commit 1.
 - T1 `S9` route: inline — RED first: a mixed-dimension batch must error, not rank. Delete the private
   `cosine_similarity`, route `distances_to_centroid`/`filter_by_relevance` through the domain's
   `cosine_similarity_fail_closed`, and reject a dimension-disagreeing batch. Risk: item 3 (the filter
@@ -149,6 +145,9 @@ spec and blocks its commit.
   this derivation is part of the same defect, not a separate concern. The tokens→chars derivation in
   `ModelProfile::max_chars()` followed by a byte comparison in the chunkers is that same unit defect one
   layer up, not a second amplification; no newtype is added — the unit is fixed at the comparison sites.
+  State explicitly in the spec: `chars().count()` counts Rust Unicode SCALAR values, not visual graphemes
+  and not provider tokens; the character budget is the chunker's rejection guard, not an exact guarantee
+  that the input fits the provider's tokenized context.
   First step of this task is a verification, not an edit: establish whether options-spec resolution already
   derives `AiConfig::max_chars` from the profile when the flag is absent. Either outcome ends the same
   way — ONE governing character budget in `chars`, and the printed one is the governing one: the resolved
@@ -176,8 +175,10 @@ spec and blocks its commit.
   4xx → `PermanentFatal`, and `RateLimited(u64)` → `TransientBackoff`; the defect is that
   `SemanticError::Inference` is an unstructured `String`, so `ScraperError::Semantic(inner) => inner.classify()`
   sends a retryable remote 5xx to `InternalFatal`, indistinguishable from a local consistency bug.
-  Convert ONCE at the adapter boundary into existing `ScraperError` variants: 5xx, 401/407 and body-cap 413
-  → `Http { status, url }`; 429 → `RateLimited(retry_after_secs)`; timeout/transport → `Network`. Status and
+  Convert ONCE at the adapter boundary into existing `ScraperError` variants: 5xx, 401/407 →
+  `Http { status, url }`; 429 → `RateLimited(retry_after_secs)`; timeout/transport → `Network`. The body cap
+  is a LOCAL read limit (`HttpError::BodyTooLarge`), never a remote 413: keep its existing local path and
+  `PermanentFatal` classification; do not synthesize a server status that was never observed. Status and
   `retry_after` stay in the adapter error while it computes backoff. Do NOT add
   `RemoteTransient`/`RemotePermanent`/`LocalConsistency` variants or expand `SemanticError`: that duplicates
   `ErrorClass` and contradicts the "no over-engineered variants" decision. RED first: one test per mapping
@@ -190,35 +191,55 @@ spec and blocks its commit.
   adapter, and `RemoteEmbeddingAdapter` already has a configured `pinned_dim` plus `probe_dim()` that
   compares the pin with the served width — no `/models` call and never the first vector of a batch.
   Validate EVERY vector against that width; add a rejection counter to `EmbeddingRunMetrics`; abort the
-  whole batch above an explicit ceiling so `embed_batch_raw` bisection cannot amplify one bad provider
-  response into `n` remote calls; if `embedding_dim() == 0` (provider declared no width) fail closed instead
-  of adopting a measured one. RED first: mixed-dimension batch, rejection counter, abort-at-threshold and
-  zero-width cases. Risk: item 6 — no existing test covers a mixed-dimension batch, and a guard that
-  rejects valid vectors fails silently on every page. Explicitly NOT item 1: the store is rebuildable by
-  re-running the export, so a false rejection is recoverable rather than unrecoverable data. Commit 6.
+  whole batch above an explicit ceiling. A dimension-invalid response MUST NOT come back as a generic `Err`
+  that `embed_batch_raw` treats like any batch failure — `Err(_) if contents.len() > 1` currently bisects and
+  would issue more remote calls. Require a terminal path matched before that arm, or validate the SUCCESSFUL
+  result inside `embed_batch_raw` before the bisection branch is reachable. If `embedding_dim() == 0`
+  (provider declared no width), cut BEFORE any provider request and fail closed — never adopt a measured
+  width. State whether the ceiling is per batch or per run, and when the counter increments. RED first:
+  mixed-dimension batch, rejection counter, abort-at-threshold, zero-width, and a test asserting the MAXIMUM
+  OUTBOUND CALLS to a provider that keeps returning bad dimensions — returning an error and incrementing a
+  counter alone does not prove the remote calls stopped. Risk: item 6 — no existing test covers a
+  mixed-dimension batch, and a guard that rejects valid vectors fails silently on every page. Explicitly
+  NOT item 1: the store is rebuildable by re-running the export, so a false rejection is recoverable rather
+  than unrecoverable data. Commit 6.
 - T8 `S13` route: inline — persist `model_id` with the vault store vectors and verify it on read in
   `vault_search`. The human's schema decision is CLOSED and recorded in L10: option A (NULL = unknown),
   with this spec. Schema: bump `SCHEMA_VERSION` to 3 and add `note_chunks.model_id TEXT` nullable; change
   `migrate_to_current` to apply ALL pending steps by checking each column's real existence
   (`spans_json`, then `model_id`) instead of using `PREVIOUS_SCHEMA_VERSION` as a single selector — a v1
-  database gets both columns, a v2 database gets only `model_id`; re-stamp `PRAGMA user_version` last.
-  Never backfill legacy rows (S17 excludes re-embedding). Write: `VaultSearchService::index_note` calls
+  database gets both columns, a v2 database gets only `model_id`. Run the checks, the `ALTER`s and the
+  `PRAGMA user_version` stamp inside ONE transaction, stamping the version last. Never backfill legacy
+  rows (S17 excludes re-embedding). Write: `VaultSearchService::index_note` calls
   `EmbeddingPort::model_id()` once per note and passes `model_id: &str` as an argument to
   `index_note_transactional`; do NOT widen the public `ChunkToPersist` tuple (risk item 3).
   `NoteChunkVector` gains `model_id: Option<String>` (`None` = legacy unknown) and `load_all_vectors`
-  selects the new column. Read: `NULL` → include with an actionable re-index warning; known `model_id`
-  differing from the current one → skip with a warning; wholesale mismatch (no row matches the current
-  model) → fail closed with actionable guidance, mirroring the existing wholesale dimension-mismatch arm;
-  matching model → include normally; existing dimension behaviour stays. RED first: v1→v3 and v2→v3
-  migration tests, a `model_id` round-trip test, a same-width different-model mismatch test, and a
-  legacy-NULL include-with-warn test. Scope boundary (document, do not implement): the general `chunks`
+  selects the new column. Read policy, in this order: an EMPTY eligible set returns zero results (not a
+  model mismatch); `NULL` rows are NEVER backfilled — they are included by width for compatibility and
+  produce ONE aggregated actionable re-index warning; a known `model_id` equal to the active one is
+  included; a known `model_id` different from it is skipped with a warning. Fail closed for a model mismatch
+  ONLY when eligible known-model rows remain, ALL of them are incompatible, and NO eligible `NULL` row would
+  be included by option A — unknown rows keep compatibility and win over the fail-closed arm. Existing
+  dimension behaviour stays. RED first: v1→v3 and v2→v3 migration (including rollback-on-failure), an empty
+  index, a NULL-only index included with the aggregated warning, a `model_id` round-trip, a same-width
+  different-model mismatch with an incompatible model and no NULL rows, and a mixed NULL+known case that
+  must NOT fail closed. Scope boundary (document, do not implement): the general `chunks`
   table has the same gap and is out of T8's scope. Risk: item 1 (schema/format change and migration over
   stored user data). Commit 7, or the next free slot if it lands earlier per the delivery order below —
   later task commit numbers are updated in the same commit.
 - T9 `S14` route: inline — one shared `RetryPolicy`/body-cap module that reads the existing constants
-  (`LLM_MAX_BODY_BYTES`, the downloader's values) instead of re-declaring them, plus a real retry on the
-  completion path. No new dependency, no invented numbers. Risk: item 6 — an attempt-count regression is
-  visible only as latency and no test catches it. Commit 8.
+  (`LLM_MAX_BODY_BYTES`, the downloader's values) instead of re-declaring them. Verify and test the timeouts
+  that ALREADY exist — `CONNECT_TIMEOUT = 10 s` and `REQUEST_TIMEOUT = 60 s` in
+  `infrastructure/llm/http_client.rs`, shared by both AI clients — and invent no values; this task adds no
+  new total-deadline number. The embedding path's bounded attempts, backoff and `Retry-After` handling
+  (seconds and HTTP-date) already exist and are pinned by tests: reuse them.
+  OPEN / BLOCKED SUB-DECISION — completion-path retries: `send_completion` is a single `POST
+  /chat/completions`, a non-idempotent operation. Retrying it requires the concrete provider's documented
+  semantics or an idempotency mechanism, and neither is known yet. T9 therefore does NOT claim to satisfy
+  the completion retry policy: that part stays EXPLICITLY OPEN and blocks the commit until the provider is
+  known and a safe repeat is confirmed. The rest of T9 — shared policy/body cap and timeout verification —
+  remains implementable. No new dependency. Risk: item 6 — an embedding attempt-count regression is visible
+  only as latency and no test catches it. Commit 8.
 - T10 `S15`, `S3` route: inline — collapse the duplicate chunking: `SemanticCleanerImpl` depends on
   `TextChunker` and `split_into_chunks` is deleted. The four S15 divergences are NOT interchangeable
   details; each is decided in the Log before the edit, with the test that pins it:
@@ -257,8 +278,10 @@ spec and blocks its commit.
 Delivery order is this list's order: T11 first (boundary assertions are the oracle the budget and chunking
 changes must not break), then T1 and T2 one commit each, then the batched contract-hygiene commit
 (T3, T4, T5), then T6 and T7, each moving a seam of the container, then T9, then T10, which closes the
-feature. T8 sits outside the streak: it waits on the human schema decision named in L5 and may land at any
-point after T6.
+feature. T8 sits outside the streak but is NOT blocked by a human decision (L10 closed it): its effective
+place is anywhere after T6, in the next free commit slot, with later task numbers updated in that commit.
+T9's completion-retry sub-decision remains open as recorded in its task. No work unit or commit count
+changes in this revision.
 
 ## Log
 
@@ -394,3 +417,29 @@ point after T6.
   dimension behaviour unchanged. The general `chunks` table has the same gap and is explicitly out of
   T8's scope. Options B (fail closed until re-index) and C (stamp the current model on old rows) were
   rejected: B breaks an existing CLI workflow, C lies about provenance.
+- L11: Human's fourth instruction, verbatim opening: "Sí. **Aplica las siete correcciones y commitea
+  únicamente el plan**; la revisión del código que compartiste basta, no hace falta otra investigación
+  externa." Also verbatim: "No hagas cambios de implementación ni presentes el commit del plan como
+  autorización para empezar a implementarlos." Companion-review corrections applied after code
+  verification, all document-only:
+  1. T8 read policy disambiguated: empty eligible set → zero results; `NULL` never backfilled, included by
+     width with ONE aggregated warning; fail-closed only with eligible known-model rows, all incompatible
+     and no eligible `NULL` rows. Migration checks, `ALTER`s and `user_version` stamp run in one transaction,
+     version last.
+  2. T7: `embedding_dim() == 0` cuts before any provider request; a dimension-invalid response cannot return
+     as a generic `Err` that triggers `embed_batch_raw` bisection — terminal path or validation of the
+     `Ok` result; test asserts MAXIMUM outbound calls, and the ceiling scope and counter increment are
+     stated.
+  3. T9: existing `CONNECT_TIMEOUT = 10 s` / `REQUEST_TIMEOUT = 60 s` are kept, no invented values;
+     completion retries stay EXPLICITLY OPEN/BLOCKED pending the concrete provider and a safe `POST` repeat
+     (contract or idempotency). T9 does not claim the completion retry policy is satisfied.
+  4. T11/S7: test the real HTML path through `extract_text_content` → `legible` and the real cleaner with
+     captured requests at both clients; `FakeCleaner` is not proof; (c) pins request structure only, with
+     no claim of semantic prompt-injection immunity; assert on serialized `FileTraceLayer` JSONL for page
+     markers and credentials, not just field names.
+  5. Delivery order: removed the stale "waits on the human schema decision named in L5"; T8's effective
+     place is anywhere after T6 in the next free commit slot.
+  6. T6: local body cap keeps its local `PermanentFatal` path; no synthesized remote `Http 413`.
+  7. T2: `chars().count()` counts Unicode scalars, not graphemes or tokens; the character budget is a
+     chunker guard, not an exact provider token limit.
+  No work unit or commit count changes. This entry is a plan edit, not authorization to implement T1–T11.
