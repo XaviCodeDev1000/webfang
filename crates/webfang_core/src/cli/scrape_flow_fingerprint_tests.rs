@@ -50,7 +50,7 @@ fn hint_with_score(total: f64) -> ExtractionQualityHint {
             total,
             active_factors: 3,
         },
-        message_es: format!("baja calidad ({total}/100)"),
+        message_es: format!("low-quality ({total}/100)"),
         fingerprint: None,
     }
 }

@@ -123,7 +123,7 @@ pub fn predict_spa_status(url: &str, raw_html: &str) -> Option<SpaDetectionResul
 /// (`extract_content`) — call this after extraction, so JS-shell pages fail
 /// honestly instead of producing near-empty Markdown.
 ///
-/// The Spanish `reason` distinguishes pages that carry SPA markers (likely
+/// The English `reason` distinguishes pages that carry SPA markers (likely
 /// requiring JavaScript rendering) from pages that simply returned very
 /// little content. 50 (`MIN_CONTENT_CHARS`) stays the ONLY threshold.
 ///
@@ -140,12 +140,12 @@ pub fn validate_min_content(
     if let Some(spa_info) = detect_spa_content(url, text_content, raw_html) {
         let reason = if spa_info.has_spa_markers {
             format!(
-                "contenido insuficiente ({} caracteres) con marcadores SPA detectados — la página requiere renderizado de JavaScript",
+                "insufficient content ({} characters) with SPA markers detected — the page requires JavaScript rendering",
                 spa_info.char_count
             )
         } else {
             format!(
-                "contenido insuficiente ({} caracteres) — la página devolvió muy poco contenido extraíble",
+                "insufficient content ({} characters) — the page returned too little extractable content",
                 spa_info.char_count
             )
         };
@@ -289,7 +289,7 @@ mod tests {
     }
 
     /// Assert that `err` is the typed `ExtractionFailed` for [`URL`] and
-    /// return its Spanish reason for further assertions.
+    /// return its English reason for further assertions.
     fn expect_extraction_failed(err: &crate::error::ScraperError) -> &str {
         match err {
             crate::error::ScraperError::ExtractionFailed { url, reason } => {
@@ -307,11 +307,11 @@ mod tests {
             .expect_err("sub-threshold marker content must fail the guard");
         let reason = expect_extraction_failed(&err);
         assert!(
-            reason.contains("contenido insuficiente"),
-            "Spanish reason must state insufficient content: {reason}"
+            reason.contains("insufficient content"),
+            "English reason must state insufficient content: {reason}"
         );
         assert!(
-            reason.contains("renderizado de JavaScript"),
+            reason.contains("JavaScript rendering"),
             "marker variant must mention JavaScript rendering: {reason}"
         );
     }
@@ -323,11 +323,11 @@ mod tests {
             .expect_err("empty content must fail the guard");
         let reason = expect_extraction_failed(&err);
         assert!(
-            reason.contains("contenido insuficiente"),
-            "Spanish reason must state insufficient content: {reason}"
+            reason.contains("insufficient content"),
+            "English reason must state insufficient content: {reason}"
         );
         assert!(
-            !reason.contains("renderizado de JavaScript"),
+            !reason.contains("JavaScript rendering"),
             "no-marker variant must not claim JS requirement: {reason}"
         );
     }

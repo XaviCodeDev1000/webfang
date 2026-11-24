@@ -5,7 +5,7 @@ expression: redacted
   <TIMESTAMP> ERROR <MODULE>: network error starting download, url: http://127.0.0.1:<PORT>/, error: error sending request for uri (http://127.0.0.1:<PORT>/): client error (<KIND>)
     at <FILE>.rs:<LINE>
 
-  <TIMESTAMP>  WARN <MODULE>: download failed: aborting pipeline, url: http://127.0.0.1:<PORT>/, error: network error: <TRANSPORT_FAILURE>
+  <TIMESTAMP>  WARN <MODULE>: download failed: aborting pipeline, url: http://127.0.0.1:<PORT>/, error: network error: error sending request for uri (http://127.0.0.1:<PORT>/): client error (<KIND>)
     at <FILE>.rs:<LINE>
 
-Error: vector ingestion failed: network error: <TRANSPORT_FAILURE>
+Error: Vector ingestion failed: network error: error sending request for uri (http://127.0.0.1:<PORT>/): client error (<KIND>)

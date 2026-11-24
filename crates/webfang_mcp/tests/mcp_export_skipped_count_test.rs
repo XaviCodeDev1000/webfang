@@ -111,7 +111,7 @@ async fn export_jsonl_reports_the_skipped_non_utf8_lines() {
         "the text must name the count: {text}"
     );
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "the existing text must survive: {text}"
     );
 }
@@ -139,7 +139,7 @@ async fn export_jsonl_without_damage_reports_zero_and_keeps_the_text() {
         "a clean export must not mention the count: {text}"
     );
     assert!(
-        text.contains("Exportación completada") && text.contains("archivo de procedencia"),
+        text.contains("Export completed") && text.contains("provenance file"),
         "the clean text must stay exactly what it was: {text}"
     );
 }

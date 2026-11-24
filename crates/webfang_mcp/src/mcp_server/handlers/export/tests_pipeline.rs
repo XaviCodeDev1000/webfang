@@ -21,7 +21,7 @@ async fn process_export_pipeline_seeded_writes_to_output_dir() {
         .expect("process_export_pipeline returns Ok");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "pipeline export must report completion: {text}"
     );
 }
@@ -78,7 +78,7 @@ async fn process_export_pipeline_with_url_invokes_scrape() {
         "url branch must not fall back to persisted 'no results': {text}"
     );
     assert!(
-        text.contains("error al rastrear") || text.contains("Exportación completada"),
+        text.contains("error al rastrear") || text.contains("Export completed"),
         "url branch must attempt a live scrape: {text}"
     );
 }

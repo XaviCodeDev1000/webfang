@@ -20,16 +20,17 @@
 
 use uuid::Uuid;
 
-use crate::domain::embedding_port::{cosine_similarity_fail_closed, EmbeddingPort};
+use crate::domain::embedding_port::EmbeddingPort;
 use crate::domain::entities::content::DocumentChunk;
 use crate::domain::semantic_cleaner::private::Sealed;
 use crate::domain::semantic_cleaner::SemanticCleaner;
-use crate::domain::text_chunker::{ByteSpan, TextChunk};
 use crate::error::SemanticError;
-use crate::infrastructure::content_processing::aggressive::strip_html_tags;
 
-/// Threshold at which filtering is reported as aggressive (>50 % discarded).
-const AGGRESSIVE_FILTER_RATIO: f64 = 0.5;
+mod relevance;
+mod text;
+
+use relevance::{distances_to_centroid, warn_aggressive_filter, z_score_filter};
+use text::{extract_text_content, split_into_chunks};
 
 /// Semantic cleaner over an erased [`EmbeddingPort`] (ADR-0004 step 6).
 ///
@@ -139,207 +140,6 @@ impl SemanticCleanerImpl {
 
         Ok(kept)
     }
-}
-
-/// Mean-pooled centroid of `embeddings`, then the distance
-/// (`1 - cosine similarity`) of every vector to it.
-fn distances_to_centroid(embeddings: &[Vec<f32>]) -> Result<Vec<f32>, SemanticError> {
-    let dim = embeddings.first().map_or(0, Vec::len);
-    if dim == 0 {
-        return Err(SemanticError::Inference(
-            "No embeddings available for relevance scoring".to_string(),
-        ));
-    }
-    let mut centroid = vec![0.0_f32; dim];
-    for embedding in embeddings {
-        for (&val, slot) in embedding.iter().zip(centroid.iter_mut()) {
-            *slot += val;
-        }
-    }
-    let n = embeddings.len() as f32;
-    for val in &mut centroid {
-        *val /= n;
-    }
-    embeddings
-        .iter()
-        .map(|emb| {
-            cosine_similarity_fail_closed(emb, &centroid)
-                .map(|similarity| 1.0 - similarity)
-                .ok_or_else(|| {
-                    SemanticError::Inference(format!(
-                        "Dimension mismatch in relevance scoring: vector {} vs centroid {dim}",
-                        emb.len()
-                    ))
-                })
-        })
-        .collect()
-}
-
-/// Z-score adaptive filtering: chunks whose centroid distance sits more than
-/// `z_limit` deviations from the mean distance are statistical outliers and
-/// are dropped; survivors carry their embedding in `embeddings`.
-///
-/// Thresholds map to strictness: `1.0` → Z=0 (centroid-only), `0.0` → Z=3
-/// (~99.7 % kept), the `0.3` default → Z=2.1.
-fn z_score_filter(
-    chunks: Vec<DocumentChunk>,
-    embeddings: Vec<Vec<f32>>,
-    relevance_threshold: f32,
-    distances: &[f32],
-) -> Vec<DocumentChunk> {
-    let sample_count = distances.len() as f32;
-    let mean_dist = distances.iter().copied().sum::<f32>() / sample_count;
-    let variance = distances
-        .iter()
-        .map(|d| (d - mean_dist).powi(2))
-        .sum::<f32>()
-        / sample_count;
-    let std_dev = variance.sqrt();
-    let z_limit = 3.0 * (1.0 - relevance_threshold);
-
-    chunks
-        .into_iter()
-        .zip(embeddings)
-        .zip(distances.iter())
-        .filter(|(_, &distance)| {
-            let z_score = (distance - mean_dist).abs() / std_dev.max(1e-6);
-            z_score <= z_limit
-        })
-        .map(|((mut chunk, embedding), _)| {
-            chunk.embeddings = Some(embedding);
-            chunk
-        })
-        .collect()
-}
-
-/// `warn!` when the filter discards more than half of the chunks, so an
-/// over-aggressive threshold or off-topic page is queryable from the trace.
-fn warn_aggressive_filter(url: &str, chunks_before: usize, chunks_after: usize) {
-    let filtered_out = chunks_before.saturating_sub(chunks_after);
-    let loss_ratio = filtered_out as f64 / chunks_before as f64;
-    if chunks_before > 0 && loss_ratio > AGGRESSIVE_FILTER_RATIO {
-        tracing::warn!(
-            url = %url,
-            chunks_before = chunks_before,
-            chunks_after = chunks_after,
-            filtered_out = filtered_out,
-            loss_ratio = format!("{:.0}%", loss_ratio * 100.0),
-            "Relevance filter discarded >50% of chunks for this page — possible over-aggressive threshold"
-        );
-    }
-}
-
-/// Remove HTML tags from a `legible` fragment while preserving its whitespace.
-///
-/// [`legible::parse`] returns a readability HTML fragment (`<div …><p>…</p></div>`),
-/// not plain text. The degraded fallback uses [`strip_html_tags`], which drops
-/// script/style/noscript bodies but collapses ALL whitespace; applying it to
-/// the fragment would erase the newlines the chunker reads as paragraph
-/// boundaries. This helper keeps that layout intact while enforcing the same
-/// embedding boundary: no raw tag may reach a model client (S4 / T11).
-fn strip_tags_keep_layout(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match (in_tag, ch) {
-            (false, '<') => in_tag = true,
-            (true, '>') => in_tag = false,
-            (true, _) => {},
-            (false, _) => out.push(ch),
-        }
-    }
-    out
-}
-
-/// Extract readable text from `html`, falling back to the shared block-dropping
-/// stripper when `legible` fails or yields nothing but whitespace.
-///
-/// Both branches are an embedding boundary: no raw tag may reach a model client
-/// (S4 / T11). The fallback must additionally drop script/style/noscript
-/// bodies before any text reaches [`EmbeddingPort::embed_batch`] (#3009).
-fn extract_text_content(html: &str) -> String {
-    match legible::parse(html, None, None) {
-        Ok(article) if !article.content.trim().is_empty() => {
-            strip_tags_keep_layout(&article.content)
-        },
-        _ => strip_html_tags(html),
-    }
-}
-
-/// Split `text` into chunks joined from non-empty paragraphs, staying under
-/// `max_chars` when possible.
-///
-/// A single paragraph longer than the budget cannot be split honestly, so it
-/// fails with [`SemanticError::ChunkTooLarge`] — the caller layer degrades
-/// the page instead of writing an unembeddable chunk.
-///
-/// #2429 AC2: each chunk also carries the exact byte spans of its paragraphs
-/// inside `text` (half-open `[start, end)`, whitespace-trimmed boundaries) —
-/// the locator the vector sink stamps into every [`VectorRecord`].
-fn split_into_chunks(text: &str, max_chars: usize) -> Result<Vec<TextChunk>, SemanticError> {
-    // Paragraphs as trimmed `(start, end)` byte spans into `text`.
-    let mut paragraphs: Vec<(usize, usize)> = Vec::new();
-    let mut rest = text;
-    let mut offset = 0;
-    loop {
-        let line_start = offset;
-        let line = match rest.find('\n') {
-            Some(nl) => {
-                let line = &rest[..nl];
-                rest = &rest[nl + 1..];
-                offset += nl + 1;
-                line
-            },
-            None => {
-                let line = rest;
-                rest = "";
-                line
-            },
-        };
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            let start = line_start + (trimmed.as_ptr() as usize - line.as_ptr() as usize);
-            paragraphs.push((start, start + trimmed.len()));
-        }
-        if rest.is_empty() {
-            break;
-        }
-    }
-
-    let mut chunks: Vec<TextChunk> = Vec::new();
-    let mut current = String::new();
-    let mut current_spans: Vec<ByteSpan> = Vec::new();
-    for (start, end) in paragraphs {
-        let paragraph = &text[start..end];
-        if !current.is_empty()
-            && current.chars().count() + paragraph.chars().count() + 1 > max_chars
-        {
-            chunks.push(TextChunk::new(
-                std::mem::take(&mut current),
-                std::mem::take(&mut current_spans),
-            ));
-        }
-        if !current.is_empty() {
-            current.push('\n');
-        }
-        current.push_str(paragraph);
-        current_spans.push(ByteSpan::try_new(start, end)?);
-    }
-    if !current.is_empty() {
-        chunks.push(TextChunk::new(current, current_spans));
-    }
-
-    for (chunk_id, chunk) in chunks.iter().enumerate() {
-        if chunk.text().chars().count() > max_chars {
-            return Err(SemanticError::ChunkTooLarge {
-                chunk_id: chunk_id.to_string(),
-                chars: chunk.text().len(),
-                max: max_chars,
-            });
-        }
-    }
-
-    Ok(chunks)
 }
 
 impl Sealed for SemanticCleanerImpl {}

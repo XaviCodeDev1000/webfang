@@ -73,10 +73,10 @@ fn parse_jsonrpc_error_code(body: &str) -> Option<i64> {
 fn redact_path_normalizes_host_separators() {
     let dir = std::path::Path::new(r"C:\Users\runneradmin\AppData\Local\Temp\.tmpAbC123");
 
-    let plain = r"Exportación completada: 1 documentos → C:\Users\runneradmin\AppData\Local\Temp\.tmpAbC123\export.jsonl";
+    let plain = r"Export completed: 1 documents → C:\Users\runneradmin\AppData\Local\Temp\.tmpAbC123\export.jsonl";
     assert_eq!(
         redact_path(plain, dir),
-        "Exportación completada: 1 documentos → [OUT_DIR]/export.jsonl"
+        "Export completed: 1 documents → [OUT_DIR]/export.jsonl"
     );
 
     let json = r#""local_path": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\.tmpAbC123\\images\\71a5.png""#;

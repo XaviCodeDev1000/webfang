@@ -148,7 +148,7 @@ async fn test_scrape_with_readability_produces_single_result() {
 
 /// CLI funnel success branch (#684): readability succeeds but yields
 /// sub-threshold text on a JS-shell page → typed `ExtractionFailed` with
-/// the marker Spanish reason, never Ok near-empty.
+/// the marker English reason, never Ok near-empty.
 #[cfg_attr(miri, ignore)] // servo_arc 0.4.3 Tree Borrows UB in ArcUnion drop via lol_html (#487, #764)
 #[tokio::test]
 async fn test_extract_content_success_branch_below_threshold_errors() {
@@ -170,11 +170,11 @@ async fn test_extract_content_success_branch_below_threshold_errors() {
         } => {
             assert_eq!(failed_url, url.as_str(), "url must be preserved");
             assert!(
-                reason.contains("contenido insuficiente"),
-                "Spanish reason must state insufficient content: {reason}"
+                reason.contains("insufficient content"),
+                "English reason must state insufficient content: {reason}"
             );
             assert!(
-                reason.contains("renderizado de JavaScript"),
+                reason.contains("JavaScript rendering"),
                 "marker-bearing shell must report the JS cause: {reason}"
             );
         },
@@ -208,7 +208,7 @@ async fn test_extract_content_legit_page_above_threshold_succeeds() {
 
 /// CE-3 no double-gate: when readability FAILS, `MIN_FALLBACK_CONTENT=100`
 /// stays the SOLE authority on the fallback branch — the 50-char guard must
-/// NOT fire there (its Spanish text would be a duplicate signal).
+/// NOT fire there (its English text would be a duplicate signal).
 #[cfg_attr(miri, ignore)] // servo_arc 0.4.3 Tree Borrows UB in ArcUnion drop via lol_html (#487, #764)
 #[tokio::test]
 async fn test_extract_content_poor_fallback_keeps_min_fallback_authority() {
@@ -227,7 +227,7 @@ async fn test_extract_content_poor_fallback_keeps_min_fallback_authority() {
                 "fallback branch error must come from MIN_FALLBACK_CONTENT, got: {reason}"
             );
             assert!(
-                !reason.contains("contenido insuficiente"),
+                !reason.contains("insufficient content"),
                 "the 50-char guard must NOT double-fire on the fallback branch: {reason}"
             );
         },
