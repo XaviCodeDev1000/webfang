@@ -602,3 +602,14 @@ changes in this revision.
   `nextest run -p webfang_core -p webfang_cli` 4913 passed / 8 skipped; check + clippy
   all-targets/all-features `-D warnings` + fmt --check + doc `-D warnings` PASS. Next: T8 in its
   own session (schema v3 + migration over stored user data); T9 completion retries remain OPEN.
+- L23: Native review of the T7 candidate (lineage `review-bbac0f8e88319e08`) was granted by the
+  human; four lenses were collected (resilience and readability required an explicit
+  `capture-result` submission). The refuter resolved the one CRITICAL readability finding
+  (`R2-003`, tag-based terminal classification) as **refuted**; all remaining findings (cold-adapter
+  error wording, `MAX_TOLERATED_REJECTIONS` name, inline import path, Retry-After on 5xx) are
+  informational non-blocking. The review returned `state: approved` and the exact
+  `review.acknowledge-approved` invocation burned authority (`action: acknowledged`,
+  `authority: burned`). Delivery remains under ordinary repository policy. T8 (schema v3, nullable
+  `note_chunks.model_id`, migration over stored data with rollback tests) is deliberately NOT
+  started here: it needs its own session with full attention. T9 completion retries remain OPEN
+  pending concrete provider semantics.
