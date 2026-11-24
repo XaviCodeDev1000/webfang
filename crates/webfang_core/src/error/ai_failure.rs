@@ -8,16 +8,20 @@
 //! [`ScraperError`] taxonomy. An untagged inference is a local consistency
 //! failure and keeps its `Semantic` variant (InternalFatal).
 //!
-//! The tag is appended after the human prose so the operator-facing message
+//! The tag payload is JSON produced and consumed by `serde`, so the tag has
+//! one format definition and URLs with special characters survive verbatim.
+//! It is appended after the human prose so the operator-facing message
 //! survives unchanged and so existing substring assertions keep working.
 
 use super::{ScraperError, SemanticError};
+use serde::{Deserialize, Serialize};
 
 const TAG_SEPARATOR: &str = "\n";
 const TAG_PREFIX: &str = "[ai-remote ";
 const TAG_END: &str = "]";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 enum RemoteKind {
     Status {
         status: u16,
@@ -27,17 +31,14 @@ enum RemoteKind {
     Transport,
 }
 
-fn tag_for(kind: &RemoteKind) -> String {
-    match kind {
-        RemoteKind::Status {
-            status,
-            url,
-            retry_after,
-        } => match retry_after {
-            Some(secs) => format!("[ai-remote status={status} url={url} retry={secs}]"),
-            None => format!("[ai-remote status={status} url={url}]"),
-        },
-        RemoteKind::Transport => "[ai-remote transport]".to_owned(),
+fn tagged_message(message: String, kind: &RemoteKind) -> SemanticError {
+    match serde_json::to_string(kind) {
+        Ok(payload) => SemanticError::Inference(format!(
+            "{message}{TAG_SEPARATOR}{TAG_PREFIX}{payload}{TAG_END}"
+        )),
+        // A payload we cannot encode is not a tag we can trust: leave the
+        // error untagged so it stays a local failure instead of guessing.
+        Err(_) => SemanticError::Inference(message),
     }
 }
 
@@ -58,49 +59,17 @@ pub fn remote_status(
         url: url.to_owned(),
         retry_after,
     };
-    SemanticError::Inference(format!(
-        "{}{TAG_SEPARATOR}{}",
-        message.into(),
-        tag_for(&kind)
-    ))
+    tagged_message(message.into(), &kind)
 }
 
 /// Build a `SemanticError` for a timeout or a transport failure.
 #[must_use]
 pub fn remote_transport(message: impl Into<String>) -> SemanticError {
-    SemanticError::Inference(format!(
-        "{}{TAG_SEPARATOR}{}",
-        message.into(),
-        tag_for(&RemoteKind::Transport)
-    ))
+    tagged_message(message.into(), &RemoteKind::Transport)
 }
 
 fn parse_kind(inner: &str) -> Option<RemoteKind> {
-    let mut tokens = inner.split_whitespace();
-    let first = tokens.next()?;
-    if first == "transport" && tokens.next().is_none() {
-        return Some(RemoteKind::Transport);
-    }
-    let (key, value) = first.split_once('=')?;
-    if key != "status" {
-        return None;
-    }
-    let status = Some(value.parse::<u16>().ok()?);
-    let mut url = None;
-    let mut retry_after = None;
-    for token in tokens {
-        let (key, value) = token.split_once('=')?;
-        match key {
-            "url" => url = Some(value.to_owned()),
-            "retry" => retry_after = Some(value.parse::<u64>().ok()?),
-            _ => return None,
-        }
-    }
-    Some(RemoteKind::Status {
-        status: status?,
-        url: url?,
-        retry_after,
-    })
+    serde_json::from_str(inner).ok()
 }
 
 /// The single conversion point for AI failures.
@@ -165,6 +134,23 @@ mod tests {
         assert_eq!(
             scraper.classify(),
             crate::domain::error::ErrorClass::InternalFatal
+        );
+    }
+
+    #[test]
+    fn url_with_special_characters_round_trips() {
+        let url = "https://api.example.test/v1?key=a=b&note=hello world&x=]";
+        let scraper: ScraperError = remote_status("endpoint returned 503", 503, url, None).into();
+        match &scraper {
+            ScraperError::Http {
+                status: 503,
+                url: parsed,
+            } => assert_eq!(parsed, url),
+            other => panic!("a tagged 503 must stay Http, got: {other}"),
+        }
+        assert_eq!(
+            scraper.classify(),
+            crate::domain::error::ErrorClass::TransientRetriable
         );
     }
 
