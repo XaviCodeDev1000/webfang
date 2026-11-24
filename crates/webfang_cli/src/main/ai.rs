@@ -59,7 +59,7 @@ pub(super) fn semantic_inspector(
     })
 }
 
-/// Build the AI semantic cleaner and the vault-search ports (ADR-0004 paso 6).
+/// Build the AI semantic cleaner and the vault-search ports (ADR-0004 step 6).
 ///
 /// `--clean-ai` carries no local ONNX model: the cleaner is built over
 /// whatever `EmbeddingPort` the run resolved — remote only, since ADR-0004
@@ -68,7 +68,7 @@ pub(super) fn semantic_inspector(
 /// already fills that slot: `--embedding-provider` (flag) >
 /// `WEBFANG_EMBEDDING_PROVIDER` (env) > the configured default embedding
 /// provider. A `--clean-ai` run with no resolvable remote provider is a
-/// `ConfigError` in Spanish naming `--embedding-provider` (exit 78) — never
+/// `ConfigError` naming `--embedding-provider` (exit 78) — never
 /// a silent no-op.
 ///
 /// WITHOUT `--clean-ai` this returns no cleaner and the ports the run would
@@ -106,9 +106,9 @@ pub(super) fn build_ai_cleaner(
 
     let Some(port) = embedding_port else {
         return Err(CliExit::ConfigError(
-            "--clean-ai requiere un provider de embeddings remoto: pasá \
-             '--embedding-provider <id>' (o exportá WEBFANG_EMBEDDING_PROVIDER) \
-             con un provider configurado en el archivo de config."
+            "--clean-ai requires a remote embeddings provider: pass \
+             '--embedding-provider <id>' (or export WEBFANG_EMBEDDING_PROVIDER) \
+             with a provider configured in the config file."
                 .to_string(),
         ));
     };
@@ -135,7 +135,7 @@ pub(super) fn load_providers() -> webfang_core::domain::providers::ProvidersConf
     }
 }
 
-/// Resolve the embedding port for the whole run (ADR-0004 paso 6).
+/// Resolve the embedding port for the whole run (ADR-0004 step 6).
 ///
 /// An explicit `--embedding-provider` always resolves (fail fast even
 /// without `--clean-ai`, so vault search works with no local model); with
@@ -175,7 +175,7 @@ pub(super) async fn resolve_remote_embedding(
 /// Tier 2 repair are distinct privacy domains (issue #1977). An explicit
 /// `--tier2-embedding-provider` always resolves (fail fast even without
 /// `--clean-ai`). Without it, Tier 2 has NO provider at all: the local ONNX
-/// pool that used to serve this slot is gone (ADR-0004 paso 6), and the
+/// pool that used to serve this slot is gone (ADR-0004 step 6), and the
 /// vault slot's default embedding provider is never adopted, so a remote
 /// provider configured for vault search cannot open a Tier 2 egress (#1981).
 /// `None` with no config load and no probe — plain runs never dial an

@@ -555,7 +555,7 @@ async fn f11_503_challenge_is_classified_as_waf_not_http_error() {
         "expected exit {EXIT_WAF_BLOCK}, got {code:?}\nstderr: {stderr}"
     );
     assert!(
-        stderr.contains("WAF/CAPTCHA detectado"),
+        stderr.contains("WAF/CAPTCHA detected"),
         "a 503 + cf-mitigated challenge must be reported as a WAF block\nstderr: {stderr}"
     );
     assert!(
@@ -589,7 +589,7 @@ async fn f11_403_challenge_is_classified_as_waf_without_rotating_user_agent() {
 
     assert_eq!(code, Some(EXIT_WAF_BLOCK), "stderr: {stderr}");
     assert!(
-        stderr.contains("WAF/CAPTCHA detectado"),
+        stderr.contains("WAF/CAPTCHA detected"),
         "a 403 + cf-mitigated challenge must be reported as a WAF block\nstderr: {stderr}"
     );
     assert_eq!(
@@ -634,7 +634,7 @@ async fn f11_transient_503_without_challenge_markers_still_retries() {
         "expected 2 retries then success, got {hits} requests"
     );
     assert!(
-        !stderr.contains("WAF/CAPTCHA detectado"),
+        !stderr.contains("WAF/CAPTCHA detected"),
         "a bare 503 must never be classified as a WAF block\nstderr: {stderr}"
     );
     assert_eq!(
@@ -669,7 +669,7 @@ async fn f11_404_with_challenge_prose_stays_a_generic_http_error() {
 
     assert_eq!(code, Some(EXIT_WAF_BLOCK), "stderr: {stderr}");
     assert!(
-        !stderr.contains("WAF/CAPTCHA detectado"),
+        !stderr.contains("WAF/CAPTCHA detected"),
         "a 404 must not be classified as WAF — the sniff read is gated on the canonical WAF statuses\nstderr: {stderr}"
     );
     assert_eq!(
@@ -694,7 +694,7 @@ async fn f11_ignore_waf_downgrades_only_the_classification() {
         "--ignore-waf must not change the exit code, only the classification\nstderr: {stderr}"
     );
     assert!(
-        !stderr.contains("WAF/CAPTCHA detectado"),
+        !stderr.contains("WAF/CAPTCHA detected"),
         "--ignore-waf must suppress the WAF classification (REQ-WAF-07)\nstderr: {stderr}"
     );
     assert!(

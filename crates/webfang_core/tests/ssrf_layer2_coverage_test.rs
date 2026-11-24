@@ -21,7 +21,7 @@
 //!
 //! A blocked target and an unreachable target both end the request, so a naive
 //! test passes if the guard is absent and the network is simply down. Every row
-//! here therefore asserts on the guard's SPANISH MESSAGE — the `SSRF detectado`
+//! here therefore asserts on the guard's SPANISH MESSAGE — the `SSRF detected`
 //! prefix the MCP probe suite already treats as the contract — so removing the
 //! guard changes the result from `refused` to `something else` rather than from
 //! `ok` to `error`.
@@ -42,7 +42,7 @@ use webfang_core::infrastructure::crawler::http_client::StaticHttpFetcher;
 
 /// The Spanish prefix every `ForbiddenLiteral` renders. Asserted literally so a
 /// refusal is distinguishable from "the network was down".
-const SSRF_PREFIX: &str = "SSRF detectado";
+const SSRF_PREFIX: &str = "SSRF detected";
 
 /// Literal targets the guard must refuse, across every address family and
 /// encoding the parser accepts. Loopback and link-local are the two that

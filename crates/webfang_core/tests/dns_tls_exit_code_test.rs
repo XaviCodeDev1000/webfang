@@ -69,11 +69,11 @@ async fn unresolvable_host_exits_69_network_unavailable_not_3() {
         code, 69,
         "DNS resolution failure must exit 69 (EX_UNAVAILABLE), got {code}. stderr:\n{stderr}"
     );
-    // The failure must surface as the network family's Spanish message, not
+    // The failure must surface as the network family's message, not
     // as an internal-error report (#1824). The transport wrapper text is
-    // webfang's own ("error de red: DNS error: …").
+    // webfang's own ("network error: DNS error: …").
     assert!(
-        stderr.contains("error de red: DNS error:"),
+        stderr.contains("network error: DNS error:"),
         "DNS failure must surface as the typed network error, got:\n{stderr}"
     );
 

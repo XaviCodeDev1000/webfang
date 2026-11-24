@@ -17,7 +17,7 @@ use super::chosen_by_operator;
 /// assertion. It is also a guard on THIS module: if the anchor appeared twice
 /// inside the notice itself, every count would report 2 and read as a
 /// regression that does not exist.
-pub const ORPHAN_THRESHOLD_NOTICE_MARKER: &str = "calibrado para Granite";
+pub const ORPHAN_THRESHOLD_NOTICE_MARKER: &str = "calibrated for Granite";
 
 /// ADR-0004 step 5: the orphaned default relevance threshold (spec T5 / S4).
 ///
@@ -34,10 +34,10 @@ pub const ORPHAN_THRESHOLD_NOTICE_MARKER: &str = "calibrado para Granite";
 pub fn orphan_threshold_notice(threshold: f32) -> String {
     format!(
         concat!(
-            "El umbral de relevancia por defecto ({threshold}) está calibrado para Granite ",
-            "(ONNX local). Sin modelo local, un endpoint remoto retiene distinto con el ",
-            "mismo número: elegí `--threshold` (o `WEBFANG_THRESHOLD`) según tu modelo. ",
-            "Referencia: ADR-0004, sección «Umbral por defecto huérfano»."
+            "The default relevance threshold ({threshold}) is calibrated for Granite ",
+            "(local ONNX). Without a local model, a remote endpoint retains a different ",
+            "meaning for the same number: choose `--threshold` (or `WEBFANG_THRESHOLD`) ",
+            "based on your model. Reference: ADR-0004, section «Orphaned default threshold»."
         ),
         threshold = threshold
     )

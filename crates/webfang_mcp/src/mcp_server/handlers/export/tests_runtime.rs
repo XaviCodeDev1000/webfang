@@ -73,7 +73,7 @@ async fn export_jsonl_keeps_runtime_responsive_during_large_export() {
         .expect("export_jsonl returns a tool result");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "the large export must still succeed: {text}"
     );
     assert!(

@@ -356,7 +356,7 @@ async fn scrape_one_url(
     root_correlation: &CorrelationId,
 ) -> Result<Option<ScrapedContent>, crate::error::ScraperError> {
     // SSRF entry guard (F-06 + F-32, #1217): reject literal-IP seeds with a
-    // typed Spanish error BEFORE robots.txt or page fetches open any
+    // typed error BEFORE robots.txt or page fetches open any
     // socket. Same shared choke-point check the downloader and MCP use.
     if let Err(rejection) = crate::domain::ssrf_guard::reject_forbidden_literal_url(url) {
         return Err(crate::error::ScraperError::invalid_url(

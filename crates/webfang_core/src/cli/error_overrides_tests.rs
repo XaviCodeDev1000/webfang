@@ -68,7 +68,7 @@ fn empty_discovery_override_ignores_other_errors() {
 }
 
 /// #1381: a seed the entry guard cuts pre-socket must surface as the
-/// documented null-result code (2), naming the guard's own Spanish cause
+/// documented null-result code (2), naming the guard's own English cause
 /// and BOTH members of the operator hatch pair.
 #[test]
 fn issue_1381_refused_literal_seed_maps_to_empty_discovery_2() {
@@ -86,7 +86,7 @@ fn issue_1381_refused_literal_seed_maps_to_empty_discovery_2() {
             panic!("a policy refusal must not escalate to a network failure");
         };
         assert!(
-            message.contains("prohibida")
+            message.contains("SSRF detected")
                 && message.contains(crate::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
                 && message.contains(crate::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV),
             "message must name the cause and both hatches, got: {message}"
@@ -240,11 +240,11 @@ fn ingestion_transient_network_failure_maps_to_unavailable_69() {
     };
     assert_eq!(exit.report(), ExitCode::from(EXIT_UNAVAILABLE));
     assert!(
-        message.contains("Falló la ingesta de vectores"),
-        "the user-facing message must stay in Spanish and name the phase: {message}"
+        message.contains("Vector ingestion failed"),
+        "the user-facing message must stay in English and name the phase: {message}"
     );
     assert!(
-        message.contains("error de red"),
+        message.contains("network error"),
         "the class-identifying prefix must survive the routing: {message}"
     );
 }
@@ -265,7 +265,7 @@ fn ingestion_panicked_task_maps_to_scraper_failure_3() {
     // a job failure (3) — a data-loss defect is never a retryable outage.
     // #1949 pins the sub-case split instead of forcing 69 everywhere.
     let error = crate::error::ScraperError::ingestion(
-        "tarea de ingesta elástica entró en pánico para https://example.test/pagina",
+        "elastic ingestion task panicked for https://example.test/pagina",
     );
     let exit = ingestion_exit_for(&error);
     assert!(matches!(exit, CliExit::ScraperFailure(_)));
@@ -273,11 +273,11 @@ fn ingestion_panicked_task_maps_to_scraper_failure_3() {
         unreachable!("checked above")
     };
     assert_eq!(exit.report(), ExitCode::from(EXIT_SCRAPER_FAILURE));
-    // The #1941 attribution contract survives the rerouting: Spanish
+    // The #1941 attribution contract survives the rerouting: English
     // context + the URL whose vectors were lost.
     assert!(
-        message.contains("Falló la ingesta de vectores")
-            && message.contains("pánico")
+        message.contains("Vector ingestion failed")
+            && message.contains("panicked")
             && message.contains("https://example.test/pagina"),
         "the failure must keep naming the phase, the cause and the URL: {message}"
     );
@@ -289,7 +289,7 @@ fn ingestion_cancelled_task_maps_to_scraper_failure_3() {
     // task — same class, same exit, pinned separately so the split cannot
     // silently collapse onto one arm or the other.
     let error = crate::error::ScraperError::ingestion(
-        "tarea de ingesta elástica cancelada para https://example.test/pagina",
+        "elastic ingestion task cancelled for https://example.test/pagina",
     );
     let exit = ingestion_exit_for(&error);
     assert!(matches!(exit, CliExit::ScraperFailure(_)));

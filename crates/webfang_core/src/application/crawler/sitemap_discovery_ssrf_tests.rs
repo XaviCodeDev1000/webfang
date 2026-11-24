@@ -24,7 +24,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 // it excludes the disarm window for its whole lifetime and mutates nothing.
 
 /// A loopback seed is rejected at entry, pre-socket: the run fails with
-/// the typed `CrawlError::InvalidUrl` carrying the Spanish SSRF message,
+/// the typed `CrawlError::InvalidUrl` carrying the SSRF message,
 /// and the mock — the only listener for the seed's host — receives zero
 /// requests of any kind (no robots.txt GET, no probes, nothing).
 #[tokio::test]
@@ -50,8 +50,8 @@ async fn sitemap_discovery_rejects_loopback_seed_pre_socket() {
 
     match err {
         CrawlError::InvalidUrl(msg) => assert!(
-            msg.contains("SSRF detectado"),
-            "rejection must carry the Spanish SSRF message, got: {msg}"
+            msg.contains("SSRF detected"),
+            "rejection must carry the SSRF message, got: {msg}"
         ),
         other => panic!("expected CrawlError::InvalidUrl, got: {other:?}"),
     }
@@ -92,8 +92,8 @@ async fn sitemap_discovery_rejects_forbidden_literal_sitemap_url() {
 
     match err {
         CrawlError::InvalidUrl(msg) => assert!(
-            msg.contains("SSRF detectado") && msg.contains("192.168.1.5"),
-            "rejection must name the offending literal in Spanish, got: {msg}"
+            msg.contains("SSRF detected") && msg.contains("192.168.1.5"),
+            "rejection must name the offending literal, got: {msg}"
         ),
         other => panic!("expected CrawlError::InvalidUrl, got: {other:?}"),
     }
@@ -141,7 +141,7 @@ async fn sitemap_discovery_rejects_robots_directive_pointing_at_literal() {
 
     match err {
         CrawlError::InvalidUrl(msg) => assert!(
-            msg.contains("SSRF detectado") && msg.contains("10.9.8.7"),
+            msg.contains("SSRF detected") && msg.contains("10.9.8.7"),
             "rejection must name the directive's forbidden literal, got: {msg}"
         ),
         other => panic!("expected CrawlError::InvalidUrl, got: {other:?}"),
@@ -202,7 +202,7 @@ async fn sitemap_discovery_rejects_index_child_pointing_at_literal() {
 
     match err {
         CrawlError::InvalidUrl(msg) => assert!(
-            msg.contains("SSRF detectado") && msg.contains("192.168.7.7"),
+            msg.contains("SSRF detected") && msg.contains("192.168.7.7"),
             "rejection must name the child's forbidden literal, got: {msg}"
         ),
         other => panic!("expected CrawlError::InvalidUrl, got: {other:?}"),

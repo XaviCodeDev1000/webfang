@@ -1,6 +1,6 @@
 //! Tests for `waf_engine`: verdict policy, inspect(ctx), error UX and the evidence-chain accessor.
 //!
-//! Extracted from the inline `mod tests` of `waf_engine.rs` (PR 1 of the Ola 1
+//! Extracted from the inline `mod tests` of `waf_engine.rs` (PR 1 of the Wave 1
 //! mission, umbrella #2584) along the file's own seam: verbatim mechanical move
 //! (dedent -4), no semantic changes and no renames. `waf_engine.rs` is
 //! grandfathered in `scripts/quality-baselines.json` and the ratchet is
@@ -235,30 +235,24 @@ fn test_inspect_collects_all_evidences() {
 }
 
 // ========================================================================
-// TASK-07 — Error UX (Spanish evidence chain) + observability (REQ-WAF-08)
+// TASK-07 — Error UX (evidence chain) + observability (REQ-WAF-08)
 // ========================================================================
 
 #[test]
 fn test_evidence_chain_spanish_lists_all_evidences() {
     let chain = fixtures::two_evidence_verdict(false, EvidenceSource::Body).evidence_chain();
-    // Every evidence's provider + pattern + Spanish tier label is listed.
+    // Every evidence's provider + pattern + tier label is listed.
     assert!(chain.contains("Cloudflare"), "chain: {chain}");
     assert!(chain.contains("cf-turnstile"), "chain: {chain}");
-    assert!(
-        chain.contains("desafío"),
-        "Challenge Spanish label: {chain}"
-    );
+    assert!(chain.contains("challenge"), "Challenge label: {chain}");
     assert!(chain.contains("Akamai"), "chain: {chain}");
     assert!(chain.contains("akamai"), "chain: {chain}");
-    assert!(
-        chain.contains("huella"),
-        "Fingerprint Spanish label: {chain}"
-    );
+    assert!(chain.contains("fingerprint"), "Fingerprint label: {chain}");
 }
 
 #[test]
 fn test_evidence_chain_empty_fallback() {
-    assert_eq!(WafVerdict::clean().evidence_chain(), "WAF desconocido");
+    assert_eq!(WafVerdict::clean().evidence_chain(), "Unknown WAF");
 }
 
 // ========================================================================
@@ -268,25 +262,19 @@ fn test_evidence_chain_empty_fallback() {
 #[test]
 fn test_verdict_evidence_chain_lists_all_evidences() {
     // REQ-WAF-08: callers (client/scraper_service/discovery/MCP) format the
-    // Spanish evidence chain straight from the verdict they received.
+    // Evidence chain straight from the verdict they received.
     let verdict = fixtures::two_evidence_verdict(true, EvidenceSource::Body);
     let chain = verdict.evidence_chain();
     assert!(chain.contains("Cloudflare"), "chain: {chain}");
     assert!(chain.contains("cf-turnstile"), "chain: {chain}");
-    assert!(
-        chain.contains("desafío"),
-        "Challenge Spanish label: {chain}"
-    );
+    assert!(chain.contains("challenge"), "Challenge label: {chain}");
     assert!(chain.contains("Akamai"), "chain: {chain}");
-    assert!(
-        chain.contains("huella"),
-        "Fingerprint Spanish label: {chain}"
-    );
+    assert!(chain.contains("fingerprint"), "Fingerprint label: {chain}");
 }
 
 #[test]
 fn test_verdict_evidence_chain_clean_is_fallback() {
     // A clean verdict (no evidence) renders the generic fallback label.
     let verdict = WafVerdict::clean();
-    assert_eq!(verdict.evidence_chain(), "WAF desconocido");
+    assert_eq!(verdict.evidence_chain(), "Unknown WAF");
 }

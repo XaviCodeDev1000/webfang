@@ -332,7 +332,7 @@ async fn test_clean_ai_without_embedding_provider_fails_before_fetch() {
 /// `CliExit::ConfigError` as `Error: {msg}` (`cli/error.rs:426-429`).
 /// Only the stable head of the sentence is asserted: the tail names the
 /// remedy and is free to change with the wording.
-const OFFLINE_REMOTE_FRAGMENT: &str = "modo offline con provider remoto de embeddings";
+const OFFLINE_REMOTE_FRAGMENT: &str = "offline mode with a remote embeddings provider";
 
 /// RFC 2606 reserved hostname: guaranteed never to resolve, so the
 /// configured endpoint is genuinely un-dialable and the test never touches a
@@ -365,7 +365,7 @@ model = "text-embedding-test"
 /// `--clean-ai --offline` with a CONFIGURED REMOTE embedding provider must
 /// exit 78 BEFORE any request leaves the process (ADR-0004 S10).
 ///
-/// S10 — "`--offline` + remoto: exit 78 (guard de regresión, no criterio
+/// S10 — "`--offline` + remote: exit 78 (regression guard, not a criterion
 /// nuevo; `cli/error.rs:36`, `llm_wire.rs:138-150`)" (ADR:116).
 ///
 /// The guard lives in the provider RESOLUTION path, so it only fires once a
@@ -445,7 +445,7 @@ async fn test_clean_ai_offline_with_remote_embedding_provider_exits_78() {
 /// (#2166): the deprecation notice, the guard's own error message, the
 /// `allow_loopback` line of `webfang doctor`, the migration guide and
 /// ADR-0004 §46 (dated correction) now all state the same rule. Before that,
-/// the texts promised "loopback permitido, remoto público -> exit 78" while
+/// the texts promised "loopback permitted, public remote -> exit 78" while
 /// the code had rejected both — and this test is the guard for the decision
 /// that replaced that promise, so a future change that exempts loopback
 /// would break it here.

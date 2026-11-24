@@ -97,8 +97,8 @@ pub async fn main() -> CliExit {
         default_hook(info);
     }));
 
-    // tokio-console: usa 'cargo install tokio-console' y corre en otra terminal
-    // El runtime con tokio[unstable] ya expone el endpoint automaticamente
+    // tokio-console: use 'cargo install tokio-console' and run it in another terminal
+    // The runtime with tokio[unstable] already exposes the endpoint automatically
     __main().await
 }
 
@@ -147,6 +147,24 @@ async fn __main() -> CliExit {
         Ok(config) => config,
         Err(e) => return CliExit::ConfigError(e.to_string()),
     };
+
+    // 5a. S10/T2b: ONE governing character budget. An explicit
+    // --max-chars/WEBFANG_MAX_CHARS wins; otherwise the effective default
+    // profile supplies it (including the operator's [[model_profiles]]
+    // overrides). The same resolver feeds `show`/`doctor`, so the number the
+    // operator reads is the number the chunker and completion guard enforce.
+    let governed_max_chars = match webfang_core::domain::model_profile::governed_max_chars(
+        args.ai.max_chars_explicit.then_some(args.ai.max_chars),
+        &config_defaults.model_profiles,
+    ) {
+        Ok(chars) => chars,
+        Err(e) => {
+            return CliExit::ConfigError(format!(
+                "could not resolve the governing character budget: {e}"
+            ))
+        },
+    };
+    args.ai.max_chars = governed_max_chars;
 
     // 5b. Nothing to validate: `--url`/positional are parsed into hardened
     // `ValidUrl` at the argv boundary (#1239), so an invalid or
@@ -315,7 +333,7 @@ async fn build_and_run(opts: CrawlOptions) -> CliExit {
             Ok(cfg) => cfg,
             Err(e) => {
                 return CliExit::ConfigError(format!(
-                    "--extract-with-llm activado pero no hay proveedor completion configurado: {e}"
+                    "--extract-with-llm enabled but no completion provider is configured: {e}"
                 ));
             },
         };
@@ -332,16 +350,16 @@ async fn build_and_run(opts: CrawlOptions) -> CliExit {
         .await
         {
             Ok(c) => c,
-            Err(e) => return CliExit::ConfigError(format!("contenedor: {e}")),
+            Err(e) => return CliExit::ConfigError(format!("container: {e}")),
         }
         .with_llm_port(Arc::new(provider));
 
-        // DEBE §8b: validar en startup que el puerto está disponible
+        // MUST §8b: validate at startup that the port is available
         let llm_port = match container.llm_port() {
             Some(p) => p,
             None => {
                 return CliExit::ConfigError(
-                    "fallo interno: llm_port() es None tras inyección".to_string(),
+                    "internal failure: llm_port() is None after injection".to_string(),
                 );
             },
         };
@@ -350,7 +368,7 @@ async fn build_and_run(opts: CrawlOptions) -> CliExit {
         None
     };
 
-    // Resolve the embedding slot ONCE (ADR-0004 paso 6): the vault-search
+    // Resolve the embedding slot ONCE (ADR-0004 step 6): the vault-search
     // slot and the `--clean-ai` cleaner are the SAME port, so the endpoint
     // is probed once per run instead of twice.
     let embedding_port = match resolve_remote_embedding(&opts).await {
@@ -401,7 +419,7 @@ async fn build_and_run(opts: CrawlOptions) -> CliExit {
         // (`Tier2EmbeddingPort` vs `Option<Arc<dyn EmbeddingPort>>`), so
         // `vault_ports.embedding_port` cannot reach `semantic_inspector` even
         // by accident. The local ONNX pool that used to serve this slot is
-        // gone (ADR-0004 paso 6), so the explicit remote is the only producer.
+        // gone (ADR-0004 step 6), so the explicit remote is the only producer.
         let semantic = semantic_inspector(tier2_remote.clone(), &engine_options);
         // Build adaptive engine inside the cfg block so semantic and engine_options are in scope
         let adaptive_engine = build_adaptive_engine(&opts, semantic, engine_options);

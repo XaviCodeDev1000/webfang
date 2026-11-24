@@ -161,7 +161,7 @@ async fn missing_platform_default_config_degrades_silently() {
         "a missing platform default must not fail the run.\nstderr:\n{stderr}"
     );
     assert!(
-        !stderr.contains("archivo de configuración"),
+        !stderr.contains("configuration file"),
         "the benign missing-file case must stay silent, got:\n{stderr}"
     );
 }
@@ -198,7 +198,7 @@ async fn malformed_platform_default_config_warns_and_degrades() {
         "a malformed platform default must keep degrading, not fail the run.\nstderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("archivo de configuración"),
+        stderr.contains("configuration file"),
         "the degraded default must warn on stderr naming the file, got:\n{stderr}"
     );
     assert_stderr_snapshot("default_config_is_malformed_warns", tmp.path(), &stderr);

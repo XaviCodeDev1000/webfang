@@ -46,7 +46,7 @@ fn the_user_facing_messages_are_spanish() {
     );
     assert_eq!(
         NetworkCause::ConnectRefused.message(),
-        "el servidor rechazó la conexión"
+        "the server refused the connection"
     );
 }
 
@@ -76,7 +76,7 @@ fn a_carrier_in_an_io_errors_payload_is_still_found() {
     assert!(
         error
             .to_string()
-            .contains("el servidor rechazó la conexión"),
+            .contains("the server refused the connection"),
         "the message must name the cause: {error}"
     );
     assert_eq!(

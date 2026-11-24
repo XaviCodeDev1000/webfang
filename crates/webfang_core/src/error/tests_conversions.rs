@@ -11,8 +11,8 @@ fn test_domain_error_invalid_url_wraps_to_scraper() {
     let scraper_err: ScraperError = domain_err.into();
     assert_eq!(
         scraper_err.to_string(),
-        "URL inválida: bad url",
-        "Spanish Display message must be preserved through From conversion"
+        "Invalid URL: bad url",
+        "English Display message must be preserved through From conversion"
     );
 }
 
@@ -152,11 +152,8 @@ fn test_infra_error_download_wraps_to_scraper_download_variant() {
         matches!(scraper_err, ScraperError::Download(_)),
         "InfraError::Download must map to ScraperError::Download, got: {scraper_err}"
     );
-    // Display contract: Download variant must preserve Spanish prefix and inner message
-    assert_eq!(
-        scraper_err.to_string(),
-        "Error de descarga: checksum mismatch"
-    );
+    // Display contract: Download variant must preserve English prefix and inner message
+    assert_eq!(scraper_err.to_string(), "Download error: checksum mismatch");
     // Must NOT be classified as a Network error.
     assert!(!matches!(scraper_err, ScraperError::Network(_)));
 }
@@ -267,7 +264,7 @@ fn test_unknown_profile_error_wraps_to_scraper_config() {
     };
     let scraper_err: ScraperError = profile_err.into();
     assert!(
-        matches!(&scraper_err, ScraperError::Config(msg) if msg.contains("Perfil TLS desconocido: 'Firefox'")),
+        matches!(&scraper_err, ScraperError::Config(msg) if msg.contains("Unknown TLS profile: 'Firefox'")),
         "UnknownProfileError must map to ScraperError::Config preserving the Spanish message, got: {scraper_err}"
     );
 }

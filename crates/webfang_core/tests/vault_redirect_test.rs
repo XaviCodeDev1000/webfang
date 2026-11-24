@@ -139,7 +139,7 @@ async fn vault_with_custom_output_exits_with_usage_error() {
     );
     // Semantic invariant beyond the snapshot: the contradiction itself.
     assert!(
-        stderr.contains("no pueden combinarse"),
+        stderr.contains("cannot be combined"),
         "stderr must state the --vault/-o contradiction: {stderr}"
     );
     insta::assert_snapshot!(

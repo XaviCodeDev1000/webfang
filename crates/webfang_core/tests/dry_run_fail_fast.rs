@@ -139,8 +139,8 @@ async fn dry_run_refused_seed_exits_69_with_spanish_error() {
         "dead-seed preview keeps exit 69: {stderr}"
     );
     assert!(
-        stderr.contains("la semilla no respondió"),
-        "existing Spanish NetworkError missing: {stderr}"
+        stderr.contains("the seed did not respond"),
+        "existing NetworkError missing: {stderr}"
     );
     assert!(
         !stdout.contains("would be scraped"),
@@ -187,7 +187,7 @@ async fn dry_run_ssrf_forbidden_seed_exits_2_before_any_fetch() {
         "refused seed preview keeps exit 2: {stderr}"
     );
     assert!(
-        stderr.contains("cortó la semilla"),
+        stderr.contains("cut off the seed"),
         "refusal message must name the pre-socket cut: {stderr}"
     );
     insta::assert_snapshot!(

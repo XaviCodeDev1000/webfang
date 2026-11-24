@@ -102,6 +102,10 @@ impl EmbeddingPort for MockEmbedder {
     fn model_id(&self) -> &str {
         "mock-embedder"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 fn context(target: &str, fragments: &[&str]) -> SemanticContext {

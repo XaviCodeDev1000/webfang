@@ -2,7 +2,7 @@
 //!
 //! Defines the contract for splitting text into semantic, located chunks.
 //! The concrete Markdown implementation moved to `webfang_core` when ADR-0004
-//! paso 6 removed the `webfang_ai` crate; the HTML implementation uses
+//! step 6 removed the `webfang_ai` crate; the HTML implementation uses
 //! `HtmlChunker`.
 //!
 //! This trait enables the application layer to orchestrate chunking
@@ -103,6 +103,11 @@ impl TextChunk {
 }
 
 /// Domain trait for text segmentation into semantic located chunks.
+///
+/// Deliberately OPEN (unlike [`crate::domain::semantic_cleaner::SemanticCleaner`]):
+/// external adapters must be able to implement it, so no seal bounds the
+/// implementor set. Callers rely on the span-reconstruction contract below,
+/// not on an in-tree-only type.
 ///
 /// Implementations split raw text into chunks suitable for embedding, each
 /// carrying the byte spans of the source text it was assembled from

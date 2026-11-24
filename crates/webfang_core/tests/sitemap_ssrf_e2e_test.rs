@@ -99,7 +99,7 @@ async fn assert_rejected_sitemap(seed: &str, sitemap_url: Option<&str>, expected
     let code = output.status.code().unwrap_or(0);
     assert_eq!(code, 69, "exit code contract (EX_UNAVAILABLE): {stderr}");
     assert!(
-        stderr.contains("SSRF detectado") && stderr.contains(expected_ip),
+        stderr.contains("SSRF detected") && stderr.contains(expected_ip),
         "typed Spanish rejection naming the offending IP missing. \
          stderr: {stderr}"
     );
@@ -138,7 +138,7 @@ async fn row1_sitemap_discovery_loopback_seed_is_rejected_pre_socket() {
         "exit code contract (EX_UNAVAILABLE): {stderr}"
     );
     assert!(
-        stderr.contains("SSRF detectado") && stderr.contains("127.0.0.1"),
+        stderr.contains("SSRF detected") && stderr.contains("127.0.0.1"),
         "typed Spanish rejection naming the seed IP missing. stderr: {stderr}"
     );
     let requests = mock_server
@@ -247,7 +247,7 @@ async fn row3_positive_control_sitemap_reachable_when_entry_guard_disarmed() {
         output.status.code()
     );
     assert!(
-        !stderr.contains("SSRF detectado"),
+        !stderr.contains("SSRF detected"),
         "disarmed entry layer must not reject the loopback listener; the \
          rejection in row1/row2 must come from the ARMED entry guard, not the \
          network: {stderr}"

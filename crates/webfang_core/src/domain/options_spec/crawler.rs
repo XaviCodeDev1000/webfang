@@ -136,10 +136,10 @@ pub const MAX_PAGES: OptionSpec = OptionSpec {
     kind: ValueKind::uint(
         NumericPolicy::legacy_verbatim(
             1,
-            "--max-pages debe ser >= 1 (0 no deja páginas para scrapear)",
-            "'{value}' no es un número válido para --max-pages",
+            "--max-pages must be >= 1 (0 leaves no pages to scrape)",
+            "'{value}' is not a valid number for --max-pages",
         )
-        .capped(100_000, "--max-pages debe ser <= 100000"),
+        .capped(100_000, "--max-pages must be <= 100000"),
     ),
     visible_aliases: &[],
     feature_gate: None,
@@ -404,8 +404,8 @@ pub const TRACE_FILE: OptionSpec = OptionSpec {
 /// `--max-depth <MAX_DEPTH>` — slice 4 (#940): enforces the shared cap
 /// `10` through the spec while keeping zero valid (`0` = only seed URL).
 /// INTENTIONAL CLI behavior change: `--max-depth 11+` now exits 64 with a
-/// Spanish usage error instead of being accepted; non-numeric input now
-/// renders the canonical Spanish message instead of clap's English one.
+/// usage error instead of being accepted; non-numeric input now renders the
+/// canonical spec message instead of clap's own wording.
 pub const MAX_DEPTH: OptionSpec = OptionSpec {
     id: "max_depth",
     value_name: "MAX_DEPTH",
@@ -420,7 +420,7 @@ pub const MAX_DEPTH: OptionSpec = OptionSpec {
     heading: Some("Crawler Settings"),
     kind: ValueKind::uint(NumericPolicy::zero_valid_capped(
         10,
-        "--max-depth debe ser <= 10",
+        "--max-depth must be <= 10",
     )),
     visible_aliases: &[],
     feature_gate: None,
@@ -443,8 +443,8 @@ pub const TIMEOUT_SECS: OptionSpec = OptionSpec {
     heading: Some("Crawler Settings"),
     kind: ValueKind::uint(NumericPolicy::legacy_verbatim(
         1,
-        "--timeout-secs debe ser >= 1 (0 hace que cada request falle al instante)",
-        "'{value}' no es un número válido para --timeout-secs",
+        "--timeout-secs must be >= 1 (0 makes every request fail instantly)",
+        "'{value}' is not a valid number for --timeout-secs",
     )),
     visible_aliases: &[],
     feature_gate: None,
@@ -453,24 +453,24 @@ pub const TIMEOUT_SECS: OptionSpec = OptionSpec {
 
 /// `--asset-naming <ASSET_NAMING>`
 pub const ASSET_NAMING: OptionSpec = OptionSpec {
-        id: "asset_naming",
-        value_name: "ASSET_NAMING",
-        long: "asset-naming",
-        short: None,
-        aliases: &[],
-        env: None,
-        default: Some(DefaultValue::Str("hash")),
-        help: "Estrategia de nombre de archivo para assets descargados: hash (default), slug, content-disposition",
-        heading: Some("Download Settings"),
-        kind: ValueKind::Enum {
-            variants: &["hash", "slug", "content-disposition"],
-        },
-        visible_aliases: &[],
-        nullable: false,
-        description_override: None,
-        feature_gate: None,
+    id: "asset_naming",
+    value_name: "ASSET_NAMING",
+    long: "asset-naming",
+    short: None,
+    aliases: &[],
+    env: None,
+    default: Some(DefaultValue::Str("hash")),
+    help: "Filename strategy for downloaded assets: hash (default), slug, content-disposition",
+    heading: Some("Download Settings"),
+    kind: ValueKind::Enum {
+        variants: &["hash", "slug", "content-disposition"],
+    },
+    visible_aliases: &[],
+    nullable: false,
+    description_override: None,
+    feature_gate: None,
     value_delimiter: None,
-    };
+};
 
 /// `--download-concurrency <DOWNLOAD_CONCURRENCY>` — FULLY migrated:
 /// bound enforced through [`OptionSpec::parse_uint`] with verbatim legacy
@@ -484,12 +484,12 @@ pub const DOWNLOAD_CONCURRENCY: OptionSpec = OptionSpec {
     env: Some("WEBFANG_DOWNLOAD_CONCURRENCY"),
     default: None,
     // Explicit `help = ...` attribute overrides the doc comment.
-    help: "Máximo de descargas de assets concurrentes por página (mínimo 1)",
+    help: "Maximum concurrent asset downloads per page (minimum 1)",
     heading: Some("Download Settings"),
     kind: ValueKind::uint(NumericPolicy::legacy_verbatim(
         1,
-        "--download-concurrency debe ser >= 1 (0 causa un deadlock / hang infinito)",
-        "'{value}' no es un número válido para --download-concurrency",
+        "--download-concurrency must be >= 1 (0 causes a deadlock / infinite hang)",
+        "'{value}' is not a valid number for --download-concurrency",
     )),
     visible_aliases: &[],
     nullable: false,
@@ -631,8 +631,8 @@ pub const DOWNLOAD_TIMEOUT: OptionSpec = OptionSpec {
     heading: Some("Download Settings"),
     kind: ValueKind::uint(NumericPolicy::legacy_verbatim(
         1,
-        "--download-timeout debe ser >= 1 (0 hace que cada descarga de assets falle al instante)",
-        "'{value}' no es un número válido para --download-timeout",
+        "--download-timeout must be >= 1 (0 makes every asset download fail instantly)",
+        "'{value}' is not a valid number for --download-timeout",
     )),
     visible_aliases: &[],
     feature_gate: None,
@@ -881,9 +881,9 @@ pub const DOM_PREPRUNE: OptionSpec = OptionSpec {
 /// the missing feature, but `--help` never told them the flag existed.
 ///
 /// Now that the semantic cleaner needs no ONNX build, the flag renders in
-/// EVERY configuration. Post-ADR-0004 paso 6 there is no cargo feature left
+/// EVERY configuration. Post-ADR-0004 step 6 there is no cargo feature left
 /// to reject by name: a requested `--clean-ai` whose cleaner wiring failed
-/// surfaces at run time as the export flow's Spanish ConfigError naming
+/// surfaces at run time as the export flow's ConfigError naming
 /// `--embedding-provider` (exit 78), so the failure stays named and
 /// actionable.
 pub const CLEAN_AI: OptionSpec = OptionSpec {

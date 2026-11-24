@@ -90,8 +90,8 @@ fn unknown_h2_profile_exits_78_with_spanish_message() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Perfil TLS desconocido"),
-        "stderr must carry the Spanish message, got: {stderr}"
+        stderr.contains("Unknown TLS profile"),
+        "stderr must carry the English message, got: {stderr}"
     );
 
     // Snapshot the full stderr for regression detection, routed through the
@@ -99,7 +99,7 @@ fn unknown_h2_profile_exits_78_with_spanish_message() {
     // the other behavioral snapshots (insta keys the on-disk location off the
     // module where `assert_snapshot!` expands). The helper redacts tracing
     // timestamps / source line numbers. The valid-profile catalog
-    // (`Opciones válidas: ...`) is captured verbatim: it is pinned by
+    // (`Valid options: ...`) is captured verbatim: it is pinned by
     // `Cargo.lock` (stable run-to-run), and a `wreq-util` upgrade that adds
     // profiles is exactly the kind of change worth a human snapshot review.
     // `Path::new("__no_temp__")` is a non-matching placeholder: this run passes
@@ -403,7 +403,7 @@ mod output_vectors_without_clean_ai {
             .expect("run webfang");
 
         // Semantic invariants (the contract under test): exit 65 (EX_DATA), the
-        // Spanish message, and — the core invariant — NO vectors file created.
+        // English message, and — the core invariant — NO vectors file created.
         assert_eq!(
             output.status.code(),
             Some(65),
@@ -411,8 +411,8 @@ mod output_vectors_without_clean_ai {
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("No hay vectores para exportar"),
-            "stderr must carry the Spanish error, got: {stderr}"
+            stderr.contains("No vectors to export"),
+            "stderr must carry the English error, got: {stderr}"
         );
         assert_snapshot_redacted(
             "output_vectors_without_clean_ai_stderr",
@@ -549,8 +549,8 @@ async fn js_shell_single_page_exits_65_with_spanish_error() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("extracción falló"),
-        "stderr must carry the Spanish per-URL failure, got: {stderr}"
+        stderr.contains("extraction failed for"),
+        "stderr must carry the English per-URL failure, got: {stderr}"
     );
     assert_snapshot_redacted("js_shell_exit_65_stderr", t.out.path(), stderr);
 }
@@ -600,7 +600,7 @@ async fn mixed_batch_with_js_shell_stays_69() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("extracción falló"),
+        stderr.contains("extraction failed for"),
         "the extraction failure must be reported on stderr, got: {stderr}"
     );
     assert_snapshot_redacted("mixed_batch_stays_69_stderr", t.out.path(), stderr);

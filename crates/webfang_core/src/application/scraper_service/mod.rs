@@ -123,7 +123,7 @@ pub async fn scrape_with_config(
 /// [`RobotsDecision::PolicyRefused`] carrying the guard's own cause, so this
 /// gate does NOT re-validate the URL (single guard call site in the chain):
 /// the refusal surfaces as [`ScraperError::Network`] with the guard's cause
-/// ("SSRF detectado: ..."), so connect-family failures keep their real
+/// ("SSRF detected: ..."), so connect-family failures keep their real
 /// cause. Genuine rules denials below keep the WAF label.
 ///
 /// [`RobotsPort::is_allowed`] is FAIL-OPEN: if the robots.txt fetch itself
@@ -255,7 +255,7 @@ async fn scrape_page(
         info!(
             target: "scraper",
             selector = %config.selector,
-            "Aplicando selector CSS manual"
+            "Applying manual CSS selector"
         );
     }
 

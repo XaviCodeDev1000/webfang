@@ -187,13 +187,13 @@ Crawler Settings:
 
 Download Settings:
       --asset-naming <ASSET_NAMING>
-          Estrategia de nombre de archivo para assets descargados: hash (default), slug, content-disposition
+          Filename strategy for downloaded assets: hash (default), slug, content-disposition
           
           [default: hash]
           [possible values: hash, slug, content-disposition]
 
       --download-concurrency <DOWNLOAD_CONCURRENCY>
-          Máximo de descargas de assets concurrentes por página (mínimo 1)
+          Maximum concurrent asset downloads per page (minimum 1)
           
           [env: WEBFANG_DOWNLOAD_CONCURRENCY=]
 

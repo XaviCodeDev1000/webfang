@@ -1,16 +1,16 @@
-//! `OpenAiCompatibleProvider` — composición de `ProviderConfig` + cliente HTTP
-//! compartido + credencial resuelta (doc `ai-providers-design.md`).
+//! `OpenAiCompatibleProvider` — composition of `ProviderConfig` + shared HTTP
+//! client + resolved credential (doc `ai-providers-design.md`).
 //!
-//! Contrato fijado en revisión:
-//! - `AuthSource::resolve()` se resuelve UNA VEZ en el constructor: falla en
-//!   startup, no en la primera llamada.
-//! - `AuthError` se convierte en [`ProviderInitError`] con `provider_id` en el
-//!   mensaje — nunca se propaga crudo hasta el Container.
-//! - El cliente HTTP se comparte a nivel proceso vía
-//!   [`build_default_http_client`]; el provider lo acepta con `with_http`.
-//! - `AuthSource::None` resuelve `Ok(None)`: **no** es un fallo de credencial.
-//!   Ver [`ProviderInitError::AnonymousCompletionUnsupported`] por qué el
-//!   camino de completion aún no lo soporta.
+//! Contract fixed in review:
+//! - `AuthSource::resolve()` resolves ONCE in the constructor: it fails at
+//!   startup, not on the first call.
+//! - `AuthError` converts into [`ProviderInitError`] with `provider_id` in the
+//!   message — it is never propagated raw up to the Container.
+//! - The HTTP client is shared process-wide via
+//!   [`build_default_http_client`]; the provider accepts one with `with_http`.
+//! - `AuthSource::None` resolves to `Ok(None)`: this is **not** a credential
+//!   failure. See [`ProviderInitError::AnonymousCompletionUnsupported`] for why
+//!   the completion path does not support it yet.
 
 use crate::domain::auth_source::AuthError;
 use crate::domain::llm_port::LlmPort;
@@ -18,93 +18,92 @@ use crate::domain::proxy_config::ProxyRegistry;
 use crate::infrastructure::llm::client::OpenAiLlmClient;
 use crate::infrastructure::llm::http_client::{build_guarded_http_client, build_llm_client};
 
-/// Configuración declarativa del provider: `crate::domain::providers::ProviderConfig`
-/// (con `kind`, `capabilities`, `model`, `embedding_dim`). Se re-exporta aquí
-/// como `ProviderConfig` para no romper import paths existentes.
+/// Declarative provider configuration: `crate::domain::providers::ProviderConfig`
+/// (with `kind`, `capabilities`, `model`, `embedding_dim`). Re-exported here as
+/// `ProviderConfig` so existing import paths keep working.
 pub use crate::domain::providers::ProviderConfig;
 
-/// Error de inicialización de un provider.
+/// Provider initialization error.
 ///
-/// Convierte `AuthError` preservando contexto (`provider_id`) para que el
-/// Container/reportes no pierdan el origen. Los mensajes son user-facing
-/// (español, por convención del repo).
+/// Converts `AuthError` while preserving context (`provider_id`) so the
+/// Container and reports do not lose the origin. Messages are user-facing
+/// (in English, per repo convention).
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderInitError {
-    /// La credencial no pudo resolverse al construir el provider (falla en
-    /// startup, no en la primera llamada).
-    #[error("no se pudo resolver credencial para provider '{provider_id}': {source}")]
+    /// The credential could not be resolved while building the provider (a
+    /// startup failure, not a first-call failure).
+    #[error("could not resolve credential for provider '{provider_id}': {source}")]
     AuthFailed {
-        /// Identificador del provider que falló (contexto del Container).
+        /// Identifier of the provider that failed (Container context).
         provider_id: String,
-        /// Error original de resolución (fuente preservada).
+        /// Original resolution error (source preserved).
         #[source]
         source: AuthError,
     },
-    /// URL base inválida. Reservada para la carga de configuración (parse de
-    /// la URL desde string en el wizard/container); el constructor con `Url`
-    /// ya validada no la produce.
-    #[error("URL base inválida para provider '{provider_id}': {source}")]
+    /// Invalid base URL. Reserved for configuration loading (parsing the URL
+    /// from a string in the wizard/container); the constructor taking an
+    /// already-validated `Url` never produces it.
+    #[error("invalid base URL for provider '{provider_id}': {source}")]
     InvalidBaseUrl {
-        /// Identificador del provider cuya URL falló.
+        /// Identifier of the provider whose URL failed.
         provider_id: String,
-        /// Error original del parse/construcción.
+        /// Original parse/construction error.
         #[source]
         source: crate::error::ScraperError,
     },
-    /// El constructor del cliente HTTP compartido falló (config de red/TLS).
-    #[error("no se pudo crear el cliente HTTP compartido: {0}")]
+    /// The shared HTTP client constructor failed (network/TLS config).
+    #[error("could not build the shared HTTP client: {0}")]
     HttpClient(String),
-    /// El provider declara `auth: {source: none}` en el camino de
-    /// chat/completions, que todavía exige credencial.
+    /// The provider declares `auth: {source: none}` on the chat/completions
+    /// path, which still requires a credential.
     ///
-    /// **Variante transitoria** (B1): el endpoint anónimo ya está soportado en
-    /// embeddings remotos (`RemoteEmbeddingAdapter`), pero el cliente de
-    /// completion (`OpenAiLlmClient`) almacena un `ApiKey` y llama a
-    /// `bearer_auth` incondicionalmente, así que no puede representar "sin
-    /// credencial". Ese archivo (`infrastructure/llm/client.rs`) queda fuera de
-    /// las superficies de B1 y se pide como parche.
+    /// **Transient variant** (B1): the anonymous endpoint is already supported
+    /// for remote embeddings (`RemoteEmbeddingAdapter`), but the completion
+    /// client (`OpenAiLlmClient`) stores an `ApiKey` and calls `bearer_auth`
+    /// unconditionally, so it cannot represent "no credential". That file
+    /// (`infrastructure/llm/client.rs`) is outside B1's surfaces and is
+    /// requested as a separate patch.
     ///
-    /// Deliberadamente **NO** es [`AuthFailed`](Self::AuthFailed): `None` no es
-    /// un fallo de credencial, y mapearlo ahí mandaría a rotar una key que el
-    /// usuario nunca declaró.
-    #[error("provider '{provider_id}': endpoint anónimo (`auth: none`) todavía no soportado por el camino de chat/completions")]
+    /// Deliberately **NOT** [`AuthFailed`](Self::AuthFailed): `None` is not a
+    /// credential failure, and mapping it there would tell the user to rotate a
+    /// key they never declared.
+    #[error("provider '{provider_id}': anonymous endpoint (`auth: none`) is not yet supported by the chat/completions path")]
     AnonymousCompletionUnsupported {
-        /// Identificador del provider configurado como anónimo.
+        /// Identifier of the provider configured as anonymous.
         provider_id: String,
     },
 }
 
-/// Configuración re-exportada arriba: `crate::domain::providers::ProviderConfig`.
+/// Configuration re-exported above: `crate::domain::providers::ProviderConfig`.
 /// Build the process-wide shared HTTP client for providers.
 ///
-/// Un solo `wreq::Client` (Chrome145, timeouts, SSRF guard) compartido por
-/// todos los providers: pooling de conexiones y una única superficie de
-/// fingerprint TLS. Devuelve el client pelado — cada provider lo compone con
-/// su base_url/api_key.
+/// A single `wreq::Client` (Chrome145, timeouts, SSRF guard) shared by every
+/// provider: connection pooling and one TLS-fingerprint surface. It returns the
+/// bare client — each provider composes it with its own base_url/api_key.
 ///
 /// # Errors
 ///
-/// [`ProviderInitError::HttpClient`] si el builder falla.
+/// [`ProviderInitError::HttpClient`] if the builder fails.
 pub fn build_default_http_client() -> Result<wreq::Client, ProviderInitError> {
     build_guarded_http_client(false, None).map_err(|e| ProviderInitError::HttpClient(e.to_string()))
 }
 
-/// Provider OpenAI-compatible listo para inyectar en el Container como
+/// OpenAI-compatible provider, ready to be injected into the Container as
 /// `Arc<dyn LlmPort>`.
 ///
-/// Sin `Debug` deliberado: contiene la credencial resuelta (vía el cliente).
-/// Los diagnósticos usan `config()` + `id()`, nunca el secreto.
+/// Deliberately no `Debug`: it holds the resolved credential (via the client).
+/// Diagnostics use `config()` + `id()`, never the secret.
 ///
-/// Política `None` (contrato del Container): el Container es permisivo — la
-/// ausencia de provider NO falla en construcción. Pero permisivo no es
-/// opcional: todo binario de servicio que arranque con un feature LLM
-/// habilitado DEBE validar `llm_port().is_some()` en startup y salir con
-/// error claro si falta. Si ningún binario valida, el fallo llega tarde en
-/// la primera llamada (`ScraperError::Config` en `extract`) — daemon que dice
-/// OK al arrancar y falla cuando un usuario/cron invoca el feature, con
-/// reintentos amplificando antes de que nadie lo note.
-/// El Container nunca inventa un provider ni degrada en silencio:
-/// `llm_port()` es `None` hasta que la capa binaria inyecta uno.
+/// `None` policy (Container contract): the Container is permissive — the
+/// absence of a provider does NOT fail construction. But permissive does not
+/// mean optional: every service binary starting with an LLM feature enabled
+/// MUST validate `llm_port().is_some()` at startup and exit with a clear error
+/// when it is missing. If no binary validates, the failure arrives late on the
+/// first call (`ScraperError::Config` in `extract`) — a daemon that says OK at
+/// boot and fails when a user or cron invokes the feature, with retries
+/// amplifying before anyone notices.
+/// The Container never invents a provider nor degrades silently:
+/// `llm_port()` stays `None` until the binary layer injects one.
 pub struct OpenAiCompatibleProvider {
     client: OpenAiLlmClient,
     config: ProviderConfig,
@@ -114,16 +113,16 @@ pub struct OpenAiCompatibleProvider {
 }
 
 impl OpenAiCompatibleProvider {
-    /// Construye el provider resolviendo la credencial UNA VEZ (startup).
+    /// Builds the provider, resolving the credential ONCE (at startup).
     ///
-    /// Usa el cliente HTTP compartido del proceso
-    /// ([`build_default_http_client`]). Para reutilizar un cliente ya
-    /// existente (tests, wiremock), [`with_http`](Self::with_http).
+    /// Uses the process-wide shared HTTP client
+    /// ([`build_default_http_client`]). To reuse an existing client
+    /// (tests, wiremock), use [`with_http`](Self::with_http).
     ///
     /// # Errors
     ///
-    /// [`ProviderInitError`] si la credencial no resuelve, la URL es inválida
-    /// o no se puede construir el cliente compartido.
+    /// [`ProviderInitError`] if the credential does not resolve, the URL is
+    /// invalid, or the shared client cannot be built.
     pub fn new(config: ProviderConfig) -> Result<Self, ProviderInitError> {
         Self::new_with_registry(config, &ProxyRegistry::default())
     }
@@ -146,15 +145,15 @@ impl OpenAiCompatibleProvider {
         Self::with_http_and_proxy_auth(config, bundle.client, bundle.proxy_auth_configured)
     }
 
-    /// Variante con cliente HTTP inyectado (composición root/tests).
+    /// Variant with an injected HTTP client (composition root/tests).
     ///
     /// # Errors
     ///
-    /// [`ProviderInitError::AuthFailed`] / `InvalidBaseUrl` — la credencial
-    /// se resuelve aquí, NO en la primera llamada.
-    /// [`ProviderInitError::AnonymousCompletionUnsupported`] si el provider
-    /// declara `auth: none` (ver la variante: el cliente de completion aún
-    /// exige credencial).
+    /// [`ProviderInitError::AuthFailed`] / `InvalidBaseUrl` — the credential
+    /// is resolved here, NOT on the first call.
+    /// [`ProviderInitError::AnonymousCompletionUnsupported`] if the provider
+    /// declares `auth: none` (see the variant: the completion client still
+    /// requires a credential).
     pub fn with_http(
         config: ProviderConfig,
         http: wreq::Client,
@@ -179,14 +178,14 @@ impl OpenAiCompatibleProvider {
                 provider_id: config.id.clone(),
                 source,
             })?;
-        // `OpenAiLlmClient` guarda un `ApiKey` y firma toda petición
-        // (`bearer_auth` incondicional en `client.rs`). Sin ese cambio
-        // --`api_key: Option<ApiKey>` + rama `None` que no firma-- no hay
-        // forma de construir un cliente anónimo, y `None` NO puede
-        // materializarse como una key vacía: eso enviaría `Authorization:
-        // Bearer ` en contra del invariante 2. Se pide el cambio a
-        // `client.rs` como parche; mientras tanto se falla de forma
-        // explícita y con una variante que NO es `AuthFailed`.
+        // `OpenAiLlmClient` stores an `ApiKey` and signs every request
+        // (`bearer_auth` unconditionally in `client.rs`). Without the change
+        // --`api_key: Option<ApiKey>` + a `None` branch that does not sign--
+        // there is no way to build an anonymous client, and `None` cannot be
+        // materialized as an empty key: that would send `Authorization:
+        // Bearer ` against invariant 2. The `client.rs` change is requested as
+        // a patch; until then, fail explicitly with a variant that is NOT
+        // `AuthFailed`.
         let Some(secret) = secret else {
             return Err(ProviderInitError::AnonymousCompletionUnsupported {
                 provider_id: config.id.clone(),
@@ -200,13 +199,13 @@ impl OpenAiCompatibleProvider {
         })
     }
 
-    /// Identificador del provider.
+    /// Provider identifier.
     #[must_use]
     pub fn id(&self) -> &str {
         &self.config.id
     }
 
-    /// Configuración declarativa (para diagnósticos/snapshots).
+    /// Declarative configuration (for diagnostics/snapshots).
     #[must_use]
     pub fn config(&self) -> &ProviderConfig {
         &self.config
@@ -245,7 +244,7 @@ impl LlmPort for OpenAiCompatibleProvider {
     }
 }
 
-/// Spanish, credential-free 407 diagnostic for the completion path.
+/// Credential-free 407 diagnostic for the completion path.
 fn proxy_407_error(proxy_auth_configured: bool, provider_id: &str) -> crate::error::ScraperError {
     tracing::warn!(
         provider_id = %provider_id,
@@ -254,12 +253,12 @@ fn proxy_407_error(proxy_auth_configured: bool, provider_id: &str) -> crate::err
         "forward proxy rejected a completion request"
     );
     let detail = if proxy_auth_configured {
-        "rechazó la credencial configurada en proxy.auth"
+        "rejected the configured credential in proxy.auth"
     } else {
-        "exige autenticación pero no se declaró proxy.auth"
+        "requires authentication but proxy.auth was not declared"
     };
     crate::error::ScraperError::Extraction(format!(
-        "el proxy del provider '{provider_id}' devolvió 407: {detail} (no se reintenta)"
+        "proxy for provider '{provider_id}' returned 407: {detail} (no retry)"
     ))
 }
 
@@ -287,8 +286,8 @@ mod tests {
         }
     }
 
-    /// Contrato clave: resolve() en CONSTRUCTOR, no en la primera llamada.
-    /// Una credencial ausente debe fallar `with_http`, no `send_completion`.
+    /// Key contract: resolve() runs in the CONSTRUCTOR, not on the first call.
+    /// A missing credential must fail `with_http`, not `send_completion`.
     #[test]
     fn missing_credential_fails_at_construction_not_first_call() {
         let cfg = config_with(AuthSource::Env {
@@ -296,10 +295,10 @@ mod tests {
         });
         let err = match OpenAiCompatibleProvider::new(cfg) {
             Err(e) => e,
-            Ok(_) => panic!("debe fallar en construcción"),
+            Ok(_) => panic!("must fail at construction"),
         };
-        // El mensaje lleva provider_id (contrato de conversión AuthError →
-        // ProviderInitError) y preserva la fuente.
+        // The message carries provider_id (the AuthError → ProviderInitError
+        // conversion contract) and preserves the source.
         assert!(err.to_string().contains("test-provider"), "{err}");
         assert!(matches!(
             err,
@@ -310,12 +309,12 @@ mod tests {
         ));
     }
 
-    /// Wire-up completo contra wiremock: credencial resuelta en el
-    /// constructor, request firmado con la key resuelta, vía LlmPort.
+    /// Full wire-up against wiremock: credential resolved in the constructor,
+    /// request signed with the resolved key, via LlmPort.
     #[tokio::test]
     async fn provider_resolves_credential_and_signs_request() {
         let server = MockServer::start().await;
-        // La key que el provider debe firmar (resuelta de Env en el ctor).
+        // The key the provider must sign with (resolved from Env in the ctor).
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
             .and(header("Authorization", "Bearer sk-wireup-test-key"))
@@ -338,9 +337,9 @@ mod tests {
         };
         let provider = match OpenAiCompatibleProvider::new(cfg) {
             Ok(p) => p,
-            Err(e) => panic!("wire-up debe resolver: {e}"),
+            Err(e) => panic!("wire-up must resolve: {e}"),
         };
-        drop(env); // el ctor ya resolvió: borrar el env no afecta
+        drop(env); // the ctor already resolved: clearing the env has no effect
 
         let response = match provider
             .send_completion(LlmRequest {
@@ -360,13 +359,13 @@ mod tests {
         assert_eq!(provider.id(), "test-provider");
     }
 
-    /// El cliente compartido se construye una vez y sirve N providers; el
-    /// contexto de error (provider_id) no se mezcla entre configs.
+    /// The shared client is built once and serves N providers; the error
+    /// context (provider_id) does not bleed across configs.
     #[test]
     fn shared_http_client_reports_each_provider_context() {
         let client = match build_default_http_client() {
             Ok(c) => c,
-            Err(e) => panic!("cliente compartido debe construirse: {e}"),
+            Err(e) => panic!("shared client must build: {e}"),
         };
         let cfg1 = config_with(AuthSource::Env {
             var: "WEBFANG_TEST_SHARED_1".to_string(),
@@ -377,11 +376,11 @@ mod tests {
         cfg2.id = "second-provider".to_string();
         let err1 = match OpenAiCompatibleProvider::with_http(cfg1, client.clone()) {
             Err(e) => e,
-            Ok(_) => panic!("sin credencial debe fallar"),
+            Ok(_) => panic!("missing credential must fail"),
         };
         let err2 = match OpenAiCompatibleProvider::with_http(cfg2, client.clone()) {
             Err(e) => e,
-            Ok(_) => panic!("sin credencial debe fallar"),
+            Ok(_) => panic!("missing credential must fail"),
         };
         assert!(err1.to_string().contains("test-provider"));
         assert!(err2.to_string().contains("second-provider"));

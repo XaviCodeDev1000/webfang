@@ -17,9 +17,6 @@ use crate::error::{Result, ScraperError};
 use serde_json::Value;
 use url::Url;
 
-/// Approximate chars per token for the sub-chunk char budget.
-const CHARS_PER_TOKEN: usize = 8;
-
 /// Result envelope for one LLM extraction run (#789).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LlmExtraction {
@@ -87,11 +84,11 @@ impl LlmExtractionService {
         let llm = self
             .llm_port
             .clone()
-            .ok_or_else(|| ScraperError::Config("no hay proveedor LLM configurado".to_string()))?;
+            .ok_or_else(|| ScraperError::Config("no LLM provider is configured".to_string()))?;
 
         // [1]-[3] Gates before any I/O.
         validate_schema(schema)
-            .map_err(|e| ScraperError::Validation(format!("esquema inválido: {e}")))?;
+            .map_err(|e| ScraperError::Validation(format!("invalid schema: {e}")))?;
         ssrf_gate(&config.base_url)?; // [2]
         enforce_robots_policy(url, self.robots.as_deref(), false).await?; // [3] fail-open (#697)
 
@@ -99,10 +96,9 @@ impl LlmExtractionService {
         let html = self.fetch_page(url).await?;
         let chunks = self.cleaner.clean(url.as_str(), &html).await?;
 
-        // [6] Chunk within the char budget; an over-budget sub-chunk fails
-        // BEFORE any LLM call is sent.
-        let char_budget = config.max_tokens.saturating_mul(CHARS_PER_TOKEN);
-        let sub_chunks = self.build_sub_chunks(&chunks, char_budget)?;
+        // [6] Chunk within the governing character budget resolved by the
+        // composition root; an over-budget sub-chunk fails BEFORE any call.
+        let sub_chunks = self.build_sub_chunks(&chunks, config.char_budget)?;
 
         // [7]-[8] One completion per sub-chunk (sequential, single attempt),
         // merging records in order with dedupe.
@@ -121,7 +117,9 @@ impl LlmExtractionService {
         // [9] Schema-validate every merged record — never a silent null.
         for record in &records {
             validate_record(record, schema).map_err(|e| {
-                ScraperError::Validation(format!("la salida del LLM no cumple el esquema: {e}"))
+                ScraperError::Validation(format!(
+                    "the LLM output does not conform to the schema: {e}"
+                ))
             })?;
         }
 
@@ -154,9 +152,9 @@ impl LlmExtractionService {
         let mut sub_chunks = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {
             for sub_chunk in self.chunker.chunk_text(&chunk.content)? {
-                if sub_chunk.text().len() > char_budget {
+                if sub_chunk.text().chars().count() > char_budget {
                     return Err(ScraperError::Validation(format!(
-                        "el fragmento {index} supera el presupuesto ({char_budget} caracteres)"
+                        "chunk {index} exceeds the budget ({char_budget} characters)"
                     )));
                 }
                 sub_chunks.push(sub_chunk.text().to_owned());
@@ -201,15 +199,17 @@ fn merge_records(
     response: LlmResponse,
 ) -> Result<()> {
     let parsed: Value = serde_json::from_str(&response.content).map_err(|e| {
-        ScraperError::Extraction(format!("la respuesta del LLM no es JSON válido: {e}"))
+        ScraperError::Extraction(format!("the LLM response is not valid JSON: {e}"))
     })?;
     let batch: Vec<Value> = match parsed {
         Value::Array(items) => items,
         object @ Value::Object(_) => vec![object],
-        other => {
-            return Err(ScraperError::Extraction(format!(
-                "la respuesta del LLM no es un objeto ni un array JSON: {other}"
-            )));
+        // S12/T5: the parsed payload is untrusted page content. It must never
+        // be echoed into an error that aggregate paths log or hand to MCP.
+        _ => {
+            return Err(ScraperError::Extraction(
+                "the LLM response is neither a JSON object nor a JSON array".to_string(),
+            ));
         },
     };
     for record in batch {
@@ -230,9 +230,12 @@ pub struct LlmConfig {
     pub base_url: Url,
     /// Provider API key — `Authorization: Bearer` only, never logged.
     pub api_key: ApiKey,
-    /// Per-completion output token budget; sub-chunk char budget is
-    /// `max_tokens * 8` (≈8 chars/token estimate).
+    /// Per-completion OUTPUT token budget. It never sets a chunk size.
     pub max_tokens: usize,
+    /// Character budget for one completion sub-chunk, resolved once by the
+    /// composition root from the governing `--max-chars` budget. Counted in
+    /// Unicode scalar values by the chunker's rejection guard (S10).
+    pub char_budget: usize,
 }
 
 impl LlmConfig {
@@ -242,17 +245,18 @@ impl LlmConfig {
     ///
     /// Returns [`ScraperError::Config`] when the base URL is malformed or
     /// `LLM_API_KEY` is missing/empty.
-    pub fn from_env(base_url: &str, max_tokens: usize) -> Result<Self> {
+    pub fn from_env(base_url: &str, max_tokens: usize, char_budget: usize) -> Result<Self> {
         let base_url = Url::parse(base_url)
-            .map_err(|e| ScraperError::Config(format!("URL base del LLM inválida: {e}")))?;
+            .map_err(|e| ScraperError::Config(format!("invalid LLM base URL: {e}")))?;
         match std::env::var("LLM_API_KEY") {
             Ok(key) if !key.is_empty() => Ok(Self {
                 base_url,
                 api_key: ApiKey::new(key),
                 max_tokens,
+                char_budget,
             }),
             _ => Err(ScraperError::Config(
-                "LLM_API_KEY no está definida: configure la clave del proveedor LLM".into(),
+                "LLM_API_KEY is not set: configure the LLM provider key".into(),
             )),
         }
     }
@@ -308,99 +312,22 @@ pub fn ssrf_gate(url: &Url) -> Result<()> {
     let scheme = url.scheme();
     if scheme != "http" && scheme != "https" {
         return Err(ScraperError::Config(format!(
-            "esquema '{scheme}' no permitido para el LLM (solo http/https)"
+            "scheme '{scheme}' not allowed for the LLM (only http/https)"
         )));
     }
     let host = url
         .host_str()
-        .ok_or_else(|| ScraperError::Config("el URL del LLM no tiene host".to_string()))?;
+        .ok_or_else(|| ScraperError::Config("the LLM URL has no host".to_string()))?;
     if crate::domain::ssrf_guard::is_forbidden_literal_host(host) {
         return Err(ScraperError::Config(format!(
-            "URL del LLM bloqueada por SSRF: el host '{host}' pertenece a una red interna (#703)"
+            "LLM URL blocked by SSRF: host '{host}' belongs to an internal network (#703)"
         )));
     }
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ssrf_gate_blocks_forbidden_internal_ips() {
-        let _guard = webfang_test_utils::EnvGuard::clean(&[LLM_SSRF_TEST_HATCH_ENV]);
-        for host in [
-            "127.0.0.1",
-            "169.254.169.254",
-            "10.0.0.1",
-            "100.64.1.1",
-            "[fc00::1]",
-        ] {
-            let url = Url::parse(&format!("http://{host}/v1")).expect("literal parses");
-            let err = ssrf_gate(&url).expect_err("forbidden host must be blocked");
-            assert!(
-                matches!(err, ScraperError::Config(_)),
-                "host {host}: {err:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn ssrf_gate_allows_public_ip() {
-        let _guard = webfang_test_utils::EnvGuard::clean(&[LLM_SSRF_TEST_HATCH_ENV]);
-        let url = Url::parse("https://8.8.8.8/v1").expect("literal parses");
-        ssrf_gate(&url).expect("public host must pass");
-    }
-
-    #[test]
-    fn ssrf_gate_rejects_non_http_scheme() {
-        let _guard = webfang_test_utils::EnvGuard::clean(&[LLM_SSRF_TEST_HATCH_ENV]);
-        let url = Url::parse("ftp://8.8.8.8/v1").expect("parses");
-        assert!(matches!(
-            ssrf_gate(&url).expect_err("ftp must fail"),
-            ScraperError::Config(_)
-        ));
-    }
-
-    /// #1615 DF-E9: the hatch still disarms the gate for THIS crate's unit
-    /// tests — the change is that it is no longer compiled into production,
-    /// not that the tests lost their loopback escape. A value that looks like
-    /// a refusal (`0`, `false`, empty) still disarms it, because that is the
-    /// pre-existing unit-test contract and hardening it would change behaviour
-    /// only under `cfg(test)`, which is not where the finding lived.
-    ///
-    /// The STRONG row is `crates/webfang_core/tests/llm_ssrf_hatch_test.rs`,
-    /// which is compiled as an EXTERNAL crate where `cfg(test)` of
-    /// `webfang_core` is definitively off. A unit test cannot observe the
-    /// property that matters here, because a unit test is compiled WITH it —
-    /// so this test pins that the escape still works, and that other one pins
-    /// that production cannot reach it.
-    #[test]
-    fn ssrf_gate_bypass_env_for_tests() {
-        let _guard = webfang_test_utils::EnvGuard::with(&[(LLM_SSRF_TEST_HATCH_ENV, "1")]);
-        let url = Url::parse("http://127.0.0.1:9/v1").expect("parses");
-        assert!(ssrf_gate(&url).is_ok());
-    }
-
-    #[test]
-    fn from_env_missing_key_is_config_error() {
-        let _guard = webfang_test_utils::EnvGuard::clean(&["LLM_API_KEY"]);
-        let err = LlmConfig::from_env("https://8.8.8.8/v1", 100).expect_err("missing key fails");
-        assert!(matches!(err, ScraperError::Config(_)));
-    }
-
-    #[test]
-    fn from_env_redacts_key_in_debug() {
-        let _guard = webfang_test_utils::EnvGuard::with(&[("LLM_API_KEY", "sk-super-secret")]);
-        let cfg = LlmConfig::from_env("https://8.8.8.8/v1", 100).expect("key present");
-        let dbg = format!("{cfg:?}");
-        assert!(dbg.contains("[REDACTED]"), "debug must redact: {dbg}");
-        assert!(
-            !dbg.contains("sk-super-secret"),
-            "debug leaked secret: {dbg}"
-        );
-    }
-}
+mod tests;
 
 #[cfg(test)]
 mod service_tests {
@@ -427,6 +354,7 @@ mod service_tests {
             base_url: Url::parse("https://203.0.113.7/v1").expect("TEST-NET base parses"),
             api_key: ApiKey::new("sk-test"),
             max_tokens: 100,
+            char_budget: 800,
         }
     }
 
@@ -576,7 +504,7 @@ mod service_tests {
         LlmExtractionService::new(
             Arc::new(FakeHttp {
                 status: 200,
-                body: "<html><body><p>página</p></body></html>".into(),
+                body: "<html><body><p>page</p></body></html>".into(),
             }),
             Arc::new(FakeCleaner {
                 chunks: cleaner_chunks,
@@ -596,9 +524,9 @@ mod service_tests {
         ]));
         let svc = service(
             vec![
-                chunk_with("Texto uno."),
-                chunk_with("Texto dos."),
-                chunk_with("Texto tres."),
+                chunk_with("Text one."),
+                chunk_with("Text two."),
+                chunk_with("Text three."),
             ],
             Arc::clone(&llm),
         );
@@ -635,11 +563,55 @@ mod service_tests {
         assert_eq!(llm.call_count(), 0, "no LLM call may be sent");
     }
 
+    /// S10: the completion sub-chunk budget is counted in characters, so a
+    /// multibyte chunk that fits must still reach the provider.
+    #[tokio::test]
+    async fn sub_chunk_budget_counts_characters_not_bytes() {
+        let content = "áéíóú ñ 漢字 🎉";
+        let budget = content.chars().count();
+        assert!(content.len() > budget, "fixture must be multibyte");
+        let llm = Arc::new(FakeLlm::new(&[r#"[{"name":"a"}]"#]));
+        let svc = service(vec![chunk_with(content)], Arc::clone(&llm));
+        let config = LlmConfig {
+            base_url: test_config().base_url,
+            api_key: ApiKey::new("sk-test".to_string()),
+            max_tokens: 100,
+            char_budget: budget,
+        };
+
+        svc.extract(&target_url(), &extraction_schema(), "m", &config)
+            .await
+            .expect("multibyte chunk fits the character budget");
+        assert_eq!(llm.call_count(), 1);
+    }
+
+    /// S12/T5: an unparseable model payload is page content, never something
+    /// to echo into an error that aggregate paths log or hand to MCP.
+    #[tokio::test]
+    async fn extraction_error_never_echoes_the_model_payload() {
+        let payload = "UNTRUSTED_MODEL_PAYLOAD_9f3a";
+        let llm = Arc::new(FakeLlm::new(&[payload]));
+        let svc = service(vec![chunk_with("clean text")], Arc::clone(&llm));
+
+        let err = match svc
+            .extract(&target_url(), &extraction_schema(), "m", &test_config())
+            .await
+        {
+            Ok(_) => panic!("non-JSON model output must fail"),
+            Err(err) => err,
+        };
+        let text = err.to_string();
+        assert!(
+            !text.contains(payload),
+            "the model payload must not travel in the error: {text}"
+        );
+    }
+
     #[tokio::test]
     async fn request_bodies_never_carry_html_tags() {
         let llm = Arc::new(FakeLlm::new(&[r#"[{"name":"a"}]"#]));
         let svc = service(
-            vec![chunk_with("Texto limpio sin etiquetas.")],
+            vec![chunk_with("Clean text without tags.")],
             Arc::clone(&llm),
         );
 

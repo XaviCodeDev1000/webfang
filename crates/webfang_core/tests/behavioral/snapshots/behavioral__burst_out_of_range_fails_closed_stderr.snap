@@ -2,4 +2,4 @@
 source: crates/webfang_core/tests/behavioral/main.rs
 expression: redacted
 ---
-Error: --rate-limit-burst «4294967296» está fuera del rango admitido (debe estar entre 1 y 4294967295)
+Error: --rate-limit-burst «4294967296» is outside the allowed range (must be between 1 and 4294967295)

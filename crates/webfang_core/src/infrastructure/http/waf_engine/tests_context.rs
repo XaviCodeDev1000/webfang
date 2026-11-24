@@ -1,6 +1,6 @@
 //! Tests for `waf_engine`: domain types + InspectionContext API.
 //!
-//! Extracted from the inline `mod tests` of `waf_engine.rs` (PR 1 of the Ola 1
+//! Extracted from the inline `mod tests` of `waf_engine.rs` (PR 1 of the Wave 1
 //! mission, umbrella #2584) along the file's own seam: verbatim mechanical move
 //! (dedent -4), no semantic changes and no renames. `waf_engine.rs` is
 //! grandfathered in `scripts/quality-baselines.json` and the ratchet is
@@ -117,12 +117,12 @@ fn test_from_lowercase_headers_drives_control_header_evidence() {
 
 #[test]
 fn test_verify_integrity_error_carries_evidence_chain() {
-    // REQ-WAF-08: a blocked verdict exposes the Spanish evidence chain.
+    // REQ-WAF-08: a blocked verdict exposes the evidence chain.
     let verdict = WafInspector::inspect("Just a moment...", &InspectionContext::default());
     assert!(verdict.is_blocked, "T1 prose must block");
     let chain = verdict.evidence_chain();
     assert!(chain.contains("Cloudflare"), "chain provider: {chain}");
-    assert!(chain.contains("patrón:"), "chain pattern label: {chain}");
+    assert!(chain.contains("pattern:"), "chain pattern label: {chain}");
     assert!(chain.contains("tier:"), "chain tier label: {chain}");
 }
 

@@ -17,7 +17,7 @@ use url::Url;
 /// fetch stack produces when the resolver never answers.
 fn resolution_error() -> CrawlError {
     CrawlError::Network {
-        message: "no se pudo resolver el nombre del dominio".to_string(),
+        message: "could not resolve the domain name".to_string(),
         status_code: None,
         source: Some(Box::new(
             crate::domain::error::cause::ClassifiedNetworkError::new(

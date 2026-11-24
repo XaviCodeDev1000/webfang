@@ -41,7 +41,7 @@ pub struct ConfigDefaults {
     /// Bypass WAF/CAPTCHA detection by default (REQ-WAF-07)
     pub ignore_waf: Option<bool>,
     /// Default explicit rate-limiter burst permits (budget model Q1 knob;
-    /// 0 is rejected at staging with a Spanish error).
+    /// 0 is rejected at staging with an error).
     pub rate_limit_burst: Option<u32>,
     /// LLM provider declarations (`ai-providers-design.md` §4): `[[providers]]`
     /// entries with `id`, `display_name`, `kind`, `base_url`, `auth`,
@@ -68,25 +68,25 @@ pub struct ConfigDefaults {
 /// Every variant carries the offending path. That is not decoration: the
 /// defect this type exists to close is a run that used defaults for a file the
 /// operator believed was applied, so a message that omits the path is the same
-/// bug in a different costume. Messages are user-facing, therefore Spanish;
-/// the `tracing` events that accompany them are English.
+/// bug in a different costume. Messages are user-facing and therefore in
+/// English, as are the `tracing` events that accompany them.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigLoadError {
     /// An explicit `WEBFANG_CONFIG` override was not an absolute path.
-    #[error("WEBFANG_CONFIG debe ser una ruta absoluta: {path}")]
+    #[error("WEBFANG_CONFIG must be an absolute path: {path}")]
     NotAbsolute {
         /// The rejected value, verbatim.
         path: String,
     },
     /// No file exists at the configured path.
-    #[error("no existe el archivo de configuración: {path}")]
+    #[error("the configuration file does not exist: {path}")]
     NotFound {
         /// The path that was looked up.
         path: String,
     },
     /// The file exists but could not be read — `PermissionDenied`, a path
     /// that is a directory (`EISDIR`), invalid UTF-8, and friends.
-    #[error("no se pudo leer el archivo de configuración {path}: {source}")]
+    #[error("could not read the configuration file {path}: {source}")]
     Io {
         /// The path that was read.
         path: String,
@@ -95,7 +95,7 @@ pub enum ConfigLoadError {
         source: std::io::Error,
     },
     /// The file was read but is not valid TOML.
-    #[error("el archivo de configuración {path} no es TOML válido: {source}")]
+    #[error("the configuration file {path} is not valid TOML: {source}")]
     Malformed {
         /// The path that was parsed.
         path: String,
@@ -112,7 +112,7 @@ impl ConfigDefaults {
     /// which is the normal state of a fresh install. Every other reason the
     /// file is unusable — `PermissionDenied`, a path that is a directory,
     /// invalid UTF-8, malformed TOML — warns on stderr with the reason
-    /// (Spanish, naming the path) before falling back, and additionally logs
+    /// (in English, naming the path) before falling back, and additionally logs
     /// a structured `error!`. Before #1659 a `let Ok(content) = … else {
     /// return Self::default() }` swallowed all of them indistinguishably, so
     /// a `config.toml` that was never read produced a run indistinguishable
@@ -136,8 +136,8 @@ impl ConfigDefaults {
                 eprintln!(
                     // The remediation line goes after a newline: `{e}` is
                     // multi-line for the TOML variant (the parser's snippet).
-                    "Advertencia: {e}\nSe ignora el archivo y se continúa con los valores \
-                     predeterminados; corríjalo o elimínelo antes de reintentar."
+                    "Warning: {e}\nThe file is ignored and defaults are used; fix or remove it \
+                     before retrying."
                 );
                 tracing::error!(
                     path = %path.display(),
@@ -282,8 +282,8 @@ pub fn load_config_defaults() -> Result<ConfigDefaults, ConfigLoadError> {
 /// config is unusable (that is [`ConfigDefaults::load`]'s product decision),
 /// but a diagnostic may not: a tool whose whole job is to describe the
 /// config, handed a degraded `Self::default()`, describes a config that does
-/// not exist — it prints "No hay ningún provider en el archivo de
-/// configuración" about a file the operator filled with providers. And the
+/// not exist — it prints "There is no provider in the configuration file"
+/// about a file the operator filled with providers. And the
 /// `tracing::error!` [`ConfigDefaults::load`] emits is no safety net here:
 /// subcommands dispatch before the tracing subscriber is installed, so the
 /// event is silently dropped and the operator sees only the false
@@ -294,8 +294,8 @@ pub fn load_config_defaults() -> Result<ConfigDefaults, ConfigLoadError> {
 /// [`ConfigDefaults::load_explicit`] — fail-closed on everything, exactly
 /// like the run. Otherwise it is the platform default, where ONLY
 /// [`ConfigLoadError::NotFound`] degrades to [`ConfigDefaults::default`]:
-/// a fresh install legitimately has no file yet, and "sin provider
-/// configurado" is the correct diagnosis for it. Every other failure —
+/// a fresh install legitimately has no file yet, and "no provider configured"
+/// is the correct diagnosis for it. Every other failure —
 /// unreadable, invalid UTF-8, malformed TOML — is an `Err` the caller
 /// renders.
 ///
@@ -419,9 +419,9 @@ pub fn init_logging_dual(
         .with(fmt_layer)
         .try_init()
         .map_err(|e| CliError::ConfigFile {
-            msg: format!("no se pudo instalar el subscriber de logging: {e}"),
+            msg: format!("could not install the logging subscriber: {e}"),
             suggestion:
-                "verifique que este proceso no tenga ya un subscriber de tracing global instalado antes de invocar webfang"
+                "verify that this process does not already have a global tracing subscriber installed before invoking webfang"
                     .to_string(),
         })
 }
@@ -505,14 +505,14 @@ max_pages = 20
         // Act
         let result = init_logging_dual("info", false, true, None);
 
-        // Assert: a typed CliError whose Spanish message names the cause.
+        // Assert: a typed CliError whose English message names the cause.
         let Err(err) = result else {
             panic!("init must fail when a global subscriber is already installed");
         };
         assert!(
             err.to_string()
-                .contains("no se pudo instalar el subscriber de logging"),
-            "error must name the subscriber failure in Spanish, got: {err}"
+                .contains("could not install the logging subscriber"),
+            "error must name the subscriber failure in English, got: {err}"
         );
     }
 
@@ -756,7 +756,7 @@ max_pages = 20
         assert!(config.providers.is_empty());
     }
 
-    /// User-facing messages are Spanish AND carry the path. The path is the
+    /// User-facing messages are in English AND carry the path. The path is the
     /// load-bearing half: an operator who cannot see WHICH file failed cannot
     /// act on the message, which is the whole defect #1659 closes.
     #[test]
@@ -766,8 +766,8 @@ max_pages = 20
             .expect_err("a missing override must fail")
             .to_string();
         assert!(
-            msg.starts_with("no existe el archivo de configuración"),
-            "user-facing config errors are Spanish, got: {msg}"
+            msg.starts_with("the configuration file does not exist"),
+            "user-facing config errors are in English, got: {msg}"
         );
         assert!(
             msg.contains(&missing.display().to_string()),
@@ -779,8 +779,8 @@ max_pages = 20
             .expect_err("a relative override must fail")
             .to_string();
         assert!(
-            msg.starts_with("WEBFANG_CONFIG debe ser una ruta absoluta"),
-            "user-facing config errors are Spanish, got: {msg}"
+            msg.starts_with("WEBFANG_CONFIG must be an absolute path"),
+            "user-facing config errors are in English, got: {msg}"
         );
     }
 
@@ -821,7 +821,7 @@ max_pages = 20
     // ========================================================================
 
     /// A nonexistent platform-default path degrades to empty defaults: that
-    /// is a fresh install, and "sin provider configurado" is the CORRECT
+    /// is a fresh install, and "no provider configured" is the CORRECT
     /// diagnosis for it. `EnvGuard` keeps the ambient environment from
     /// flipping the call into the explicit-override arm (issue #926 class).
     #[test]
@@ -836,7 +836,7 @@ max_pages = 20
 
     /// A malformed platform-default path is an `Err`, never a degraded
     /// diagnosis: this is the exact case `doctor`/`show` used to render as
-    /// "No hay ningún provider en el archivo de configuración".
+    /// "There is no provider in the configuration file".
     #[test]
     fn or_diag_refuses_a_malformed_default_path() {
         let _guard = webfang_test_utils::EnvGuard::clean(&["WEBFANG_CONFIG"]);
@@ -848,8 +848,8 @@ max_pages = 20
         assert!(matches!(err, ConfigLoadError::Malformed { .. }));
         let msg = err.to_string();
         assert!(
-            msg.contains("no es TOML válido"),
-            "the error must name the file problem in Spanish, got: {msg}"
+            msg.contains("is not valid TOML"),
+            "the error must name the file problem in English, got: {msg}"
         );
     }
 }

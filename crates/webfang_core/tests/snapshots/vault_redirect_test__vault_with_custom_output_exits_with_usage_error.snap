@@ -2,4 +2,4 @@
 source: crates/webfang_core/tests/vault_redirect_test.rs
 expression: "redact_nondeterministic(out.path(), &stderr)"
 ---
-Error: --vault y un directorio de output personalizado (<OUT_DIR>) no pueden combinarse: usá --vault <path> solo (redirige todo el output al vault) o -o <dir> sin --vault
+Error: --vault and a custom output directory (<OUT_DIR>) cannot be combined: use --vault <path> alone (redirects all output to the vault) or -o <dir> without --vault

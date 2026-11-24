@@ -62,7 +62,7 @@ fn assert_malformed_config_refused(output: &std::process::Output, stdout: &str, 
         "a malformed config is a configuration error (exit 78), got:\n{stdout}\n{stderr}"
     );
     assert!(
-        stderr.contains("no es TOML válido"),
+        stderr.contains("is not valid TOML"),
         "the error must name the file's own problem, got:\n{stderr}"
     );
     assert!(
@@ -203,10 +203,10 @@ fn test_issue_1933_show_about_does_not_claim_the_run_uses_the_profile() {
     );
 }
 
-/// `webfang doctor` must disclose the Tramo D boundary in its budget block:
-/// the profile numbers are CONFIGURED, not consumed by a run yet. Captured
-/// from the real binary so the assertion is on what the operator actually
-/// sees, not on an in-source string mirrored by the test.
+/// `webfang doctor` must disclose the profile boundary in its budget block
+/// (T2b): the default profile governs the character budget, but it is not the
+/// run's identity. Captured from the real binary so the assertion is on what
+/// the operator actually sees, not on an in-source string mirrored by the test.
 ///
 /// Issue #1933 (ADR-0004 step 4).
 #[test]
@@ -220,12 +220,12 @@ fn test_issue_1933_doctor_budget_discloses_the_tramo_d_boundary() {
     // in CI); the budget block prints regardless. Assert on the text, not the
     // exit code.
     assert!(
-        stdout.contains("Tramo D"),
-        "doctor's budget block must name the Tramo D boundary, got:\n{stdout}"
+        stdout.contains("now governs the cleaner"),
+        "doctor must name the boundary the profile now governs, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("no está cableado al run"),
-        "doctor must say the profile is not wired to the run yet, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "doctor must say the profile is not the run identity, got:\n{stdout}"
     );
 }
 
@@ -240,11 +240,11 @@ fn test_issue_2500_doctor_states_the_proxy_posture() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
-        stdout.contains("Proxy: no se usa"),
+        stdout.contains("Proxy: not used"),
         "doctor must state the proxy posture explicitly, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("se ignora por diseño"),
+        stdout.contains("is ignored by design"),
         "doctor must say the proxy environment is ignored by design, got:\n{stdout}"
     );
 }
@@ -255,7 +255,7 @@ fn test_issue_2500_doctor_states_the_proxy_posture() {
 /// This replaces the contract that made the problem invisible: until 3.0.0 the
 /// binary exited 0 here, because `ProviderKind::LocalOnnx` mapped to
 /// `Ok(None)` and `doctor` read that as "the local pool serves". ADR-0004
-/// paso 6 removed the pool, so the same input must now be a hard failure —
+/// step 6 removed the pool, so the same input must now be a hard failure —
 /// never a run without embeddings, never a green diagnostic.
 #[test]
 fn issue_2099_config_with_the_removed_local_onnx_kind_is_rejected() {
@@ -305,11 +305,11 @@ fn show_default_render_names_the_repo_verified_profiles_as_history() {
         "show must exit 0 with no provider configured, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("sin provider de embeddings configurado"),
+        stdout.contains("no embeddings provider configured"),
         "the run identity must be the EMPTY provider slot, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("perfil: granite-97m (repo-verified)"),
+        stdout.contains("profile: granite-97m (repo-verified)"),
         "the historical profile must carry its repo-verified provenance, got:\n{stdout}"
     );
     assert!(
@@ -317,7 +317,7 @@ fn show_default_render_names_the_repo_verified_profiles_as_history() {
         "the profile must cite its repo source, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("dim (nativa): 384"),
+        stdout.contains("dim (native): 384"),
         "granite-97m is 384d native, got:\n{stdout}"
     );
     assert!(
@@ -325,8 +325,12 @@ fn show_default_render_names_the_repo_verified_profiles_as_history() {
         "the profile context must be shown, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("Ninguna corrida los consume"),
-        "the profile numbers must be labelled as history no run consumes, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "the profile block must say it is not the run identity, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("max_chars: 98304"),
+        "the printed budget must be the governing profile budget, got:\n{stdout}"
     );
 }
 
@@ -345,15 +349,15 @@ fn show_operator_override_renders_override_provenance_value_and_warning() {
         "show must exit 0 with an operator override, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("perfil: granite-97m (operator-override)"),
+        stdout.contains("profile: granite-97m (operator-override)"),
         "an overridden profile is operator-override, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("dim (nativa): 512"),
+        stdout.contains("dim (native): 512"),
         "the overridden dim must be the rendered value, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("ATENCIÓN") && stdout.contains("identidad auditada"),
+        stdout.contains("WARNING") && stdout.contains("audited identity"),
         "the override must warn that the audited identity was overwritten, got:\n{stdout}"
     );
 }
@@ -376,13 +380,14 @@ fn show_budget_names_the_operator_origin_for_an_explicit_max_chars() {
         "the explicit --max-chars value must be shown, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("operatorio (--max-chars o WEBFANG_MAX_CHARS)"),
+        stdout.contains("operator (--max-chars or WEBFANG_MAX_CHARS)"),
         "an explicit --max-chars must be labelled operator-supplied, got:\n{stdout}"
     );
 }
 
-/// Without flags the budget block names the spec default for BOTH knobs —
-/// `show` may not dress a default up as a choice the operator made.
+/// Without flags, the budget comes from the default profile (T2b) and only
+/// the threshold is a spec default. `show` may not dress either up as a
+/// choice the operator made.
 #[test]
 fn show_budget_names_the_spec_default_without_flags() {
     let (_dir, config) = seeded_config("");
@@ -391,10 +396,17 @@ fn show_budget_names_the_spec_default_without_flags() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert_eq!(
-        stdout.matches("default del spec").count(),
-        2,
-        "max_chars AND threshold must both name the spec default when no flag \
-         is given, got:\n{stdout}"
+        stdout.matches("spec default").count(),
+        1,
+        "only the threshold is a spec default when no flag is given, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("max_chars: 98304"),
+        "max_chars must be the governing profile budget, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("profile (default granite-97m"),
+        "the profile must be named as the budget origin, got:\n{stdout}"
     );
 }
 
@@ -416,37 +428,39 @@ fn show_budget_names_the_operator_origin_for_an_explicit_threshold() {
         "the explicit --threshold value must be shown, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("operatorio (--threshold)"),
+        stdout.contains("operator (--threshold)"),
         "an explicit --threshold must be labelled operator-supplied, got:\n{stdout}"
     );
     assert_eq!(
-        stdout.matches("default del spec").count(),
-        1,
-        "max_chars is still the spec default in this run, got:\n{stdout}"
+        stdout.matches("spec default").count(),
+        0,
+        "an explicit threshold leaves no spec-default label in the budget block, \
+         max_chars comes from the profile, got:\n{stdout}"
     );
 }
 
-/// The Tramo D boundary note must appear in `show` output: the numbers are
-/// shown, but consuming them in the cleaner is explicitly not wired yet.
+/// The profile boundary must appear in `show` output (T2b): the character
+/// budget IS governed by the default profile, but the profile is still not
+/// the run's identity.
 #[test]
-fn show_output_discloses_the_tramo_d_boundary() {
+fn show_output_discloses_the_profile_boundary() {
     let (_dir, config) = seeded_config("");
 
     let output = run_with_config(&["show"], &config);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
-        stdout.contains("Tramo D"),
-        "show must name the Tramo D boundary, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "show must say the profile is not the run identity, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("no está cableado al run"),
-        "show must say the profile is not wired to the run yet, got:\n{stdout}"
+        stdout.contains("now governs the cleaner"),
+        "show must name the budget the profile governs, got:\n{stdout}"
     );
 }
 
-/// An unknown PROVIDER id is a configuration error that NAMES the id, in
-/// Spanish — never a silent fallback to the config-order default.
+/// An unknown PROVIDER id is a configuration error that NAMES the id — never
+/// a silent fallback to the config-order default.
 ///
 /// `--embedding-provider` names a provider in both subcommands (issue
 /// #2106): the error talks about the embedding capability, never about a
@@ -472,14 +486,14 @@ fn show_unknown_provider_id_is_a_spanish_error_naming_the_id() {
         "the error must name the embedding capability, got:\n{stderr}"
     );
     assert!(
-        !stderr.contains("perfil de modelo"),
+        !stderr.contains("model profile"),
         "the error must not talk about a model profile — the id names a \
          provider, got:\n{stderr}"
     );
 }
 
 /// `doctor`'s budget block names the threshold origin on its own render path:
-/// `operatorio` with an explicit `--threshold`, `default del spec` without it
+/// `operator` with an explicit `--threshold`, `spec default` without it
 /// (the provenance contract `show` asserts, pinned for doctor as well).
 #[test]
 fn test_doctor_budget_names_the_threshold_origin() {
@@ -491,7 +505,7 @@ fn test_doctor_budget_names_the_threshold_origin() {
     let default = run_with_config(&["doctor"], &config);
     let default_stdout = String::from_utf8_lossy(&default.stdout);
     assert!(
-        default_stdout.contains("umbral de relevancia: 0.3 (default del spec)"),
+        default_stdout.contains("relevance threshold: 0.3 (spec default)"),
         "doctor must label the threshold a spec default when no flag is given, \
          got:\n{default_stdout}"
     );
@@ -499,7 +513,7 @@ fn test_doctor_budget_names_the_threshold_origin() {
     let explicit = run_with_config(&["--threshold", "0.5", "doctor"], &config);
     let explicit_stdout = String::from_utf8_lossy(&explicit.stdout);
     assert!(
-        explicit_stdout.contains("umbral de relevancia: 0.5 (operatorio)"),
+        explicit_stdout.contains("relevance threshold: 0.5 (operator)"),
         "doctor must label an explicit --threshold operator-supplied, \
          got:\n{explicit_stdout}"
     );
@@ -511,14 +525,14 @@ fn test_doctor_budget_names_the_threshold_origin() {
 // A malformed config used to degrade silently to defaults inside the
 // subcommand (ConfigDefaults::load), and the tracing::error! that carried
 // the real cause was dropped — subcommands dispatch before the tracing
-// subscriber exists. The operator saw "No hay ningún provider en el archivo
-// de configuración": a false diagnosis about a file full of providers.
+// subscriber exists. The operator saw "There is no provider in the configuration
+// file": a false diagnosis about a file full of providers.
 // The contract now: the error names the file's own problem, exit 78, and
 // the false-providers message never appears.
 // ============================================================================
 
 /// `doctor` with a malformed `WEBFANG_CONFIG`: exit 78, stderr names the
-/// file's TOML problem, and the false "No hay ningún provider" diagnosis is
+/// file's TOML problem, and the false "There is no provider" diagnosis is
 /// absent from every stream.
 #[test]
 fn doctor_names_a_malformed_config_instead_of_inventing_a_diagnosis() {
@@ -529,7 +543,7 @@ fn doctor_names_a_malformed_config_instead_of_inventing_a_diagnosis() {
 
     assert_malformed_config_refused(&output, &stdout, &stderr);
     assert!(
-        !stdout.contains("No hay ningún provider") && !stderr.contains("No hay ningún provider"),
+        !stdout.contains("There is no provider") && !stderr.contains("There is no provider"),
         "the false no-providers diagnosis must not appear, got:\n{stdout}\n{stderr}"
     );
 }
@@ -567,7 +581,7 @@ fn doctor_refuses_a_missing_explicit_config_override() {
         "a missing explicit override is a configuration error (exit 78), got:\n{stdout}\n{stderr}"
     );
     assert!(
-        stderr.contains("no existe el archivo de configuración"),
+        stderr.contains("the configuration file does not exist"),
         "the error must say the file does not exist, got:\n{stderr}"
     );
     assert!(

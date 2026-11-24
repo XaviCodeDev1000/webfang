@@ -59,7 +59,7 @@ pub(super) async fn export_results(
         Err(join) => {
             tracing::warn!(error = %join, "export_spawn_blocking_join_failed");
             Ok(provenance::neutralized_error(&format!(
-                "error al exportar: la tarea de exportación falló en el pool de bloqueo: {join}"
+                "export error: the export task failed in the blocking pool: {join}"
             )))
         },
     }

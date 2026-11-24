@@ -219,7 +219,7 @@ async fn configured_proxy_without_loopback_opt_in_is_rejected_before_dial() {
         stderr_of(&output)
     );
     assert!(
-        stderr_of(&output).contains("está prohibido por el guard SSRF"),
+        stderr_of(&output).contains("is forbidden by the SSRF guard"),
         "the diagnostic must name the SSRF guard; stderr:\n{}",
         stderr_of(&output)
     );
@@ -316,7 +316,7 @@ async fn redirect_to_metadata_is_stopped_before_a_second_proxy_request() {
         stderr_of(&output)
     );
     assert!(
-        stderr_of(&output).contains("devolvió el estado 302"),
+        stderr_of(&output).contains("returned status 302"),
         "the probe must report the observed status, not a transport error; stderr:\n{}",
         stderr_of(&output)
     );
@@ -330,7 +330,7 @@ async fn redirect_to_metadata_is_stopped_before_a_second_proxy_request() {
 }
 
 /// The 16 MiB response ceiling applies through the proxy hop: an oversized
-/// body fails the probe with exit 78 and the Spanish cap message, never a
+/// body fails the probe with exit 78 and the English cap message, never a
 /// successful parse of a truncated body.
 #[tokio::test]
 async fn oversized_embedding_response_is_capped() {
@@ -361,7 +361,7 @@ async fn oversized_embedding_response_is_capped() {
         stderr_of(&output)
     );
     assert!(
-        stderr_of(&output).contains("excede 16 MiB"),
+        stderr_of(&output).contains("exceeds 16 MiB"),
         "the diagnostic must name the cap; stderr:\n{}",
         stderr_of(&output)
     );

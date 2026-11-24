@@ -87,7 +87,7 @@ impl StructuralScore {
 
     fn message_es(&self) -> String {
         format!(
-            "La extracción devolvió contenido de baja calidad (puntaje estructural {}/100): posible deriva semántica o contenido insuficiente.",
+            "Extraction returned low-quality content (structural score {}/100): possible semantic drift or insufficient content.",
             self.total.round() as i64
         )
     }
@@ -98,7 +98,7 @@ impl StructuralScore {
 pub struct ExtractionQualityHint {
     /// The structural score that triggered the hint.
     pub score: StructuralScore,
-    /// User-facing message in Spanish.
+    /// User-facing message.
     pub message_es: String,
     /// Per-site fingerprint record (populated by Slice B; None in Slice A).
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -175,7 +175,7 @@ mod tests {
         };
         let hint = score.to_hint(&cfg).expect("hint expected");
         assert!(hint.message_es.contains("35"));
-        assert!(hint.message_es.contains("baja calidad"));
+        assert!(hint.message_es.contains("low-quality"));
         assert!(hint.fingerprint.is_none());
     }
 }

@@ -286,10 +286,10 @@ async fn test_scrape_url_js_shell_is_error_result() {
         tool_text(&result)
     );
 
-    // Semantic invariant: the Spanish error text names the JS-rendering cause.
+    // Semantic invariant: the error text names the JS-rendering cause.
     let text = tool_text(&result);
     assert!(
-        text.contains("renderizado de JavaScript"),
+        text.contains("JavaScript rendering"),
         "error text must explain the JS-rendering cause, got: {text}"
     );
 
@@ -522,7 +522,7 @@ async fn test_detect_spa_predicts_scrape_verdict_on_js_shell() {
         tool_text(&scrape_result)
     );
     assert!(
-        tool_text(&scrape_result).contains("renderizado de JavaScript"),
+        tool_text(&scrape_result).contains("JavaScript rendering"),
         "the scrape error must name the JS cause: {}",
         tool_text(&scrape_result)
     );

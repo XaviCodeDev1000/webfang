@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-//! Integration tests for AX-tree DTOs, observability, and Spanish error
+//! Integration tests for AX-tree DTOs, observability, and user-facing errors
 //! messages.
 
 use webfang_core::error::ScraperError;
@@ -20,12 +20,12 @@ fn test_compactnode_role_and_name_preserved() {
 
 #[test]
 fn test_spanish_error_message() {
-    let err = ScraperError::invalid_url("URL vacía");
+    let err = ScraperError::invalid_url("empty URL");
     let msg = err.to_string();
-    // Spanish user-facing error format
+    // User-facing error format
     assert!(
-        msg.starts_with("URL inválida:"),
-        "Spanish error must start with 'URL inválida:'"
+        msg.starts_with("Invalid URL:"),
+        "error must start with 'Invalid URL:'"
     );
 }
 
@@ -35,7 +35,7 @@ fn test_spanish_http_error() {
 
     let err = ScraperError::http(404, "https://example.com");
     let msg = err.to_string();
-    // HTTP errors should have Spanish format
+    // HTTP errors should have the standard format
     assert!(
         msg.contains("404") || msg.contains("error"),
         "HTTP error must contain status code"

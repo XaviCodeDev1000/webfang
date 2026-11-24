@@ -60,7 +60,7 @@ async fn export_jsonl_accepts_absolute_output_dir_inside_root() {
         .expect("export_jsonl returns Ok for absolute output_dir inside root");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "seeded export under a configured root must report completion: {text}"
     );
     assert!(
@@ -102,7 +102,7 @@ async fn export_jsonl_seeded_writes_file() {
         .expect("export_jsonl returns Ok");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "seeded export must report completion: {text}"
     );
     assert!(
@@ -127,7 +127,7 @@ async fn export_vector_seeded_writes_json() {
         .expect("export_vector returns Ok");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "seeded vector export must report completion: {text}"
     );
     assert!(

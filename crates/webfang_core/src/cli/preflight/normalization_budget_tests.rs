@@ -84,7 +84,7 @@ fn burst_zero_rejected_with_spanish_error() {
         .expect_err("zero burst must be rejected");
     match err {
         CliExit::ConfigError(msg) => assert!(
-            msg.contains("--rate-limit-burst debe ser >= 1"),
+            msg.contains("--rate-limit-burst must be >= 1"),
             "unexpected error: {msg}"
         ),
         other => panic!("expected ConfigError, got {other:?}"),
@@ -117,7 +117,7 @@ fn burst_non_numeric_rejected_with_spanish_error() {
             .expect_err("a non-numeric burst must be rejected, not defaulted");
         match err {
             CliExit::ConfigError(msg) => assert!(
-                msg.contains("no es un número"),
+                msg.contains("is not a number"),
                 "unexpected error for {raw}: {msg}"
             ),
             other => panic!("expected ConfigError for {raw}, got {other:?}"),

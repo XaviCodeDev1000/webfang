@@ -138,7 +138,7 @@ pub struct NumericPolicy {
     /// Inclusive upper bound (`None` = unbounded above). Caps shared by
     /// every surface live HERE only (ADR-002 slice 4).
     pub max: Option<u64>,
-    /// Completes "`{raw}` no es …" when parsing fails.
+    /// Completes "`{raw}` is not …" when parsing fails.
     pub parse_failure_detail: &'static str,
     /// Complete message raised when the value is below [`NumericPolicy::min`].
     pub below_min_message: &'static str,
@@ -147,7 +147,7 @@ pub struct NumericPolicy {
     /// `None` or when `min = 0` already accepts every valid value below it.
     pub above_max_message: &'static str,
     /// Verbatim parse-failure message overriding the default
-    /// `` `{raw}` no es {parse_failure_detail} `` rendering, with `{value}`
+    /// `` `{raw}` is not {parse_failure_detail} `` rendering, with `{value}`
     /// substituted by the raw input. Present ONLY where pre-migration legacy
     /// wording cannot be expressed by the default template — byte-identical
     /// errors outrank uniformity (ADR-002 acceptance bar). When set, the
@@ -156,9 +156,9 @@ pub struct NumericPolicy {
 }
 
 impl NumericPolicy {
-    /// Canonical detail completing "`{raw}` no es …" for integer options
+    /// Canonical detail completing "`{raw}` is not …" for integer options
     /// whose kind carries no explicit policy (unbounded metadata entries).
-    pub(super) const INTEGER_PARSE_DETAIL: &'static str = "un número entero válido";
+    pub(super) const INTEGER_PARSE_DETAIL: &'static str = "a valid integer";
 
     /// Canonical positive-integer policy (`min = 1`) with the standard
     /// integer parse-failure message and no verbatim template.
@@ -244,7 +244,7 @@ pub enum ValueKind {
     /// Unsigned integer. `Some(policy)` enforces the policy's inclusive
     /// lower bound with its exact messages; `None` records a metadata-only
     /// entry with NO bound today — parse failures render the canonical
-    /// `` `{raw}` no es un número entero válido `` message.
+    /// `` `{raw}` is not a valid integer `` message.
     Uint {
         /// Shared parse + bound policy, absent when unbounded.
         policy: Option<NumericPolicy>,

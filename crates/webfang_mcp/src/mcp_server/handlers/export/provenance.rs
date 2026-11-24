@@ -65,8 +65,8 @@ pub(super) fn write_provenance_sidecar(export_path: &Path, format: ExportFormat,
         Err(e) => tracing::warn!(
             error = %e,
             sidecar = %sidecar.display(),
-            user_message = "La exportación se completó, pero no se pudo escribir el \
-        archivo de procedencia que acompaña al archivo exportado.",
+            user_message = "The export completed, but the provenance file accompanying the \
+        exported content could not be written.",
             "export provenance sidecar could not be written"
         ),
     }
@@ -117,16 +117,15 @@ pub(super) fn export_success_result(
     skipped_non_utf8: usize,
 ) -> CallToolResult {
     let mut text = format!(
-        "Exportación completada: {documents} documentos → {}\n\
-         Se escribió además un archivo de procedencia ({}), que acompaña al \
-         contenido exportado.",
+        "Export completed: {documents} documents → {}\n\
+         A provenance file ({}) was also written, accompanying the exported content.",
         path.display(),
         sidecar_path_for(path).display()
     );
     if skipped_non_utf8 > 0 {
         text.push_str(&format!(
-            "\nSe saltaron {skipped_non_utf8} línea(s) del archivo de exportación que no eran \
-             UTF-8 válido (skipped_non_utf8)."
+            "\nSkipped {skipped_non_utf8} line(s) from the export file that were not valid \
+             UTF-8 (skipped_non_utf8)."
         ));
     }
     let mut result = provenance::local_text(&text);

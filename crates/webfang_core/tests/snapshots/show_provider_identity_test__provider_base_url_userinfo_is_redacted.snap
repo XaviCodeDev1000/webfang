@@ -3,26 +3,26 @@ source: crates/webfang_core/tests/show_provider_identity_test.rs
 expression: "redact_nondeterministic(dir.path(), &rendered)"
 ---
 --- show ---
-Provider configurado:
+Configured provider:
   id: userinfo
   display_name: Userinfo
   kind: OpenAiCompatible
   base_url: https://api.example.test:8443/v1?key=public
   capabilities: ["Embedding"]
-  model: nomic-embed-text (declarado en la config)
-  allow_loopback: false (política de red del provider: loopback bloqueado por defecto)
-  network_policy: restringida (solo endpoints públicos, con guard SSRF)
+  model: nomic-embed-text (declared in the config)
+  allow_loopback: false (provider network policy: loopback blocked by default)
+  network_policy: restricted (public endpoints only, with SSRF guard)
   auth: none
-  dim declarada: no declarada en la config — el endpoint la fija en cada request
+  declared dim: not declared in the config — the endpoint fixes it on each request
 --- doctor ---
-Provider configurado:
+Configured provider:
   id: userinfo
   display_name: Userinfo
   kind: OpenAiCompatible
   base_url: https://api.example.test:8443/v1?key=public
   capabilities: ["Embedding"]
-  model: nomic-embed-text (declarado en la config)
-  allow_loopback: false (política de red del provider: loopback bloqueado por defecto)
-  network_policy: restringida (solo endpoints públicos, con guard SSRF)
+  model: nomic-embed-text (declared in the config)
+  allow_loopback: false (provider network policy: loopback blocked by default)
+  network_policy: restricted (public endpoints only, with SSRF guard)
   auth: none
-  dim declarada: no declarada en la config — el endpoint la fija en cada request
+  declared dim: not declared in the config — the endpoint fixes it on each request

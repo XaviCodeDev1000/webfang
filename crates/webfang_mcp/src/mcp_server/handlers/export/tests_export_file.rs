@@ -122,7 +122,7 @@ async fn export_file_writes_jsonl() {
         .expect("export_file returns Ok");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "success must report completion: {text}"
     );
     assert!(
@@ -155,7 +155,7 @@ async fn export_file_neutralizes_content_and_prefixes_provenance_header() {
         .expect("export_file returns Ok");
     let text = result_text(&res);
     assert!(
-        text.contains("Exportación completada"),
+        text.contains("Export completed"),
         "neutralized export must still succeed: {text}"
     );
 

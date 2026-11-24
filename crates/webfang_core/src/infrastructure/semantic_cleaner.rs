@@ -24,12 +24,13 @@ use crate::domain::embedding_port::EmbeddingPort;
 use crate::domain::entities::content::DocumentChunk;
 use crate::domain::semantic_cleaner::private::Sealed;
 use crate::domain::semantic_cleaner::SemanticCleaner;
-use crate::domain::text_chunker::{ByteSpan, TextChunk};
 use crate::error::SemanticError;
-use crate::infrastructure::content_processing::aggressive::strip_html_tags;
 
-/// Threshold at which filtering is reported as aggressive (>50 % discarded).
-const AGGRESSIVE_FILTER_RATIO: f64 = 0.5;
+mod relevance;
+mod text;
+
+use relevance::{distances_to_centroid, warn_aggressive_filter, z_score_filter};
+use text::{extract_text_content, split_into_chunks};
 
 /// Semantic cleaner over an erased [`EmbeddingPort`] (ADR-0004 step 6).
 ///
@@ -81,6 +82,13 @@ impl SemanticCleanerImpl {
     async fn embed_batch_raw(&self, contents: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
         match self.embedding_port.embed_batch(contents).await {
             Ok(vectors) => Ok(vectors),
+            // A dimension rejection is terminal: bisecting it would issue
+            // more provider calls for a width that is already known bad.
+            Err(e)
+                if crate::infrastructure::llm::remote_embedding::dimension::is_dimension_rejection(&e) =>
+            {
+                Err(e)
+            },
             Err(_) if contents.len() > 1 => {
                 let mid = contents.len() / 2;
                 let (left, right) = contents.split_at(mid);
@@ -114,6 +122,16 @@ impl SemanticCleanerImpl {
                 embeddings.len()
             )));
         }
+        // One batch shares one embedding space. A dimension-disagreeing vector
+        // used to be truncated by the private zip-based cosine and could WIN a
+        // ranking; reject the batch instead of silently degrading it (S9).
+        let width = embeddings.first().map_or(0, Vec::len);
+        if embeddings.iter().any(|emb| emb.len() != width) {
+            return Err(SemanticError::Inference(format!(
+                "Dimension mismatch in relevance batch: expected {width}, got {:?}",
+                embeddings.iter().map(Vec::len).collect::<Vec<_>>()
+            )));
+        }
         let distances = distances_to_centroid(&embeddings)?;
         let chunks_before = chunks.len();
         let kept = z_score_filter(chunks, embeddings, self.relevance_threshold, &distances);
@@ -122,183 +140,6 @@ impl SemanticCleanerImpl {
 
         Ok(kept)
     }
-}
-
-/// Mean-pooled centroid of `embeddings`, then the distance
-/// (`1 - cosine similarity`) of every vector to it.
-fn distances_to_centroid(embeddings: &[Vec<f32>]) -> Result<Vec<f32>, SemanticError> {
-    let dim = embeddings.first().map_or(0, Vec::len);
-    if dim == 0 {
-        return Err(SemanticError::Inference(
-            "No embeddings available for relevance scoring".to_string(),
-        ));
-    }
-    let mut centroid = vec![0.0_f32; dim];
-    for embedding in embeddings {
-        for (&val, slot) in embedding.iter().zip(centroid.iter_mut()) {
-            *slot += val;
-        }
-    }
-    let n = embeddings.len() as f32;
-    for val in &mut centroid {
-        *val /= n;
-    }
-    Ok(embeddings
-        .iter()
-        .map(|emb| 1.0 - cosine_similarity(emb, &centroid))
-        .collect())
-}
-
-/// Z-score adaptive filtering: chunks whose centroid distance sits more than
-/// `z_limit` deviations from the mean distance are statistical outliers and
-/// are dropped; survivors carry their embedding in `embeddings`.
-///
-/// Thresholds map to strictness: `1.0` → Z=0 (centroid-only), `0.0` → Z=3
-/// (~99.7 % kept), the `0.3` default → Z=2.1.
-fn z_score_filter(
-    chunks: Vec<DocumentChunk>,
-    embeddings: Vec<Vec<f32>>,
-    relevance_threshold: f32,
-    distances: &[f32],
-) -> Vec<DocumentChunk> {
-    let sample_count = distances.len() as f32;
-    let mean_dist = distances.iter().copied().sum::<f32>() / sample_count;
-    let variance = distances
-        .iter()
-        .map(|d| (d - mean_dist).powi(2))
-        .sum::<f32>()
-        / sample_count;
-    let std_dev = variance.sqrt();
-    let z_limit = 3.0 * (1.0 - relevance_threshold);
-
-    chunks
-        .into_iter()
-        .zip(embeddings)
-        .zip(distances.iter())
-        .filter(|(_, &distance)| {
-            let z_score = (distance - mean_dist).abs() / std_dev.max(1e-6);
-            z_score <= z_limit
-        })
-        .map(|((mut chunk, embedding), _)| {
-            chunk.embeddings = Some(embedding);
-            chunk
-        })
-        .collect()
-}
-
-/// `warn!` when the filter discards more than half of the chunks, so an
-/// over-aggressive threshold or off-topic page is queryable from the trace.
-fn warn_aggressive_filter(url: &str, chunks_before: usize, chunks_after: usize) {
-    let filtered_out = chunks_before.saturating_sub(chunks_after);
-    let loss_ratio = filtered_out as f64 / chunks_before as f64;
-    if chunks_before > 0 && loss_ratio > AGGRESSIVE_FILTER_RATIO {
-        tracing::warn!(
-            url = %url,
-            chunks_before = chunks_before,
-            chunks_after = chunks_after,
-            filtered_out = filtered_out,
-            loss_ratio = format!("{:.0}%", loss_ratio * 100.0),
-            "Relevance filter discarded >50% of chunks for this page — possible over-aggressive threshold"
-        );
-    }
-}
-
-/// Cosine similarity of two non-empty vectors; zero-norm degenerates to 0.0.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        dot / (norm_a * norm_b)
-    }
-}
-
-/// Extract readable text from `html`, falling back to the shared block-dropping
-/// stripper when `legible` fails or yields nothing but whitespace.
-///
-/// The fallback is an embedding boundary: it must drop script/style/noscript
-/// bodies before any text reaches [`EmbeddingPort::embed_batch`] (#3009).
-fn extract_text_content(html: &str) -> String {
-    match legible::parse(html, None, None) {
-        Ok(article) if !article.content.trim().is_empty() => article.content,
-        _ => strip_html_tags(html),
-    }
-}
-
-/// Split `text` into chunks joined from non-empty paragraphs, staying under
-/// `max_chars` when possible.
-///
-/// A single paragraph longer than the budget cannot be split honestly, so it
-/// fails with [`SemanticError::ChunkTooLarge`] — the caller layer degrades
-/// the page instead of writing an unembeddable chunk.
-///
-/// #2429 AC2: each chunk also carries the exact byte spans of its paragraphs
-/// inside `text` (half-open `[start, end)`, whitespace-trimmed boundaries) —
-/// the locator the vector sink stamps into every [`VectorRecord`].
-fn split_into_chunks(text: &str, max_chars: usize) -> Result<Vec<TextChunk>, SemanticError> {
-    // Paragraphs as trimmed `(start, end)` byte spans into `text`.
-    let mut paragraphs: Vec<(usize, usize)> = Vec::new();
-    let mut rest = text;
-    let mut offset = 0;
-    loop {
-        let line_start = offset;
-        let line = match rest.find('\n') {
-            Some(nl) => {
-                let line = &rest[..nl];
-                rest = &rest[nl + 1..];
-                offset += nl + 1;
-                line
-            },
-            None => {
-                let line = rest;
-                rest = "";
-                line
-            },
-        };
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            let start = line_start + (trimmed.as_ptr() as usize - line.as_ptr() as usize);
-            paragraphs.push((start, start + trimmed.len()));
-        }
-        if rest.is_empty() {
-            break;
-        }
-    }
-
-    let mut chunks: Vec<TextChunk> = Vec::new();
-    let mut current = String::new();
-    let mut current_spans: Vec<ByteSpan> = Vec::new();
-    for (start, end) in paragraphs {
-        let paragraph = &text[start..end];
-        if !current.is_empty() && current.len() + paragraph.len() + 1 > max_chars {
-            chunks.push(TextChunk::new(
-                std::mem::take(&mut current),
-                std::mem::take(&mut current_spans),
-            ));
-        }
-        if !current.is_empty() {
-            current.push('\n');
-        }
-        current.push_str(paragraph);
-        current_spans.push(ByteSpan::try_new(start, end)?);
-    }
-    if !current.is_empty() {
-        chunks.push(TextChunk::new(current, current_spans));
-    }
-
-    for (chunk_id, chunk) in chunks.iter().enumerate() {
-        if chunk.text().len() > max_chars {
-            return Err(SemanticError::ChunkTooLarge {
-                chunk_id: chunk_id.to_string(),
-                chars: chunk.text().len(),
-                max: max_chars,
-            });
-        }
-    }
-
-    Ok(chunks)
 }
 
 impl Sealed for SemanticCleanerImpl {}
@@ -411,7 +252,7 @@ mod tests {
             Box::pin(async move {
                 if texts.len() > fail_gt.unwrap_or(usize::MAX) {
                     return Err(SemanticError::Inference(
-                        "el endpoint de embeddings devolvió el estado 413".to_string(),
+                        "embedding endpoint returned status 413".to_string(),
                     ));
                 }
                 Ok(texts.iter().map(|_| vec![1.0, 2.0, 3.0]).collect())
@@ -429,6 +270,75 @@ mod tests {
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
+    }
+
+    /// A port whose every batch is a terminal dimension rejection. Used to
+    /// prove the cleaner's bisection arm cannot amplify a bad width into
+    /// more remote calls.
+    struct RejectingDimensionPort {
+        calls: AtomicUsize,
+    }
+
+    impl EmbeddingPort for RejectingDimensionPort {
+        fn embed<'a>(&'a self, _text: &'a str) -> BoxFuture<'a, Result<Vec<f32>, SemanticError>> {
+            Box::pin(async {
+                Err(
+                    crate::infrastructure::llm::remote_embedding::dimension::rejection_error(
+                        "rejecting-provider",
+                        3,
+                    ),
+                )
+            })
+        }
+
+        fn embed_batch<'a>(
+            &'a self,
+            _texts: &'a [String],
+        ) -> BoxFuture<'a, Result<Vec<Vec<f32>>, SemanticError>> {
+            self.calls.fetch_add(1, Relaxed);
+            Box::pin(async {
+                Err(
+                    crate::infrastructure::llm::remote_embedding::dimension::rejection_error(
+                        "rejecting-provider",
+                        3,
+                    ),
+                )
+            })
+        }
+
+        fn embedding_dim(&self) -> usize {
+            3
+        }
+
+        fn model_id(&self) -> &str {
+            "rejecting-embedding"
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[tokio::test]
+    async fn dimension_rejection_is_terminal_not_bisected() {
+        let port = Arc::new(RejectingDimensionPort {
+            calls: AtomicUsize::new(0),
+        });
+        let cleaner = SemanticCleanerImpl::new(port.clone(), 1000, 0.3);
+        let texts = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+        let err = cleaner
+            .embed_batch_raw(&texts)
+            .await
+            .expect_err("dimension rejection must fail the batch");
+        assert!(
+            crate::infrastructure::llm::remote_embedding::dimension::is_dimension_rejection(&err),
+            "the terminal error must remain dimension-tagged, got: {err}"
+        );
+        assert_eq!(
+            port.calls.load(Relaxed),
+            1,
+            "a rejected batch must not be bisected"
+        );
     }
 
     /// Fixed-answer mock used for the shape-level tests below: one fixed
@@ -485,6 +395,39 @@ mod tests {
             );
             assert!(!chunk.content.is_empty());
         }
+    }
+
+    /// S10: the chunk budget counts Unicode scalar values, not UTF-8 bytes.
+    #[test]
+    fn split_into_chunks_counts_characters_not_bytes() {
+        let text = "áéíóú ñ 漢字 🎉";
+        let budget = text.chars().count();
+        assert!(text.len() > budget, "fixture must be multibyte");
+
+        let chunks = split_into_chunks(text, budget).expect("text fits the character budget");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text(), text);
+    }
+
+    /// S9: a mixed-dimension batch must be rejected, never ranked with the
+    /// shorter vector silently truncated to the first vector's width.
+    #[test]
+    fn mixed_dimension_batch_is_rejected_not_ranked() {
+        let cleaner = SemanticCleanerImpl::new(Arc::new(MockEmbeddingPort::new()), 1000, 0.3);
+        let chunks = vec![
+            DocumentChunk::new(Uuid::new_v4(), "", "", "alpha".to_string()),
+            DocumentChunk::new(Uuid::new_v4(), "", "", "beta".to_string()),
+        ];
+        let mixed = vec![vec![1.0, 0.0], vec![1.0, 0.0, 0.0]];
+
+        let err = match cleaner.filter_by_relevance("https://e.test/page", chunks, mixed) {
+            Ok(_) => panic!("a dimension-disagreeing batch must not be ranked"),
+            Err(err) => err,
+        };
+        assert!(
+            matches!(err, SemanticError::Inference(_)),
+            "dimension mismatch must fail closed with Inference, got: {err:?}"
+        );
     }
 
     #[tokio::test]
