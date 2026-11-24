@@ -143,27 +143,6 @@ spec and blocks its commit.
   through the domain `cosine_similarity_fail_closed`; the private zip-based cosine was deleted.
   Verification: full `infrastructure::semantic_cleaner` suite PASS, `ai_boundary_test` PASS.
   Native assess: `medium` / `under_budget` (no review due); Commit 2 SHA `0f2bb2aa`.
-- L14: T2 executed as two slices. First (Commit 3) fixes the unit defect and the consumed
-  `LlmConfig` contract: `split_into_chunks` and `build_sub_chunks` now compare `chars().count()`
-  (Unicode scalars, not bytes, graphemes or tokens); `extract` takes the explicit `char_budget`
-  resolved by the composition root; `CHARS_PER_TOKEN` was deleted; `max_tokens` is output-only.
-  RED observed on `split_into_chunks_counts_characters_not_bytes` (25 bytes > 12 chars) and on
-  `sub_chunk_budget_counts_characters_not_bytes` once `extract` stopped honoring the derived 800.
-  Remaining slice **T2b** (next free slot, Commit 3b; later task numbers update when it lands):
-  derive the governing budget from `ModelProfile::max_chars()` when `--max-chars` is absent, and
-  prove the printed value in `show`/`doctor` is that same governing value carried into
-  `char_budget`. No newtype, no benchmark token counts as a character budget (S17).
-- L15: Native RDD review of Commit 3 (`997c4237`, lineage `review-c97064a20ba2b8fe`, lenses risk +
-  reliability) granted by the human. Risk lens admitted `completed`; reliability escalated with
-  `unknown_causality` on R3-1 and exact-lineage STATUS returned terminal `native_stop_required`.
-  As with L13, no correction was offered and no authority was burned; the escalation neither
-  approves nor blocks delivery. Commit 3 SHA recorded here; implementation of the remaining units
-  continues under the human's L12 authorization.
-- L16: Commit 4 batches T3+T4+T5 as planned. `as_any` became required on `EmbeddingPort` (three
-  test-only impls completed); the `SemanticCleaner` seal doc now states the invariant it actually
-  protects and `TextChunker` records why it stays open; the LLM extraction error stops echoing the
-  parsed model payload. Verification: new payload regression test PASS, `cargo check --all-targets
-  --all-features` PASS, clippy/fmt PASS. No native review (medium contract-hygiene slice).
 - T2 `S10` route: inline — RED first: multi-byte tests (accented Spanish, CJK, emoji) prove the budget is
   counted in characters in `split_into_chunks` and in `build_sub_chunks`. Decide `chars` as the unit of the
   contract: the accepted number changes for non-ASCII text, and that is the contract change.
@@ -505,3 +484,41 @@ changes in this revision.
   approves nor blocks delivery — maintainer inspection of the lineage is the only review action,
   and ordinary repository policy still owns commit/push/PR. R3-1/R3-2 details stay with the review
   authority; they are not silently reclassified here. Commit 1 SHA: `0b1de600`.
+- L14: T2 executed as two slices. First (Commit 3) fixes the unit defect and the consumed
+  `LlmConfig` contract: `split_into_chunks` and `build_sub_chunks` now compare `chars().count()`
+  (Unicode scalars, not bytes, graphemes or tokens); `extract` takes the explicit `char_budget`
+  resolved by the composition root; `CHARS_PER_TOKEN` was deleted; `max_tokens` is output-only.
+  RED observed on `split_into_chunks_counts_characters_not_bytes` (25 bytes > 12 chars) and on
+  `sub_chunk_budget_counts_characters_not_bytes` once `extract` stopped honoring the derived 800.
+  Remaining slice **T2b** (next free slot, Commit 3b; later task numbers update when it lands):
+  derive the governing budget from `ModelProfile::max_chars()` when `--max-chars` is absent, and
+  prove the printed value in `show`/`doctor` is that same governing value carried into
+  `char_budget`. No newtype, no benchmark token counts as a character budget (S17).
+- L15: Native RDD review of Commit 3 (`997c4237`, lineage `review-c97064a20ba2b8fe`, lenses risk +
+  reliability) granted by the human. Risk lens admitted `completed`; reliability escalated with
+  `unknown_causality` on R3-1 and exact-lineage STATUS returned terminal `native_stop_required`.
+  As with L13, no correction was offered and no authority was burned; the escalation neither
+  approves nor blocks delivery. Commit 3 SHA recorded here; implementation of the remaining units
+  continues under the human's L12 authorization.
+- L16: Commit 4 batches T3+T4+T5 as planned. `as_any` became required on `EmbeddingPort` (three
+  test-only impls completed); the `SemanticCleaner` seal doc now states the invariant it actually
+  protects and `TextChunker` records why it stays open; the LLM extraction error stops echoing the
+  parsed model payload. Verification: new payload regression test PASS, `cargo check --all-targets
+  --all-features` PASS, clippy/fmt PASS. No native review (medium contract-hygiene slice);
+  Commit 4 SHA `060f3cb2`.
+- L17: Session handoff (implementation authorized by L12, still in force). **Landed:** Commit 1
+  `0b1de600` (T11, boundary fix + real-path oracle), Commit 2 `0f2bb2aa` (T1, dimension fail-closed),
+  Commit 3 `997c4237` (T2 part 1, character unit + `char_budget`), Commit 4 `060f3cb2` (T3+T4+T5).
+  Tree clean; branch `feat/ai-layer-hardening` matches directory; all four commits passed clippy and
+  their focused suites; the full pre-commit gate passed on Commit 1. **Native RDD:** Commits 1 and 3
+  were `high_risk` (the diff touched `ai_boundary_test.rs`), granted by the human, and both escalated
+  with `unknown_causality` (L13: R3-1/R3-2; L15: R3-1) to terminal `native_stop_required` — no
+  correction offered, no authority burned, delivery stays under ordinary repository policy. Commits 2
+  and 4 assessed `medium`/`under_budget` (no review due). **Not landed:** T2b (profile-derived
+  governing budget, see L14), T6, T7, T8, T9, T10. Next action: resume with T2b, then T6
+  (classify remote AI errors at the adapter boundary — note `ScraperError::Semantic(inner) =>
+  inner.classify()` sends every `SemanticError::Inference` to `InternalFatal`; change the boundary,
+  not the taxonomy), then T7. T8 is HIGH RISK (schema/migration over stored user data): do not start
+  it until a fresh session can give the transaction and rollback tests full attention. T9's
+  completion-retry sub-decision remains OPEN pending concrete provider semantics. Reindex codedb and
+  verify `eval "$(direnv export bash)"` before any command in a new session.
