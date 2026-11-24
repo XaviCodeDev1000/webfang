@@ -104,6 +104,11 @@ impl TextChunk {
 
 /// Domain trait for text segmentation into semantic located chunks.
 ///
+/// Deliberately OPEN (unlike [`crate::domain::semantic_cleaner::SemanticCleaner`]):
+/// external adapters must be able to implement it, so no seal bounds the
+/// implementor set. Callers rely on the span-reconstruction contract below,
+/// not on an in-tree-only type.
+///
 /// Implementations split raw text into chunks suitable for embedding, each
 /// carrying the byte spans of the source text it was assembled from
 /// (see [`TextChunk`]). The trait is dyn-compatible (no generics, no `async`)

@@ -99,13 +99,12 @@ pub trait EmbeddingPort: Send + Sync {
     /// Returns a reference to the concrete implementation as `&dyn Any`,
     /// enabling downcasting for implementation-specific metrics.
     ///
-    /// Default implementation panics; implementations SHOULD override this
-    /// to return `self` as `&dyn Any`. This is a controlled escape hatch for
-    /// telemetry collection (e.g., embedding usage counters) without leaking
-    /// implementation details into the domain trait.
-    fn as_any(&self) -> &dyn Any {
-        panic!("as_any not implemented for EmbeddingPort; concrete type must override");
-    }
+    /// REQUIRED, not defaulted: a panicking default turns a missing override
+    /// into a runtime abort reached through the vtable (S2). Every
+    /// implementation returns `self`; the compiler now enforces it. This is a
+    /// controlled escape hatch for telemetry collection (e.g., embedding usage
+    /// counters) without leaking implementation details into the domain trait.
+    fn as_any(&self) -> &dyn Any;
 }
 
 /// The Tier 2 semantic embedding slot — *which slot* a port occupies.

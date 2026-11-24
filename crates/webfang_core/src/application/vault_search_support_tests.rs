@@ -27,6 +27,10 @@ impl EmbeddingPort for StubEmbedding {
     fn model_id(&self) -> &str {
         "stub-embedding"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Stub chunker: one chunk per non-blank line, span covering the raw line.

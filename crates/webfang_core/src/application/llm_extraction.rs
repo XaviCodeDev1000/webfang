@@ -202,10 +202,12 @@ fn merge_records(
     let batch: Vec<Value> = match parsed {
         Value::Array(items) => items,
         object @ Value::Object(_) => vec![object],
-        other => {
-            return Err(ScraperError::Extraction(format!(
-                "la respuesta del LLM no es un objeto ni un array JSON: {other}"
-            )));
+        // S12/T5: the parsed payload is untrusted page content. It must never
+        // be echoed into an error that aggregate paths log or hand to MCP.
+        _ => {
+            return Err(ScraperError::Extraction(
+                "la respuesta del LLM no es un objeto ni un array JSON".to_string(),
+            ));
         },
     };
     for record in batch {
@@ -657,6 +659,28 @@ mod service_tests {
             .await
             .expect("multibyte chunk fits the character budget");
         assert_eq!(llm.call_count(), 1);
+    }
+
+    /// S12/T5: an unparseable model payload is page content, never something
+    /// to echo into an error that aggregate paths log or hand to MCP.
+    #[tokio::test]
+    async fn extraction_error_never_echoes_the_model_payload() {
+        let payload = "UNTRUSTED_MODEL_PAYLOAD_9f3a";
+        let llm = Arc::new(FakeLlm::new(&[payload]));
+        let svc = service(vec![chunk_with("texto limpio")], Arc::clone(&llm));
+
+        let err = match svc
+            .extract(&target_url(), &extraction_schema(), "m", &test_config())
+            .await
+        {
+            Ok(_) => panic!("non-JSON model output must fail"),
+            Err(err) => err,
+        };
+        let text = err.to_string();
+        assert!(
+            !text.contains(payload),
+            "the model payload must not travel in the error: {text}"
+        );
     }
 
     #[tokio::test]

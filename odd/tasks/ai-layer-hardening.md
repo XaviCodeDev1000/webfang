@@ -153,6 +153,17 @@ spec and blocks its commit.
   derive the governing budget from `ModelProfile::max_chars()` when `--max-chars` is absent, and
   prove the printed value in `show`/`doctor` is that same governing value carried into
   `char_budget`. No newtype, no benchmark token counts as a character budget (S17).
+- L15: Native RDD review of Commit 3 (`997c4237`, lineage `review-c97064a20ba2b8fe`, lenses risk +
+  reliability) granted by the human. Risk lens admitted `completed`; reliability escalated with
+  `unknown_causality` on R3-1 and exact-lineage STATUS returned terminal `native_stop_required`.
+  As with L13, no correction was offered and no authority was burned; the escalation neither
+  approves nor blocks delivery. Commit 3 SHA recorded here; implementation of the remaining units
+  continues under the human's L12 authorization.
+- L16: Commit 4 batches T3+T4+T5 as planned. `as_any` became required on `EmbeddingPort` (three
+  test-only impls completed); the `SemanticCleaner` seal doc now states the invariant it actually
+  protects and `TextChunker` records why it stays open; the LLM extraction error stops echoing the
+  parsed model payload. Verification: new payload regression test PASS, `cargo check --all-targets
+  --all-features` PASS, clippy/fmt PASS. No native review (medium contract-hygiene slice).
 - T2 `S10` route: inline — RED first: multi-byte tests (accented Spanish, CJK, emoji) prove the budget is
   counted in characters in `split_into_chunks` and in `build_sub_chunks`. Decide `chars` as the unit of the
   contract: the accepted number changes for non-ASCII text, and that is the contract change.
@@ -188,13 +199,19 @@ spec and blocks its commit.
   Risk: item 3 — `EmbeddingPort` is deliberately open so external adapters may implement it, and a required
   method is a source-breaking change for any impl outside this workspace. Seven in-tree impls carry it, so
   the workspace compiles unchanged; the commit body states the breaking change. Commit 4 (with T4, T5).
+  **DONE** — `as_any` is required; three test-only impls that lacked it were completed (CLI
+  `CountingEmbedder`, vault `StubEmbedding`, inspector `MockEmbedder`). Source-breaking for external
+  adapters, stated in the commit body.
 - T4 `S16` route: inline — correct the seal doc-comment so it states the invariant it actually protects
   (impl-set control over `Box<dyn SemanticCleaner>` consumers), and add the one-sentence rationale
   `EmbeddingPort` already carries to `TextChunker`. Five lines; no seal removal. Risk: none. Commit 4.
+  **DONE** — seal doc now states implementor-set control over `Box<dyn SemanticCleaner>` consumers and
+  says explicitly there is no `unsafe` and no cache; `TextChunker` records why it stays open.
 - T5 `S7`, `S12` route: inline — stop echoing the parsed model payload into `ScraperError::Extraction`;
-  carry the provider's own short message instead. Risk: item 3 — the error text and the snapshots pinning it
+  carry the provider's own short message instead. Risk:   item 3 — the error text and the snapshots pinning it
   change. Not item 2: the payload is page content, not a credential; T11 owns the credential channel.
-  Commit 4.
+  Commit 4. **DONE** — `merge_records` no longer interpolates the parsed value into
+  `ScraperError::Extraction`; `extraction_error_never_echoes_the_model_payload` pins it.
 - T6 `S11` route: inline — one classification point, using the taxonomy that already exists.
   `ScraperError::classify` maps `Http` 5xx → `TransientRetriable`, `Http` 429 → `TransientBackoff`, other
   4xx → `PermanentFatal`, and `RateLimited(u64)` → `TransientBackoff`; the defect is that

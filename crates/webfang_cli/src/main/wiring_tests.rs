@@ -193,6 +193,10 @@ impl webfang_core::domain::embedding_port::EmbeddingPort for CountingEmbedder {
     fn model_id(&self) -> &str {
         "counting-embedder"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Pins the SHAPE of the Tier 2 wiring: an inspector is built only from a
