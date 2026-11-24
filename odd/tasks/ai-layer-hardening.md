@@ -546,3 +546,16 @@ changes in this revision.
   T7; T8 stays in its own session. Follow-up recorded, not fixed here: `show --help` still describes
   `[[model_profiles]]` as historical metadata that no run consumes; that help string and its
   snapshots need a separate truthfulness edit.
+- L19: Native review of the T2b candidate (lineage `review-11a9184b7464d4f9`, target
+  `sha256:7551723324bc42e78deb5a8fd9ea4a06cf49a46d990e66d08aa83edf428cde07`, lenses risk +
+  resilience + readability + reliability) was granted by the human and ran to completion. All four
+  captures were admitted `completed`; the refuter corroborated `R1-profile-budget-overflow-ub` (with
+  `probe unavailable on opencode`), and the final capture escalated `R2-1` with
+  `unknown_causality`. Exact-lineage STATUS returned `action: stop`,
+  `reason_code: native_stop_required`, `replayability: manual_action_required`. The transaction is
+  TERMINAL: no scoped correction was offered, no authority was burned, and the escalation neither
+  approves nor blocks delivery — maintainer inspection is the only review action, ordinary repository
+  policy still owns commit/push/PR. The native findings are not reclassified here. Parent observation
+  for the maintainer, not a reclassification: Rust's `f64 as usize` saturates since 1.45 and
+  `ModelProfile::max_chars` already documents that it saturates, so the claimed overflow-UB does not
+  match current Rust semantics; the pre-existing unbounded budget value remains a separate question.
