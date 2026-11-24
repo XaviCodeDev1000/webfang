@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-linux:
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - name: Install deps
+        run: dnf install -y gcc make cargo clippy rustfmt libkrun-devel openssl-devel clang-devel qemu-img
+
+      - uses: actions/checkout@v7.0.1
+
+      - name: Check (fmt + clippy + unit tests)
+        run: make check
+
+  check-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Check (fmt + clippy + unit tests)
+        run: make check
+
+  check-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install make
+        run: choco install make -y
+
+      - name: Check (fmt + clippy + unit tests)
+        run: make check
+
+  integration:
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:latest
+    needs: check-linux
+    steps:
+      - name: Install deps
+        run: dnf install -y gcc make cargo openssl-devel python3
+
+      - uses: actions/checkout@v7.0.1
+
+      - name: Integration tests
+        run: make test-integration
