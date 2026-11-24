@@ -197,10 +197,24 @@ spec and blocks its commit.
   rejects valid vectors fails silently on every page. Explicitly NOT item 1: the store is rebuildable by
   re-running the export, so a false rejection is recoverable rather than unrecoverable data. Commit 6.
 - T8 `S13` route: inline — persist `model_id` with the vault store vectors and verify it on read in
-  `vault_search`, with an actionable warning on mismatch. Requires the human's schema decision (column +
-  migration shape); recorded in the Log before the edit. Risk: item 1 (a schema/format change and a
-  migration over stored user data). Commit 7, or the next free slot if it lands earlier per the delivery
-  order below — later task commit numbers are updated in the same commit.
+  `vault_search`. The human's schema decision is CLOSED and recorded in L10: option A (NULL = unknown),
+  with this spec. Schema: bump `SCHEMA_VERSION` to 3 and add `note_chunks.model_id TEXT` nullable; change
+  `migrate_to_current` to apply ALL pending steps by checking each column's real existence
+  (`spans_json`, then `model_id`) instead of using `PREVIOUS_SCHEMA_VERSION` as a single selector — a v1
+  database gets both columns, a v2 database gets only `model_id`; re-stamp `PRAGMA user_version` last.
+  Never backfill legacy rows (S17 excludes re-embedding). Write: `VaultSearchService::index_note` calls
+  `EmbeddingPort::model_id()` once per note and passes `model_id: &str` as an argument to
+  `index_note_transactional`; do NOT widen the public `ChunkToPersist` tuple (risk item 3).
+  `NoteChunkVector` gains `model_id: Option<String>` (`None` = legacy unknown) and `load_all_vectors`
+  selects the new column. Read: `NULL` → include with an actionable re-index warning; known `model_id`
+  differing from the current one → skip with a warning; wholesale mismatch (no row matches the current
+  model) → fail closed with actionable guidance, mirroring the existing wholesale dimension-mismatch arm;
+  matching model → include normally; existing dimension behaviour stays. RED first: v1→v3 and v2→v3
+  migration tests, a `model_id` round-trip test, a same-width different-model mismatch test, and a
+  legacy-NULL include-with-warn test. Scope boundary (document, do not implement): the general `chunks`
+  table has the same gap and is out of T8's scope. Risk: item 1 (schema/format change and migration over
+  stored user data). Commit 7, or the next free slot if it lands earlier per the delivery order below —
+  later task commit numbers are updated in the same commit.
 - T9 `S14` route: inline — one shared `RetryPolicy`/body-cap module that reads the existing constants
   (`LLM_MAX_BODY_BYTES`, the downloader's values) instead of re-declaring them, plus a real retry on the
   completion path. No new dependency, no invented numbers. Risk: item 6 — an attempt-count regression is
@@ -362,7 +376,21 @@ point after T6.
      promoted `assert_spans_reconstruct`, empty input is `Ok(vec![])` (L5). No new fixture files.
   4. T11's (c) is now recorded as VERIFIED in code: `build_request` uses a separate `user` `ChatMessage`
      and `EmbeddingRequest.input`; only (b) and (d) remain pinning tests.
-  5. T6 rewritten to the existing `ErrorClass` taxonomy. No new error variants: 5xx / 401 / 407 / 413 →
-     `Http { status, url }`, 429 → `RateLimited(retry_after_secs)`, timeout/transport → `Network`; status
-     and `retry_after` remain in the adapter error. The bug is `SemanticError::Inference` → `InternalFatal`
-     through `ScraperError::Semantic(inner) => inner.classify()`, not a missing variant.
+   5. T6 rewritten to the existing `ErrorClass` taxonomy. No new error variants: 5xx / 401 / 407 / 413 →
+      `Http { status, url }`, 429 → `RateLimited(retry_after_secs)`, timeout/transport → `Network`; status
+      and `retry_after` remain in the adapter error. The bug is `SemanticError::Inference` → `InternalFatal`
+      through `ScraperError::Semantic(inner) => inner.classify()`, not a missing variant.
+- L10: T8 schema decision, human's words verbatim: "Decisión: Opción A — NULL = desconocido, con
+  refinamientos de migración" and "Sí, aplica esta especificación en el commit de T8." The decision is
+  recorded in T8 before the edit, as that task requires. Verified in the worktree:
+  `SCHEMA_VERSION = 2`, `PREVIOUS_SCHEMA_VERSION = 1`, and `enforce_schema_version` accepts only 0/1/2
+  with a single `spans_json` ALTER, so a naive v3 bump with `PREVIOUS = 2` would reject existing v1
+  databases. The migration therefore checks each column's existence and applies every pending step.
+  Other closed choices: `model_id TEXT` nullable on `note_chunks` (not `notes`, because
+  `load_all_vectors` reads per chunk and mixed-model indexes are possible); `model_id()` called once per
+  note and passed as a `&str` argument to `index_note_transactional`, without widening the public
+  `ChunkToPersist` tuple; no backfill of legacy NULL rows (S17); read policy NULL → include with a
+  re-index warning, individual known mismatch → skip with warning, wholesale mismatch → fail closed,
+  dimension behaviour unchanged. The general `chunks` table has the same gap and is explicitly out of
+  T8's scope. Options B (fail closed until re-index) and C (stamp the current model on old rows) were
+  rejected: B breaks an existing CLI workflow, C lies about provenance.
