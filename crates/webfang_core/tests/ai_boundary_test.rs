@@ -139,6 +139,7 @@ fn build_service(base: &str) -> (LlmExtractionService, LlmConfig) {
         base_url: Url::parse(base).expect("base parses"),
         api_key: ApiKey::new(API_KEY.to_string()),
         max_tokens: 500,
+        char_budget: 4000,
     };
     let service = LlmExtractionService::new(
         Arc::new(RawHtmlHttp),

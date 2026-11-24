@@ -304,7 +304,9 @@ fn split_into_chunks(text: &str, max_chars: usize) -> Result<Vec<TextChunk>, Sem
     let mut current_spans: Vec<ByteSpan> = Vec::new();
     for (start, end) in paragraphs {
         let paragraph = &text[start..end];
-        if !current.is_empty() && current.len() + paragraph.len() + 1 > max_chars {
+        if !current.is_empty()
+            && current.chars().count() + paragraph.chars().count() + 1 > max_chars
+        {
             chunks.push(TextChunk::new(
                 std::mem::take(&mut current),
                 std::mem::take(&mut current_spans),
@@ -321,7 +323,7 @@ fn split_into_chunks(text: &str, max_chars: usize) -> Result<Vec<TextChunk>, Sem
     }
 
     for (chunk_id, chunk) in chunks.iter().enumerate() {
-        if chunk.text().len() > max_chars {
+        if chunk.text().chars().count() > max_chars {
             return Err(SemanticError::ChunkTooLarge {
                 chunk_id: chunk_id.to_string(),
                 chars: chunk.text().len(),
@@ -517,6 +519,18 @@ mod tests {
             );
             assert!(!chunk.content.is_empty());
         }
+    }
+
+    /// S10: the chunk budget counts Unicode scalar values, not UTF-8 bytes.
+    #[test]
+    fn split_into_chunks_counts_characters_not_bytes() {
+        let text = "áéíóú ñ 漢字 🎉";
+        let budget = text.chars().count();
+        assert!(text.len() > budget, "fixture must be multibyte");
+
+        let chunks = split_into_chunks(text, budget).expect("text fits the character budget");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text(), text);
     }
 
     /// S9: a mixed-dimension batch must be rejected, never ranked with the

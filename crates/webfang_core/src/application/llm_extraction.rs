@@ -17,9 +17,6 @@ use crate::error::{Result, ScraperError};
 use serde_json::Value;
 use url::Url;
 
-/// Approximate chars per token for the sub-chunk char budget.
-const CHARS_PER_TOKEN: usize = 8;
-
 /// Result envelope for one LLM extraction run (#789).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LlmExtraction {
@@ -99,10 +96,9 @@ impl LlmExtractionService {
         let html = self.fetch_page(url).await?;
         let chunks = self.cleaner.clean(url.as_str(), &html).await?;
 
-        // [6] Chunk within the char budget; an over-budget sub-chunk fails
-        // BEFORE any LLM call is sent.
-        let char_budget = config.max_tokens.saturating_mul(CHARS_PER_TOKEN);
-        let sub_chunks = self.build_sub_chunks(&chunks, char_budget)?;
+        // [6] Chunk within the governing character budget resolved by the
+        // composition root; an over-budget sub-chunk fails BEFORE any call.
+        let sub_chunks = self.build_sub_chunks(&chunks, config.char_budget)?;
 
         // [7]-[8] One completion per sub-chunk (sequential, single attempt),
         // merging records in order with dedupe.
@@ -154,7 +150,7 @@ impl LlmExtractionService {
         let mut sub_chunks = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {
             for sub_chunk in self.chunker.chunk_text(&chunk.content)? {
-                if sub_chunk.text().len() > char_budget {
+                if sub_chunk.text().chars().count() > char_budget {
                     return Err(ScraperError::Validation(format!(
                         "el fragmento {index} supera el presupuesto ({char_budget} caracteres)"
                     )));
@@ -230,9 +226,12 @@ pub struct LlmConfig {
     pub base_url: Url,
     /// Provider API key — `Authorization: Bearer` only, never logged.
     pub api_key: ApiKey,
-    /// Per-completion output token budget; sub-chunk char budget is
-    /// `max_tokens * 8` (≈8 chars/token estimate).
+    /// Per-completion OUTPUT token budget. It never sets a chunk size.
     pub max_tokens: usize,
+    /// Character budget for one completion sub-chunk, resolved once by the
+    /// composition root from the governing `--max-chars` budget. Counted in
+    /// Unicode scalar values by the chunker's rejection guard (S10).
+    pub char_budget: usize,
 }
 
 impl LlmConfig {
@@ -242,7 +241,7 @@ impl LlmConfig {
     ///
     /// Returns [`ScraperError::Config`] when the base URL is malformed or
     /// `LLM_API_KEY` is missing/empty.
-    pub fn from_env(base_url: &str, max_tokens: usize) -> Result<Self> {
+    pub fn from_env(base_url: &str, max_tokens: usize, char_budget: usize) -> Result<Self> {
         let base_url = Url::parse(base_url)
             .map_err(|e| ScraperError::Config(format!("URL base del LLM inválida: {e}")))?;
         match std::env::var("LLM_API_KEY") {
@@ -250,6 +249,7 @@ impl LlmConfig {
                 base_url,
                 api_key: ApiKey::new(key),
                 max_tokens,
+                char_budget,
             }),
             _ => Err(ScraperError::Config(
                 "LLM_API_KEY no está definida: configure la clave del proveedor LLM".into(),
@@ -385,14 +385,15 @@ mod tests {
     #[test]
     fn from_env_missing_key_is_config_error() {
         let _guard = webfang_test_utils::EnvGuard::clean(&["LLM_API_KEY"]);
-        let err = LlmConfig::from_env("https://8.8.8.8/v1", 100).expect_err("missing key fails");
+        let err =
+            LlmConfig::from_env("https://8.8.8.8/v1", 100, 800).expect_err("missing key fails");
         assert!(matches!(err, ScraperError::Config(_)));
     }
 
     #[test]
     fn from_env_redacts_key_in_debug() {
         let _guard = webfang_test_utils::EnvGuard::with(&[("LLM_API_KEY", "sk-super-secret")]);
-        let cfg = LlmConfig::from_env("https://8.8.8.8/v1", 100).expect("key present");
+        let cfg = LlmConfig::from_env("https://8.8.8.8/v1", 100, 800).expect("key present");
         let dbg = format!("{cfg:?}");
         assert!(dbg.contains("[REDACTED]"), "debug must redact: {dbg}");
         assert!(
@@ -427,6 +428,7 @@ mod service_tests {
             base_url: Url::parse("https://203.0.113.7/v1").expect("TEST-NET base parses"),
             api_key: ApiKey::new("sk-test"),
             max_tokens: 100,
+            char_budget: 800,
         }
     }
 
@@ -633,6 +635,28 @@ mod service_tests {
             "budget breach must be Validation, got: {err:?}"
         );
         assert_eq!(llm.call_count(), 0, "no LLM call may be sent");
+    }
+
+    /// S10: the completion sub-chunk budget is counted in characters, so a
+    /// multibyte chunk that fits must still reach the provider.
+    #[tokio::test]
+    async fn sub_chunk_budget_counts_characters_not_bytes() {
+        let content = "áéíóú ñ 漢字 🎉";
+        let budget = content.chars().count();
+        assert!(content.len() > budget, "fixture must be multibyte");
+        let llm = Arc::new(FakeLlm::new(&[r#"[{"name":"a"}]"#]));
+        let svc = service(vec![chunk_with(content)], Arc::clone(&llm));
+        let config = LlmConfig {
+            base_url: test_config().base_url,
+            api_key: ApiKey::new("sk-test".to_string()),
+            max_tokens: 100,
+            char_budget: budget,
+        };
+
+        svc.extract(&target_url(), &extraction_schema(), "m", &config)
+            .await
+            .expect("multibyte chunk fits the character budget");
+        assert_eq!(llm.call_count(), 1);
     }
 
     #[tokio::test]

@@ -142,6 +142,17 @@ spec and blocks its commit.
   was ranked), then GREEN after adding the batch width check and routing `distances_to_centroid`
   through the domain `cosine_similarity_fail_closed`; the private zip-based cosine was deleted.
   Verification: full `infrastructure::semantic_cleaner` suite PASS, `ai_boundary_test` PASS.
+  Native assess: `medium` / `under_budget` (no review due); Commit 2 SHA `0f2bb2aa`.
+- L14: T2 executed as two slices. First (Commit 3) fixes the unit defect and the consumed
+  `LlmConfig` contract: `split_into_chunks` and `build_sub_chunks` now compare `chars().count()`
+  (Unicode scalars, not bytes, graphemes or tokens); `extract` takes the explicit `char_budget`
+  resolved by the composition root; `CHARS_PER_TOKEN` was deleted; `max_tokens` is output-only.
+  RED observed on `split_into_chunks_counts_characters_not_bytes` (25 bytes > 12 chars) and on
+  `sub_chunk_budget_counts_characters_not_bytes` once `extract` stopped honoring the derived 800.
+  Remaining slice **T2b** (next free slot, Commit 3b; later task numbers update when it lands):
+  derive the governing budget from `ModelProfile::max_chars()` when `--max-chars` is absent, and
+  prove the printed value in `show`/`doctor` is that same governing value carried into
+  `char_budget`. No newtype, no benchmark token counts as a character budget (S17).
 - T2 `S10` route: inline — RED first: multi-byte tests (accented Spanish, CJK, emoji) prove the budget is
   counted in characters in `split_into_chunks` and in `build_sub_chunks`. Decide `chars` as the unit of the
   contract: the accepted number changes for non-ASCII text, and that is the contract change.
@@ -169,7 +180,9 @@ spec and blocks its commit.
   `CHARS_PER_TOKEN` stops setting a chunk size. If the derivation already exists, this task degrades to the
   unit fix plus a test proving printed == splitting == sub-chunk budget. Risk: item 3 — `LlmConfig` is a
   consumed contract and the sub-chunk count changes for existing callers; the commit body states it.
-  Commit 3.
+  Commit 3 (unit + contract), Commit 3b (profile-derived resolution, see L14). **PART 1 DONE** —
+  multibyte RED→GREEN in both chunkers, `char_budget` carried explicitly, `CHARS_PER_TOKEN` deleted;
+  full semantic_cleaner and llm_extraction suites, `ai_boundary_test` and clippy PASS.
 - T3 `S2` route: inline — make `as_any` a required `EmbeddingPort` method (remove the panicking default);
   every in-tree impl already overrides it, so this is compile-time enforcement of an existing practice.
   Risk: item 3 — `EmbeddingPort` is deliberately open so external adapters may implement it, and a required
