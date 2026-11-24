@@ -16,6 +16,31 @@ fn issue_2836_collapses_the_spanish_transport_prefix() {
     assert_eq!(result, "error de red: <NET_ERR>");
 }
 
+/// #3030: the cause taxonomy is now English, but the product-owned prefix is
+/// still OS-dependent. Linux keeps it on the `io::Error` path; Windows
+/// degrades to a timeout with no prefix. Both must land on `<NET_ERR>` or the
+/// committed snapshot bakes a Linux-only string and the Windows lane goes red.
+#[test]
+fn issue_3030_collapses_the_english_transport_prefix() {
+    let dir = Path::new("/tmp/test");
+    let input = "network error: I/O error: the server refused the connection: Connection refused (os error 111)";
+    let result = redact_nondeterministic(dir, input);
+    assert_eq!(result, "network error: <NET_ERR>");
+
+    let windows = redact_nondeterministic(dir, "network error: request timed out after 2s");
+    assert_eq!(windows, "network error: <NET_ERR>");
+}
+
+/// The legacy Spanish spelling stays accepted: fixtures and older traces can
+/// still carry it, and the collapse must not fork by language.
+#[test]
+fn issue_3030_keeps_the_spanish_transport_prefix_collapsed() {
+    let dir = Path::new("/tmp/test");
+    let input = "error de red: I/O error: el servidor rechazó la conexión: Connection refused (os error 111)";
+    let result = redact_nondeterministic(dir, input);
+    assert_eq!(result, "error de red: <NET_ERR>");
+}
+
 /// A dropped SYN reads `connect_refused` on Linux and `connect_timeout` on
 /// Windows; the classification contract is pinned by domain tests, not here.
 #[test]
