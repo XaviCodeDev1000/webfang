@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [9.2.4] - 2026-11-24
+
+
+### 🏗️ Architecture Improvements
+
+- Recover Miri coverage with per-test gates in preflight ([#3031](https://github.com/XaviCodeDev1000/webfang/pull/3031))
+- Harden AI layer boundaries and gate readiness ([#3029](https://github.com/XaviCodeDev1000/webfang/pull/3029))
+
+### 🔧 Fixed
+
+- Make connection-error snapshots platform-neutral ([#3033](https://github.com/XaviCodeDev1000/webfang/pull/3033))
+
+### 🧪 Testing
+
+- Gate two pre-existing Miri UB surfaces ([#3032](https://github.com/XaviCodeDev1000/webfang/pull/3032))
 ## [9.2.3] - 2026-11-23
 
 
