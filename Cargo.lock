@@ -5587,6 +5587,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "webfang-sandbox-wrapper"
+version = "9.2.3"
+dependencies = [
+ "tempfile",
+ "webfang_test_utils",
+]
+
+[[package]]
 name = "webfang_benchmark"
 version = "9.2.4"
 dependencies = [

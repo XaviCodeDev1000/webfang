@@ -1,0 +1,18 @@
+[package]
+name = "webfang-sandbox-wrapper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Linux browser wrapper that runs WebFang's browser subprocesses inside arapuca"
+publish = false
+
+[[bin]]
+name = "webfang-sandbox-wrapper"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile.workspace = true
+webfang_test_utils.workspace = true

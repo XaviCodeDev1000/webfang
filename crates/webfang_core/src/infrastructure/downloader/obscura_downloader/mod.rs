@@ -34,16 +34,24 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::ExitStatus;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::time::timeout;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 use url::Url;
 
 use super::{DownloadError, Downloader, FetchedPage};
+
+/// Shared sandbox resolution; the file is declared here so both browser
+/// downloader layers consume the same mount order and skip rules.
+#[path = "../downloader_factory.rs"]
+pub(crate) mod sandbox;
+
+use sandbox::{arapuca_args, SandboxConfig};
 
 /// Memory budget for one Obscura subprocess (~30 MB).
 const OBSCURA_MEMORY_COST: usize = 30_000_000;
@@ -125,6 +133,8 @@ pub struct ObscuraDownloader {
     /// Beyond the cap the fetch aborts with
     /// [`DownloadError::BodyTooLarge`] instead of buffering unbounded output.
     max_page_bytes: u64,
+    /// Sandbox prerequisites, resolved at build time and never mutated.
+    sandbox: SandboxConfig,
 }
 
 impl ObscuraDownloader {
@@ -146,6 +156,7 @@ impl ObscuraDownloader {
             binary,
             user_agent: None,
             max_page_bytes: DEFAULT_MAX_PAGE_BYTES,
+            sandbox: SandboxConfig::resolve(),
         }
     }
 
@@ -189,7 +200,64 @@ impl Default for ObscuraDownloader {
     }
 }
 
+/// Capped stdout, stderr and exit status of the child process.
+type ChildOutput = (Vec<u8>, Vec<u8>, Option<ExitStatus>);
+
+/// Shared child wiring: the handle is owned by the awaited future with
+/// `kill_on_drop(true)`, so a timeout drops it and terminates the subprocess
+/// instead of leaving an orphan (XP-S-05, #1608).
+fn configure_child(mut command: Command) -> Command {
+    command
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command
+}
+
 impl ObscuraDownloader {
+    /// Build the child command: wrap with `arapuca run` when the sandbox is
+    /// available, otherwise emit a structured WARN and run obscura directly.
+    fn spawn_command(&self, url_string: &str) -> Command {
+        let mut inner = vec![
+            "fetch".to_string(),
+            "--dump".to_string(),
+            "html".to_string(),
+        ];
+        // S1 (#2722 H5): the operator-pinned User-Agent travels to obscura's
+        // argv; `None` passes no flag and obscura keeps its own default UA.
+        if let Some(ua) = &self.user_agent {
+            inner.push("--user-agent".to_string());
+            inner.push(ua.clone());
+        }
+        inner.push(url_string.to_string());
+
+        if let Some(reason) = self.sandbox.skip_reason() {
+            warn!(
+                layer = 2,
+                reason,
+                task_id = %self.sandbox.task_id,
+                binary = %self.binary.display(),
+                "sandbox unavailable — running obscura unsandboxed"
+            );
+        } else if let Some(arapuca) = &self.sandbox.arapuca {
+            info!(
+                layer = 2,
+                sandbox = "arapuca",
+                task_id = %self.sandbox.task_id,
+                binary = %self.binary.display(),
+                "browser subprocess sandboxed"
+            );
+            let mut command = Command::new(arapuca);
+            command.args(arapuca_args(&self.binary, &self.sandbox.task_id, &inner));
+            return configure_child(command);
+        }
+
+        let mut command = Command::new(&self.binary);
+        command.args(&inner);
+        configure_child(command)
+    }
+
     #[instrument(skip(self), fields(url = %url, binary = %self.binary.display()))]
     async fn fetch_inner(&self, url: &Url) -> Result<FetchedPage, DownloadError> {
         debug!(
@@ -198,7 +266,6 @@ impl ObscuraDownloader {
         );
 
         let url_string = url.to_string();
-        let binary = self.binary.clone();
 
         // Defense in depth: a typed Url always carries a scheme (e.g. https://) so it can
         // never be mistaken for an obscura flag; reject defensively anyway.
@@ -210,113 +277,104 @@ impl ObscuraDownloader {
         }
         // LCOV_EXCL_STOP
 
-        // XP-S-05 (#1608): the child handle is owned by the awaited future
-        // with `kill_on_drop(true)`. On timeout the future (and the handle)
-        // is dropped, which terminates the subprocess — no orphaned obscura
-        // keeps fetching after the caller gave up. No Mutex is held across
-        // the await: the `Child` is moved into the future, never shared.
-        let mut command = Command::new(&binary);
-        command
-            .args(["fetch", "--dump", "html"])
-            .kill_on_drop(true)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        // S1 (#2722 H5): the operator-pinned User-Agent travels to obscura's
-        // argv; `None` passes no flag and obscura keeps its own default UA.
-        if let Some(ua) = &self.user_agent {
-            command.args(["--user-agent", ua]);
-        }
-        command.arg(&url_string);
-
-        let child = command.spawn().map_err(|e| {
+        let child = self.spawn_command(&url_string).spawn().map_err(|e| {
             DownloadError::Internal(format!("obscura process failed to start: {e}"))
         })?;
 
-        // Stage 5 of the fetch guard chain (#2722): the stdout read is capped
-        // at `max_page_bytes` (+1 detects overflow) and the stderr read at a
-        // small auxiliary cap, both drained concurrently with `wait()` so a
-        // chatty child can never deadlock the pipes or inflate memory.
         let max_page_bytes = self.max_page_bytes;
-        let result =
-            timeout(self.timeout, async move {
-                let mut child = child;
-                let stdout = child.stdout.take().ok_or_else(|| {
-                    DownloadError::Internal("obscura stdout pipe unavailable".into())
-                })?;
-                let stderr = child.stderr.take().ok_or_else(|| {
-                    DownloadError::Internal("obscura stderr pipe unavailable".into())
-                })?;
-
-                let mut out_buf = Vec::new();
-                let mut err_buf = Vec::new();
-                let mut capped_out = stdout.take(max_page_bytes.saturating_add(1));
-                let mut capped_err = stderr.take(OBSCURA_STDERR_CAP.saturating_add(1));
-                let (out_res, _, wait_res) = tokio::join!(
-                    capped_out.read_to_end(&mut out_buf),
-                    capped_err.read_to_end(&mut err_buf),
-                    child.wait(),
-                );
-                out_res.map_err(DownloadError::Io)?;
-                Ok((out_buf, err_buf, wait_res.ok()))
-            })
-            .await;
-
+        let result = timeout(self.timeout, Self::collect_child(child, max_page_bytes)).await;
         match result {
-            Ok(Ok((out_bytes, err_bytes, exit_status))) => {
-                if !exit_status.is_some_and(|status| status.success()) {
-                    let stderr = String::from_utf8_lossy(&err_bytes);
-                    let reported = exit_status
-                        .map(|status| status.to_string())
-                        .unwrap_or_else(|| "unknown (wait failed)".to_string());
-                    return Err(DownloadError::Internal(format!(
-                        "obscura exited with {reported}: {stderr}"
-                    )));
-                }
-
-                // The take() reader stops at cap+1: one byte over means the
-                // rendered page exceeded the limit.
-                if out_bytes.len() as u64 > max_page_bytes {
-                    return Err(DownloadError::BodyTooLarge {
-                        limit: max_page_bytes,
-                    });
-                }
-
-                let html = String::from_utf8_lossy(&out_bytes).to_string();
-
-                // S2 (#2722 H4): obscura reports the final URL on stderr.
-                // The line is free text upstream: a parse failure degrades to
-                // the requested URL with a WARN — it never fails the fetch.
-                let final_url = parse_page_loaded_url(&String::from_utf8_lossy(&err_bytes))
-                    .unwrap_or_else(|| {
-                        warn!(
-                            url = %url,
-                            "obscura stderr did not report the final URL — keeping the requested URL"
-                        );
-                        url.clone()
-                    });
-
-                debug!(
-                    dump = "html",
-                    bytes = html.len(),
-                    final_url = %final_url,
-                    status = 200,
-                    status_source = "synthesized",
-                    "Obscura returned {} bytes",
-                    html.len()
-                );
-
-                Ok(FetchedPage {
-                    url: final_url,
-                    html,
-                    status: 200,
-                    headers: obscura_html_headers(),
-                    cookies: vec![],
-                })
-            },
-            Ok(Err(e)) => Err(e),
+            Ok(Ok(output)) => self.build_page(output, url, max_page_bytes),
+            Ok(Err(error)) => Err(error),
             Err(_) => Err(DownloadError::timeout(self.timeout.as_secs())),
         }
+    }
+
+    /// Drain both pipes concurrently with `wait()` so a chatty child can
+    /// never deadlock the pipes or inflate memory (fetch-guard stage 5).
+    async fn collect_child(
+        child: Child,
+        max_page_bytes: u64,
+    ) -> Result<ChildOutput, DownloadError> {
+        let mut child = child;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| DownloadError::Internal("obscura stdout pipe unavailable".into()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| DownloadError::Internal("obscura stderr pipe unavailable".into()))?;
+
+        let mut out_buf = Vec::new();
+        let mut err_buf = Vec::new();
+        let mut capped_out = stdout.take(max_page_bytes.saturating_add(1));
+        let mut capped_err = stderr.take(OBSCURA_STDERR_CAP.saturating_add(1));
+        let (out_res, _, wait_res) = tokio::join!(
+            capped_out.read_to_end(&mut out_buf),
+            capped_err.read_to_end(&mut err_buf),
+            child.wait(),
+        );
+        out_res.map_err(DownloadError::Io)?;
+        Ok((out_buf, err_buf, wait_res.ok()))
+    }
+
+    /// Validate the child output and synthesize the page DTO.
+    fn build_page(
+        &self,
+        (out_bytes, err_bytes, exit_status): ChildOutput,
+        url: &Url,
+        max_page_bytes: u64,
+    ) -> Result<FetchedPage, DownloadError> {
+        if !exit_status.is_some_and(|status| status.success()) {
+            let stderr = String::from_utf8_lossy(&err_bytes);
+            let reported = exit_status
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "unknown (wait failed)".to_string());
+            return Err(DownloadError::Internal(format!(
+                "obscura exited with {reported}: {stderr}"
+            )));
+        }
+
+        // The take() reader stops at cap+1: one byte over means the
+        // rendered page exceeded the limit.
+        if out_bytes.len() as u64 > max_page_bytes {
+            return Err(DownloadError::BodyTooLarge {
+                limit: max_page_bytes,
+            });
+        }
+
+        let html = String::from_utf8_lossy(&out_bytes).to_string();
+
+        // S2 (#2722 H4): obscura reports the final URL on stderr.
+        // The line is free text upstream: a parse failure degrades to
+        // the requested URL with a WARN — it never fails the fetch.
+        let final_url =
+            parse_page_loaded_url(&String::from_utf8_lossy(&err_bytes)).unwrap_or_else(|| {
+                warn!(
+                    url = %url,
+                    "obscura stderr did not report the final URL — keeping the requested URL"
+                );
+                url.clone()
+            });
+
+        debug!(
+            dump = "html",
+            bytes = html.len(),
+            final_url = %final_url,
+            status = 200,
+            status_source = "synthesized",
+            "Obscura returned {} bytes",
+            html.len()
+        );
+
+        Ok(FetchedPage {
+            url: final_url,
+            html,
+            status: 200,
+            headers: obscura_html_headers(),
+            cookies: vec![],
+        })
     }
 }
 

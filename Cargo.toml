@@ -6,6 +6,7 @@ members = [
     "crates/webfang_cli",
     "crates/webfang_test_utils",
     "crates/webfang_benchmark",
+    "crates/webfang_sandbox_wrapper",
 ]
 exclude = ["fuzz", "tools/intra-crate-lint", "vendor/arapuca"]
 

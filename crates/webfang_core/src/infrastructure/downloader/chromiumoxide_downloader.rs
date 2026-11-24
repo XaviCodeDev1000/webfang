@@ -9,6 +9,7 @@
 
 #[cfg(feature = "chromium")]
 use {
+    super::obscura_downloader::sandbox::sandbox_wrapper_or_binary,
     chromiumoxide::browser::HeadlessMode,
     chromiumoxide::cdp::browser_protocol::network::{
         CookieParam, EnableParams as NetworkEnableParams, EventLoadingFailed, EventLoadingFinished,
@@ -449,17 +450,16 @@ impl Downloader for ChromiumoxideDownloader {
                 DownloadError::Internal(format!("failed to create Chrome profile dir: {e}"))
             })?;
 
+            // S3: the sandbox seam picks the wrapper or the configured binary; a missing prerequisite never fails the fetch.
+            let launch = sandbox_wrapper_or_binary(self.chrome_binary.as_deref());
             // 3. Browser config with sandbox bypass for CI/Docker.
-            // F-52-c (#1278): when the preflight gate certified a binary,
-            // launch exactly it instead of chromiumoxide auto-detection.
             let mut config_builder = BrowserConfig::builder()
                 .headless_mode(HeadlessMode::True)
                 .no_sandbox()
                 .launch_timeout(CHROME_LAUNCH_TIMEOUT)
                 .user_data_dir(profile.path());
-            if let Some(path) = &self.chrome_binary {
-                tracing::debug!(chrome_binary = %path.display(), "using gate-certified chrome binary");
-                config_builder = config_builder.chrome_executable(path);
+            if let Some(path) = launch {
+                config_builder = config_builder.chrome_executable(&path);
             }
             let config = config_builder
                 .build()
