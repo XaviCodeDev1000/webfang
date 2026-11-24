@@ -444,6 +444,24 @@ mod tests {
         );
     }
 
+    /// The other half of #2784: a name that DID come back leaves no evidence,
+    /// so a connect timeout stays a connect timeout. This is the deterministic
+    /// pin for the dropped-SYN probe, whose real `wreq` chain may carry no
+    /// `io::Error` kind (#3026).
+    #[test]
+    fn a_finished_resolution_keeps_the_connect_timeout() {
+        let host = "webfang-finished-resolution.test";
+        let request_started = Instant::now();
+        let mut mark = resolution_tracker().begin(host);
+        mark.finished(true);
+        drop(mark);
+
+        assert_eq!(
+            refine_connect_cause(NetworkCause::ConnectTimeout, host, request_started, true),
+            NetworkCause::ConnectTimeout
+        );
+    }
+
     /// A poisoned mark mutex must not drop the resolution evidence: recovery
     /// keeps the mark recorded, readable, and clearable (#3008).
     #[test]
