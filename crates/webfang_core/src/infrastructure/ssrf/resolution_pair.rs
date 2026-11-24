@@ -268,6 +268,29 @@ mod pair {
         );
     }
 
+    /// The deterministic half of the dropped-SYN probe: a name that DID come
+    /// back leaves no marker, so a connect timeout stays a connect timeout
+    /// (#3026). It lives here rather than in `resolution.rs`, which is at the
+    /// file-size ratchet limit.
+    #[test]
+    fn a_finished_resolution_keeps_the_connect_timeout() {
+        let host = "webfang-finished-resolution.test";
+        let request_started = std::time::Instant::now();
+        let mut mark = crate::domain::error::resolution::resolution_tracker().begin(host);
+        mark.finished(true);
+        drop(mark);
+
+        assert_eq!(
+            crate::domain::error::resolution::refine_connect_cause(
+                NetworkCause::ConnectTimeout,
+                host,
+                request_started,
+                true,
+            ),
+            NetworkCause::ConnectTimeout
+        );
+    }
+
     /// THE SSRF REFUSAL KEEPS ITS CLASS.
     ///
     /// The fail-closed scan is the one place that knows the requested name and
