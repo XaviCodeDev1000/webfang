@@ -215,14 +215,39 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
+/// Remove HTML tags from a `legible` fragment while preserving its whitespace.
+///
+/// [`legible::parse`] returns a readability HTML fragment (`<div …><p>…</p></div>`),
+/// not plain text. The degraded fallback uses [`strip_html_tags`], which drops
+/// script/style/noscript bodies but collapses ALL whitespace; applying it to
+/// the fragment would erase the newlines the chunker reads as paragraph
+/// boundaries. This helper keeps that layout intact while enforcing the same
+/// embedding boundary: no raw tag may reach a model client (S4 / T11).
+fn strip_tags_keep_layout(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match (in_tag, ch) {
+            (false, '<') => in_tag = true,
+            (true, '>') => in_tag = false,
+            (true, _) => {},
+            (false, _) => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Extract readable text from `html`, falling back to the shared block-dropping
 /// stripper when `legible` fails or yields nothing but whitespace.
 ///
-/// The fallback is an embedding boundary: it must drop script/style/noscript
+/// Both branches are an embedding boundary: no raw tag may reach a model client
+/// (S4 / T11). The fallback must additionally drop script/style/noscript
 /// bodies before any text reaches [`EmbeddingPort::embed_batch`] (#3009).
 fn extract_text_content(html: &str) -> String {
     match legible::parse(html, None, None) {
-        Ok(article) if !article.content.trim().is_empty() => article.content,
+        Ok(article) if !article.content.trim().is_empty() => {
+            strip_tags_keep_layout(&article.content)
+        },
         _ => strip_html_tags(html),
     }
 }

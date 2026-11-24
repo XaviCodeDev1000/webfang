@@ -124,6 +124,15 @@ spec and blocks its commit.
   channel. This task does NOT add tracing fields to `EmbeddingPort` (that would reopen T3/T4) and does NOT
   change the empty-input contract (T10). Risk: item 2 (what leaves the process, and on which channel) +
   item 6 (no test exercises (a)-(d) on the real path; the existing one uses `FakeCleaner`). Commit 1.
+  **DONE** — `crates/webfang_core/tests/ai_boundary_test.rs::boundary_assertions_on_the_real_path`
+  pins (a)-(d) with wiremock at BOTH clients, the real `SemanticCleanerImpl` and the serialized
+  `FileTraceLayer` JSONL. RED was real: `legible` returns a readability HTML fragment, so raw
+  `<div>/<p>/<span>` reached the embedding client; the `FakeCleaner` test could never see it. Fix in
+  `extract_text_content`: the primary branch strips tags with `strip_tags_keep_layout` (preserves
+  newlines for T10), the fallback keeps `strip_html_tags`. Verified: focused test PASS;
+  `infrastructure::semantic_cleaner` + `cleaning_pipelines_regression` PASS; check/clippy/fmt/doc
+  gate PASS. Risk: item 2 (what leaves the process) + item 6 (no test covered the real path) —
+  independent RDD review applies to Commit 1.
 - T1 `S9` route: inline — RED first: a mixed-dimension batch must error, not rank. Delete the private
   `cosine_similarity`, route `distances_to_centroid`/`filter_by_relevance` through the domain's
   `cosine_similarity_fail_closed`, and reject a dimension-disagreeing batch. Risk: item 3 (the filter
@@ -442,4 +451,16 @@ changes in this revision.
   6. T6: local body cap keeps its local `PermanentFatal` path; no synthesized remote `Http 413`.
   7. T2: `chars().count()` counts Unicode scalars, not graphemes or tokens; the character budget is a
      chunker guard, not an exact provider token limit.
-  No work unit or commit count changes. This entry is a plan edit, not authorization to implement T1–T11.
+   No work unit or commit count changes. This entry is a plan edit, not authorization to implement T1–T11.
+- L12: Human's implementation authorization, verbatim: "vamos a implementar el odd task que esta en
+  \"~/Projects/Rust/webfang-worktrees/feat-ai-layer-hardening\"". This supersedes the L5/L11 hold;
+  implementation is now in progress in worktree `feat-ai-layer-hardening` (branch matches directory,
+  target isolation `own-registered-target`, codedb reindexed to HEAD `3255ac90`). Environment note:
+  every non-interactive command must start with `eval "$(direnv export bash)"` or the identity gate
+  denies with `CARGO_TARGET_DIR` pointing at main. T11 was executed RED-first on the real path: the
+  first run leaked `<div id="readability-page-1" class="page"><p>…<span>…</span></p></div>` into the
+  embedding request body, proving the old `FakeCleaner` test was not an oracle for S4. Fixed at the
+  extraction boundary with a layout-preserving tag stripper for the `legible` primary branch. The
+  two `EnvGuard`s initially stacked in the test deadlocked on the shared `ENV_LOCK` (one guard for
+  both variables is the fix); wiremock's loopback is spelled `localhost` so `ssrf_gate` stays armed.
+  Commit 1 holds T11; its SHA is recorded at the next task transition.
