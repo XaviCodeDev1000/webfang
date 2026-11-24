@@ -587,3 +587,18 @@ changes in this revision.
   repository policy. Final verification after the correction: check + clippy all-targets/all-features
   `-D warnings` + fmt --check + doc `-D warnings` PASS, full `nextest run -p webfang_core -p
   webfang_cli` 4910 passed / 8 skipped. Next: T7, then T8 in its own session.
+- L22: **T7 landed as Commit 6 `1164ccde`** (`fix(ai): guard embedding dimensions at the adapter
+  boundary`, 8 files / 226 insertions / 13 deletions, new
+  `infrastructure/llm/remote_embedding/dimension.rs`). The width comes only from
+  `EmbeddingPort::embedding_dim()` (pin or startup probe), never from a response vector; every
+  vector in a successful batch is checked against it. `embedding_dim() == 0` cuts before any
+  provider request. Rejections increment `EmbeddingRunMetrics::dimension_rejections` per vector;
+  the ceiling is explicit and per batch (`MAX_TOLERATED_REJECTIONS = 0`, one bad vector aborts),
+  because the port must keep one vector per input. The rejection error is tag-marked and the
+  cleaner's `embed_batch_raw` treats it as terminal before its bisection arm, so a bad width cannot
+  amplify into more provider calls. RED observed (tests failed to compile with no dimension
+  module), GREEN after wiring. Cold-adapter tests now declare the contract width before dialing:
+  `one_d` fixtures pin 1, the 8-dimensional wire fixtures pin 8. Verification: full
+  `nextest run -p webfang_core -p webfang_cli` 4913 passed / 8 skipped; check + clippy
+  all-targets/all-features `-D warnings` + fmt --check + doc `-D warnings` PASS. Next: T8 in its
+  own session (schema v3 + migration over stored user data); T9 completion retries remain OPEN.
