@@ -171,8 +171,15 @@ spec and blocks its commit.
   unit fix plus a test proving printed == splitting == sub-chunk budget. Risk: item 3 — `LlmConfig` is a
   consumed contract and the sub-chunk count changes for existing callers; the commit body states it.
   Commit 3 (unit + contract), Commit 3b (profile-derived resolution, see L14). **PART 1 DONE** —
-  multibyte RED→GREEN in both chunkers, `char_budget` carried explicitly, `CHARS_PER_TOKEN` deleted;
-  full semantic_cleaner and llm_extraction suites, `ai_boundary_test` and clippy PASS.
+   multibyte RED→GREEN in both chunkers, `char_budget` carried explicitly, `CHARS_PER_TOKEN` deleted;
+   full semantic_cleaner and llm_extraction suites, `ai_boundary_test` and clippy PASS.
+   **T2b DONE (Commit 3b `60d8e414`)** — a single `governed_max_chars` resolver in
+   `domain/model_profile.rs`; the run (`__main` after config load), `show` and `doctor` all call it, so
+   printed == governing == `char_budget`. Explicit `--max-chars` still wins; absent, the budget is
+   `ModelProfile::max_chars()` of the default profile under `[[model_profiles]]` overrides; a bad
+   override fails closed with exit 78. RED observed (four resolver tests failed to compile with no
+   function), GREEN after the resolver. `LlmConfig` still has no production constructor — that seam
+   is tracked separately; the contract is pinned by `completion_char_budget_is_the_governing_resolution`.
 - T3 `S2` route: inline — make `as_any` a required `EmbeddingPort` method (remove the panicking default);
   every in-tree impl already overrides it, so this is compile-time enforcement of an existing practice.
   Risk: item 3 — `EmbeddingPort` is deliberately open so external adapters may implement it, and a required
@@ -520,5 +527,22 @@ changes in this revision.
   inner.classify()` sends every `SemanticError::Inference` to `InternalFatal`; change the boundary,
   not the taxonomy), then T7. T8 is HIGH RISK (schema/migration over stored user data): do not start
   it until a fresh session can give the transaction and rollback tests full attention. T9's
-  completion-retry sub-decision remains OPEN pending concrete provider semantics. Reindex codedb and
-  verify `eval "$(direnv export bash)"` before any command in a new session.
+   completion-retry sub-decision remains OPEN pending concrete provider semantics. Reindex codedb and
+   verify `eval "$(direnv export bash)"` before any command in a new session.
+- L18: Session resumed with the exact handoff of L17. Bootstrap verified first: `mem_current_project`
+  → `webfang` (cwd matches), `eval "$(direnv export bash)"`, worktree HEAD `e833786c`, clean tree,
+  branch `feat/ai-layer-hardening` matches directory, codedb reindexed (`root` = worktree,
+  `head e833786c18f6`). **T2b landed as Commit 3b `60d8e414`** (`fix(ai): derive one governing
+  character budget from the model profile`, 8 files / 300 insertions / 70 deletions). Verification:
+  RED → GREEN on four domain resolver tests; `cli::commands` lib tests 53 PASS;
+  `show_provider_identity_test` 32 PASS; `cli_binary_test` budget/profile tests PASS;
+  `ai_boundary_test`, `max_chars_bound_test`, llm_extraction suite PASS; full `nextest run
+  -p webfang_core -p webfang_cli` 4902 passed / 8 skipped; check + clippy all-targets/all-features
+  `-D warnings` + fmt --check + doc `-D warnings` PASS (rustdoc emitted an internal ICE in
+  `write_shared` for several crates but cargo still exited 0 — toolchain quirk, not a lint finding).
+  Old assertions that said "no run consumes the profile" were rewritten, not bypassed: the profile
+  now governs a budget but is still NOT the run identity. Native assess over `e833786c..HEAD`
+  reported `high_risk` (review_due true) — review lifecycle pending for this commit. Next: T6, then
+  T7; T8 stays in its own session. Follow-up recorded, not fixed here: `show --help` still describes
+  `[[model_profiles]]` as historical metadata that no run consumes; that help string and its
+  snapshots need a separate truthfulness edit.
