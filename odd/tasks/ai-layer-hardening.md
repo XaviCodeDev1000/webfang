@@ -3,8 +3,14 @@
 **Branch:** `feat/ai-layer-hardening` · **Worktree:** `~/Projects/Rust/webfang-worktrees/feat-ai-layer-hardening`
 **Goal:** harden the AI layer (`SemanticCleaner` ↔ `EmbeddingPort` ↔ `TextChunker` ↔ `LlmExtractionService`)
 so that a provider swap or a malformed response fails loudly instead of degrading silently.
-Ten work units, one commit each, English-only artifacts. Native review applies per work-unit commit only
-while the user-owned RDD switch is on; a review outcome never authorizes delivery.
+Eleven work units in nine commits — T11 lands first (Commit 1) and T3–T5 share Commit 4 — English-only
+artifacts. Native review applies per work-unit commit only while the user-owned RDD switch is on; a review
+outcome never authorizes delivery.
+
+**Grounding (human decision):** every spec below is either the human's verbatim requirement (S1–S8) or a
+finding we verified in this session against the worktree tree (S9–S16). Repository ADRs and prose are
+context, never authority: where a doc-comment contradicts the code, the code wins and the comment becomes
+a task (it does, in T4 and T2). No worker re-derives scope from `docs/adr/`.
 
 ## Specs
 
@@ -53,7 +59,7 @@ downloader. The completion path has no retry at all: `llm/client.rs` maps every 
 `ScraperError::Http` and `build_sub_chunks` issues a single sequential attempt per sub-chunk.
 
 S15 (derived) Two independent chunking implementations diverge on separator (`\n\n` vs `\n`), on
-oversized-block handling (hard-split vs `ChunkTooLarge`), on the budget unit (chars vs bytes), and on
+oversized-block handling (hard-split vs `ChunkTooLarge`), on the budget unit (chars vs bytes — S10), and on
 empty input (`Tokenize` vs `Ok(vec![])`). `LlmExtractionService` is injected both and re-chunks what the
 cleaner already chunked.
 
@@ -73,43 +79,137 @@ and would import the very unit defect this mission removes.
 S18 (out of scope) Re-embedding existing stores; near-duplicate dedup; renaming `odd/tasks` Spanish
 prose; touching `CHANGELOG.md` (single writer is the Release PR); touching `docs/`.
 
+## Spec ↔ task coverage
+
+No spec is left without an owner, and no task quietly widens another. A row with no decision is an open
+spec and blocks its commit.
+
+| Spec | Owner | Note |
+| --- | --- | --- |
+| S1, S8 | this document | Intent: reviewing before presenting is the deliverable; no code task. |
+| S2 | T3, T4 | Panicking default removed; sealing rationale made true. |
+| S3 | T10 | Cross-cutting by nature; the union of T1/T2/T10 is where the shared assumptions become owned contracts. Satisfied only by that union — its own row set goes stale in each unit's commit. |
+| S4 | T11 | The data/instruction boundary itself — no raw HTML and no credential on an unplanned channel, page text treated as data, never as prose. |
+| S5 | T9 (primary), T6, T11 | Shared limits, uniform typed errors, clean traces. |
+| S6 | T3 (panics), T10 (empty/malformed), T1 (malformed dims), T6 (network/API), T9 (slow responses), T11 (credential leaks) | Decomposed; each owner names the failure it closes. |
+| S7 | T5, T11 | Redaction, plus an assertion that span fields stay an allowlist. |
+| S9 | T1, T7 | Truncated ranking; the guard that stops one bad response becoming `n` calls. |
+| S10 | T2 | One budget, one unit, three consumers. |
+| S11 | T6 | Retryability distinct from a local consistency bug. |
+| S12 | T5 | The payload stops travelling in error text. |
+| S13 | T8 | `model_id` persisted and checked on read. |
+| S14 | T9 | Shared policy literals and a real retry on completion. |
+| S15 | T10 | Two chunkers become one. |
+| S16 | T4 | The seal keeps a true sentence. |
+| S17, S18 | this document | Rejected and out-of-scope decisions, so no worker re-litigates them. |
+
 ## Tasks
 
+- T11 `S4`, `S7`, `S5` route: inline — the data/instruction boundary, asserted at the two places content
+  leaves the process (embedding request, completion request). RED first, built from the same raw HTML the
+  CLI accepts: (a) no raw HTML reaches either model client — assert on the captured request body that a
+  tag sequence from the input document is absent, and locate the single strip site
+  (`content_processing::aggressive::strip_html_tags`, imported by `infrastructure/semantic_cleaner.rs`)
+  before claiming it is the only door; (b) the credential channel is single — the key appears only in the
+  `Authorization` header of its intended endpoint, in no body, URL, error string or trace event;
+  (c) untrusted page text is data — it travels in a delimited data field of the completion request and is
+  never interpolated into the instruction prose, and the instruction text is pinned as a constant that
+  cannot absorb page content; (d) tracing stays an allowlist — provider/model/dim/count/request_id/lengths
+  only, with a test that a known page substring never appears in the emitted span fields.
+  Honest precondition: (c) and (d) were NOT verified before this task was written; the read-only audit that
+  would have confirmed the current request shape and span fields was cancelled by the human. Point (d) may
+  land as a pinning test with no code change (the design already looks right), or as an interim pin on the
+  recording macro's field set; point (c) is the only part with standing behaviour risk, and it must not
+  grow a provider-specific instruction channel on the way. This task does NOT add tracing fields to
+  `EmbeddingPort` (that would reopen T3/T4) and does NOT change the empty-input contract (T10).
+  Risk: item 2 (what leaves the process toward an external model, and on which channel) + item 6 (no
+  existing test asserts any of (a)-(d)). Commit 1.
 - T1 `S9` route: inline — RED first: a mixed-dimension batch must error, not rank. Delete the private
   `cosine_similarity`, route `distances_to_centroid`/`filter_by_relevance` through the domain's
-  `cosine_similarity_fail_closed`, and reject a dimension-disagreeing batch. Risk: item 6 — a regression
-  here is silent and no current test covers it. Commit 1.
+  `cosine_similarity_fail_closed`, and reject a dimension-disagreeing batch. Risk: item 3 (the filter
+  decides which chunks survive for every caller — export, batch, MCP clean, vault — so a stricter batch
+  decision changes their output) + item 6 (no existing test pins reject-vs-degrade on mixed dimensions).
+  Commit 2.
 - T2 `S10` route: inline — RED first: multi-byte tests (accented Spanish, CJK, emoji) prove the budget is
-  counted in characters in both `split_into_chunks` and `build_sub_chunks`. Decide `chars` as the unit of
-  the contract. Contract change: the accepted number changes for non-ASCII text. Risk: item 3. Commit 2.
+  counted in characters in `split_into_chunks` and in `build_sub_chunks`. Decide `chars` as the unit of the
+  contract: the accepted number changes for non-ASCII text, and that is the contract change.
+  There is a THIRD budget consumer, and it is live: `ModelProfile::max_chars()` derives a character budget
+  from `context` × chars-per-token and its own doc-comment calls it the per-profile input for the chunk
+  budget, yet its only production call site is the display helper in `cli/commands/blocks.rs:217`; the
+  cleaner is in fact built from `AiConfig::max_chars` (`cli/parse.rs:54` →
+  `webfang_cli/src/main/ai.rs:94,118`), and `max_chars_explicit` already exists in `cli/args/ai.rs`. Two
+  budgets, one printed and one governing: the operator reads a number that chunks nothing.
+  First step of this task is a verification, not an edit: establish whether options-spec resolution already
+  derives `AiConfig::max_chars` from the profile when the flag is absent. Either outcome ends the same
+  way — ONE governing budget, and the printed one is the governing one: the resolved budget derives from
+  `ModelProfile::max_chars()`, and an explicit `--max-chars` wins. If the derivation already exists, this
+  task degrades to the unit fix plus a test proving printed == splitting. Risk: item 3. Commit 3.
 - T3 `S2` route: inline — make `as_any` a required `EmbeddingPort` method (remove the panicking default);
-  every existing impl already overrides it, so this is compile-time enforcement of an existing practice.
-  Risk: item 3. Commit 3 (batched with T4 and T5).
+  every in-tree impl already overrides it, so this is compile-time enforcement of an existing practice.
+  Risk: item 3 — `EmbeddingPort` is deliberately open so external adapters may implement it, and a required
+  method is a source-breaking change for any impl outside this workspace. Seven in-tree impls carry it, so
+  the workspace compiles unchanged; the commit body states the breaking change. Commit 4 (with T4, T5).
 - T4 `S16` route: inline — correct the seal doc-comment so it states the invariant it actually protects
-  (impl-set control over `Box<dyn SemanticCleaner>` consumers), and add the same one-sentence rationale
-  to `TextChunker` that `EmbeddingPort` already carries. Five lines; no seal removal. Risk: none. Commit 3.
+  (impl-set control over `Box<dyn SemanticCleaner>` consumers), and add the one-sentence rationale
+  `EmbeddingPort` already carries to `TextChunker`. Five lines; no seal removal. Risk: none. Commit 4.
 - T5 `S7`, `S12` route: inline — stop echoing the parsed model payload into `ScraperError::Extraction`;
-  carry the provider's own short message instead. Risk: item 7 (data exposure through logs). Commit 3.
+  carry the provider's own short message instead. Risk: item 3 — the error text and the snapshots pinning it
+  change. Not item 2: the payload is page content, not a credential; T11 owns the credential channel.
+  Commit 4.
 - T6 `S11` route: inline — one classification point: extend the `ScraperError` mapping so a retryable
   remote failure is distinguishable from a local consistency bug, keeping HTTP status and `retry_after` in
   the adapter error and converting once at the boundary. Risk: item 3 (error contract consumed by the CLI
-  exit codes) + item 6. Commit 4.
-- T7 `S6`, `S9` route: inline — dimension guard at the embedding adapter boundary (the single funnel every
-  vector passes: `embed_batch_raw` → `EmbeddingPort::embed_batch`), with a rejection counter and an upper
-  bound that stops the bisection from amplifying one bad provider response into `n` remote calls. Ask the
-  provider for its width instead of guessing it. Risk: item 1 + item 6. Commit 5.
+  exit codes) + item 6. Commit 5.
+- T7 `S6`, `S9` route: inline — dimension guard at the embedding adapter boundary, the single funnel every
+  vector passes (`embed_batch_raw` → `EmbeddingPort::embed_batch`), with a rejection counter and an upper
+  bound that stops the bisection amplifying one bad provider response into `n` remote calls. Ask the
+  provider for its width (`/models` or the endpoint's declared dim) instead of guessing it. Risk: item 6
+  — no existing test covers a mixed-dimension batch, and a guard that rejects valid vectors fails silently
+  on every page. Explicitly NOT item 1: the store is rebuildable by re-running the export, so a false
+  rejection is recoverable rather than unrecoverable data. Commit 6.
 - T8 `S13` route: inline — persist `model_id` with the vault store vectors and verify it on read in
-  `vault_search`, with an actionable warning on mismatch. Requires a schema decision from the human
-  (column + migration shape); recorded in the Log before the edit. Risk: item 1. Commit 6.
+  `vault_search`, with an actionable warning on mismatch. Requires the human's schema decision (column +
+  migration shape); recorded in the Log before the edit. Risk: item 1 (a schema/format change and a
+  migration over stored user data). Commit 7.
 - T9 `S14` route: inline — one shared `RetryPolicy`/body-cap module that reads the existing constants
-  instead of re-declaring them, plus a real retry on the completion path. No new dependency, no invented
-  numbers. Risk: item 5 + item 6. Commit 7.
-- T10 `S15` route: inline — collapse the duplicate chunking: `SemanticCleanerImpl` depends on
-  `TextChunker` and `split_into_chunks` is deleted; decide the empty-input contract once and write it into
-  the trait. Check `tools/intra-crate-lint` when the new edge moves. Risk: item 3 + item 6. Commit 8.
+  (`LLM_MAX_BODY_BYTES`, the downloader's values) instead of re-declaring them, plus a real retry on the
+  completion path. No new dependency, no invented numbers. Risk: item 6 — an attempt-count regression is
+  visible only as latency and no test catches it. Commit 8.
+- T10 `S15`, `S3` route: inline — collapse the duplicate chunking: `SemanticCleanerImpl` depends on
+  `TextChunker` and `split_into_chunks` is deleted. The four S15 divergences are NOT interchangeable
+  details; each is decided in the Log before the edit, with the test that pins it:
+  1. **separator** — `\n` (every line) vs `\n\n` (blank-line block). Decide from the observed shape of
+     `strip_html_tags` output on a real sample: if a paragraph can contain `\n`, `\n\n` is the correct unit
+     and the current splitter is shredding paragraphs; if it never does, both are equivalent. Pin with a
+     fixture, not with opinion, and do not import the token-based benchmark numbers as a character verdict.
+  2. **oversized block** — today `semantic_cleaner.rs` errors `ChunkTooLarge` and `clean_respects_max_chars`
+     (`infrastructure/semantic_cleaner.rs:499`) pins exactly that, while `MarkdownChunker::split_oversized`
+     hard-splits. Default: keep strict (the error is the page-level degradation signal) and put hard-split
+     behind an explicit policy value; if the consolidated chunker adopts hard-split instead, rewrite that
+     test deliberately and describe it as a behaviour change, never as a refactor.
+  3. **byte spans** — `split_into_chunks` spans point at the cleaned text it received; `MarkdownChunker`
+     spans point at its own input and chunks join on `\n\n`. If the cleaner passes the cleaned text the
+     spans stay comparable, but the joined chunk text — and therefore the offsets — change. Requirement:
+     the consolidated chunker's chunk text reconstructs its source from the spans (reuse
+     `text_chunker::assert_spans_reconstruct` on the cleaner path), and downstream locators (chunk_index +
+     char ranges, the #2429 provenance) are re-derived, not assumed intact. UNVERIFIED here: the audit that
+     would have said which bytes the spans point at was cancelled; verify before deciding.
+  4. **empty input** — empty input is a VALUE, not a failure: `SemanticCleaner::clean("")` → `Ok(vec![])`
+     and `TextChunker::chunk_text("")` → `Ok(vec![])`. Whoever cannot proceed with zero chunks owns that
+     decision in its own terms; `llm_extraction` may still fail the page, but with its own reason, not the
+     chunker's `Tokenize`. This row implements the pending human call recorded in L5 (parent's
+     recommendation), and its commit rewrites any test that pins the old value, describing it as a
+     behaviour change.
+  S3 acceptance: this task also delivers the closed table of assumptions that changed owner — one row per
+  item above plus the budget unit (T2) and the dimension (T1). A row with no decision is an open spec and
+  blocks the commit as committed. Check `tools/intra-crate-lint` when the new edge moves. Risk: item 3 +
+  item 6. Commit 9.
 
-Order: T1 → T2 → (T3,T4,T5) → T6 → T7 → T8 → T9 → T10. T1–T5 are one review sitting; from T6 on each
-unit moves a seam of the container and gets its own.
+Delivery order is this list's order: T11 first (boundary assertions are the oracle the budget and chunking
+changes must not break), then T1 and T2 one commit each, then the batched contract-hygiene commit
+(T3, T4, T5), then T6 and T7, each moving a seam of the container, then T9, then T10, which closes the
+feature. T8 sits outside the streak: it waits on the human schema decision named in L5 and may land at any
+point after T6.
 
 ## Log
 
@@ -127,8 +227,8 @@ unit moves a seam of the container and gets its own.
 - L3: Bootstrap state — identity manifest written for `feat/ai-layer-hardening`, `codegraph init` done,
   `codedb` reindexed against the worktree root (head matches). The `.envrc`/`.env` half of the per-worktree
   bootstrap could not be executed by this session: the host safety policy blocks any command naming those
-  paths, and conversational permission does not clear it. Exact commands handed to the human. Until they
-  run, builds in this worktree are unisolated and the isolation guard will refuse.
+  paths, and conversational permission does not clear it. Exact commands handed to the human.
+  (Superseded by L6.)
 - L4: Source verification of the 2026 research the human supplied (via the Jina CLI). Held up: arXiv
   2605.03346, arXiv 2504.16318, agentmemory #247/#248/#256, arXiv 2605.22834, arXiv 2608.00824, RFC 3323
   (`impl_restriction`, nightly only), `C-NEWTYPE`. Did not hold up: "Qdrant PR #9058" (the real record is
@@ -139,15 +239,52 @@ unit moves a seam of the container and gets its own.
   benchmark sources the human cited for collapsing the duplicate chunking recommend the strategy
   `MarkdownChunker` already implements, so T10 is justified by *deleting* the second implementation, not by
   unifying two peers — no shared conformance test is needed once only one implementation remains.
-- L5: Human decided to review this plan before any code is written. Implementation of T1 is therefore held.
-  Four points are flagged in the document as needing a human decision rather than a parent one: the
-  empty-input contract that T10 must write once (today `Tokenize` vs `Ok(vec![])`), the schema and
-  migration shape for `model_id` in the vault store that T8 needs, confirmation that characters are the
-  single budget unit for T2, and whether the seal on `SemanticCleaner` may eventually be removed instead of
-  only re-documented (this plan recommends documentation only). Native review per work-unit commit depends
-  on the user-owned RDD switch being on for this clone.
+- L5: Human decided to review this plan before any code is written. Implementation is therefore held.
+  Decisions still the human's, not the parent's: the empty-input contract (today `Tokenize` in
+  `MarkdownChunker` vs `Ok(vec![])` in `split_into_chunks`; parent recommends `Ok(vec![])`, T10 records it
+  as a behaviour change), the schema and migration shape for `model_id` in the vault store (T8), and
+  whether the seal on `SemanticCleaner` may eventually be removed instead of only re-documented (parent
+  recommends documentation only, T4). Characters as the single budget unit is accepted by the review and
+  the unit fix proceeds on it (T2). Native review per work-unit commit depends on the user-owned
+  RDD switch being on for this clone.
 - L6: Bootstrap completed by the human (`.envrc` with the five exact lines, `$TREE` substituted and `$HOME`
   literal; `direnv allow`; `.env` copied). Isolation verified with `scripts/check_target_isolation.sh`:
   `reason=own-registered-target`, declared by this tree's own `.envrc`. Commit 8f646367..36219d0a lands this
-  mission document and unblocks every later work unit; the identity gate and the review gate both pass. L3
-  is superseded: the half it reported as blocked is now done.
+  mission document. The identity gate and the review gate both pass, **but only inside a shell that has
+  loaded this tree's environment**: `eval "$(direnv export bash)"` must precede every non-interactive
+  commit, or the gate denies with `CARGO_TARGET_DIR` pointing at `main`. This entry does not clear any
+  other unit to start — the T8 schema decision and the human's review of this document remain open.
+- L7: The human reviewed this plan against the tree (not against the document) and confirmed the forensics
+  of S9, S10 and S2: the truncating `zip`, the byte budget compared against `chars().count()` in
+  `MarkdownChunker`, the `panic!` default on `as_any`, and the existence of
+  `cosine_similarity_fail_closed` in the domain and of `tools/intra-crate-lint`. Five defects were
+  corrected in place:
+  1. **S4 had no owner** — nothing in T1–T10 built the data/instruction boundary the human asked about
+     (T5 removes an echo on the way out; it does not guard the way in). Added **T11** as Commit 1, holding
+     the four boundary assertions ((a) no raw HTML, (b) single credential channel, (c) page text is data Kipling
+     not instruction, (d) trace fields are an allowlist). S4 is not otherwise mappable, so no other task
+     claims it.
+  2. **Invalid risk lines** — T5 cited "item 7" and T7 cited "item 1"; the taxonomy has six items. T5 is
+     item 3 (the error text and its snapshots change; the echoed payload is page content, not a secret),
+     T7 is item 6 (no existing test covers a mixed-dimension batch; not item 1, the store is rebuildable
+     by re-running the export). T1 (item 3 on the filter's consumers + item 6), T3 (item 3: the port is
+     deliberately open, a required method is source-breaking outside this workspace) and T9 (item 6:
+     attempt-count regressions show up as latency only) were also restated.
+  3. **L6 contradicted L5 and the header promised the wrong count** — "unblocks every later work unit"
+     is false while T8 waits on the human schema call; now L6 says gates pass but the T8 decision and this
+     review stay open. The header now reads eleven work units in nine commits, and each task names its
+     commit.
+  4. **T2 ignored a third budget** — `ModelProfile::max_chars()`, verified live only in the display
+     helper `cli/commands/blocks.rs:217` (`profile.max_chars()`), while the cleaner receives
+     `AiConfig::max_chars` (`cli/parse.rs:54` → `webfang_cli/src/main/ai.rs:94,118`) and
+     `max_chars_explicit` already exists (`cli/args/ai.rs`). A unit fix that leaves two numbers with one
+     printed and one governing is the same defect one layer up; T2 now carries it, with a verification
+     step first (does options-spec resolution already derive the budget from the profile?). S16 records
+     the confirmed dead accessors (`SemanticCleaner::max_chars`/`is_ready`) with no production reader.
+  5. **T10 decided too much and too little** — it fixed the empty-input contract while silently changing
+     separator, oversized-block policy and byte spans. All four divergences are now written into T10 with
+     a decision, and the witness this review already established: `clean_respects_max_chars`
+     (`infrastructure/semantic_cleaner.rs:499`) pins `ChunkTooLarge`, so the strict-vs-hard-split choice is
+     a behaviour change that T10 must either keep strict or rewrite the test for, never describe as a
+     refactor. Separator and span rows start with a verification, since the audit that would have settled
+     them was cancelled and remains unverified.
