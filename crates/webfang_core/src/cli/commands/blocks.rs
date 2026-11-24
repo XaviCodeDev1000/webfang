@@ -22,6 +22,26 @@ use crate::domain::model_profile::{ModelProfileRegistry, ProfileProvenance};
 use crate::domain::network_policy::NetworkPolicyMode;
 use crate::domain::providers::ProviderConfig;
 
+/// Resolve the character budget BOTH diagnostics render and the run chunks
+/// with (S10/T2b). An explicit operator flag wins; otherwise the shipped
+/// default profile supplies the budget under the operator's
+/// `[[model_profiles]]` overrides. Sharing this helper is what keeps `show`
+/// and `doctor` from disagreeing with each other or with the run.
+pub(crate) fn governing_budget(
+    args: &crate::cli::args::SubcommandArgs,
+    profiles: &crate::domain::model_profile::ModelProfilesConfig,
+) -> Result<usize, crate::CliExit> {
+    let explicit = args.max_chars_explicit.then_some(
+        args.max_chars_value
+            .unwrap_or(crate::domain::options_spec::ai::DEFAULT_MAX_CHARS),
+    );
+    crate::domain::model_profile::governed_max_chars(explicit, profiles).map_err(|e| {
+        crate::CliExit::ConfigError(format!(
+            "could not resolve the governing character budget: {e}"
+        ))
+    })
+}
+
 /// Render a provider base URL for diagnostics with its userinfo removed.
 ///
 /// The URL is cloned, so config load and request egress keep the configured
@@ -183,9 +203,10 @@ pub fn print_proxy_posture(
 /// reported as one line and does NOT abort the listing: a broken historical
 /// record must not hide the rest of the diagnostic.
 pub fn print_historical_profiles(registry: &ModelProfileRegistry) {
-    println!("Estos perfiles describen modelos LOCALES que la feature `ai` y el runtime ONNX");
-    println!("retiraron en 3.0.0 (ADR-0004 paso 6). Ninguna corrida los consume: no son el");
-    println!("perfil del run.");
+    println!("These profiles are not the identity of the run: no endpoint is dialed from them.");
+    println!(
+        "The default profile's character budget now governs the cleaner and the completion guard."
+    );
 
     for id in registry.ids() {
         match registry.resolve(id) {
@@ -194,8 +215,8 @@ pub fn print_historical_profiles(registry: &ModelProfileRegistry) {
         }
     }
 
-    println!("Nota: consumir el perfil en el cleaner (budget real, dim de vault) es Tramo D");
-    println!("(pasos 2–3 del ADR-0004); todavía no está cableado al run.");
+    println!("Note: the character budget above is the one the cleaner enforces when no");
+    println!("--max-chars was chosen; the vault dimension is a separate concern.");
 }
 
 /// Print one resolved historical profile.
@@ -254,6 +275,53 @@ mod tests {
         let lines = proxy_posture_lines(None, &registry);
         assert!(lines[0].contains("se ignora por diseño"));
         assert!(lines.join("\n").contains("el egreso es directo"));
+    }
+
+    fn budget_args(explicit: bool, value: Option<usize>) -> crate::cli::args::SubcommandArgs {
+        crate::cli::args::SubcommandArgs {
+            provider_id: None,
+            max_chars_explicit: explicit,
+            max_chars_value: value,
+            threshold_explicit: false,
+            threshold_value: None,
+        }
+    }
+
+    fn overridden_budget_profiles() -> crate::domain::model_profile::ModelProfilesConfig {
+        crate::domain::model_profile::ModelProfilesConfig {
+            profiles: vec![crate::domain::model_profile::ModelProfileOverride {
+                id: crate::domain::model_profile::GRANITE_97M_PROFILE_ID.to_string(),
+                context: Some(1024),
+                chars_per_token: Some(2.0),
+                ..Default::default()
+            }],
+        }
+    }
+
+    /// The number `show` prints and the number `doctor` prints must be the
+    /// number the run chunks with: all three call the same resolver.
+    #[test]
+    fn governing_budget_in_diagnostics_comes_from_the_profile() {
+        let profiles = overridden_budget_profiles();
+        assert_eq!(
+            governing_budget(&budget_args(false, None), &profiles).expect("resolves"),
+            2048
+        );
+        // The parsed CLI always carries the (default) value; explicitness is
+        // the separate fact that decides whether the profile governs.
+        assert_eq!(
+            governing_budget(&budget_args(false, Some(98_304)), &profiles).expect("resolves"),
+            2048
+        );
+    }
+
+    #[test]
+    fn governing_budget_in_diagnostics_lets_an_explicit_flag_win() {
+        assert_eq!(
+            governing_budget(&budget_args(true, Some(500)), &overridden_budget_profiles())
+                .expect("resolves"),
+            500
+        );
     }
 
     #[test]

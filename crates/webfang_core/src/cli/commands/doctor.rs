@@ -28,7 +28,6 @@ use crate::domain::model_profile::{
     ModelProfileRegistry,
     ModelProfilesConfig, // sin el id del perfil (ADR-0004 paso 6)
 };
-use crate::domain::options_spec::ai::DEFAULT_MAX_CHARS;
 use crate::domain::providers::{Capability, ProviderConfig, ProviderRegistry, ProvidersConfig};
 
 /// Run the diagnosis against the providers declared in `config_path`.
@@ -140,7 +139,9 @@ async fn diagnose_provider(
     crate::cli::commands::blocks::print_proxy_posture(Some(provider), proxy_registry);
     println!();
     crate::cli::commands::blocks::print_provider_block(provider, args.provider_id.is_some());
-    print_profile_and_budget(args, profiles);
+    if let Err(exit) = print_profile_and_budget(args, profiles) {
+        return exit;
+    }
 
     // 1. Credential — a hard failure blocks the run before any network hop.
     if let Err(exit) = check_credential(provider) {
@@ -231,14 +232,17 @@ async fn diagnose_reachability(provider: &ProviderConfig) -> CliExit {
 /// history (issue #2106).
 ///
 /// Reads the same inputs `show` does — the operator's `[[model_profiles]]`
-/// overrides and the argv budget knobs — so the two diagnostics cannot
-/// contradict each other on identical input.
-fn print_profile_and_budget(args: &SubcommandArgs, profiles: &ModelProfilesConfig) {
-    let max_chars = args.max_chars_value.unwrap_or(DEFAULT_MAX_CHARS);
+/// overrides and the argv budget knobs — through the SAME shared resolver, so
+/// the two diagnostics cannot contradict each other or the run.
+fn print_profile_and_budget(
+    args: &SubcommandArgs,
+    profiles: &ModelProfilesConfig,
+) -> Result<(), CliExit> {
+    let max_chars = crate::cli::commands::blocks::governing_budget(args, profiles)?;
     let max_chars_origin = if args.max_chars_explicit {
         "operatorio"
     } else {
-        "default del spec"
+        "profile (default granite-97m)"
     };
     let threshold_origin = if args.threshold_explicit {
         "operatorio"
@@ -256,6 +260,7 @@ fn print_profile_and_budget(args: &SubcommandArgs, profiles: &ModelProfilesConfi
     let registry = ModelProfileRegistry::new(profiles.clone());
     println!("\nMetadata histórica de perfiles de modelo (ADR-0004 paso 4):\n");
     crate::cli::commands::blocks::print_historical_profiles(&registry);
+    Ok(())
 }
 
 #[cfg(test)]

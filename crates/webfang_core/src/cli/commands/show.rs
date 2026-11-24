@@ -15,14 +15,15 @@
 //! This subcommand performs **no network I/O**: it reads the user's config and
 //! prints what will be used. Probing an endpoint is `connect` / `doctor`'s job.
 //!
-//! ## Scope: step 4 is configuration, not consumption
+//! ## Scope: the profile governs a budget, not an endpoint
 //!
-//! ADR-0004 step 4 is *easy configuration* — the profiles plus the
-//! `connect`/`doctor`/`show` surface that lets the operator see what a config
-//! means. **Consuming** a profile (deriving the cleaner's chunk budget from
-//! `context × chars_per_token`, pinning the vault dimension from `dim`) is
-//! Tramo D, steps 2–3. Until that wiring lands, this output describes the
-//! historical profile metadata — it does **not** claim the run reads it.
+//! The default profile's `context × chars_per_token` is the character budget
+//! the run chunks with when the operator gave no `--max-chars` (S10/T2b). This
+//! command renders that same resolved number through the shared helper
+//! `super::blocks::governing_budget`, so the printed budget is the governing
+//! one. The profile is still NOT the identity of the run: no endpoint is
+//! dialed from it, and pinning the vault dimension from `dim` remains a
+//! separate concern.
 
 use std::path::Path;
 
@@ -70,7 +71,10 @@ pub fn run(args: &SubcommandArgs, config_path: &Path) -> CliExit {
         Err(exit) => return exit,
     }
 
-    print_budget(args);
+    match super::blocks::governing_budget(args, &defaults.model_profiles) {
+        Ok(max_chars) => print_budget(max_chars, args),
+        Err(exit) => return exit,
+    }
 
     let registry = ModelProfileRegistry::new(defaults.model_profiles.clone());
     println!("\n=== show: metadata histórica de perfiles de modelo (ADR-0004 paso 4) ===\n");
@@ -113,17 +117,14 @@ fn print_no_provider() {
 
 /// The budget the cleaner is CONFIGURED with, with its provenance.
 ///
-/// Only the knobs the run really honours live here: `--max-chars` (or
-/// `WEBFANG_MAX_CHARS`) and the relevance threshold. The budget derived from
-/// a model profile is historical metadata and is printed with the profiles.
-fn print_budget(args: &SubcommandArgs) {
-    let max_chars = args
-        .max_chars_value
-        .unwrap_or(crate::domain::options_spec::ai::DEFAULT_MAX_CHARS);
+/// `max_chars` comes from the shared resolver, never from a second literal:
+/// the number rendered here is the number the chunker enforces. Only the
+/// relevance threshold remains a purely argv knob.
+fn print_budget(max_chars: usize, args: &SubcommandArgs) {
     let max_chars_origin = if args.max_chars_explicit {
         "operatorio (--max-chars o WEBFANG_MAX_CHARS)"
     } else {
-        "default del spec"
+        "profile (default granite-97m, derived from context x chars_per_token)"
     };
 
     let threshold = args.threshold_value.unwrap_or(0.3);

@@ -415,6 +415,34 @@ impl ModelProfileRegistry {
     }
 }
 
+/// Resolve the ONE character budget that governs the run.
+///
+/// An explicit operator value (`--max-chars` / `WEBFANG_MAX_CHARS`) always
+/// wins. Otherwise the budget is `ModelProfile::max_chars()` of the shipped
+/// default profile under the operator's `[[model_profiles]]` overrides — never
+/// a second literal that only the diagnostics happen to print. Every consumer
+/// (chunker, completion sub-chunk guard, `show`, `doctor`) calls this resolver,
+/// so the printed number is the number that chunks.
+///
+/// The profile is not the identity of the run: it supplies a budget, not an
+/// endpoint. This is why a provider id is never substituted for a profile id.
+///
+/// # Errors
+///
+/// [`ProfileError`] when the effective profile is invalid — a bad override
+/// must fail closed at the boundary instead of silently chunking at zero.
+pub fn governed_max_chars(
+    explicit: Option<usize>,
+    profiles: &ModelProfilesConfig,
+) -> Result<usize, ProfileError> {
+    match explicit {
+        Some(chars) => Ok(chars),
+        None => ModelProfileRegistry::new(profiles.clone())
+            .resolve(GRANITE_97M_PROFILE_ID)
+            .map(|profile| profile.max_chars()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,5 +508,60 @@ mod tests {
             profile.validate(),
             Err(ProfileError::InvalidField { field: "dim", .. })
         ));
+    }
+
+    /// S10/T2b: the budget the run chunks with and the budget the diagnostics
+    /// print come from ONE resolution. Without `--max-chars` it is the effective
+    /// profile's `max_chars()`, operator overrides included.
+    #[test]
+    fn governed_budget_comes_from_the_effective_profile() {
+        let profiles = ModelProfilesConfig {
+            profiles: vec![ModelProfileOverride {
+                id: GRANITE_97M_PROFILE_ID.to_string(),
+                context: Some(1024),
+                chars_per_token: Some(2.0),
+                ..ModelProfileOverride::default()
+            }],
+        };
+        assert_eq!(governed_max_chars(None, &profiles).expect("resolves"), 2048);
+    }
+
+    #[test]
+    fn governed_budget_lets_an_explicit_flag_win() {
+        let profiles = ModelProfilesConfig {
+            profiles: vec![ModelProfileOverride {
+                id: GRANITE_97M_PROFILE_ID.to_string(),
+                context: Some(1024),
+                chars_per_token: Some(2.0),
+                ..ModelProfileOverride::default()
+            }],
+        };
+        assert_eq!(
+            governed_max_chars(Some(500), &profiles).expect("resolves"),
+            500
+        );
+    }
+
+    #[test]
+    fn governed_budget_without_overrides_matches_the_spec_default() {
+        assert_eq!(
+            governed_max_chars(None, &ModelProfilesConfig::default()).expect("resolves"),
+            crate::domain::options_spec::ai::DEFAULT_MAX_CHARS
+        );
+    }
+
+    #[test]
+    fn governed_budget_refuses_an_invalid_override() {
+        let profiles = ModelProfilesConfig {
+            profiles: vec![ModelProfileOverride {
+                id: GRANITE_97M_PROFILE_ID.to_string(),
+                context: Some(0),
+                ..ModelProfileOverride::default()
+            }],
+        };
+        assert!(
+            governed_max_chars(None, &profiles).is_err(),
+            "a zero context must fail closed instead of silently chunking at zero"
+        );
     }
 }

@@ -403,6 +403,33 @@ mod tests {
             "debug leaked secret: {dbg}"
         );
     }
+
+    /// S10/T2b: the completion guard takes the SAME resolved number the
+    /// chunker and the diagnostics use. `max_tokens` stays output-only — it
+    /// never re-derives a character budget from a tokens→chars ratio.
+    #[test]
+    fn completion_char_budget_is_the_governing_resolution() {
+        let _guard = webfang_test_utils::EnvGuard::with(&[("LLM_API_KEY", "sk-test")]);
+        use crate::domain::model_profile::{
+            governed_max_chars, ModelProfileOverride, ModelProfilesConfig, GRANITE_97M_PROFILE_ID,
+        };
+        let profiles = ModelProfilesConfig {
+            profiles: vec![ModelProfileOverride {
+                id: GRANITE_97M_PROFILE_ID.to_string(),
+                context: Some(1024),
+                chars_per_token: Some(2.0),
+                ..ModelProfileOverride::default()
+            }],
+        };
+        let governed = governed_max_chars(None, &profiles).expect("resolves");
+        assert_eq!(governed, 2048, "the profile governs the budget");
+        let cfg = LlmConfig::from_env("https://8.8.8.8/v1", 100, governed).expect("key present");
+        assert_eq!(
+            cfg.char_budget, governed,
+            "the completion guard uses it verbatim"
+        );
+        assert_eq!(cfg.max_tokens, 100, "max_tokens remains the OUTPUT budget");
+    }
 }
 
 #[cfg(test)]

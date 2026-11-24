@@ -148,6 +148,24 @@ async fn __main() -> CliExit {
         Err(e) => return CliExit::ConfigError(e.to_string()),
     };
 
+    // 5a. S10/T2b: ONE governing character budget. An explicit
+    // --max-chars/WEBFANG_MAX_CHARS wins; otherwise the effective default
+    // profile supplies it (including the operator's [[model_profiles]]
+    // overrides). The same resolver feeds `show`/`doctor`, so the number the
+    // operator reads is the number the chunker and completion guard enforce.
+    let governed_max_chars = match webfang_core::domain::model_profile::governed_max_chars(
+        args.ai.max_chars_explicit.then_some(args.ai.max_chars),
+        &config_defaults.model_profiles,
+    ) {
+        Ok(chars) => chars,
+        Err(e) => {
+            return CliExit::ConfigError(format!(
+                "could not resolve the governing character budget: {e}"
+            ))
+        },
+    };
+    args.ai.max_chars = governed_max_chars;
+
     // 5b. Nothing to validate: `--url`/positional are parsed into hardened
     // `ValidUrl` at the argv boundary (#1239), so an invalid or
     // credential-bearing URL is a clap usage error before this point.

@@ -84,13 +84,19 @@ fn stderr_of(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// The part of the output that comes BEFORE the historical-metadata section.
+/// The part of the output that comes BEFORE the budget section.
 ///
-/// The section header is the only place the word "histórica" appears, so the
-/// split is exact. Everything before it is what the command claims the run
-/// uses — the part that must never name a retired local model.
-fn before_historical_section(stdout: &str) -> &str {
-    stdout.split("histórica").next().unwrap_or(stdout)
+/// The provider block is the run's identity and must never name a retired
+/// local model. The budget block that follows legitimately names the default
+/// profile (T2b), so the identity assertion has to stop at the budget header.
+fn before_budget_section(stdout: &str) -> &str {
+    stdout
+        .split("=== show: budget efectivo ===")
+        .next()
+        .unwrap_or(stdout)
+        .split("Budget del cleaner:")
+        .next()
+        .unwrap_or(stdout)
 }
 
 // ============================================================================
@@ -128,18 +134,22 @@ fn show_never_presents_a_retired_local_model_as_the_run_profile() {
     let output = run_with_config(&["show"], &config);
     let stdout = stdout_of(&output);
 
-    let run_identity = before_historical_section(&stdout);
+    let run_identity = before_budget_section(&stdout);
     assert!(
         !run_identity.contains("granite-97m"),
         "the run's identity must not name a retired local model, got:\n{run_identity}"
     );
     assert!(
         stdout.contains("metadata histórica"),
-        "the profile numbers must survive as labelled historical metadata, got:\n{stdout}"
+        "the profile numbers must survive as labelled metadata, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("Ninguna corrida los consume"),
-        "the historical section must say that no run consumes it, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "the profile block must say it is not the run identity, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("max_chars: 98304"),
+        "the printed budget must be the governing profile budget, got:\n{stdout}"
     );
 }
 
@@ -202,7 +212,7 @@ fn show_without_any_provider_reports_no_embeddings_provider() {
         stdout.contains("sin provider de embeddings configurado"),
         "show must report the empty slot, got:\n{stdout}"
     );
-    let run_identity = before_historical_section(&stdout);
+    let run_identity = before_budget_section(&stdout);
     assert!(
         !run_identity.contains("granite-97m"),
         "an empty slot must not be filled with a retired local model, got:\n{run_identity}"
@@ -225,17 +235,21 @@ fn doctor_labels_the_profile_numbers_as_historical_metadata() {
         stdout.contains("id: known"),
         "doctor must name the resolved provider, got:\n{stdout}"
     );
-    // Pre-existing contract (issue #1933): the Tramo D boundary stays
-    // disclosed, because it is still true — no run consumes the profile.
+    // T2b: the profile now supplies the GOVERNING character budget, but it is
+    // still not the run's identity (no endpoint is dialed from it).
     assert!(
-        stdout.contains("Tramo D"),
-        "doctor must keep naming the Tramo D boundary, got:\n{stdout}"
+        stdout.contains("now governs the cleaner"),
+        "doctor must name the budget boundary the run actually consumes, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("no está cableado al run"),
-        "doctor must keep saying the profile is not wired to the run, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "doctor must say the profile is not the run identity, got:\n{stdout}"
     );
-    let run_identity = before_historical_section(&stdout);
+    assert!(
+        stdout.contains("--max-chars (o WEBFANG_MAX_CHARS): 98304"),
+        "the printed budget must be the governing profile budget, got:\n{stdout}"
+    );
+    let run_identity = before_budget_section(&stdout);
     assert!(
         !run_identity.contains("granite-97m"),
         "the run's identity must not name a retired local model, got:\n{run_identity}"

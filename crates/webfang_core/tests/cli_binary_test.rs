@@ -203,10 +203,10 @@ fn test_issue_1933_show_about_does_not_claim_the_run_uses_the_profile() {
     );
 }
 
-/// `webfang doctor` must disclose the Tramo D boundary in its budget block:
-/// the profile numbers are CONFIGURED, not consumed by a run yet. Captured
-/// from the real binary so the assertion is on what the operator actually
-/// sees, not on an in-source string mirrored by the test.
+/// `webfang doctor` must disclose the profile boundary in its budget block
+/// (T2b): the default profile governs the character budget, but it is not the
+/// run's identity. Captured from the real binary so the assertion is on what
+/// the operator actually sees, not on an in-source string mirrored by the test.
 ///
 /// Issue #1933 (ADR-0004 step 4).
 #[test]
@@ -220,12 +220,12 @@ fn test_issue_1933_doctor_budget_discloses_the_tramo_d_boundary() {
     // in CI); the budget block prints regardless. Assert on the text, not the
     // exit code.
     assert!(
-        stdout.contains("Tramo D"),
-        "doctor's budget block must name the Tramo D boundary, got:\n{stdout}"
+        stdout.contains("now governs the cleaner"),
+        "doctor must name the boundary the profile now governs, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("no está cableado al run"),
-        "doctor must say the profile is not wired to the run yet, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "doctor must say the profile is not the run identity, got:\n{stdout}"
     );
 }
 
@@ -325,8 +325,12 @@ fn show_default_render_names_the_repo_verified_profiles_as_history() {
         "the profile context must be shown, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("Ninguna corrida los consume"),
-        "the profile numbers must be labelled as history no run consumes, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "the profile block must say it is not the run identity, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("max_chars: 98304"),
+        "the printed budget must be the governing profile budget, got:\n{stdout}"
     );
 }
 
@@ -381,8 +385,9 @@ fn show_budget_names_the_operator_origin_for_an_explicit_max_chars() {
     );
 }
 
-/// Without flags the budget block names the spec default for BOTH knobs —
-/// `show` may not dress a default up as a choice the operator made.
+/// Without flags, the budget comes from the default profile (T2b) and only
+/// the threshold is a spec default. `show` may not dress either up as a
+/// choice the operator made.
 #[test]
 fn show_budget_names_the_spec_default_without_flags() {
     let (_dir, config) = seeded_config("");
@@ -392,9 +397,16 @@ fn show_budget_names_the_spec_default_without_flags() {
 
     assert_eq!(
         stdout.matches("default del spec").count(),
-        2,
-        "max_chars AND threshold must both name the spec default when no flag \
-         is given, got:\n{stdout}"
+        1,
+        "only the threshold is a spec default when no flag is given, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("max_chars: 98304"),
+        "max_chars must be the governing profile budget, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("profile (default granite-97m"),
+        "the profile must be named as the budget origin, got:\n{stdout}"
     );
 }
 
@@ -421,27 +433,29 @@ fn show_budget_names_the_operator_origin_for_an_explicit_threshold() {
     );
     assert_eq!(
         stdout.matches("default del spec").count(),
-        1,
-        "max_chars is still the spec default in this run, got:\n{stdout}"
+        0,
+        "an explicit threshold leaves no spec-default label in the budget block, \
+         max_chars comes from the profile, got:\n{stdout}"
     );
 }
 
-/// The Tramo D boundary note must appear in `show` output: the numbers are
-/// shown, but consuming them in the cleaner is explicitly not wired yet.
+/// The profile boundary must appear in `show` output (T2b): the character
+/// budget IS governed by the default profile, but the profile is still not
+/// the run's identity.
 #[test]
-fn show_output_discloses_the_tramo_d_boundary() {
+fn show_output_discloses_the_profile_boundary() {
     let (_dir, config) = seeded_config("");
 
     let output = run_with_config(&["show"], &config);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
-        stdout.contains("Tramo D"),
-        "show must name the Tramo D boundary, got:\n{stdout}"
+        stdout.contains("not the identity of the run"),
+        "show must say the profile is not the run identity, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("no está cableado al run"),
-        "show must say the profile is not wired to the run yet, got:\n{stdout}"
+        stdout.contains("now governs the cleaner"),
+        "show must name the budget the profile governs, got:\n{stdout}"
     );
 }
 
