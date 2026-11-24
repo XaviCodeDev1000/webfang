@@ -80,6 +80,7 @@ impl RemoteEmbeddingAdapter {
             usage_prompt_tokens: std::sync::atomic::AtomicU64::new(0),
             usage_total_tokens: std::sync::atomic::AtomicU64::new(0),
             usage_request_count: std::sync::atomic::AtomicU64::new(0),
+            dimension_rejections: std::sync::atomic::AtomicU64::new(0),
         })
     }
 }

@@ -69,7 +69,9 @@ fn anonymous_config(base_url: String) -> ProviderConfig {
         auth: AuthSource::None,
         capabilities: vec![Capability::Embedding],
         model: Some("nomic-embed-text".to_string()),
-        embedding_dim: None,
+        // T7: a cold adapter now fails closed before dialing. These cases
+        // use the one-dimensional `one_d` fixture, so the contract width is 1.
+        embedding_dim: Some(1),
         // Loopback es el wiremock; el opt-in de config es lo que lo permite.
         allow_loopback: true,
         network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),

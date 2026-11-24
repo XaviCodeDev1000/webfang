@@ -90,7 +90,9 @@ fn provider_with(base_url: url::Url, allow_loopback: bool, auth: AuthSource) -> 
         auth,
         capabilities: vec![Capability::Embedding],
         model: Some("nomic-embed-text".to_string()),
-        embedding_dim: None,
+        // T7: declare the contract width so the dimension guard does not cut
+        // these auth/header cases before the request reaches the mock.
+        embedding_dim: Some(8),
         allow_loopback,
         network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
         proxy: None,

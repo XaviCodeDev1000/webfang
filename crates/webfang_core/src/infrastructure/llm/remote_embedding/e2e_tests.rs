@@ -25,7 +25,7 @@ async fn embed_batch_happy_path_serves_fixture_vectors_in_order() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
     let _guard = mount_embeddings(&server, 200, &load_fixture("embeddings_happy.json")).await;
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let vecs = adapter
         .embed_batch(&["a".to_string(), "b".to_string()])
@@ -33,7 +33,11 @@ async fn embed_batch_happy_path_serves_fixture_vectors_in_order() {
         .expect("happy path serves");
     assert_eq!(vecs.len(), 2);
     assert_eq!(vecs[0].len(), 8, "non-384d dims pass through");
-    assert_eq!(adapter.embedding_dim(), 0, "no probe ran yet");
+    assert_eq!(
+        adapter.embedding_dim(),
+        8,
+        "the configured pin is the contract width"
+    );
 }
 
 #[tokio::test]
@@ -41,7 +45,7 @@ async fn embed_delegates_to_batch_for_single_text() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
     let _guard = mount_embeddings(&server, 200, &load_fixture("embeddings_tolerant.json")).await;
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let vec = adapter.embed("hello").await.expect("single embed serves");
     assert_eq!(vec.len(), 8);
@@ -92,7 +96,7 @@ async fn wire_shape_matches_contract_golden() {
         .mount(&server)
         .await;
 
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
     adapter
         .embed_batch(&["hello world".to_string()])
         .await
@@ -138,7 +142,7 @@ async fn status_429_then_success_recovers() {
         .respond_with(ResponseTemplate::new(200).set_body_string(&happy))
         .mount(&server)
         .await;
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let vecs = adapter
         .embed_batch(&["a".to_string()])
@@ -157,7 +161,7 @@ async fn status_500_exhausts_and_reports_last_status() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
     let _guard = mount_embeddings(&server, 500, "caído").await;
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let err = adapter
         .embed_batch(&["a".to_string()])
@@ -183,7 +187,7 @@ async fn status_400_is_terminal_without_retry() {
     use wiremock::MockServer;
     let server = MockServer::start().await;
     let _guard = mount_embeddings(&server, 400, "mala petición").await;
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let err = adapter
         .embed_batch(&["a".to_string()])
@@ -215,7 +219,7 @@ async fn oversize_body_maps_to_semantic_error() {
         .respond_with(ResponseTemplate::new(200).set_body_string(&huge))
         .mount(&server)
         .await;
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(8));
 
     let err = adapter
         .embed_batch(&["a".to_string()])
@@ -280,6 +284,7 @@ async fn timeout_is_retried_and_recovery_is_served() {
     });
     cfg.base_url = Url::parse(&server.uri()).expect("mock uri parses");
     cfg.allow_loopback = true;
+    cfg.embedding_dim = Some(8);
     let client = wreq::Client::builder()
         .timeout(Duration::from_millis(150))
         .build()
@@ -326,7 +331,7 @@ async fn body_read_error_maps_to_spanish_inference_error() {
         )
         .mount(&server)
         .await;
-    let adapter = adapter_for(&server, |_| {});
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(2));
 
     // Either the short read surfaces as the body-read error arm or the
     // complete body parses; both are legitimate, and the assertion
@@ -372,6 +377,64 @@ async fn probe_matching_pin_continues() {
 
     let dim = adapter.probe_dim().await.expect("matching pin continues");
     assert_eq!(dim, 8);
+}
+
+#[tokio::test]
+async fn mixed_dimension_batch_is_rejected_with_one_outbound_call() {
+    use wiremock::MockServer;
+    let server = MockServer::start().await;
+    let mixed = r#"{"data":[{"index":0,"embedding":[1.0,2.0,3.0]},{"index":1,"embedding":[1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0]}]}"#;
+    let _guard = mount_embeddings(&server, 200, mixed).await;
+    let adapter = adapter_for(&server, |cfg| cfg.embedding_dim = Some(3));
+
+    let err = adapter
+        .embed_batch(&["a".to_string(), "b".to_string()])
+        .await
+        .expect_err("a mixed-width response must not be ranked or bisected");
+    assert!(
+        super::dimension::is_dimension_rejection(&err),
+        "the failure must be terminal and dimension-tagged, got: {err}"
+    );
+    let metrics = adapter.metrics();
+    assert_eq!(metrics.dimension_rejections, 1, "one bad vector is counted");
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .map(|r| r.len())
+            .unwrap_or(0),
+        1,
+        "the provider must see exactly one call — no bisection after rejection"
+    );
+}
+
+#[tokio::test]
+async fn zero_width_fails_before_any_provider_request() {
+    use wiremock::MockServer;
+    let server = MockServer::start().await;
+    // No mock mounted: any dial would 404. A cold adapter must cut first.
+    let adapter = adapter_for(&server, |_| {});
+    assert_eq!(
+        adapter.embedding_dim(),
+        0,
+        "no pin and no probe means zero width"
+    );
+
+    let err = adapter
+        .embed_batch(&["a".to_string()])
+        .await
+        .expect_err("zero width must fail closed before dialing");
+    assert!(super::dimension::is_dimension_rejection(&err));
+    assert_eq!(adapter.metrics().request_count, 0, "no request may be sent");
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .map(|r| r.len())
+            .unwrap_or(0),
+        0,
+        "the provider must see zero outbound requests"
+    );
 }
 
 #[tokio::test]

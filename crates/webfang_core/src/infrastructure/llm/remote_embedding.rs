@@ -81,6 +81,8 @@ pub struct EmbeddingRunMetrics {
     pub total_tokens: u64,
     /// Number of embedding requests made in this run.
     pub request_count: u64,
+    /// Number of vectors rejected by the declared-width guard in this run.
+    pub dimension_rejections: u64,
 }
 
 /// Remote embedding adapter: `EmbeddingPort` over `POST {base_url}/embeddings`.
@@ -122,6 +124,7 @@ pub struct RemoteEmbeddingAdapter {
     usage_prompt_tokens: std::sync::atomic::AtomicU64,
     usage_total_tokens: std::sync::atomic::AtomicU64,
     usage_request_count: std::sync::atomic::AtomicU64,
+    dimension_rejections: std::sync::atomic::AtomicU64,
 }
 
 /// Render an error together with its `source` chain.
@@ -369,7 +372,26 @@ impl RemoteEmbeddingAdapter {
             if texts.is_empty() {
                 return Ok(Vec::new());
             }
-            self.post_embeddings(texts).await
+            let declared = self.embedding_dim();
+            if declared == 0 {
+                // A cold adapter has no contract width. Never adopt one from
+                // a response: cut before any provider request is sent.
+                return Err(dimension::rejection_error(&self.provider_id, 0));
+            }
+            let vectors = self.post_embeddings(texts).await?;
+            let rejected = dimension::rejected_count(&vectors, declared);
+            if rejected > dimension::MAX_TOLERATED_REJECTIONS {
+                self.dimension_rejections
+                    .fetch_add(rejected as u64, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!(
+                    provider_id = %self.provider_id,
+                    declared,
+                    rejected,
+                    "remote embedding batch aborted on dimension mismatch"
+                );
+                return Err(dimension::rejection_error(&self.provider_id, declared));
+            }
+            Ok(vectors)
         }
         .instrument(span)
         .await
@@ -391,10 +413,14 @@ impl RemoteEmbeddingAdapter {
             request_count: self
                 .usage_request_count
                 .load(std::sync::atomic::Ordering::Relaxed),
+            dimension_rejections: self
+                .dimension_rejections
+                .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
 
+pub(crate) mod dimension;
 #[cfg(test)]
 mod fixtures;
 mod gate;

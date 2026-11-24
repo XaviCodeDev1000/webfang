@@ -81,6 +81,13 @@ impl SemanticCleanerImpl {
     async fn embed_batch_raw(&self, contents: &[String]) -> Result<Vec<Vec<f32>>, SemanticError> {
         match self.embedding_port.embed_batch(contents).await {
             Ok(vectors) => Ok(vectors),
+            // A dimension rejection is terminal: bisecting it would issue
+            // more provider calls for a width that is already known bad.
+            Err(e)
+                if crate::infrastructure::llm::remote_embedding::dimension::is_dimension_rejection(&e) =>
+            {
+                Err(e)
+            },
             Err(_) if contents.len() > 1 => {
                 let mid = contents.len() / 2;
                 let (left, right) = contents.split_at(mid);
@@ -463,6 +470,75 @@ mod tests {
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
+    }
+
+    /// A port whose every batch is a terminal dimension rejection. Used to
+    /// prove the cleaner's bisection arm cannot amplify a bad width into
+    /// more remote calls.
+    struct RejectingDimensionPort {
+        calls: AtomicUsize,
+    }
+
+    impl EmbeddingPort for RejectingDimensionPort {
+        fn embed<'a>(&'a self, _text: &'a str) -> BoxFuture<'a, Result<Vec<f32>, SemanticError>> {
+            Box::pin(async {
+                Err(
+                    crate::infrastructure::llm::remote_embedding::dimension::rejection_error(
+                        "rejecting-provider",
+                        3,
+                    ),
+                )
+            })
+        }
+
+        fn embed_batch<'a>(
+            &'a self,
+            _texts: &'a [String],
+        ) -> BoxFuture<'a, Result<Vec<Vec<f32>>, SemanticError>> {
+            self.calls.fetch_add(1, Relaxed);
+            Box::pin(async {
+                Err(
+                    crate::infrastructure::llm::remote_embedding::dimension::rejection_error(
+                        "rejecting-provider",
+                        3,
+                    ),
+                )
+            })
+        }
+
+        fn embedding_dim(&self) -> usize {
+            3
+        }
+
+        fn model_id(&self) -> &str {
+            "rejecting-embedding"
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[tokio::test]
+    async fn dimension_rejection_is_terminal_not_bisected() {
+        let port = Arc::new(RejectingDimensionPort {
+            calls: AtomicUsize::new(0),
+        });
+        let cleaner = SemanticCleanerImpl::new(port.clone(), 1000, 0.3);
+        let texts = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+        let err = cleaner
+            .embed_batch_raw(&texts)
+            .await
+            .expect_err("dimension rejection must fail the batch");
+        assert!(
+            crate::infrastructure::llm::remote_embedding::dimension::is_dimension_rejection(&err),
+            "the terminal error must remain dimension-tagged, got: {err}"
+        );
+        assert_eq!(
+            port.calls.load(Relaxed),
+            1,
+            "a rejected batch must not be bisected"
+        );
     }
 
     /// Fixed-answer mock used for the shape-level tests below: one fixed

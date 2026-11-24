@@ -27,7 +27,8 @@ fn config(base_url: &str) -> ProviderConfig {
         auth: AuthSource::None,
         capabilities: vec![Capability::Embedding],
         model: Some("nomic-embed-text".to_string()),
-        embedding_dim: None,
+        // T7: 407 cases must reach the mock; a cold adapter would cut first.
+        embedding_dim: Some(8),
         allow_loopback: true,
         network_policy: NetworkPolicy::default(),
         proxy: None,
