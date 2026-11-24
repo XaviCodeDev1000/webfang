@@ -559,3 +559,17 @@ changes in this revision.
   for the maintainer, not a reclassification: Rust's `f64 as usize` saturates since 1.45 and
   `ModelProfile::max_chars` already documents that it saturates, so the claimed overflow-UB does not
   match current Rust semantics; the pre-existing unbounded budget value remains a separate question.
+- L20: **T6 landed as Commit 5 `e9978183`** (`fix(ai): classify remote AI failures at the adapter
+  boundary`, 5 files / 346 insertions / 29 deletions, new `error/ai_failure.rs`). The embedding
+  adapter appends a stable machine tag to the human prose of `SemanticError::Inference` (observed
+  status, dialed endpoint, honored Retry-After; or `transport`). The single
+  `From<SemanticError> for ScraperError` conversion reads that tag: 5xx and 401/407 → `Http`,
+  429 → `RateLimited(retry_after_secs)`, timeout/transport → `Network`. Untagged local consistency
+  failures — including the local body cap — keep the `Semantic` path. No new `ScraperError` or
+  `SemanticError` variants; `SemanticError` itself is not expanded. RED observed (six tests failed
+  to compile without the tag module), GREEN after wiring. Verification: `error::` lib suite 271
+  PASS, `ai_error_propagation` 14 PASS, `ai_boundary_test` PASS, `remote_embedding_resilience_test`
+  8 PASS, `ai_proxy_407_test` 4 PASS, full `nextest run -p webfang_core -p webfang_cli` 4909 passed
+  / 8 skipped, check + clippy all-targets/all-features `-D warnings` + fmt --check + doc
+  `-D warnings` PASS. All newly authored strings are English; the pre-existing Spanish operator
+  messages were preserved verbatim inside the tagged wrappers, not translated or newly written.
