@@ -42,6 +42,7 @@ fn static_strategy_ignores_missing_obscura_binary() {
 // The fake obscura binary is a `#!/bin/sh` script resolved through an
 // extension-less PATH lookup — unix semantics with no Windows equivalent
 // to assert (#1825).
+#[cfg_attr(miri, ignore)] // Command::spawn → posix_spawnattr_init unsupported by Miri (#775)
 #[cfg(unix)]
 #[test]
 fn hybrid_strategy_ok_without_chromium_feature() {
@@ -286,6 +287,7 @@ fn classify_render_probe_maps_output_shapes() {
 /// `no-render` build must pass the Hybrid preflight (verified upstream: the
 /// `--dump html` path is feature-independent, only paint resources are
 /// gated by the render feature).
+#[cfg_attr(miri, ignore)] // Command::spawn → posix_spawnattr_init unsupported by Miri (#775)
 #[cfg(unix)]
 #[test]
 fn no_render_build_passes_preflight_with_warning() {

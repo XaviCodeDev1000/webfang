@@ -69,6 +69,7 @@ write_ub_surfaces() {
   local root="$1"
   mkdir -p "$root/crates/webfang_core/src/application/batch" "$root/crates/webfang_core/src/application/scraper_service" "$root/crates/webfang_core/src/application/extraction" \
     "$root/crates/webfang_core/src/cli" \
+    "$root/crates/webfang_core/src/cli/preflight" \
     "$root/crates/webfang_core/src/infrastructure/converter" \
     "$root/crates/webfang_core/src/domain"
 
@@ -196,21 +197,69 @@ mod tests {
 }
 EOF
 
-  # preflight: the WHOLE module is the gate unit (#775) — `Command::spawn`
-  # reaches `posix_spawnattr_init`, which Miri cannot call on linux, and no
-  # text marker separates the tests that spawn from the ones that only name a
-  # missing binary. Both declared markers are still matched by the fixture so
-  # the surface stays documented; the module gate is what covers it.
-  cat >"$root/crates/webfang_core/src/cli/preflight.rs" <<'EOF'
-#[cfg(all(test, not(miri)))] // Command::spawn unsupported by Miri (#775)
+  # preflight (#2723): four child-file fixtures, one per declared entry. Each
+  # marker names the fixture that hands a fake binary to the probe; the pure
+  # tests beside it share no marker and stay ungated.
+  cat >"$root/crates/webfang_core/src/cli/preflight/tests_js_strategy.rs" <<'EOF'
+#[cfg(test)]
 mod tests {
     #[test]
-    fn hybrid_strategy_probes_the_resolved_obscura_binary() {
-        let _ = check_js_dependencies_with(&["true"], false, "", &opts);
+    #[cfg_attr(miri, ignore = "Command::spawn unsupported by Miri (#775)")]
+    fn full_strategy_ok_when_binary_reports_version() {
+        write_chrome_like(tmp.path(), "google-chrome", 0);
     }
 
     #[test]
-    fn version_probe_reads_the_child_output_and_the_exit_status() {
+    fn static_strategy_ok_without_spawn() {
+        assert!(check_js_dependencies_with(&["missing"], true, "", &opts).is_ok());
+    }
+}
+EOF
+
+  cat >"$root/crates/webfang_core/src/cli/preflight/tests_obscura_binary.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "Command::spawn unsupported by Miri (#775)")]
+    fn hybrid_binary_found_on_path_ok() {
+        let bin_dir = tempfile::TempDir::new().unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "Command::spawn unsupported by Miri (#775)")]
+    fn hybrid_explicit_existing_path_ok_with_empty_path() {
+        opts.network.obscura_binary = bin_path.to_string_lossy().into_owned();
+    }
+
+    #[test]
+    fn resolve_executable_in_path_finds_file_in_path_entries() {
+        let bin_path = tmp.path().join("obscura");
+    }
+}
+EOF
+
+  cat >"$root/crates/webfang_core/src/cli/preflight/tests_obscura_version.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "Command::spawn unsupported by Miri (#775)")]
+    fn hybrid_version_025_passes() {
+        let bin_path = write_obscura_with_version(tmp.path(), "0.2.5");
+    }
+
+    #[test]
+    fn parse_obscura_version_extracts_semver_token() {
+        assert_eq!(parse_obscura_version("obscura 0.2.0"), Some((0, 2, 0)));
+    }
+}
+EOF
+
+  cat >"$root/crates/webfang_core/src/cli/preflight/tests_version_probe.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "Command::spawn unsupported by Miri (#775)")]
+    fn version_probe_reports_normal_exit_and_output() {
         let _ = run_version_probe_with_timeout(&bin_path, DEADLINE);
     }
 }
@@ -556,26 +605,87 @@ mod tests {
     }
 }'
 
-# preflight: the seventh entry point, found by the manual run 43111425786
-# after 798 tests. TWO markers are declared for this one file —
-# `check_js_dependencies_with` (the hybrid strategy that probes a resolved
-# obscura binary) and `run_version_probe_with_timeout` (the direct probe) —
-# because they are the two doors into the same `Command::spawn`. The gate is
-# a MODULE-level one, so the RED control is its removal, and the removed gate
-# leaves both markers matched and un-gated: a symmetric counterpart of the
-# per-test RED controls above.
-red_surface "preflight" "crates/webfang_core/src/cli/preflight.rs" \
-'rejects a preflight module whose Miri gate was removed' \
+# preflight (#2723): the seven gates are now per test in four child files.
+# One RED control per entry (an ungated spawner must fail) plus one vacuity
+# control per entry (a vanished marker must fail) keeps every declared row
+# accountable — the old module-gate control could not see these files at all.
+red_surface "preflight-js" "crates/webfang_core/src/cli/preflight/tests_js_strategy.rs" \
+'rejects an ungated hybrid-strategy spawner in tests_js_strategy.rs' \
 '#[cfg(test)]
 mod tests {
     #[test]
     fn hybrid_strategy_ok_without_chromium_feature() {
-        let _ = check_js_dependencies_with(&["definitely-not-installed-9x4k"], false, "", &opts);
+        write_chrome_like(tmp.path(), "google-chrome", 0);
     }
+}'
 
+red_surface "preflight-js-vacuity" "crates/webfang_core/src/cli/preflight/tests_js_strategy.rs" \
+'rejects a vanished js-strategy marker' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn classify_render_probe_maps_output_shapes() {
+        assert_eq!(classify_render_probe(None), RenderCapability::Unknown);
+    }
+}'
+
+red_surface "preflight-obscura" "crates/webfang_core/src/cli/preflight/tests_obscura_binary.rs" \
+'rejects an ungated explicit-path spawner in tests_obscura_binary.rs' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn hybrid_explicit_existing_path_ok_with_empty_path() {
+        opts.network.obscura_binary = bin_path.to_string_lossy().into_owned();
+    }
+}'
+
+red_surface "preflight-obscura-vacuity" "crates/webfang_core/src/cli/preflight/tests_obscura_binary.rs" \
+'rejects a vanished obscura-binary marker' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn has_path_separator_detects_explicit_paths() {
+        assert!(has_path_separator("./obscura"));
+    }
+}'
+
+red_surface "preflight-version" "crates/webfang_core/src/cli/preflight/tests_obscura_version.rs" \
+'rejects an ungated version spawner in tests_obscura_version.rs' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn hybrid_version_025_passes() {
+        let bin_path = write_obscura_with_version(tmp.path(), "0.2.5");
+    }
+}'
+
+red_surface "preflight-version-vacuity" "crates/webfang_core/src/cli/preflight/tests_obscura_version.rs" \
+'rejects a vanished version marker' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn parse_obscura_version_extracts_semver_token() {
+        assert_eq!(parse_obscura_version("obscura 0.2.0"), Some((0, 2, 0)));
+    }
+}'
+
+red_surface "preflight-probe" "crates/webfang_core/src/cli/preflight/tests_version_probe.rs" \
+'rejects an ungated version probe in tests_version_probe.rs' \
+'#[cfg(test)]
+mod tests {
     #[test]
     fn version_probe_reports_normal_exit_and_output() {
-        let _ = run_version_probe_with_timeout(&bin_path, std::time::Duration::from_secs(5));
+        let _ = run_version_probe_with_timeout(&bin_path, DEADLINE);
+    }
+}'
+
+red_surface "preflight-probe-vacuity" "crates/webfang_core/src/cli/preflight/tests_version_probe.rs" \
+'rejects a vanished version-probe marker' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn pure_probe_contract() {
+        let _ = 42;
     }
 }'
 

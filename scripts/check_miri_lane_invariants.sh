@@ -110,29 +110,20 @@ UB_SURFACE_EXEMPT=(
 #   - `keyctl` (syscall 250): Miri cannot execute the syscall at all. That is a
 #     property of the interpreter, so the test that needs a real kernel keyring
 #     is gated and the configuration contract it also verifies stays ungated.
-#   - `check_js_dependencies_with` and `run_version_probe_with_timeout`
-#     (`cli/preflight.rs`) → `check_obscura_binary` → `probe_obscura_version`
-#     → `Command::spawn`: a THIRD interpreter limit, not aliasing. The hybrid
-#     strategy resolves an `obscura` binary and probes its version, so the
-#     spawn reaches `posix_spawnattr_init`, which Miri cannot call on `linux`
-#     at all. The manual run 43111425786 aborted `Miri (core)` there on the
-#     SEVENTH entry point, after 798 tests. These markers are COARSE: they also
-#     match the tests that assert a MISSING binary is rejected (they resolve to
-#     `None` and never spawn) and the pure path-resolution tests, because a text
-#     marker cannot tell "resolved an executable and spawned it" from "named one
-#     that does not exist".
+#   - `check_js_dependencies_with` and `run_version_probe_with_timeout` (now in
+#     `cli/preflight/*_tests.rs`) → `check_obscura_binary` →
+#     `probe_obscura_version` → `Command::spawn`: a THIRD interpreter limit,
+#     not aliasing. The hybrid strategy resolves an `obscura` binary and probes
+#     its version, so the spawn reaches `posix_spawnattr_init`, which Miri
+#     cannot call on `linux` at all. The manual run 43111425786 aborted
+#     `Miri (core)` there on the SEVENTH entry point, after 798 tests.
 #
-#     The gate is therefore a MODULE-level one — `mod tests` of that file is
-#     excluded from Miri, the `domain::html_cleaner::tests` shape — and NOT the
-#     8 per-test gates a precise solution would use. The blocker is
-#     `scripts/check_file_size.sh`: `cli/preflight.rs` is grandfathered at 3274
-#     lines and the ratchet is DESCENDING, so it may not grow by a single line.
-#     8 gates are 8 lines, and the tests that would have to move into a
-#     `#[path]` child to make room are ~570 lines, above the 500-line hard limit
-#     of a NEW file. The per-test shape — the honest one, which keeps the ~60
-#     other tests of that file under the interpreter — is tracked separately.
-#     The markers above stay declared so the surface is documented even when
-#     the module gate is what covers it.
+#     The gate is per test (#2723): after PR #2800 split the tests into four
+#     `#[path]` child files, only the tests that hand a fake executable to the
+#     probe carry `#[cfg_attr(miri, ignore)]`; the pure tests stay under the
+#     interpreter. Each declared marker therefore names the FIXTURE that
+#     distinguishes "resolved an executable and spawned it" from "named one
+#     that does not exist" — a text marker alone cannot tell them apart.
 #   - `V1_ONE_PROCESSED_URL` (`cli/scrape_flow_tests.rs`, extracted from
 #     `cli/scrape_flow.rs` by O3-B3) →
 #     `RecordStore::load` → `migrate_v1` → `fs::copy`: an EIGHTH, unrelated
@@ -171,8 +162,14 @@ UB_SURFACE_ENTRIES=(
   "crates/webfang_core/src/cli/batch_flush_tests.rs~flush_spool_tail|convert_spool~0~flush_spool_tail → convert_spool → extract_content → extract_with_selector → serialize_matches → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/fragment_markdown.rs~with_header~0~with_header (fragment_markdown.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/domain/keyring_store.rs~store.build|default_store.build~0~keyctl (syscall 250) building a real kernel-keyring credential"
-  "crates/webfang_core/src/cli/preflight.rs~check_js_dependencies_with~0~check_obscura_binary → probe_obscura_version → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
-  "crates/webfang_core/src/cli/preflight.rs~run_version_probe_with_timeout~0~run_version_probe_with_timeout → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
+  # #2723: the preflight spawn tests live in `cli/preflight/*_tests.rs` since
+  # PR #2800, not in preflight.rs. Each marker names the FIXTURE that hands a
+  # fake executable to the probe — that is what distinguishes a spawn from a
+  # pure test that only passes a missing binary name to the same function.
+  "crates/webfang_core/src/cli/preflight/tests_js_strategy.rs~write_chrome_like|write_variant_probe_obscura|#!/bin/sh~0~check_obscura_binary → probe_obscura_version / probe_render_capability → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
+  "crates/webfang_core/src/cli/preflight/tests_obscura_binary.rs~bin_dir|obscura_binary = bin_path~0~check_obscura_binary → probe_obscura_version → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
+  "crates/webfang_core/src/cli/preflight/tests_obscura_version.rs~write_obscura_with_version|hybrid_opts_with_version_script~0~check_obscura_version → probe_obscura_version → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
+  "crates/webfang_core/src/cli/preflight/tests_version_probe.rs~run_version_probe_with_timeout~0~run_version_probe_with_timeout → Command::spawn (posix_spawnattr_init unsupported by Miri, #775)"
   "crates/webfang_core/src/cli/scrape_flow_tests.rs~V1_ONE_PROCESSED_URL~0~RecordStore::load → migrate_v1 → fs::copy → copy_file_range (syscall 326), unsupported by Miri (upstream miri#4183)"
 )
 
