@@ -275,6 +275,7 @@ mod backup_name_tests {
     use super::*;
     use std::sync::Arc;
 
+    #[cfg_attr(miri, ignore)] // copy_file_range (syscall 326) unsupported by Miri (miri#4183)
     #[test]
     fn repeated_migrations_keep_distinct_backup_names() {
         let dir = tempfile::TempDir::new().expect("tempdir");

@@ -68,9 +68,11 @@ expect_rc() {
 write_ub_surfaces() {
   local root="$1"
   mkdir -p "$root/crates/webfang_core/src/application/batch" "$root/crates/webfang_core/src/application/scraper_service" "$root/crates/webfang_core/src/application/extraction" \
+    "$root/crates/webfang_core/src/application/http_client" \
     "$root/crates/webfang_core/src/cli" \
     "$root/crates/webfang_core/src/cli/preflight" \
     "$root/crates/webfang_core/src/infrastructure/converter" \
+    "$root/crates/webfang_core/src/infrastructure/export" \
     "$root/crates/webfang_core/src/domain"
 
   # html_cleaner: every test routes through clean_html — module-level gate.
@@ -281,6 +283,39 @@ mod tests {
     #[cfg_attr(miri, ignore = "copy_file_range(326) unsupported by Miri")]
     async fn apply_resume_mode_skips_previously_scraped_urls() {
         std::fs::write(&state_dir.join("example.com.json"), V1_ONE_PROCESSED_URL).unwrap();
+    }
+}
+EOF
+
+  # retry (#3027): the wiremock-backed status-exhaustion test builds a wreq
+  # Client and reaches `TLS_method` in btls FFI. The pure backoff cases and the
+  # loopback-refused dial beside it stay under the interpreter.
+  cat >"$root/crates/webfang_core/src/application/http_client/retry.rs" <<'EOF'
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn compute_backoff_delay_is_capped_at_max() {
+        assert_eq!(compute_backoff_delay(3, None, 10, 1), 1);
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore = "TLS_method (btls FFI) unsupported by Miri")]
+    async fn exhaustion_after_status_failures_stays_bare() {
+        let server = wiremock::MockServer::start().await;
+    }
+}
+EOF
+
+  # record_store_file (#3027): a direct migrate_v1 call reaches the same
+  # `copy_file_range` (syscall 326) surface as the pre-v2 resume fixture. The
+  # module is NOT gated — only the migration test carries the per-test gate.
+  cat >"$root/crates/webfang_core/src/infrastructure/export/record_store_file.rs" <<'EOF'
+#[cfg(test)]
+mod backup_name_tests {
+    #[test]
+    #[cfg_attr(miri, ignore = "copy_file_range (syscall 326) unsupported by Miri (upstream miri#4183)")]
+    fn repeated_migrations_keep_distinct_backup_names() {
+        store.migrate_v1(&path, legacy).expect("migration");
     }
 }
 EOF
@@ -716,6 +751,57 @@ mod tests {
     #[tokio::test]
     async fn apply_resume_mode_skips_previously_scraped_urls() {
         std::fs::write(&state_dir.join("example.com.json"), v2_state()).unwrap();
+    }
+}'
+
+# retry (#3027): `MockServer::start` is the marker that separates the
+# wiremock-backed status-exhaustion test from the pure backoff cases. Without
+# its per-test gate the test reaches `TLS_method` (btls FFI) and aborts the
+# whole lane before any `cli::` test runs (dispatch 45490558291).
+red_surface "retry-status" "crates/webfang_core/src/application/http_client/retry.rs" \
+'rejects an ungated wiremock-backed status-exhaustion test' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn exhaustion_after_status_failures_stays_bare() {
+        let server = wiremock::MockServer::start().await;
+    }
+}'
+
+# Vacuity, per entry: no wiremock setup left in the retry file means the
+# declared TLS_method surface is no longer being inspected.
+red_surface "retry-status-vacuity" "crates/webfang_core/src/application/http_client/retry.rs" \
+'rejects a retry file whose wiremock marker disappeared' \
+'#[cfg(test)]
+mod tests {
+    #[test]
+    fn compute_backoff_delay_is_capped_at_max() {
+        assert_eq!(compute_backoff_delay(3, None, 10, 1), 1);
+    }
+}'
+
+# record_store_file (#3027): the backup-name test calls `migrate_v1` directly,
+# reaching `copy_file_range` (syscall 326, upstream miri#4183). The module is
+# NOT gated, so the only acceptable shape is a per-test gate on that one test.
+red_surface "record-store-backup" "crates/webfang_core/src/infrastructure/export/record_store_file.rs" \
+'rejects an ungated direct migration test' \
+'#[cfg(test)]
+mod backup_name_tests {
+    #[test]
+    fn repeated_migrations_keep_distinct_backup_names() {
+        store.migrate_v1(&path, legacy).expect("migration");
+    }
+}'
+
+# Vacuity, per entry: a backup-name test that no longer migrates means the
+# syscall-326 surface is no longer being inspected.
+red_surface "record-store-backup-vacuity" "crates/webfang_core/src/infrastructure/export/record_store_file.rs" \
+'rejects a backup-name file whose migration marker disappeared' \
+'#[cfg(test)]
+mod backup_name_tests {
+    #[test]
+    fn backup_names_are_stable_without_migration() {
+        assert_eq!(1, 1);
     }
 }'
 
