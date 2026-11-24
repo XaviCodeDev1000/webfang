@@ -8,6 +8,7 @@ use super::retry::{backoff_delay_ms, retry_after_delay};
 use super::wire::EmbeddingRequest;
 use super::RemoteEmbeddingAdapter;
 use super::{parse_embedding_body, EMBEDDING_MAX_ATTEMPTS, EMBEDDING_MAX_BODY_BYTES};
+use crate::error::ai_failure::{remote_status, remote_transport};
 use crate::error::SemanticError;
 
 impl RemoteEmbeddingAdapter {
@@ -45,14 +46,24 @@ impl RemoteEmbeddingAdapter {
                         return self.read_and_parse(response, texts.len()).await;
                     }
                     if status == 429 || (500..=599).contains(&status) {
-                        if attempt >= EMBEDDING_MAX_ATTEMPTS {
-                            return Err(last_status_error(&self.provider_id, status));
-                        }
                         let raw_retry_after = response
                             .headers()
                             .get("retry-after")
                             .and_then(|v| v.to_str().ok());
                         let retry_after = retry_after_delay(raw_retry_after, Utc::now());
+                        if attempt >= EMBEDDING_MAX_ATTEMPTS {
+                            let retry_secs = if status == 429 {
+                                retry_after.map(|delay| delay.as_secs())
+                            } else {
+                                None
+                            };
+                            return Err(last_status_error(
+                                &self.provider_id,
+                                status,
+                                self.base_url.as_str(),
+                                retry_secs,
+                            ));
+                        }
                         // A header we could not honor is a server
                         // instruction we are about to ignore — say so,
                         // with the raw value, instead of silently
@@ -91,13 +102,19 @@ impl RemoteEmbeddingAdapter {
                             &self.provider_id,
                             self.proxy_auth_configured,
                             status,
+                            self.base_url.as_str(),
                         ));
                     }
-                    return Err(last_status_error(&self.provider_id, status));
+                    return Err(last_status_error(
+                        &self.provider_id,
+                        status,
+                        self.base_url.as_str(),
+                        None,
+                    ));
                 },
                 Err(e) if e.is_timeout() => {
                     if attempt >= EMBEDDING_MAX_ATTEMPTS {
-                        return Err(SemanticError::Inference(format!(
+                        return Err(remote_transport(format!(
                             "el endpoint de embeddings '{}' agotó el tiempo de espera",
                             self.provider_id
                         )));
@@ -106,7 +123,7 @@ impl RemoteEmbeddingAdapter {
                         .await;
                 },
                 Err(e) => {
-                    return Err(SemanticError::Inference(format!(
+                    return Err(remote_transport(format!(
                         "error de transporte contra el endpoint de embeddings '{}': {}",
                         self.provider_id,
                         render_error_chain(&e)
@@ -136,11 +153,16 @@ impl RemoteEmbeddingAdapter {
                 credential_sent = false,
                 "remote embedding endpoint rejected an anonymous request"
             );
-            return SemanticError::Inference(format!(
-                "el endpoint de embeddings '{}' devolvió {status} a una petición sin credencial \
-                 (auth source '{}'): el servidor rechazó la petición anónima",
-                self.provider_id, self.auth_source
-            ));
+            return remote_status(
+                format!(
+                    "el endpoint de embeddings '{}' devolvió {status} a una petición sin credencial \
+                     (auth source '{}'): el servidor rechazó la petición anónima",
+                    self.provider_id, self.auth_source
+                ),
+                status,
+                self.base_url.as_str(),
+                None,
+            );
         }
         tracing::warn!(
             provider_id = %self.provider_id,
@@ -149,11 +171,16 @@ impl RemoteEmbeddingAdapter {
             credential_sent = true,
             "remote embedding endpoint rejected the configured credential"
         );
-        SemanticError::Inference(format!(
-            "el endpoint de embeddings '{}' devolvió {status}: rechazó la credencial configurada \
-             (auth source '{}')",
-            self.provider_id, self.auth_source
-        ))
+        remote_status(
+            format!(
+                "el endpoint de embeddings '{}' devolvió {status}: rechazó la credencial configurada \
+                 (auth source '{}')",
+                self.provider_id, self.auth_source
+            ),
+            status,
+            self.base_url.as_str(),
+            None,
+        )
     }
 
     /// Bounded body read (16 MiB cap) plus the tolerant wire parse, with the
@@ -209,8 +236,20 @@ impl RemoteEmbeddingAdapter {
 }
 
 /// Terminal/retries-exhausted status error naming the last observed status.
-fn last_status_error(provider_id: &str, status: u16) -> SemanticError {
-    SemanticError::Inference(format!(
-        "el endpoint de embeddings '{provider_id}' devolvió el estado {status}"
-    ))
+///
+/// The observed status, dialed endpoint and (for 429) honored `Retry-After`
+/// travel in the tag so the single `From<SemanticError>` conversion can
+/// classify without inventing a status that was never seen.
+fn last_status_error(
+    provider_id: &str,
+    status: u16,
+    url: &str,
+    retry_after_secs: Option<u64>,
+) -> SemanticError {
+    remote_status(
+        format!("el endpoint de embeddings '{provider_id}' devolvió el estado {status}"),
+        status,
+        url,
+        retry_after_secs,
+    )
 }

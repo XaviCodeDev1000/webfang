@@ -5,6 +5,7 @@
 //! credential from an anonymous proxy dial using only a boolean provenance
 //! flag — the secret is never logged and never appears in the message.
 
+use crate::error::ai_failure::remote_status;
 use crate::error::SemanticError;
 
 /// Build the Spanish, credential-free 407 diagnostic.
@@ -13,6 +14,7 @@ pub(super) fn proxy_auth_error(
     provider_id: &str,
     proxy_auth_configured: bool,
     status: u16,
+    url: &str,
 ) -> SemanticError {
     if proxy_auth_configured {
         tracing::warn!(
@@ -21,10 +23,15 @@ pub(super) fn proxy_auth_error(
             proxy_auth_configured = true,
             "forward proxy rejected the configured proxy credential"
         );
-        SemanticError::Inference(format!(
-            "el proxy del provider '{provider_id}' devolvió {status}: rechazó la credencial \
-             configurada en proxy.auth (no se reintenta)"
-        ))
+        remote_status(
+            format!(
+                "el proxy del provider '{provider_id}' devolvió {status}: rechazó la credencial \
+                 configurada en proxy.auth (no se reintenta)"
+            ),
+            status,
+            url,
+            None,
+        )
     } else {
         tracing::warn!(
             provider_id = %provider_id,
@@ -32,9 +39,14 @@ pub(super) fn proxy_auth_error(
             proxy_auth_configured = false,
             "forward proxy required authentication but none was configured"
         );
-        SemanticError::Inference(format!(
-            "el proxy del provider '{provider_id}' devolvió {status}: exige autenticación pero no \
-             se declaró proxy.auth (no se reintenta)"
-        ))
+        remote_status(
+            format!(
+                "el proxy del provider '{provider_id}' devolvió {status}: exige autenticación pero no \
+                 se declaró proxy.auth (no se reintenta)"
+            ),
+            status,
+            url,
+            None,
+        )
     }
 }

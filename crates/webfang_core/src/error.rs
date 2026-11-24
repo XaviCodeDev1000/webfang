@@ -143,8 +143,12 @@ pub enum ScraperError {
     Ingestion(String),
 
     /// Semantic cleaning error (AI-powered content processing)
+    ///
+    /// The `From<SemanticError>` conversion lives in [`ai_failure`]: a tagged
+    /// remote failure becomes `Http`/`RateLimited`/`Network` once, at the
+    /// adapter boundary; an untagged local failure stays `Semantic`.
     #[error("Error de limpieza semántica: {0}")]
-    Semantic(#[from] SemanticError),
+    Semantic(SemanticError),
 
     /// HTTP/2 configuration error (ALPN, settings, or handshake failure)
     #[error("Error de configuración HTTP/2: {0}")]
@@ -376,6 +380,7 @@ impl SemanticError {
     }
 }
 
+pub mod ai_failure;
 mod classification;
 mod conversions;
 
