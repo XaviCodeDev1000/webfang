@@ -5,9 +5,10 @@
 ///   `is_t2_blocking_status(status)` (403/429/503/520-529) OR
 ///   `has_genuine_fingerprint` — a Fingerprint in genuine challenge context: a
 ///   non-config-string body match (#781 — a quoted JS/JSON config value like
-///   `"wgConfirmEdit...":"hcaptcha"` is NOT genuine) or a control header
-///   (active mitigation). This keeps dense legitimate pages (Wikipedia) from
-///   escalating to an obfuscated-WAF block on HTTP 200.
+///   `"wgConfirmEdit...":"hcaptcha"` is NOT genuine). A control header alone
+///   does NOT qualify at status 200 (S11): a correlated WAF status is required
+///   for header-sourced promotion. This keeps dense legitimate pages
+///   (Wikipedia) from escalating to an obfuscated-WAF block on HTTP 200.
 /// - Rule (b): body < 1500B AND > 5 `<script>` tags → block if
 ///   `is_t2_blocking_status(status)` OR (200 + HTML content-type). The
 ///   200+HTML case is the "H3 fix" silent challenge and MUST be kept
@@ -46,7 +47,7 @@ use crate::domain::waf::InspectionContext;
 use super::content_type::is_html_content_type;
 use super::signatures::{
     ENTROPY_THRESHOLD, SILENT_CHALLENGE_MAX_BYTES, SILENT_CHALLENGE_MIN_SCRIPTS,
-    SUSPICIOUS_SIZE_THRESHOLD,
+    SUSPICIOUS_SIZE_THRESHOLD, WAF_CONTROL_HEADERS,
 };
 
 /// Entropy-based challenge detection (REQ-WAF-06).
@@ -59,7 +60,22 @@ pub fn entropy_evidence(
     if body.len() > SUSPICIOUS_SIZE_THRESHOLD {
         let entropy = calculate_entropy(body);
         if entropy > ENTROPY_THRESHOLD {
-            if crate::domain::waf::is_t2_blocking_status(ctx.status) || has_genuine_fingerprint {
+            // S11: at status 200 the caller's `has_genuine_fingerprint` may have
+            // been set by control-header presence alone (`cf-mitigated` etc.).
+            // A control header is T2 context, not a WAF-correlated status, so
+            // it must not promote a high-entropy body to T1 there. Only a
+            // genuine BODY fingerprint may do that; a correlated status is
+            // required for header-sourced promotion.
+            let genuine_fingerprint = if ctx.status == Some(200)
+                && WAF_CONTROL_HEADERS
+                    .iter()
+                    .any(|(name, _)| ctx.headers.contains_key(*name))
+            {
+                super::evidence::collect_body_evidence(body).1
+            } else {
+                has_genuine_fingerprint
+            };
+            if crate::domain::waf::is_t2_blocking_status(ctx.status) || genuine_fingerprint {
                 return Some(crate::domain::waf::WafEvidence {
                     provider: "Obfuscated WAF",
                     tier: crate::domain::waf::WafTier::Challenge,

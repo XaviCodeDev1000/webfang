@@ -166,10 +166,11 @@ fn count_visible_text(html: &str) -> VisibleTextCount {
 ///
 /// # Arguments
 ///
-/// * `html` - Raw HTML content of the page
-/// * `ignore_waf` - Bypass WAF classification (REQ-WAF-07). When `true`, the
-///   inspection yields a clean verdict and the page is classified by normal
-///   spa/static logic instead of [`SpaSignal::WafBlocked`].
+/// * `html` - Raw HTML content of the page (the body sample under inspection)
+/// * `ctx` - Full [`InspectionContext`] built by the caller from the fetched
+///   page. Its `ignore_waf` flag controls the REQ-WAF-07 bypass: when `true`
+///   the inspection yields a clean verdict and the page is classified by
+///   normal spa/static logic instead of [`SpaSignal::WafBlocked`].
 ///
 /// # Returns
 ///
@@ -178,28 +179,27 @@ fn count_visible_text(html: &str) -> VisibleTextCount {
 /// # Examples
 ///
 /// ```
+/// use webfang_core::domain::waf::InspectionContext;
 /// use webfang_core::infrastructure::downloader::spa_detector::{detect_spa, SpaSignal};
+///
+/// let ctx = InspectionContext::default();
 ///
 /// // Substantial visible text → static, even with hydration markers (SSR).
 /// let html = "<html><body><article><h1>Hello</h1><p>This page carries enough visible text to be considered static content by the detector.</p></article></body></html>";
-/// assert_eq!(detect_spa(html, false), SpaSignal::StaticContent);
+/// assert_eq!(detect_spa(html, &ctx), SpaSignal::StaticContent);
 ///
 /// // A JS shell: fat markup, near-zero visible text → SPA.
 /// let spa = "<html><body><div id=\"root\"></div></body></html>";
-/// assert!(matches!(detect_spa(spa, false), SpaSignal::SpaDetected(_)));
+/// assert!(matches!(detect_spa(spa, &ctx), SpaSignal::SpaDetected(_)));
 /// ```
-pub fn detect_spa(html: &str, ignore_waf: bool) -> SpaSignal {
+pub fn detect_spa(html: &str, ctx: &InspectionContext) -> SpaSignal {
     // Check for WAF challenges first via the shared inspection verdict
-    // (REQ-WAF-10) — challenge pages are not real SPAs. Degraded context (no
-    // HTTP status/content-type): only Challenge-tier (T1) markers classify a
-    // challenge, so bare Fingerprint vendor names no longer cause false
-    // positives (issue #346). `ignore_waf` short-circuits to a clean verdict
-    // (REQ-WAF-07) so an opted-out caller never aborts on the spa path (W1).
-    let ctx = InspectionContext {
-        ignore_waf,
-        ..InspectionContext::default()
-    };
-    let verdict = WafInspector::inspect(html, &ctx);
+    // (REQ-WAF-10) — challenge pages are not real SPAs. The caller supplies the
+    // full inspection context (status, headers, content-type, body sample and
+    // cookies) and owns the `ignore_waf` policy; there is no hardcoded short
+    // circuit here (S11). WAF detection therefore sees the real HTTP status
+    // and control headers instead of a degraded, status-less context.
+    let verdict = WafInspector::inspect(html, ctx);
     if verdict.is_blocked {
         return SpaSignal::WafBlocked;
     }
@@ -253,7 +253,10 @@ mod tests {
   </article>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::StaticContent);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::StaticContent
+        );
     }
 
     #[test]
@@ -266,7 +269,7 @@ mod tests {
   <script src="/static/js/bundle.js"></script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "React #root"
@@ -283,7 +286,7 @@ mod tests {
   <script src="/js/app.js"></script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::MountPoint(_))
@@ -300,7 +303,7 @@ mod tests {
   <script id="__NEXT_DATA__" type="application/json">{"props":{}}</script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "Next.js"
@@ -317,7 +320,7 @@ mod tests {
   <script>window.__NUXT__={}</script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "Nuxt.js"
@@ -333,7 +336,7 @@ mod tests {
   <app-root></app-root>
 </body>
 </html>"#;
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "Angular app-root"
@@ -343,7 +346,7 @@ mod tests {
     #[test]
     fn test_insufficient_text_empty() {
         let html = "";
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::InsufficientText(0))
@@ -353,7 +356,7 @@ mod tests {
     #[test]
     fn test_insufficient_text_short() {
         let html = "<html></html>"; // 0 visible chars < 50
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::InsufficientText(_))
@@ -372,7 +375,7 @@ mod tests {
              <script>{fat_script}</script></head><body></body></html>"
         );
         assert!(html.len() > 5_000, "fixture must be a fat raw-HTML shell");
-        let signal = detect_spa(&html, false);
+        let signal = detect_spa(&html, &InspectionContext::default());
         assert!(
             matches!(
                 signal,
@@ -393,7 +396,7 @@ mod tests {
             "b".repeat(100),
             "c".repeat(100),
         );
-        let signal = detect_spa(&html, false);
+        let signal = detect_spa(&html, &InspectionContext::default());
         assert!(
             matches!(
                 signal,
@@ -415,7 +418,10 @@ mod tests {
   <div id="root"><article><h1>Server rendered</h1><p>This content was hydrated server-side and is fully readable without executing any JavaScript at all.</p></article></div>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::StaticContent);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::StaticContent
+        );
     }
 
     #[test]
@@ -429,7 +435,10 @@ mod tests {
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::WafBlocked);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::WafBlocked
+        );
     }
 
     #[test]
@@ -441,7 +450,10 @@ mod tests {
   <div class="g-recaptcha" data-sitekey="abc123"></div>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::WafBlocked);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::WafBlocked
+        );
     }
 
     #[test]
@@ -454,7 +466,10 @@ mod tests {
   <div class="h-captcha" data-sitekey="abc123"></div>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::WafBlocked);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::WafBlocked
+        );
     }
 
     #[test]
@@ -468,7 +483,10 @@ mod tests {
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::WafBlocked);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::WafBlocked
+        );
     }
 
     #[test]
@@ -479,7 +497,10 @@ mod tests {
         // prose carries enough visible text to stay static under the #758
         // text gate.
         let html = r#"<html><body><article><p>This site is protected by cloudflare and this sentence is long enough to pass the visible text threshold.</p></article></body></html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::StaticContent);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::StaticContent
+        );
     }
 
     #[test]
@@ -492,30 +513,39 @@ mod tests {
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::WafBlocked);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::WafBlocked
+        );
     }
 
     #[test]
     fn test_detect_spa_ignore_waf_true_t1_not_blocked() {
-        // REQ-WAF-07 (W1): ignore_waf=true short-circuits the inspection to a
-        // clean verdict, so a genuine T1 challenge is NOT WafBlocked — it falls
-        // through to normal spa/static classification.
+        // S11: the escalation gate reads `ignore_waf` from the caller-supplied
+        // InspectionContext instead of a hardcoded bool short circuit. The same
+        // body is clean under the opted-out context and blocked under the
+        // default one — the policy is configurable, not compiled into detect_spa.
         let html = r#"<!DOCTYPE html>
 <html>
 <body>
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
-        let signal = detect_spa(html, true);
-        assert_ne!(signal, SpaSignal::WafBlocked);
+        let opted_out = InspectionContext {
+            ignore_waf: true,
+            ..Default::default()
+        };
+        let enforced = InspectionContext::default();
+        assert_ne!(detect_spa(html, &opted_out), SpaSignal::WafBlocked);
+        assert_eq!(detect_spa(html, &enforced), SpaSignal::WafBlocked);
     }
 
     #[test]
     fn test_detect_spa_ignore_waf_true_t1_with_spa_marker_escalates() {
-        // Triangulation: with ignore_waf=true a T1 challenge that ALSO carries
-        // an SPA mount point is classified by normal spa logic (SpaDetected),
-        // not WafBlocked — the page is treated per the regular spa path. The
-        // ignore_waf=false mirror is test_waf_checked_before_spa (WafBlocked).
+        // Triangulation: with `ignore_waf` set in the context, a T1 challenge
+        // that ALSO carries an SPA mount point is classified by normal spa
+        // logic (SpaDetected), not WafBlocked. The default-context mirror is
+        // test_waf_checked_before_spa (WafBlocked).
         let html = r#"<!DOCTYPE html>
 <html>
 <body>
@@ -523,8 +553,12 @@ mod tests {
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
+        let ctx = InspectionContext {
+            ignore_waf: true,
+            ..Default::default()
+        };
         assert!(matches!(
-            detect_spa(html, true),
+            detect_spa(html, &ctx),
             SpaSignal::SpaDetected(SpaReason::MountPoint(_))
         ));
     }
@@ -533,14 +567,17 @@ mod tests {
     fn test_static_content_exact_threshold() {
         // Exactly 50 visible chars should be considered static (not insufficient)
         let html = format!("<html><body>{}</body></html>", "a".repeat(50));
-        assert_eq!(detect_spa(&html, false), SpaSignal::StaticContent);
+        assert_eq!(
+            detect_spa(&html, &InspectionContext::default()),
+            SpaSignal::StaticContent
+        );
     }
 
     #[test]
     fn test_static_content_below_threshold() {
         // 49 visible chars should be insufficient
         let html = format!("<html><body>{}</body></html>", "a".repeat(49));
-        let signal = detect_spa(&html, false);
+        let signal = detect_spa(&html, &InspectionContext::default());
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::InsufficientText(49))
@@ -568,7 +605,7 @@ mod tests {
   </footer>
 </body>
 </html>"#;
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(
             matches!(
                 &signal,
@@ -592,7 +629,7 @@ mod tests {
             "b".repeat(40),
         );
         // 80 visible chars total, all inside boilerplate regions.
-        let signal = detect_spa(&html, false);
+        let signal = detect_spa(&html, &InspectionContext::default());
         assert!(
             matches!(
                 &signal,
@@ -616,7 +653,7 @@ mod tests {
             "b".repeat(30),
         );
         // 60 visible chars, all anchor text.
-        let signal = detect_spa(&html, false);
+        let signal = detect_spa(&html, &InspectionContext::default());
         assert!(
             matches!(
                 &signal,
@@ -647,7 +684,10 @@ mod tests {
   <footer><p>Copyright 2026 Example Site. All rights reserved.</p></footer>
 </body>
 </html>"#;
-        assert_eq!(detect_spa(html, false), SpaSignal::StaticContent);
+        assert_eq!(
+            detect_spa(html, &InspectionContext::default()),
+            SpaSignal::StaticContent
+        );
     }
 
     /// #785 edge: content exactly at the threshold (50 chars of paragraph
@@ -660,7 +700,10 @@ mod tests {
             "b".repeat(80),
             "a".repeat(50),
         );
-        assert_eq!(detect_spa(&html, false), SpaSignal::StaticContent);
+        assert_eq!(
+            detect_spa(&html, &InspectionContext::default()),
+            SpaSignal::StaticContent
+        );
     }
 
     /// #785: when content text is insufficient, a mount-point marker still
@@ -673,7 +716,7 @@ mod tests {
   <div id="root"></div>
   <footer><p>Some footer credit text here</p></footer>
 </body></html>"#;
-        let signal = detect_spa(html, false);
+        let signal = detect_spa(html, &InspectionContext::default());
         assert!(
             matches!(
                 &signal,
