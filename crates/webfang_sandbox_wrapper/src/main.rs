@@ -72,11 +72,11 @@ fn run() -> ExitCode {
     };
 
     let Some(arapuca) = resolve_arapuca() else {
-        warn_skip("arapuca binary unavailable");
+        warn_skip("arapuca binary unavailable", &task_id());
         return exec(&browser, &args);
     };
     if !cgroup_delegation() {
-        warn_skip("cgroup controllers not delegated");
+        warn_skip("cgroup controllers not delegated", &task_id());
         return exec(&browser, &args);
     }
 
@@ -91,9 +91,11 @@ fn run() -> ExitCode {
 }
 
 /// Emit a structured skip reason. WebFang's `tracing::WARN` counterpart lives
-/// in the downloaders; this standalone binary has no subscriber installed.
-fn warn_skip(reason: &str) {
-    eprintln!("webfang-sandbox-wrapper: sandbox=skipped reason={reason}");
+/// in the downloaders; this standalone binary has no subscriber installed, so
+/// it carries the same run id in its stderr line and the parent process owns
+/// the FileTraceLayer event.
+fn warn_skip(reason: &str, task_id: &str) {
+    eprintln!("webfang-sandbox-wrapper: sandbox=skipped layer=3 reason={reason} task_id={task_id}");
 }
 
 /// Replace the current process, propagating `exec` failures to the caller.

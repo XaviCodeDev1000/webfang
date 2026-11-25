@@ -117,6 +117,85 @@ fn parse_page_loaded_url(stderr: &str) -> Option<Url> {
     matches!(parsed.scheme(), "http" | "https").then_some(parsed)
 }
 
+/// Emit the "wrapper applied" decision into FileTraceLayer.
+///
+/// The tenant/run id is the existing per-run task id; the top-level `trace_id`
+/// is added by FileTraceLayer from the surrounding fetch span. No metrics
+/// backend, global registry or extra correlation mechanism is introduced.
+pub fn trace_sandbox_applied(layer: u8, task_id: &str, binary: &str) {
+    info!(
+        event = "sandbox_applied",
+        layer,
+        sandbox = "arapuca",
+        task_id,
+        binary,
+        "browser subprocess sandboxed"
+    );
+}
+
+/// Emit the "wrapper skipped" decision with its reason and selected binary.
+pub fn trace_sandbox_skipped(layer: u8, task_id: &str, reason: &str, binary: &str) {
+    warn!(
+        event = "sandbox_skipped",
+        layer, reason, task_id, binary, "sandbox unavailable — running browser unsandboxed"
+    );
+}
+
+/// Emit one structured event per arapuca seccomp denial found on child stderr.
+///
+/// The vendored baseline profile returns `ENOSYS` for `landlock_*` and
+/// `memfd_create` and a dedicated `EPERM` tier for `ptrace`; arapuca's debug
+/// handler prints `seccomp: blocked syscall N (name)` for trapped syscalls.
+/// Mapping the name back to errno keeps the denial actionable without
+/// changing the sandbox profile or its argv.
+pub fn trace_sandbox_denials(stderr: &str, layer: u8, task_id: &str) {
+    for line in stderr.lines() {
+        let Some(rest) = line.strip_prefix("seccomp: blocked syscall ") else {
+            continue;
+        };
+        let Some((number, tail)) = rest.split_once(' ') else {
+            continue;
+        };
+        if number.parse::<u32>().is_err() {
+            continue;
+        }
+        let syscall = tail.trim().trim_start_matches('(').trim_end_matches(')');
+        if syscall.is_empty() {
+            continue;
+        }
+        let errno = if syscall == "ptrace" {
+            "EPERM"
+        } else {
+            "ENOSYS"
+        };
+        warn!(
+            event = "sandbox_denial",
+            errno,
+            syscall,
+            syscall_nr = number,
+            layer,
+            task_id,
+            "sandbox denied a syscall"
+        );
+    }
+}
+
+/// Emit the browser subprocess exit status as a structured event.
+pub fn trace_browser_exit(status: Option<&ExitStatus>, layer: u8, task_id: &str) {
+    let (exit_status, success) = match status {
+        Some(status) => (status.to_string(), status.success()),
+        None => ("unknown (wait failed)".to_string(), false),
+    };
+    info!(
+        event = "browser_exit",
+        exit_status = exit_status.as_str(),
+        success,
+        layer,
+        task_id,
+        "browser subprocess exited"
+    );
+}
+
 /// Subprocess-based downloader that shells out to `obscura fetch --dump html`
 /// (#793 — was markdown; the downstream pipeline is HTML-only).
 ///
@@ -232,22 +311,11 @@ impl ObscuraDownloader {
         }
         inner.push(url_string.to_string());
 
+        let binary = self.binary.to_string_lossy();
         if let Some(reason) = self.sandbox.skip_reason() {
-            warn!(
-                layer = 2,
-                reason,
-                task_id = %self.sandbox.task_id,
-                binary = %self.binary.display(),
-                "sandbox unavailable — running obscura unsandboxed"
-            );
+            trace_sandbox_skipped(2, &self.sandbox.task_id, reason, &binary);
         } else if let Some(arapuca) = &self.sandbox.arapuca {
-            info!(
-                layer = 2,
-                sandbox = "arapuca",
-                task_id = %self.sandbox.task_id,
-                binary = %self.binary.display(),
-                "browser subprocess sandboxed"
-            );
+            trace_sandbox_applied(2, &self.sandbox.task_id, &binary);
             let mut command = Command::new(arapuca);
             command.args(arapuca_args(
                 &self.binary,
@@ -288,6 +356,10 @@ impl ObscuraDownloader {
 
         let max_page_bytes = self.max_page_bytes;
         let result = timeout(self.timeout, Self::collect_child(child, max_page_bytes)).await;
+        if let Ok(Ok((_, err, status))) = &result {
+            trace_sandbox_denials(&String::from_utf8_lossy(err), 2, &self.sandbox.task_id);
+            trace_browser_exit(status.as_ref(), 2, &self.sandbox.task_id);
+        }
         match result {
             Ok(Ok(output)) => self.build_page(output, url, max_page_bytes),
             Ok(Err(error)) => Err(error),

@@ -214,6 +214,7 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> SandboxLau
     };
     if let Some(reason) = sandbox.skip_reason() {
         tracing::warn!(
+            event = "sandbox_skipped",
             layer = 3,
             reason,
             task_id = %sandbox.task_id,
@@ -224,6 +225,7 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> SandboxLau
     match resolve_wrapper_path() {
         Some(path) => {
             tracing::info!(
+                event = "sandbox_applied",
                 layer = 3,
                 sandbox = "arapuca-wrapper",
                 task_id = %sandbox.task_id,
@@ -237,6 +239,7 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> SandboxLau
         },
         None => {
             tracing::warn!(
+                event = "sandbox_skipped",
                 layer = 3,
                 reason = "sandbox wrapper binary not found",
                 task_id = %sandbox.task_id,
