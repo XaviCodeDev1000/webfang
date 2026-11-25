@@ -30,6 +30,15 @@ i_rv=$(grep -n -E '^(exec )?".*review-gate\.sh' "$HOOK" | head -1 | cut -d: -f1)
 mapfile -t guards < <(sed -n '/^GUARDS=(/,/^)/p' "$RUNNER" | grep -E '^  scripts/' | tr -d ' ')
 (( ${#guards[@]} > 0 )) || fail "no guards declared in $RUNNER"
 
+# A hook guard must work on a fresh checkout. jq is not part of the Rust
+# toolchain and is absent on minimal images; a guard that needs it belongs in
+# ci_fast_gate.sh / CI, not in pre-commit.
+for g in "${guards[@]}"; do
+  if grep -v '^[[:space:]]*#' "$ROOT/$g" | grep -qE '(^|[^[:alnum:]_])jq([^[:alnum:]_]|$)'; then
+    fail "guard $g requires jq, which is absent on fresh checkouts"
+  fi
+done
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 git -C "$TMP" init -q
