@@ -67,9 +67,9 @@ use wreq::redirect::Policy;
 ///
 /// Mirrors the MCP crate's `WEBFANG_MCP_DISABLE_SSRF` convention: wiremock
 /// listens on 127.0.0.1, so harnesses that exercise redirect chains need this
-/// set before building clients. Production never sets it; the entry-level DNS
-/// validator still blocks forbidden targets even when this is set, only the
-/// synchronous redirect guard is lifted.
+/// set before building clients. The read is compiled only for unit tests (S9):
+/// a shipped binary never consults it, so the synchronous redirect stop is
+/// always armed there.
 ///
 /// TEST-ISOLATION: Writers use `EnvGuard::{set,remove,with,clean}` or
 /// `env_lock()` for permanent setup (#1126). Readers must hold `EnvGuard`
@@ -83,7 +83,8 @@ pub const DISABLE_REDIRECT_GUARD_ENV: &str = "WEBFANG_DISABLE_SSRF_REDIRECT_GUAR
 /// Same rationale as [`DISABLE_REDIRECT_GUARD_ENV`]: wiremock binds 127.0.0.1,
 /// which [`is_forbidden_ip`] rejects, so any harness driving real connections
 /// through the production clients must set `WEBFANG_DISABLE_SSRF_RESOLVER=1`
-/// before clients are built. Production never sets it.
+/// before clients are built. The read is compiled only for unit tests (S9); a
+/// shipped binary always validates every DNS answer.
 ///
 /// `pub` (not `pub(crate)`) so the discovery integration tests — external
 /// test targets — can reference the single source of truth instead of
@@ -170,6 +171,7 @@ pub fn disables_ssrf(raw: Option<&str>) -> bool {
 }
 
 mod classification;
+mod env_hatches;
 mod forbidden_literal;
 mod ip_helpers;
 
@@ -178,6 +180,7 @@ pub use classification::{
     is_forbidden_ip_with_policy, is_ipv4_this_network, is_ipv6_link_local, is_ipv6_unique_local,
     is_permitted_loopback, is_reserved_v4,
 };
+pub(crate) use env_hatches::{redirect_guard_disabled_by_env, validating_resolver_disabled_by_env};
 pub use forbidden_literal::ForbiddenLiteral;
 pub use ip_helpers::{
     ipv6_6to4_embedded_v4, ipv6_isatap_embedded_v4, ipv6_nat64_embedded_v4,
@@ -251,13 +254,14 @@ pub fn reject_forbidden_literal_url(url: &url::Url) -> Result<(), ForbiddenLiter
 /// is `Policy::limited(10)`), so the hop cap and loop protection of the
 /// previous `Policy::limited(10)` are preserved.
 ///
-/// Test harnesses that exercise redirect chains against wiremock (which binds
-/// 127.0.0.1) can set `WEBFANG_DISABLE_SSRF_REDIRECT_GUARD=1` before building
-/// clients; the entry-level DNS validator still protects production callers.
+/// Unit-test harnesses that exercise redirect chains against wiremock (which
+/// binds 127.0.0.1) can set `WEBFANG_DISABLE_SSRF_REDIRECT_GUARD=1` before
+/// building clients; non-test builds never read it, so the stop is always
+/// armed in a shipped binary (S9).
 #[must_use]
 pub fn redirect_policy() -> Policy {
     let base = Policy::default();
-    let guard_enabled = std::env::var(DISABLE_REDIRECT_GUARD_ENV).is_err();
+    let guard_enabled = !redirect_guard_disabled_by_env();
     Policy::custom(move |attempt| {
         if guard_enabled && attempt.uri.host().is_some_and(is_forbidden_literal_host) {
             tracing::warn!(

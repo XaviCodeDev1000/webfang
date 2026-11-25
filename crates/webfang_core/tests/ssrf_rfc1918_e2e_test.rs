@@ -51,9 +51,9 @@ fn normalize_captured(s: &str) -> String {
         .join(" ")
 }
 
-/// Run `webfang` against `url` in production posture (entry guard enforced —
-/// the harness default is disarmed, so remove it explicitly).
-async fn run_production(url: &str) -> (Output, MockServer) {
+/// Run `webfang` against `url`. `bypass_vars` sets both SSRF test hatches in
+/// the child environment to prove a non-test build ignores them (S9).
+async fn run_production_with(url: &str, bypass_vars: bool) -> (Output, MockServer) {
     let mock_server = MockServer::start().await;
     // Tripwire: if any request reached the network, the mock would record it.
     Mock::given(method("GET"))
@@ -73,6 +73,17 @@ async fn run_production(url: &str) -> (Output, MockServer) {
     // per attempt — and every assertion stays outside, on the returned
     // `Output`.
     let mut command = common::std_cmd();
+    if bypass_vars {
+        command
+            .env(
+                webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
+                "1",
+            )
+            .env(
+                webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
+                "1",
+            );
+    }
     command
         .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
         .arg("--url")
@@ -89,22 +100,31 @@ async fn run_production(url: &str) -> (Output, MockServer) {
     (output, mock_server)
 }
 
+/// Production posture without any test hatch set (the original matrix).
+async fn run_production(url: &str) -> (Output, MockServer) {
+    run_production_with(url, false).await
+}
+
 /// Assert the pinned rejection contract for a forbidden IP literal:
 /// exit 69 (EX_UNAVAILABLE — CLI classifies the typed InvalidUrl as a hard
 /// scrape failure), user-facing SSRF message, and zero outbound.
 async fn assert_rejected_literal(url: &str, expected_ip: &str, deny_reason: &str) {
     let (output, mock_server) = run_production(url).await;
-    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert_entry_rejection(output, mock_server, expected_ip, deny_reason).await;
+}
 
-    assert!(
-        !output.status.success(),
-        "forbidden literal must fail: {url} stderr={stderr}"
-    );
-    let code = output.status.code().unwrap_or(0);
-    assert_eq!(code, 69, "exit code contract (EX_UNAVAILABLE): {stderr}");
+async fn assert_entry_rejection(
+    output: Output,
+    mock_server: MockServer,
+    expected_ip: &str,
+    deny_reason: &str,
+) {
+    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert!(!output.status.success(), "must fail: {stderr}");
+    assert_eq!(output.status.code(), Some(69), "exit 69: {stderr}");
     assert!(
         stderr.contains("SSRF detected") && stderr.contains(expected_ip),
-        "typed rejection naming the offending IP missing. {deny_reason}\nstderr: {stderr}"
+        "typed rejection missing. {deny_reason}\nstderr: {stderr}"
     );
     let requests = mock_server
         .received_requests()
@@ -112,8 +132,7 @@ async fn assert_rejected_literal(url: &str, expected_ip: &str, deny_reason: &str
         .expect("wiremock request journal");
     assert!(
         requests.is_empty(),
-        "entry guard fired after a socket opened — {deny_reason}; got {} requests",
-        requests.len()
+        "guard fired after a socket opened — {deny_reason}"
     );
 }
 
@@ -414,6 +433,111 @@ the ephemeral local listener.</p>
         !md_files.is_empty(),
         "positive control must write a Markdown artifact under {:?}",
         out_dir.path()
+    );
+}
+
+// ============================================================================
+// S9 — a non-test build ignores BOTH SSRF test hatches
+// ============================================================================
+
+/// Dial-time: the literal entry guard stays armed with both hatches set.
+#[tokio::test]
+async fn ssrf_bypass_vars_cannot_disarm_dial_guard() {
+    let (output, mock) = run_production_with("http://192.168.1.1:59999/", true).await;
+    assert_entry_rejection(output, mock, "192.168.1.1", "hatches must be ignored").await;
+}
+
+/// Connect-time: the validating resolver stays armed with both hatches set.
+#[tokio::test]
+async fn ssrf_bypass_vars_cannot_disarm_connect_resolver() {
+    let port = port_provider::bind_any().await.expect("ephemeral port");
+    let out_dir = tempfile::TempDir::new().expect("temp output dir");
+    let mut command = common::std_cmd();
+    command
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
+            "1",
+        )
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
+            "1",
+        )
+        .arg("--url")
+        .arg(format!("http://localhost:{port}/"))
+        .arg("--single-page")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(out_dir.path())
+        .arg("--timeout-secs")
+        .arg("5")
+        .arg("--max-retries")
+        .arg("0");
+    let output = common::spawn_budgeted(
+        "ssrf_bypass_vars_cannot_disarm_connect_resolver",
+        command,
+        None,
+    )
+    .await;
+    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(69), "dial must fail: {stderr}");
+    assert!(
+        stderr.contains("name resolution failed"),
+        "resolver hatch leaked: {stderr}"
+    );
+}
+
+/// Redirect-time: the literal redirect stop stays armed with both hatches set.
+#[tokio::test]
+async fn ssrf_bypass_vars_cannot_disarm_redirect_guard() {
+    let mock = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redir"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("location", "http://127.0.0.2:9/forbidden"),
+        )
+        .mount(&mock)
+        .await;
+    let out_dir = tempfile::TempDir::new().expect("temp output dir");
+    let mut command = common::std_cmd();
+    command
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
+            "1",
+        )
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
+            "1",
+        )
+        .arg("--url")
+        .arg(format!("{}/redir", mock.uri()))
+        .arg("--single-page")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(out_dir.path())
+        .arg("--timeout-secs")
+        .arg("5")
+        .arg("--max-retries")
+        .arg("0");
+    let output = common::spawn_budgeted(
+        "ssrf_bypass_vars_cannot_disarm_redirect_guard",
+        command,
+        None,
+    )
+    .await;
+    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(69),
+        "redirect must fail: {stderr}"
+    );
+    assert!(
+        stderr.contains("302"),
+        "redirect hop was followed: {stderr}"
+    );
+    assert_eq!(
+        mock.received_requests().await.expect("journal").len(),
+        1,
+        "only the seed request may hit the mock server"
     );
 }
 

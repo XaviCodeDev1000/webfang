@@ -64,11 +64,14 @@
 // consumers only.
 use crate::domain::network_policy::NetworkPolicy;
 use crate::domain::proxy_config::ClientSecurityProfile;
-#[cfg(test)]
-pub(crate) use crate::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV;
 use crate::domain::ssrf_guard::{
     is_forbidden_ip_with, is_forbidden_resolved_address, redirect_policy,
-    redirect_policy_with_loopback, redirect_policy_with_policy, DISABLE_VALIDATING_RESOLVER_ENV,
+    redirect_policy_with_loopback, redirect_policy_with_policy,
+    validating_resolver_disabled_by_env,
+};
+#[cfg(test)]
+pub(crate) use crate::domain::ssrf_guard::{
+    DISABLE_REDIRECT_GUARD_ENV, DISABLE_VALIDATING_RESOLVER_ENV,
 };
 
 use std::net::IpAddr;
@@ -99,11 +102,12 @@ pub use resolution_errors::{ForbiddenHostNotAllowlistedError, ForbiddenResolutio
 /// replaced with the scheme's conventional port otherwise. This mirrors
 /// wreq's own `GaiResolver`, which resolves `(name, 0)`.
 ///
-/// The escape hatch `DISABLE_VALIDATING_RESOLVER_ENV` is read **once, at
-/// construction time** (stored as a plain `bool`): long-lived clients keep a
-/// consistent policy for their whole lifetime (no half-disarmed states where
-/// some pooled connections validate and others don't), and there is no
-/// per-request env syscall on the resolve hot path.
+/// The test-only escape hatch is captured **once, at construction time** in
+/// unit-test builds (stored as a plain `bool`); non-test builds always
+/// validate (S9). Long-lived clients keep a consistent policy for their whole
+/// lifetime (no half-disarmed states where some pooled connections validate
+/// and others don't), and there is no per-request env syscall on the resolve
+/// hot path.
 ///
 /// Note: wreq short-circuits IP-literal hosts before calling any custom
 /// resolver, so this type only ever sees hostname connections; literal-IP
@@ -141,15 +145,13 @@ mod name_source;
 use self::name_source::{BoxedLookupError, GaiNameSource, NameSource};
 
 impl ValidatingResolver {
-    /// Builds a resolver; validation state is captured from
-    /// `DISABLE_VALIDATING_RESOLVER_ENV` at this moment. Only the exact
-    /// value `"1"` disarms the guard — any other value (including `"0"`,
-    /// `"true"`, `"yes"`) keeps validation active.
+    /// Builds a resolver with validation always active in non-test builds.
+    /// Unit tests capture the exact `"1"` hatch value here; any other value
+    /// (including `"0"`, `"true"`, `"yes"`) keeps validation active.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            validation_enabled: std::env::var(DISABLE_VALIDATING_RESOLVER_ENV).as_deref()
-                != Ok("1"),
+            validation_enabled: !validating_resolver_disabled_by_env(),
             allow_loopback: false,
             policy: Arc::new(NetworkPolicy::default()),
             name_source: Arc::new(GaiNameSource),
@@ -158,15 +160,15 @@ impl ValidatingResolver {
 
     /// Builds a resolver with the per-client loopback permit (#1462).
     ///
-    /// The escape hatch is still read once at construction (same semantics
-    /// as [`new`](Self::new)); `allow_loopback` additionally permits answers
+    /// The test-only hatch is still read once at construction in unit-test
+    /// builds (same semantics as [`new`](Self::new)); `allow_loopback`
+    /// additionally permits answers
     /// resolving to exactly `127.0.0.1` / `::1` for self-hosted endpoints.
     /// The flag lives on this instance — never in the process registry.
     #[must_use]
     pub fn with_allow_loopback(allow_loopback: bool) -> Self {
         Self {
-            validation_enabled: std::env::var(DISABLE_VALIDATING_RESOLVER_ENV).as_deref()
-                != Ok("1"),
+            validation_enabled: !validating_resolver_disabled_by_env(),
             allow_loopback,
             policy: Arc::new(NetworkPolicy::default()),
             name_source: Arc::new(GaiNameSource),
@@ -176,7 +178,7 @@ impl ValidatingResolver {
     /// Builds a resolver with the loopback permit AND this provider's B2
     /// network allowlist (slice 2, #1947).
     ///
-    /// Same lifecycle as its siblings: the escape hatch is read once at
+    /// Same lifecycle as its siblings: the test-only hatch is read once at
     /// construction, and both parameters are copied into THIS resolver —
     /// per-client state, never registry state, so two providers with
     /// different policies in one process cannot influence each other.
@@ -186,8 +188,7 @@ impl ValidatingResolver {
     #[must_use]
     pub fn with_policy(allow_loopback: bool, policy: &NetworkPolicy) -> Self {
         Self {
-            validation_enabled: std::env::var(DISABLE_VALIDATING_RESOLVER_ENV).as_deref()
-                != Ok("1"),
+            validation_enabled: !validating_resolver_disabled_by_env(),
             allow_loopback,
             policy: Arc::new(policy.clone()),
             name_source: Arc::new(GaiNameSource),
@@ -356,8 +357,8 @@ impl Resolve for ValidatingResolver {
 // construction is infrastructure I/O a domain body may not reference. Same-crate
 // impl placement keeps both halves satisfied (infrastructure → domain is the
 // allowed direction). The resolver is constructed PER `secure_client` call, so
-// the escape hatch is captured at client-build time exactly like the previous
-// inline `dns_resolver(ValidatingResolver::new())` wiring.
+// the test-only hatch is captured at client-build time (non-test builds always
+// validate) exactly like the previous inline wiring.
 impl crate::domain::ssrf_guard::sealed::Sealed for crate::domain::ssrf_guard::DefaultSsrfGuard {}
 
 impl crate::domain::ssrf_guard::SsrfGuard for crate::domain::ssrf_guard::DefaultSsrfGuard {
