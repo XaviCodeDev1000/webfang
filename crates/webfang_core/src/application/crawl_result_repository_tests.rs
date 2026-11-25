@@ -276,6 +276,37 @@ async fn test_shutdown_drains_buffered_writes() {
     );
 }
 
+/// #S13: shutdown must fit the acceptance budget (5 s) with writes still in
+/// flight. The hand-off is bounded and the join drains the queue, so closing
+/// a repository mid-run neither hangs nor drops acknowledged writes.
+#[tokio::test]
+async fn test_shutdown_with_inflight_work_fits_the_acceptance_budget() {
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("crawl_results.bin");
+    // Capacity above the load: `save` is a non-blocking `try_send`, so a full
+    // queue would make acceptance depend on writer timing (#1170).
+    let repo = CrawlResultRepositoryImpl::new(log_path, 64).unwrap();
+
+    for i in 0..32 {
+        repo.save(&make_content(
+            &format!("https://inflight-{i}.example.com"),
+            &format!("Inflight {i}"),
+        ))
+        .expect("save accepted into the bounded channel");
+    }
+
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(5), repo.shutdown()).await;
+    closed
+        .expect("shutdown with in-flight work must finish inside 5 s")
+        .expect("in-flight writes must drain cleanly");
+
+    assert_eq!(
+        repo.load_all().expect("load_all after shutdown").len(),
+        32,
+        "every record queued before shutdown must be on disk"
+    );
+}
+
 /// After `shutdown()` the send side is closed: a late `save` must fail
 /// explicitly instead of accepting data that will never be persisted.
 #[tokio::test]

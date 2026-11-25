@@ -1,8 +1,18 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::ScraperError;
 use crate::infrastructure::persistence::pool::{
-    rusqlite, Config, Hook, HookError, Manager, Pool, Runtime,
+    rusqlite, Config, Hook, HookError, Manager, Pool, Runtime, Timeouts,
+};
+
+/// Explicit pool wait budgets (#S13): acquiring a connection, creating one and
+/// recycling one are all bounded, so a stalled database file cannot hang a
+/// caller forever. `deadpool` leaves every timeout unset by default.
+const POOL_TIMEOUTS: Timeouts = Timeouts {
+    wait: Some(Duration::from_secs(30)),
+    create: Some(Duration::from_secs(10)),
+    recycle: Some(Duration::from_secs(10)),
 };
 
 /// WAL + per-connection pragmas, applied on every new pooled connection via the
@@ -66,6 +76,7 @@ pub fn create_pool(db_path: &Path, pool_size: usize) -> Result<Pool, ScraperErro
     let manager = Manager::from_config(&cfg, Runtime::Tokio1);
     let pool = Pool::builder(manager)
         .max_size(pool_size.max(1))
+        .timeouts(POOL_TIMEOUTS)
         .runtime(Runtime::Tokio1)
         .post_create(pragma_hook())
         .build()
@@ -84,6 +95,7 @@ pub fn create_memory_pool() -> Result<Pool, ScraperError> {
     let manager = Manager::from_config(&cfg, Runtime::Tokio1);
     let pool = Pool::builder(manager)
         .max_size(1)
+        .timeouts(POOL_TIMEOUTS)
         .runtime(Runtime::Tokio1)
         // No post_create hook: in-memory databases don't support WAL mode.
         .build()

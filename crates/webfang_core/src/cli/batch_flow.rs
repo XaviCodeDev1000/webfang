@@ -212,13 +212,20 @@ async fn run_batch_crawl(
     // The crawl is over: stop the watch loop and let its FINAL flush (bounded
     // by FLUSH_SHUTDOWN_TIMEOUT) run before the sink closes.
     flush_done.cancel();
-    if let Some(handle) = flush_task {
-        let _ = tokio::time::timeout(
-            crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
-                .saturating_add(std::time::Duration::from_secs(1)),
-            handle,
-        )
-        .await;
+    if let Some(mut handle) = flush_task {
+        let grace = crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
+            .saturating_add(std::time::Duration::from_secs(1));
+        // #S13: timing out over the handle only DROPS it, which detaches the
+        // task — the watch kept running past the batch. Keep the handle and
+        // abort it, then join the cancellation so nothing is left behind.
+        if tokio::time::timeout(grace, &mut handle).await.is_err() {
+            warn!(
+                timeout_secs = grace.as_secs(),
+                "flush watch exceeded its shutdown budget — aborting it"
+            );
+            handle.abort();
+            let _ = handle.await;
+        }
     }
 
     if cancel.is_cancelled() {

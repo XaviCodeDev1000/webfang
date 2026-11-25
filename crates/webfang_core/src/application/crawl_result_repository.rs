@@ -47,6 +47,11 @@ use crawl_result_repository_writer::AppendSink;
 
 /// Append-only storage for crawl results
 ///
+/// Bound on handing the shutdown command to the writer queue (#S13). The
+/// queue is bounded and the writer runs blocking syscalls, so the hand-off
+/// gets a budget instead of an unbounded wait.
+const SHUTDOWN_HANDOFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Writes are sent to a background writer task via an mpsc channel.
 /// Reads use the in-memory DashMap index for O(1) lookups.
 pub struct CrawlResultRepositoryImpl {
@@ -292,12 +297,20 @@ impl CrawlResultRepository for CrawlResultRepositoryImpl {
     /// acknowledged by `save` is confirmed handed to the OS (`write(2)`)
     /// before the caller proceeds. A writer panic or I/O failure is reported,
     /// never swallowed.
+    ///
+    /// The hand-off is bounded (#S13): the channel is bounded and the writer
+    /// may be wedged in a blocking syscall, so waiting for a free slot must
+    /// never become an unbounded shutdown wait.
     /// Idempotent: a second call finds no handle and returns `Ok`.
     fn shutdown(&self) -> Pin<Box<dyn Future<Output = Result<(), CrawlError>> + Send + '_>> {
         Box::pin(async move {
             // If the writer is already gone the request fails; the join
             // below still reports its terminal status.
-            let _send_result = self.tx.send(WriteCommand::Shutdown).await;
+            let handoff = tokio::time::timeout(
+                SHUTDOWN_HANDOFF_TIMEOUT,
+                self.tx.send(WriteCommand::Shutdown),
+            )
+            .await;
             // The std guard is dropped before the await — never held across
             // a suspension point.
             // Recovered: a poisoned slot still grants exclusive access, and
@@ -307,6 +320,25 @@ impl CrawlResultRepository for CrawlResultRepositoryImpl {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take();
+
+            if handoff.is_err() {
+                // The writer never accepted the command. A `spawn_blocking`
+                // task cannot be interrupted, so awaiting the join would wait
+                // on the same wedged syscall: detach it and report instead of
+                // hanging the shutdown.
+                self.write_error.store(true, Ordering::Relaxed);
+                if let Some(handle) = handle {
+                    handle.abort();
+                }
+                tracing::error!(
+                    timeout_secs = SHUTDOWN_HANDOFF_TIMEOUT.as_secs(),
+                    "crawl-result writer did not accept the shutdown command in time"
+                );
+                return Err(CrawlError::Storage(
+                    "crawl-result writer did not accept the shutdown command in time".to_string(),
+                ));
+            }
+
             let Some(handle) = handle else {
                 return Ok(());
             };
