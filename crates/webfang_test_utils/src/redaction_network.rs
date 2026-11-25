@@ -24,21 +24,33 @@ use std::sync::LazyLock;
 /// affected tests assert that a failure is mentioned, not its kind.
 ///
 /// #2836 follow-up: the connection-cause taxonomy added a product-owned
-/// Spanish phrase BEFORE the OS text, present only on the `io::Error` path.
-/// It belongs to the same collapse, or the committed snapshot can only ever
-/// match one OS. The classified cause is equally OS-dependent: a dropped SYN
-/// reads `connect_refused` on Linux and `connect_timeout` on Windows, while
-/// the classification contract itself is pinned by domain tests.
+/// phrase BEFORE the OS text, present only on the `io::Error` path. It belongs
+/// to the same collapse, or the committed snapshot can only ever match one OS.
+/// The classified cause is equally OS-dependent: a dropped SYN reads
+/// `connect_refused` on Linux and `connect_timeout` on Windows, while the
+/// classification contract itself is pinned by domain tests.
+///
+/// #3030: `NetworkCause::message()` changed that phrase from Spanish to
+/// English. The collapse must accept BOTH spellings: on Linux the English
+/// phrase stays on the `io::Error` path, while Windows degrades to a timeout
+/// with no phrase at all. Leaving only the Spanish spelling in the regex made
+/// the snapshot bake a Linux-only prefix and broke the Windows lane.
 #[must_use]
 pub(crate) fn collapse_connection_surface(text: String) -> String {
-    let net_err = Regex::new(
-        r"(?i)(?:I/O error:\s*)?(?:el servidor rechazó la conexión:\s*)?(?:(?:connection refused|connection timed out|no connection could be made[^()\n]*|an attempt to connect[^()\n]*)\s*(?:\(\s*os error\s*\d+\s*\))?|request timed out after \d+\s*s)",
-    )
-    .expect("valid network error regex");
-    let text = net_err.replace_all(&text, "<NET_ERR>").into_owned();
-    let net_cause = Regex::new(r#"cause: "(?:connect_refused|connect_timeout)""#)
-        .expect("valid network cause regex");
-    net_cause
+    // Compiled once: the regex crate documents repeated compilation inside a
+    // helper as an anti-pattern, and this chain runs on every redacted snapshot.
+    static NET_ERR: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?i)(?:I/O error:\s*)?(?:(?:el servidor rechazó la conexión|the server refused the connection):\s*)?(?:(?:connection refused|connection timed out|no connection could be made[^()\n]*|an attempt to connect[^()\n]*)\s*(?:\(\s*os error\s*\d+\s*\))?|request timed out after \d+\s*s)",
+        )
+        .expect("valid network error regex")
+    });
+    static NET_CAUSE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"cause: "(?:connect_refused|connect_timeout)""#)
+            .expect("valid network cause regex")
+    });
+    let text = NET_ERR.replace_all(&text, "<NET_ERR>").into_owned();
+    NET_CAUSE
         .replace_all(&text, r#"cause: "<NET_CAUSE>""#)
         .into_owned()
 }

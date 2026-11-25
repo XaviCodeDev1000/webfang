@@ -319,6 +319,7 @@ mod tests {
     /// S4: when the last attempt failed with a STATUS, exhaustion stays bare —
     /// `RateLimited`/`ServerError` carry no transport cause. Covers both
     /// policies' exhaustion (S9), wiremock for the HTTP side.
+    #[cfg_attr(miri, ignore)] // TLS_method (btls FFI) via the wiremock-backed wreq Client, unsupported by Miri
     #[tokio::test]
     async fn exhaustion_after_status_failures_stays_bare() {
         for (status, exhausted, label) in [
