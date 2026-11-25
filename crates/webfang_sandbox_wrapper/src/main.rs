@@ -20,15 +20,9 @@ use std::process::{Command, ExitCode};
 #[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
 
-/// Optional absolute path of the real browser (operator / test override).
-const REAL_BINARY_ENV: &str = "WEBFANG_SANDBOX_REAL_BINARY";
-/// Optional absolute path of `arapuca` (operator / test override).
-const ARAPUCA_ENV: &str = "WEBFANG_ARAPUCA_BINARY";
-/// `on` / `off` override for the cgroup-delegation probe (`auto` otherwise).
-const CGROUP_ENV: &str = "WEBFANG_CGROUP_DELEGATION";
-/// Per-run task identifier forwarded to `arapuca --task-id`.
-const TASK_ENV: &str = "WEBFANG_RUN_ID";
-const TENANT_ENV: &str = "WEBFANG_TENANT_ID";
+use webfang_core::infrastructure::downloader::obscura_downloader::sandbox::{
+    arapuca_args, cgroup_delegation, find_in_path, resolve_arapuca, task_id, REAL_BINARY_ENV,
+};
 
 /// Browser names tried in order when no explicit path is configured.
 const BROWSER_CANDIDATES: &[&str] = &[
@@ -36,21 +30,6 @@ const BROWSER_CANDIDATES: &[&str] = &[
     "google-chrome-stable",
     "chromium",
     "chromium-browser",
-];
-
-/// Fixed mounts appended after the binary and profile directories. `/sys`
-/// itself is never mounted — only the subtrees Chrome actually reads.
-const FIXED_MOUNTS: &[(&str, &str)] = &[
-    ("-v", "/proc:ro"),
-    ("-v", "/dev/shm:rw"),
-    ("-v", "/tmp:rw"),
-    ("-v", "/sys/bus:ro"),
-    ("-v", "/sys/class:ro"),
-    ("-v", "/sys/devices:ro"),
-    ("-v", "/etc/fonts:ro"),
-    ("-v", "/usr/share/fonts:ro"),
-    ("-v", "/dev/dri:rw"),
-    ("-v", "/etc/ssl:ro"),
 ];
 
 fn main() -> ExitCode {
@@ -104,6 +83,8 @@ fn run() -> ExitCode {
     let argv = arapuca_args(&browser, profile.as_deref(), &task_id(), &args);
     let mut command = Command::new(&arapuca);
     command.args(&argv);
+    // arapuca execs the browser: the override is consumed here, not inherited.
+    command.env_remove(REAL_BINARY_ENV);
     let error = command.exec();
     eprintln!("webfang-sandbox-wrapper: arapuca exec failed: {error}");
     ExitCode::FAILURE
@@ -119,6 +100,8 @@ fn warn_skip(reason: &str) {
 fn exec(binary: &Path, args: &[String]) -> ExitCode {
     let mut command = Command::new(binary);
     command.args(args);
+    // The override selects the real browser; Chrome must never inherit it.
+    command.env_remove(REAL_BINARY_ENV);
     let error = command.exec();
     eprintln!(
         "webfang-sandbox-wrapper: exec {}: {error}",
@@ -146,100 +129,6 @@ fn resolve_real_browser() -> Option<PathBuf> {
     BROWSER_CANDIDATES
         .iter()
         .find_map(|name| find_in_path(name))
-}
-
-/// Resolve `arapuca` from the explicit override, then from `PATH`.
-fn resolve_arapuca() -> Option<PathBuf> {
-    if let Some(path) = env::var_os(ARAPUCA_ENV) {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    find_in_path("arapuca")
-}
-
-fn find_in_path(name: &str) -> Option<PathBuf> {
-    let path_var = env::var_os("PATH")?;
-    env::split_paths(&path_var)
-        .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())
-}
-
-/// Per-run task id: explicit run/tenant id, else this process's identity.
-fn task_id() -> String {
-    for key in [TASK_ENV, TENANT_ENV] {
-        if let Some(value) = env::var(key).ok().filter(|v| !v.trim().is_empty()) {
-            return value;
-        }
-    }
-    format!("webfang-{}", std::process::id())
-}
-
-/// `on`/`off` override, otherwise the real cgroups-v2 delegation probe.
-fn cgroup_delegation() -> bool {
-    match env::var(CGROUP_ENV).as_deref() {
-        Ok("on") => true,
-        Ok("off") => false,
-        _ => cgroup_delegated(),
-    }
-}
-
-fn cgroup_delegated() -> bool {
-    let Ok(contents) = fs::read_to_string("/proc/self/cgroup") else {
-        return false;
-    };
-    let Some(relative) = contents.lines().find_map(|line| line.strip_prefix("0::")) else {
-        return false;
-    };
-    let base = Path::new("/sys/fs/cgroup").join(relative.trim_start_matches('/'));
-    fs::read_to_string(base.join("cgroup.controllers"))
-        .is_ok_and(|controllers| !controllers.trim().is_empty())
-}
-
-/// Absolute directory containing `binary`, for the `:ro` binary mount.
-fn binary_directory(binary: &Path) -> PathBuf {
-    let parent = binary.parent().unwrap_or_else(|| Path::new("."));
-    if parent.is_absolute() {
-        parent.to_path_buf()
-    } else {
-        env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("/"))
-            .join(parent)
-    }
-}
-
-fn push_mount(argv: &mut Vec<String>, path: &Path, mode: &str) {
-    argv.push("-v".to_string());
-    argv.push(format!("{}:{mode}", path.display()));
-}
-
-/// Build the exact `arapuca run` argv mandated by the spec.
-fn arapuca_args(
-    binary: &Path,
-    profile: Option<&Path>,
-    task_id: &str,
-    original: &[String],
-) -> Vec<String> {
-    let mut argv = vec![
-        "run".to_string(),
-        "--task-id".to_string(),
-        task_id.to_string(),
-        "--seccomp".to_string(),
-        "baseline".to_string(),
-    ];
-    push_mount(&mut argv, &binary_directory(binary), "ro");
-    if let Some(dir) = profile {
-        push_mount(&mut argv, dir, "rw");
-    }
-    for (flag, spec) in FIXED_MOUNTS {
-        argv.push((*flag).to_string());
-        argv.push((*spec).to_string());
-    }
-    argv.push("--".to_string());
-    argv.push(binary.to_string_lossy().into_owned());
-    argv.extend(original.iter().cloned());
-    argv
 }
 
 #[cfg(test)]

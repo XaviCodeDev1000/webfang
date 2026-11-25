@@ -134,6 +134,7 @@ webfang/                          # virtual workspace root (no [package])
 | `webfang_cli` | `webfang_core` |
 | `webfang_test_utils` | `webfang_core` |
 | `webfang_benchmark` | `webfang_core`, `webfang_test_utils` |
+| `webfang_sandbox_wrapper` | `webfang_core` (shared sandbox seam only) |
 
 - The **direction is `cli → core`, `mcp → core`; `cli` does NOT depend on `mcp`**. If you
   need something from the MCP server in the CLI, that is an architecture decision, not an

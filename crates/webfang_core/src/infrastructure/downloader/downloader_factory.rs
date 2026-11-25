@@ -12,13 +12,15 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 /// Explicit path to `arapuca`, used when the binary is not on `PATH`.
-const ARAPUCA_BINARY_ENV: &str = "WEBFANG_ARAPUCA_BINARY";
+pub const ARAPUCA_BINARY_ENV: &str = "WEBFANG_ARAPUCA_BINARY";
 /// Explicit run identifier forwarded to `arapuca --task-id`.
-const RUN_ID_ENV: &str = "WEBFANG_RUN_ID";
+pub const RUN_ID_ENV: &str = "WEBFANG_RUN_ID";
 /// Explicit tenant identifier, used when no run id is set.
-const TENANT_ID_ENV: &str = "WEBFANG_TENANT_ID";
+pub const TENANT_ID_ENV: &str = "WEBFANG_TENANT_ID";
 /// `on`/`off` override for the cgroup-delegation probe (`auto` otherwise).
-const CGROUP_DELEGATION_ENV: &str = "WEBFANG_CGROUP_DELEGATION";
+pub const CGROUP_DELEGATION_ENV: &str = "WEBFANG_CGROUP_DELEGATION";
+/// Real-browser override consumed by the sandbox wrapper before exec.
+pub const REAL_BINARY_ENV: &str = "WEBFANG_SANDBOX_REAL_BINARY";
 /// Explicit override for the sandbox wrapper binary.
 #[cfg(feature = "chromium")]
 const SANDBOX_WRAPPER_ENV: &str = "WEBFANG_SANDBOX_WRAPPER";
@@ -28,7 +30,7 @@ const SANDBOX_WRAPPER_NAME: &str = "webfang-sandbox-wrapper";
 
 /// Mounts appended after the binary and profile directories. `/sys` itself
 /// is never mounted — Chrome only needs these subtrees.
-const FIXED_MOUNTS: &[(&str, &str)] = &[
+pub const FIXED_MOUNTS: &[(&str, &str)] = &[
     ("-v", "/proc:ro"),
     ("-v", "/dev/shm:rw"),
     ("-v", "/tmp:rw"),
@@ -57,7 +59,7 @@ impl SandboxConfig {
     pub(crate) fn resolve() -> Self {
         Self {
             arapuca: resolve_arapuca(),
-            task_id: sandbox_task_id(),
+            task_id: task_id(),
             cgroup_delegated: cgroup_delegation(),
         }
     }
@@ -76,7 +78,8 @@ impl SandboxConfig {
     }
 }
 
-fn resolve_arapuca() -> Option<PathBuf> {
+/// Resolve `arapuca` from the explicit override, then from `PATH`.
+pub fn resolve_arapuca() -> Option<PathBuf> {
     if let Some(path) = env::var_os(ARAPUCA_BINARY_ENV) {
         let path = PathBuf::from(path);
         if path.is_file() {
@@ -86,7 +89,8 @@ fn resolve_arapuca() -> Option<PathBuf> {
     find_in_path("arapuca")
 }
 
-fn sandbox_task_id() -> String {
+/// Per-run task id: explicit run/tenant id, else this process's identity.
+pub fn task_id() -> String {
     for key in [RUN_ID_ENV, TENANT_ID_ENV] {
         if let Some(value) = env::var(key).ok().filter(|v| !v.trim().is_empty()) {
             return value;
@@ -95,7 +99,8 @@ fn sandbox_task_id() -> String {
     format!("webfang-{}", std::process::id())
 }
 
-fn cgroup_delegation() -> bool {
+/// `on`/`off` override, otherwise the real cgroups-v2 delegation probe.
+pub fn cgroup_delegation() -> bool {
     match env::var(CGROUP_DELEGATION_ENV).as_deref() {
         Ok("on") => true,
         Ok("off") => false,
@@ -103,7 +108,8 @@ fn cgroup_delegation() -> bool {
     }
 }
 
-fn cgroup_delegated() -> bool {
+/// Probe cgroups v2 for delegated controllers.
+pub fn cgroup_delegated() -> bool {
     let Ok(contents) = std::fs::read_to_string("/proc/self/cgroup") else {
         return false;
     };
@@ -115,14 +121,16 @@ fn cgroup_delegated() -> bool {
         .is_ok_and(|controllers| !controllers.trim().is_empty())
 }
 
-fn find_in_path(name: &str) -> Option<PathBuf> {
+/// Find an executable by name on `PATH`.
+pub fn find_in_path(name: &str) -> Option<PathBuf> {
     let path_var = env::var_os("PATH")?;
     env::split_paths(&path_var)
         .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())
 }
 
-fn binary_directory(binary: &Path) -> PathBuf {
+/// Absolute directory containing `binary`, for the `:ro` binary mount.
+pub fn binary_directory(binary: &Path) -> PathBuf {
     let parent = binary.parent().unwrap_or_else(|| Path::new("."));
     if parent.is_absolute() {
         parent.to_path_buf()
@@ -133,14 +141,19 @@ fn binary_directory(binary: &Path) -> PathBuf {
     }
 }
 
-fn push_mount(argv: &mut Vec<String>, path: &Path, mode: &str) {
+/// Append a `-v <path>:<mode>` mount argument to `argv`.
+pub fn push_mount(argv: &mut Vec<String>, path: &Path, mode: &str) {
     argv.push("-v".to_string());
     argv.push(format!("{}:{mode}", path.display()));
 }
 
-/// `arapuca run` argv in the exact spec order. Obscura has no resolved
-/// profile directory, so the optional `-v <profile-dir>:rw` is omitted here.
-pub(crate) fn arapuca_args(binary: &Path, task_id: &str, inner: &[String]) -> Vec<String> {
+/// `arapuca run` argv in the exact spec order; `profile` adds the optional rw mount.
+pub fn arapuca_args(
+    binary: &Path,
+    profile: Option<&Path>,
+    task_id: &str,
+    inner: &[String],
+) -> Vec<String> {
     let mut argv = vec![
         "run".to_string(),
         "--task-id".to_string(),
@@ -149,6 +162,9 @@ pub(crate) fn arapuca_args(binary: &Path, task_id: &str, inner: &[String]) -> Ve
         "baseline".to_string(),
     ];
     push_mount(&mut argv, &binary_directory(binary), "ro");
+    if let Some(dir) = profile {
+        push_mount(&mut argv, dir, "rw");
+    }
     for (flag, spec) in FIXED_MOUNTS {
         argv.push((*flag).to_string());
         argv.push((*spec).to_string());
@@ -178,13 +194,24 @@ fn resolve_wrapper_path() -> Option<PathBuf> {
     find_in_path(SANDBOX_WRAPPER_NAME)
 }
 
+/// Layer 3 launch decision: executable plus the wrapper's real-browser override.
+#[cfg(feature = "chromium")]
+pub(crate) struct SandboxLaunch {
+    pub(crate) executable: Option<PathBuf>,
+    pub(crate) real_binary: Option<PathBuf>,
+}
+
 /// Pick the Layer 3 launch executable: the wrapper when the sandbox is
 /// usable, else the gate-certified binary / chromiumoxide auto-detection.
 /// Every decision is a structured event; a missing prerequisite is never
 /// fatal to the fetch.
 #[cfg(feature = "chromium")]
-pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> SandboxLaunch {
     let sandbox = SandboxConfig::resolve();
+    let fallback = || SandboxLaunch {
+        executable: configured.map(Path::to_path_buf),
+        real_binary: None,
+    };
     if let Some(reason) = sandbox.skip_reason() {
         tracing::warn!(
             layer = 3,
@@ -192,7 +219,7 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> Option<Pat
             task_id = %sandbox.task_id,
             "sandbox unavailable — launching chrome unsandboxed"
         );
-        return configured.map(Path::to_path_buf);
+        return fallback();
     }
     match resolve_wrapper_path() {
         Some(path) => {
@@ -203,7 +230,10 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> Option<Pat
                 wrapper = %path.display(),
                 "browser launch sandboxed"
             );
-            Some(path)
+            SandboxLaunch {
+                executable: Some(path),
+                real_binary: configured.map(Path::to_path_buf),
+            }
         },
         None => {
             tracing::warn!(
@@ -212,7 +242,7 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> Option<Pat
                 task_id = %sandbox.task_id,
                 "sandbox unavailable — launching chrome unsandboxed"
             );
-            configured.map(Path::to_path_buf)
+            fallback()
         },
     }
 }
@@ -226,7 +256,7 @@ mod tests {
 
     use super::{arapuca_args, SandboxConfig};
     #[cfg(feature = "chromium")]
-    use super::{resolve_wrapper_path, SANDBOX_WRAPPER_ENV};
+    use super::{resolve_wrapper_path, sandbox_wrapper_or_binary, SANDBOX_WRAPPER_ENV};
     use crate::infrastructure::downloader::obscura_downloader::{Downloader, ObscuraDownloader};
 
     const ARAPUCA_ENV: &str = "WEBFANG_ARAPUCA_BINARY";
@@ -289,6 +319,7 @@ mod tests {
     fn arapuca_args_follow_the_exact_spec_order() {
         let argv = arapuca_args(
             Path::new("/usr/bin/obscura"),
+            None,
             "tenant-9",
             &["fetch".into(), "--dump".into(), "html".into()],
         );
@@ -423,5 +454,23 @@ mod tests {
             wrapper.to_str().expect("utf8 path"),
         )]);
         assert_eq!(resolve_wrapper_path(), Some(wrapper));
+    }
+
+    #[cfg(feature = "chromium")]
+    #[test]
+    fn configured_binary_is_forwarded_through_the_wrapper_override() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let arapuca = script(tmp.path(), "arapuca", "exit 0\n");
+        let wrapper = script(tmp.path(), "webfang-sandbox-wrapper", "exit 0\n");
+        let pinned = PathBuf::from("/opt/google/chrome/chrome");
+        let _env = webfang_test_utils::EnvGuard::with(&[
+            (ARAPUCA_ENV, arapuca.to_str().expect("utf8 path")),
+            (CGROUP_ENV, "on"),
+            (TASK_ENV, "tenant-7"),
+            (SANDBOX_WRAPPER_ENV, wrapper.to_str().expect("utf8 path")),
+        ]);
+        let launch = sandbox_wrapper_or_binary(Some(&pinned));
+        assert_eq!(launch.executable, Some(wrapper));
+        assert_eq!(launch.real_binary, Some(pinned));
     }
 }

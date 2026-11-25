@@ -44,6 +44,7 @@
 #   webfang_cli:        webfang_core, webfang_mcp
 #   webfang_test_utils: webfang_core
 #   webfang_benchmark:  webfang_core
+#   webfang_sandbox_wrapper: webfang_core (standalone wrapper reuses the shared sandbox seam)
 #
 #   webfang_ai was removed in ADR-0004 step 6 (see docs/adr/
 #   0004-onnx-local-removal.md): the crate and its ai feature no longer
@@ -105,9 +106,12 @@ declare -A ALLOWED=(
   # dependents). Its [dev-dependencies] edge into webfang_test_utils is
   # accepted by the dev tier below.
   [webfang_benchmark]="webfang_core"
+  # Standalone sandbox wrapper: consumes the shared sandbox argv/prereq seam
+  # from core (core is the leaf). No other prod edge is admitted.
+  [webfang_sandbox_wrapper]="webfang_core"
 )
 
-CRATES=(webfang_core webfang_mcp webfang_cli webfang_test_utils webfang_benchmark)
+CRATES=(webfang_core webfang_mcp webfang_cli webfang_test_utils webfang_benchmark webfang_sandbox_wrapper)
 
 status=0
 

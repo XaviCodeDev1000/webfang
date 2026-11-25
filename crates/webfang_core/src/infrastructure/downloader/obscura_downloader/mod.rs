@@ -49,7 +49,7 @@ use super::{DownloadError, Downloader, FetchedPage};
 /// Shared sandbox resolution; the file is declared here so both browser
 /// downloader layers consume the same mount order and skip rules.
 #[path = "../downloader_factory.rs"]
-pub(crate) mod sandbox;
+pub mod sandbox;
 
 use sandbox::{arapuca_args, SandboxConfig};
 
@@ -249,7 +249,12 @@ impl ObscuraDownloader {
                 "browser subprocess sandboxed"
             );
             let mut command = Command::new(arapuca);
-            command.args(arapuca_args(&self.binary, &self.sandbox.task_id, &inner));
+            command.args(arapuca_args(
+                &self.binary,
+                None,
+                &self.sandbox.task_id,
+                &inner,
+            ));
             return configure_child(command);
         }
 

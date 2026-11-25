@@ -97,3 +97,24 @@ fn user_data_dir_is_created_and_original_argv_reach_the_browser() {
         "original argv lost: {forwarded}"
     );
 }
+
+#[test]
+fn real_binary_override_is_stripped_before_browser_exec() {
+    let tmp = TempDir::new().expect("tempdir");
+    let browser = script(
+        tmp.path(),
+        "browser",
+        "printf '%s' \"${WEBFANG_SANDBOX_REAL_BINARY-unset}\"",
+    );
+    let _env = guard(&[(REAL_BINARY_ENV, browser.to_str().expect("utf8 path"))]);
+    let output = Command::new(WRAPPER)
+        .arg("--version")
+        .output()
+        .expect("run wrapper");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "unset");
+}

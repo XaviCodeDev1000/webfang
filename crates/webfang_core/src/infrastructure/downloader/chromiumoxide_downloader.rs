@@ -9,7 +9,7 @@
 
 #[cfg(feature = "chromium")]
 use {
-    super::obscura_downloader::sandbox::sandbox_wrapper_or_binary,
+    super::obscura_downloader::sandbox::{sandbox_wrapper_or_binary, REAL_BINARY_ENV},
     chromiumoxide::browser::HeadlessMode,
     chromiumoxide::cdp::browser_protocol::network::{
         CookieParam, EnableParams as NetworkEnableParams, EventLoadingFailed, EventLoadingFinished,
@@ -458,8 +458,13 @@ impl Downloader for ChromiumoxideDownloader {
                 .no_sandbox()
                 .launch_timeout(CHROME_LAUNCH_TIMEOUT)
                 .user_data_dir(profile.path());
-            if let Some(path) = launch {
-                config_builder = config_builder.chrome_executable(&path);
+            if let Some(path) = &launch.executable {
+                config_builder = config_builder.chrome_executable(path);
+            }
+            // The wrapper consumes and strips this before Chrome is exec'd.
+            if let Some(binary) = &launch.real_binary {
+                config_builder =
+                    config_builder.env(REAL_BINARY_ENV, binary.to_string_lossy().into_owned());
             }
             let config = config_builder
                 .build()

@@ -13,6 +13,9 @@ publish = false
 name = "webfang-sandbox-wrapper"
 path = "src/main.rs"
 
+[dependencies]
+webfang_core = { workspace = true }
+
 [dev-dependencies]
 tempfile.workspace = true
 webfang_test_utils.workspace = true

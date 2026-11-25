@@ -5591,6 +5591,7 @@ name = "webfang-sandbox-wrapper"
 version = "9.2.3"
 dependencies = [
  "tempfile",
+ "webfang_core",
  "webfang_test_utils",
 ]
 
