@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Pre-commit delivery gates: identity first, then the Gentle AI review verdict.
-# identity-gate.sh is fail-closed; review-gate.sh stays fail-open by design (#1036).
+# Pre-commit delivery gates: identity, static guards, then the review verdict.
+# identity-gate.sh and static-guards.sh are fail-closed; review-gate.sh stays
+# fail-open by design (#1036).
 "$(dirname "$0")/identity-gate.sh" || exit $?
+"$(dirname "$0")/static-guards.sh" || exit $?
 exec "$(dirname "$0")/review-gate.sh" pre-commit
