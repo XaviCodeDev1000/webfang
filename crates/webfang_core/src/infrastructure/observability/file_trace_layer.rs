@@ -41,6 +41,8 @@ use std::time::{Instant, SystemTime};
 
 use serde_json::{json, Map, Value};
 use tracing::Subscriber;
+
+use crate::domain::providers::RedactedUrl;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
@@ -356,27 +358,40 @@ impl EventRecorder {
     }
 }
 
+/// Sink-level backstop: strip userinfo from any field or message that embeds a
+/// URL authority with credentials, including emitters that predate the
+/// redactor-aware call sites. Non-URL values (e.g. `"unknown"`) and URLs
+/// without userinfo stay byte-for-byte, so existing trace contracts hold.
+fn redact_url_value(value: &str) -> String {
+    let Some(marker) = value.find("://") else {
+        return value.to_owned();
+    };
+    let authority = &value[marker + 3..];
+    let end = authority
+        .find(['/', '?', '#', '"', ')', ' '])
+        .unwrap_or(authority.len());
+    if !authority[..end].contains('@') {
+        return value.to_owned();
+    }
+    RedactedUrl::from_str_lossy(value).to_string()
+}
+
 impl tracing::field::Visit for EventRecorder {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         let name = field.name().to_string();
         let formatted = format!("{value:?}");
+        let text = if formatted.starts_with('"') && formatted.ends_with('"') && formatted.len() >= 2
+        {
+            formatted[1..formatted.len() - 1].to_string()
+        } else {
+            formatted
+        };
+        let text = redact_url_value(&text);
 
         if name == "message" {
-            let msg =
-                if formatted.starts_with('"') && formatted.ends_with('"') && formatted.len() >= 2 {
-                    formatted[1..formatted.len() - 1].to_string()
-                } else {
-                    formatted
-                };
-            self.message = Some(msg);
+            self.message = Some(text);
         } else {
-            let value =
-                if formatted.starts_with('"') && formatted.ends_with('"') && formatted.len() >= 2 {
-                    Value::String(formatted[1..formatted.len() - 1].to_string())
-                } else {
-                    Value::String(formatted)
-                };
-            self.fields.insert(name, value);
+            self.fields.insert(name, Value::String(text));
         }
     }
 
@@ -396,11 +411,12 @@ impl tracing::field::Visit for EventRecorder {
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        let text = redact_url_value(value);
         if field.name() == "message" {
-            self.message = Some(value.to_string());
+            self.message = Some(text);
         } else {
             self.fields
-                .insert(field.name().to_string(), Value::String(value.to_string()));
+                .insert(field.name().to_string(), Value::String(text));
         }
     }
 }

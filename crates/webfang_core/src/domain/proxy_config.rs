@@ -27,8 +27,15 @@ use url::Url;
 
 use crate::domain::auth_source::AuthSource;
 use crate::domain::network_policy::NetworkPolicy;
-use crate::domain::providers::ProviderConfig;
+use crate::domain::providers::{ProviderConfig, RedactedUrl};
 use crate::domain::ssrf_guard::is_forbidden_literal_host_with_policy;
+
+/// Render an error origin without userinfo. The enum is publicly
+/// constructible, so the Display path strips credentials too — not only the
+/// validator that builds the error.
+fn redact_error_origin(origin: &str) -> String {
+    RedactedUrl::from_str_lossy(origin).to_string()
+}
 
 /// Error for proxy configuration and validation (ADR-0021). User-facing:
 /// Spanish messages name the config field that can fix the problem.
@@ -55,7 +62,8 @@ pub enum ProxyConfigError {
     /// SOCKS hop would conflate proxy and destination resolution on a single
     /// resolver slot).
     #[error(
-        "scheme '{scheme}' is not supported for proxy '{origin}' (only http:// and https:// forward proxies, with CONNECT tunneling for https destinations); socks5/socks5h are unavailable in this version"
+        "scheme '{scheme}' is not supported for proxy '{}' (only http:// and https:// forward proxies, with CONNECT tunneling for https destinations); socks5/socks5h are unavailable in this version",
+        redact_error_origin(origin)
     )]
     UnsupportedScheme {
         /// The rejected scheme, as written in the config.
@@ -68,7 +76,8 @@ pub enum ProxyConfigError {
     /// authentication composes a plain `user` with an `AuthSource` password
     /// instead (ADR-0021 Decision 1).
     #[error(
-        "proxy URL '{origin}' carries inline credentials (userinfo); declare the user and password in proxy.auth (auth = {{ user = …, password = {{ source = … }} }})"
+        "proxy URL '{}' carries inline credentials (userinfo); declare the user and password in proxy.auth (auth = {{ user = …, password = {{ source = … }} }})",
+        redact_error_origin(origin)
     )]
     UserInfoNotAllowed {
         /// The offending proxy URL.
@@ -78,7 +87,8 @@ pub enum ProxyConfigError {
     /// fragment), which is meaningless for a forward proxy and usually a
     /// config typo.
     #[error(
-        "la URL del proxy '{origin}' debe ser un origen (scheme://host[:port]) sin path, query ni fragment"
+        "la URL del proxy '{}' debe ser un origen (scheme://host[:port]) sin path, query ni fragment",
+        redact_error_origin(origin)
     )]
     OriginOnly {
         /// The offending proxy URL.
@@ -289,16 +299,19 @@ impl ValidatedProxy {
     /// the checks cannot drift between the named and inline forms.
     fn build(definition: &ProxyDefinition, id: Option<String>) -> Result<Self, ProxyConfigError> {
         let origin = &definition.url;
+        // Error fields are redacted at construction as well as at Display time:
+        // the derived Debug of this enum must not carry a credential either.
+        let safe_origin = RedactedUrl::from_url(origin).to_string();
         let scheme = origin.scheme();
         if scheme != "http" && scheme != "https" {
             return Err(ProxyConfigError::UnsupportedScheme {
                 scheme: scheme.to_string(),
-                origin: origin.to_string(),
+                origin: safe_origin,
             });
         }
         if !origin.username().is_empty() || origin.password().is_some() {
             return Err(ProxyConfigError::UserInfoNotAllowed {
-                origin: origin.to_string(),
+                origin: safe_origin,
             });
         }
         let path = origin.path();
@@ -307,7 +320,7 @@ impl ValidatedProxy {
             || origin.fragment().is_some()
         {
             return Err(ProxyConfigError::OriginOnly {
-                origin: origin.to_string(),
+                origin: safe_origin,
             });
         }
         let host = origin.host_str().unwrap_or_default();

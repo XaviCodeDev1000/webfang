@@ -59,6 +59,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::domain::network_policy::NetworkPolicy;
+use crate::domain::providers::RedactedUrl;
 use crate::domain::proxy_config::ClientSecurityProfile;
 
 use wreq::redirect::Policy;
@@ -265,7 +266,7 @@ pub fn redirect_policy() -> Policy {
     Policy::custom(move |attempt| {
         if guard_enabled && attempt.uri.host().is_some_and(is_forbidden_literal_host) {
             tracing::warn!(
-                target_uri = %attempt.uri,
+                target_uri = %RedactedUrl::from_str_lossy(&attempt.uri.to_string()),
                 "Redirect to forbidden literal IP blocked (SSRF guard)"
             );
             attempt.stop()
@@ -312,7 +313,7 @@ pub fn redirect_policy_with_loopback(allow_loopback: bool) -> Policy {
     Policy::custom(move |attempt| {
         if redirect_literal_blocked(attempt.uri.host(), allow_loopback) {
             tracing::warn!(
-                target_uri = %attempt.uri,
+                target_uri = %RedactedUrl::from_str_lossy(&attempt.uri.to_string()),
                 allow_loopback,
                 "Redirect to forbidden literal IP blocked (SSRF guard)"
             );
@@ -345,7 +346,7 @@ pub fn redirect_policy_with_policy(allow_loopback: bool, policy: NetworkPolicy) 
     Policy::custom(move |attempt| {
         if redirect_literal_blocked_with_policy(attempt.uri.host(), allow_loopback, &policy) {
             tracing::warn!(
-                target_uri = %attempt.uri,
+                target_uri = %RedactedUrl::from_str_lossy(&attempt.uri.to_string()),
                 allow_loopback,
                 "Redirect to forbidden literal IP blocked (SSRF guard, provider network policy)"
             );

@@ -39,6 +39,7 @@ use rand::SeedableRng;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
+use crate::domain::providers::RedactedUrl;
 use crate::error::ScraperError;
 
 mod jitter;
@@ -213,7 +214,13 @@ impl<'a> PacingContext<'a> {
 /// surface, stderr is the human one.
 pub fn record_pacing_wait(ctx: &PacingContext<'_>, waited: Duration, outcome: &'static str) {
     let waited_ms = waited.as_millis() as u64;
-    let url = ctx.url.unwrap_or("unknown");
+    // Every URL-valued field goes through the redactor: userinfo is a
+    // credential and must never reach the trace file. A missing URL keeps the
+    // existing "unknown" literal, and an unparseable one fails closed.
+    let url = ctx
+        .url
+        .map(RedactedUrl::from_str_lossy)
+        .map_or_else(|| "unknown".to_owned(), |redacted| redacted.to_string());
     match ctx.correlation {
         Some(correlation) => {
             tracing::debug!(
