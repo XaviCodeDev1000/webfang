@@ -291,3 +291,27 @@ pub(super) fn span_close_records(path: &Path) -> Vec<Value> {
         .filter(|v| v["record"] == "span_close")
         .collect()
 }
+
+/// The sink backstop is a surgical redaction, not a whole-value replacement:
+/// a message that merely EMBEDS a credentialed URL keeps its diagnostic text,
+/// and URL occurrences without userinfo stay byte-for-byte.
+#[test]
+fn redact_url_value_strips_only_the_userinfo_segment() {
+    assert_eq!(
+        redact_url_value("http error 401 accessing https://user:s3cret@host:8443/v1?x=1"),
+        "http error 401 accessing https://host:8443/v1?x=1",
+        "the message around an embedded URL must survive redaction"
+    );
+    assert_eq!(
+        redact_url_value("a https://u:p@h/ then https://u2:p2@h2/x"),
+        "a https://h/ then https://h2/x",
+        "every credentialed URL in the value must be redacted"
+    );
+    assert_eq!(
+        redact_url_value("https://host/v1"),
+        "https://host/v1",
+        "a URL without userinfo must not change"
+    );
+    assert_eq!(redact_url_value("no url here"), "no url here");
+    assert_eq!(redact_url_value("unknown"), "unknown");
+}

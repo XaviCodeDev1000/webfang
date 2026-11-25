@@ -41,8 +41,6 @@ use std::time::{Instant, SystemTime};
 
 use serde_json::{json, Map, Value};
 use tracing::Subscriber;
-
-use crate::domain::providers::RedactedUrl;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
@@ -358,22 +356,34 @@ impl EventRecorder {
     }
 }
 
-/// Sink-level backstop: strip userinfo from any field or message that embeds a
-/// URL authority with credentials, including emitters that predate the
-/// redactor-aware call sites. Non-URL values (e.g. `"unknown"`) and URLs
-/// without userinfo stay byte-for-byte, so existing trace contracts hold.
+/// Sink-level backstop: strip userinfo from any URL embedded in a field or
+/// message, including emitters that predate the redactor-aware call sites.
+///
+/// Only the `userinfo@` segment of each `scheme://userinfo@host` occurrence is
+/// removed; the surrounding text, the scheme, host, port, path and query stay
+/// byte-for-byte. Values without a credentialed URL are returned unchanged, so
+/// existing trace contracts hold.
 fn redact_url_value(value: &str) -> String {
-    let Some(marker) = value.find("://") else {
-        return value.to_owned();
-    };
-    let authority = &value[marker + 3..];
-    let end = authority
-        .find(['/', '?', '#', '"', ')', ' '])
-        .unwrap_or(authority.len());
-    if !authority[..end].contains('@') {
-        return value.to_owned();
+    /// Bytes that end a URL authority inside free text.
+    const AUTHORITY_END: [char; 9] = ['/', '?', '#', '"', '\'', ')', ']', ' ', '\t'];
+
+    let mut out = String::with_capacity(value.len());
+    let mut cursor = 0;
+    while let Some(marker) = value[cursor..].find("://") {
+        let authority_start = cursor + marker + 3;
+        let tail = &value[authority_start..];
+        let authority_end = tail.find(AUTHORITY_END).unwrap_or(tail.len());
+        let authority = &tail[..authority_end];
+        out.push_str(&value[cursor..authority_start]);
+        match authority.rfind('@') {
+            // RFC 3986: the LAST `@` of the authority separates userinfo.
+            Some(at) => out.push_str(&authority[at + 1..]),
+            None => out.push_str(authority),
+        }
+        cursor = authority_start + authority_end;
     }
-    RedactedUrl::from_str_lossy(value).to_string()
+    out.push_str(&value[cursor..]);
+    out
 }
 
 impl tracing::field::Visit for EventRecorder {
