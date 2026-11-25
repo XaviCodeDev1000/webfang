@@ -302,7 +302,10 @@ fn spawn_flush_watch(
 
     // Supervised: the handle is joined in run_batch_crawl under a timeout
     // right after the crawl finishes (the watch's own final flush).
-    #[allow(clippy::disallowed_methods)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "run_batch_crawl retains this JoinHandle and joins it under a timeout after the crawl"
+    )]
     let handle = tokio::spawn(crate::cli::batch_flush::run_flush_watch(
         crate::cli::batch_flush::FlushWatchParams {
             sink,

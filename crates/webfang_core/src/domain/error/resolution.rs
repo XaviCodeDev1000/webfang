@@ -294,8 +294,9 @@ impl Drop for ResolutionGuard<'_> {
 /// The resolver marks it and the failure sites read it, so both sides agree on
 /// WHICH request a hung resolution belongs to (#2784).
 pub fn resolution_tracker() -> &'static ResolutionTracker {
-    static TRACKER: std::sync::OnceLock<ResolutionTracker> = std::sync::OnceLock::new();
-    TRACKER.get_or_init(ResolutionTracker::default)
+    static TRACKER: std::sync::LazyLock<ResolutionTracker> =
+        std::sync::LazyLock::new(ResolutionTracker::default);
+    &TRACKER
 }
 
 /// Refine a connect-phase cause with what the resolver knows.
