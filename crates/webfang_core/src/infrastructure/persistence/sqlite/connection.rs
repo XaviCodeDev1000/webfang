@@ -91,17 +91,28 @@ pub fn create_memory_pool() -> Result<Pool, ScraperError> {
     Ok(pool)
 }
 
-/// `post_create` hook applying the WAL-mode pragmas to each new connection.
+/// `post_create` hook applying the WAL-mode pragmas to each new connection,
+/// plus the startup integrity gate.
+///
+/// `PRAGMA integrity_check` is O(database size), so it runs once per POOL —
+/// claimed before the first connection verifies, on the first connection the
+/// pool creates — never on every new connection. The pragmas still run on
+/// every connection because `synchronous` and `cache_size` are per-connection.
+///
+/// The check runs BEFORE the pragmas: a corrupt file must not first be
+/// rewritten by `journal_mode=WAL` and then reported as a generic pragma
+/// failure.
 fn pragma_hook() -> Hook {
-    Hook::async_fn(|obj, _metrics| {
+    let integrity_checked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    Hook::async_fn(move |obj, _metrics| {
+        let integrity_checked = std::sync::Arc::clone(&integrity_checked);
         Box::pin(async move {
-            // Integrity BEFORE pragmas: a corrupt file must not first be
-            // rewritten by journal_mode=WAL and then reported as a generic
-            // pragma failure.
-            obj.interact(|conn| verify_integrity(conn))
-                .await
-                .map_err(|e| HookError::message(format!("integrity_check (interact): {e}")))?
-                .map_err(|e| HookError::message(format!("integrity_check: {e}")))?;
+            if !integrity_checked.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                obj.interact(|conn| verify_integrity(conn))
+                    .await
+                    .map_err(|e| HookError::message(format!("integrity_check (interact): {e}")))?
+                    .map_err(|e| HookError::message(format!("integrity_check: {e}")))?;
+            }
             obj.interact(|conn| conn.execute_batch(INIT_PRAGMAS))
                 .await
                 .map_err(|e| HookError::message(format!("init pragmas (interact): {e}")))?
