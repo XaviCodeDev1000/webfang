@@ -86,8 +86,7 @@ What the compiler **cannot** catch; the rest comes from the harness or the table
   errors, logs, tracing). Spanish still in the tree is a migration, not a precedent:
   never add new Spanish.
 - **HTTP: always `wreq`, never `reqwest`** — TLS fingerprint impersonation for WAF evasion.
-- **Do not unify conflicting dependencies** (dashmap 5/6, selectors 0.35/0.37/0.38): they are
-  deliberate, three different crates need three different versions.
+- **Do not unify conflicting dependencies** (dashmap 5/6, selectors 0.35/0.37/0.38): deliberate.
 - **Do not cite line numbers.** Cite the symbol (`WreqDownloader::fetch_inner`) or the path;
   line citations rot on every edit above them.
 - **Do not copy mutable state into prose.** If it changes on its own (versions, counts, support
@@ -134,7 +133,7 @@ webfang/                          # virtual workspace root (no [package])
 | `webfang_cli` | `webfang_core` |
 | `webfang_test_utils` | `webfang_core` |
 | `webfang_benchmark` | `webfang_core`, `webfang_test_utils` |
-| `webfang_sandbox_wrapper` | `webfang_core` (shared sandbox seam only) |
+| `webfang_sandbox_wrapper` | `webfang_core` (sandbox seam) |
 
 - The **direction is `cli → core`, `mcp → core`; `cli` does NOT depend on `mcp`**. If you
   need something from the MCP server in the CLI, that is an architecture decision, not an
