@@ -62,12 +62,25 @@ fn seeded_config() -> (TempDir, PathBuf) {
     (dir, config)
 }
 
-fn stdout_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
+/// Both CLI streams must stay free of the credential, including the sink that
+/// carries `CliExit` output.
+fn assert_streams_clean(output: &Output, sink: &str) {
+    assert_clean(
+        &String::from_utf8_lossy(&output.stdout),
+        &format!("{sink} stdout"),
+    );
+    assert_clean(
+        &String::from_utf8_lossy(&output.stderr),
+        &format!("{sink} stderr (CliExit output)"),
+    );
 }
 
-fn stderr_of(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+/// Run `f` under a scoped subscriber writing to `path`. The layer is dropped
+/// before the caller reads the JSONL, so the file is fully flushed.
+fn with_file_trace<R>(path: &std::path::Path, f: impl FnOnce() -> R) -> R {
+    let layer = FileTraceLayer::new(path.to_path_buf()).expect("file trace layer");
+    let subscriber = tracing_subscriber::Registry::default().with(layer);
+    tracing::subscriber::with_default(subscriber, f)
 }
 
 #[test]
@@ -108,21 +121,17 @@ fn proxy_errors_strip_origin_userinfo() {
 fn url_valued_trace_fields_strip_userinfo_in_jsonl() {
     let dir = TempDir::new().expect("temp dir");
     let trace_path = dir.path().join("trace.jsonl");
-    {
-        let layer = FileTraceLayer::new(trace_path.clone()).expect("file trace layer");
-        let subscriber = tracing_subscriber::Registry::default().with(layer);
-        tracing::subscriber::with_default(subscriber, || {
-            record_pacing_wait(
-                &PacingContext::bare("test").with_url(CREDENTIAL_URL),
-                Duration::ZERO,
-                "granted",
-            );
-            tracing::warn!(
-                target_uri = %Url::parse(CREDENTIAL_URL).expect("fixture url"),
-                "redirect blocked"
-            );
-        });
-    }
+    with_file_trace(&trace_path, || {
+        record_pacing_wait(
+            &PacingContext::bare("test").with_url(CREDENTIAL_URL),
+            Duration::ZERO,
+            "granted",
+        );
+        tracing::warn!(
+            target_uri = %Url::parse(CREDENTIAL_URL).expect("fixture url"),
+            "redirect blocked"
+        );
+    });
 
     let raw = std::fs::read_to_string(&trace_path).expect("trace file readable");
     assert_clean(&raw, "FileTraceLayer JSONL");
@@ -160,10 +169,6 @@ fn doctor_and_show_never_print_base_url_credentials() {
             .env("WEBFANG_CONFIG", &config)
             .output()
             .expect("run binary");
-        assert_clean(&stdout_of(&output), &format!("{subcommand} stdout"));
-        assert_clean(
-            &stderr_of(&output),
-            &format!("{subcommand} stderr (CliExit output)"),
-        );
+        assert_streams_clean(&output, subcommand);
     }
 }

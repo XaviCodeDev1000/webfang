@@ -51,6 +51,45 @@ fn normalize_captured(s: &str) -> String {
         .join(" ")
 }
 
+/// `std_cmd()` with both non-test SSRF hatches set in the child environment.
+/// The hatches are only test seams: a production build ignores them, which is
+/// exactly what the S9 tests assert. Every other env/arg decision stays in the
+/// caller so `spawn_budgeted` still snapshots the final command.
+fn command_with_ssrf_bypasses() -> std::process::Command {
+    let mut command = common::std_cmd();
+    command
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
+            "1",
+        )
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
+            "1",
+        );
+    command
+}
+
+/// Append the scrape argv shared by every matrix row. Only the target URL,
+/// output directory and timeout ceiling vary; the zero-retry posture stays.
+fn with_scrape_args(
+    command: &mut std::process::Command,
+    url: &str,
+    out_dir: &std::path::Path,
+    timeout_secs: &str,
+) {
+    command
+        .arg("--url")
+        .arg(url)
+        .arg("--single-page")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(out_dir)
+        .arg("--timeout-secs")
+        .arg(timeout_secs)
+        .arg("--max-retries")
+        .arg("0");
+}
+
 /// Run `webfang` against `url`. `bypass_vars` sets both SSRF test hatches in
 /// the child environment to prove a non-test build ignores them (S9).
 async fn run_production_with(url: &str, bypass_vars: bool) -> (Output, MockServer) {
@@ -72,30 +111,13 @@ async fn run_production_with(url: &str, bypass_vars: bool) -> (Output, MockServe
     // BEFORE the call — the harness snapshots them and rebuilds the command
     // per attempt — and every assertion stays outside, on the returned
     // `Output`.
-    let mut command = common::std_cmd();
-    if bypass_vars {
-        command
-            .env(
-                webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
-                "1",
-            )
-            .env(
-                webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
-                "1",
-            );
-    }
-    command
-        .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
-        .arg("--url")
-        .arg(url)
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    let mut command = if bypass_vars {
+        command_with_ssrf_bypasses()
+    } else {
+        common::std_cmd()
+    };
+    command.env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV);
+    with_scrape_args(&mut command, url, out_dir.path(), "5");
     let output = common::spawn_budgeted("run_production", command, None).await;
     (output, mock_server)
 }
@@ -260,18 +282,13 @@ async fn row7_hostname_answering_private_range_is_blocked_at_connect() {
     // Budgeted spawn (#2658 backlog): args/envs set before the call are
     // snapshotted by `spawn_budgeted` and rebuilt per attempt.
     let mut command = common::std_cmd();
-    command
-        .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
-        .arg("--url")
-        .arg(format!("http://localhost:{port}/"))
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    command.env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV);
+    with_scrape_args(
+        &mut command,
+        &format!("http://localhost:{port}/"),
+        out_dir.path(),
+        "5",
+    );
     let output = common::spawn_budgeted(
         "row7_hostname_answering_private_range_is_blocked_at_connect",
         command,
@@ -322,17 +339,12 @@ async fn row8_redirect_to_forbidden_literal_is_never_followed() {
     // Budgeted spawn (#2658 backlog): harness posture kept — `std_cmd()`
     // already disarms only the entry layer, exactly like `cmd()` did here.
     let mut command = common::std_cmd();
-    command
-        .arg("--url")
-        .arg(format!("{}/redir", mock_server.uri()))
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    with_scrape_args(
+        &mut command,
+        &format!("{}/redir", mock_server.uri()),
+        out_dir.path(),
+        "5",
+    );
     let output = common::spawn_budgeted(
         "row8_redirect_to_forbidden_literal_is_never_followed",
         command,
@@ -404,17 +416,7 @@ the ephemeral local listener.</p>
     // Budgeted spawn (#2658 backlog): harness posture kept — `std_cmd()`
     // already sets the entry-guard disarmer, as the comment above states.
     let mut command = common::std_cmd();
-    command
-        .arg("--url")
-        .arg(mock_server.uri())
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("10")
-        .arg("--max-retries")
-        .arg("0");
+    with_scrape_args(&mut command, &mock_server.uri(), out_dir.path(), "10");
     let output = common::spawn_budgeted(
         "row9_positive_control_loopback_is_reachable_when_entry_guard_disarmed",
         command,
@@ -452,26 +454,13 @@ async fn ssrf_bypass_vars_cannot_disarm_dial_guard() {
 async fn ssrf_bypass_vars_cannot_disarm_connect_resolver() {
     let port = port_provider::bind_any().await.expect("ephemeral port");
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
-    let mut command = common::std_cmd();
-    command
-        .env(
-            webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
-            "1",
-        )
-        .env(
-            webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
-            "1",
-        )
-        .arg("--url")
-        .arg(format!("http://localhost:{port}/"))
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    let mut command = command_with_ssrf_bypasses();
+    with_scrape_args(
+        &mut command,
+        &format!("http://localhost:{port}/"),
+        out_dir.path(),
+        "5",
+    );
     let output = common::spawn_budgeted(
         "ssrf_bypass_vars_cannot_disarm_connect_resolver",
         command,
@@ -498,26 +487,13 @@ async fn ssrf_bypass_vars_cannot_disarm_redirect_guard() {
         .mount(&mock)
         .await;
     let out_dir = tempfile::TempDir::new().expect("temp output dir");
-    let mut command = common::std_cmd();
-    command
-        .env(
-            webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
-            "1",
-        )
-        .env(
-            webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
-            "1",
-        )
-        .arg("--url")
-        .arg(format!("{}/redir", mock.uri()))
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    let mut command = command_with_ssrf_bypasses();
+    with_scrape_args(
+        &mut command,
+        &format!("{}/redir", mock.uri()),
+        out_dir.path(),
+        "5",
+    );
     let output = common::spawn_budgeted(
         "ssrf_bypass_vars_cannot_disarm_redirect_guard",
         command,
