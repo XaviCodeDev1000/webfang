@@ -234,7 +234,7 @@ credential — on every run.
 
 ```powershell
 # 1. Download (PowerShell 5.1+)
-$Version = "v9.2.3"
+$Version = "v9.2.4"
 $Asset   = "webfang-x86_64-pc-windows-msvc.zip"
 Invoke-WebRequest "https://github.com/XaviCodeDev1000/webfang/releases/download/$Version/$Asset" -OutFile $Asset
 Invoke-WebRequest "https://github.com/XaviCodeDev1000/webfang/releases/download/$Version/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
