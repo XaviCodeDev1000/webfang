@@ -285,6 +285,7 @@ mod tests {
     /// failure, classified through the one seam — `127.0.0.1:9` refuses every
     /// dial with no network and no status, so the refusal itself is the only
     /// evidence the exhaustion error may carry.
+    #[cfg_attr(miri, ignore)] // TLS_method (btls FFI) via wreq Client::builder, unsupported by Miri
     #[tokio::test]
     async fn exhaustion_after_transport_failures_delivers_the_classified_cause() {
         let client = Client::builder().build().expect("the client builds");
@@ -319,7 +320,7 @@ mod tests {
     /// S4: when the last attempt failed with a STATUS, exhaustion stays bare —
     /// `RateLimited`/`ServerError` carry no transport cause. Covers both
     /// policies' exhaustion (S9), wiremock for the HTTP side.
-    #[cfg_attr(miri, ignore)] // TLS_method (btls FFI) via the wiremock-backed wreq Client, unsupported by Miri
+    #[cfg_attr(miri, ignore)] // TLS_method (btls FFI) via wreq Client::builder, unsupported by Miri
     #[tokio::test]
     async fn exhaustion_after_status_failures_stays_bare() {
         for (status, exhausted, label) in [
