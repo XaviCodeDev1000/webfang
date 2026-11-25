@@ -253,8 +253,7 @@ before validating, or pacing after dialing, is rejected in review even if its te
   `assert!(output.contains("..."))`. Cycle: `cargo nextest run` (fails with `.snap.new`) →
   `cargo insta review` (every diff) → `cargo nextest run` (green). Never commit `.snap.new`.
 - **Mandatory sanitization**: `redact_nondeterministic()` normalizes TempDir paths, timestamps,
-  wiremock ports and ANSI; for extra fields, `insta::Settings::clone_current()` + `add_filter(...)`
-  + `.bind(...)` (see `crates/webfang_core/tests/behavioral/main.rs`).
+  wiremock ports and ANSI; extras via `insta::Settings::clone_current()` + `add_filter()` + `.bind()`.
 - **Six-node diagnostic** for every test you write or modify:
   1. **Observable behavior** — exercise public ports, never internal state.
   2. **Ephemeral adapters** — wiremock for HTTP, TempDir for the filesystem. No real network.
