@@ -26,6 +26,13 @@ pub const EXIT_USAGE_ERROR: u8 = 64;
 pub const EXIT_DATA_ERROR: u8 = 65;
 /// Exit 69 — Infrastructure/network failure (sysexits EX_UNAVAILABLE).
 pub const EXIT_UNAVAILABLE: u8 = 69;
+/// Exit 70 — The SSRF guard refused the target (#S14). Distinct from 69: the
+/// network did not fail, the run was not allowed to touch it.
+pub const EXIT_SSRF_BLOCKED: u8 = 70;
+/// Exit 71 — A WAF/CAPTCHA challenge blocked every target (#S14). Distinct
+/// from 69 (there is no outage to retry) and from 77 (robots.txt is a
+/// permission rule, not an adversarial refusal).
+pub const EXIT_WAF_BLOCKED: u8 = 71;
 /// Exit 74 — File I/O error (sysexits EX_IOERR).
 pub const EXIT_IO_ERROR: u8 = 74;
 /// Exit 76 — Protocol error (sysexits EX_PROTOCOL).
@@ -131,6 +138,7 @@ pub fn format_cli_error(err: &CliError, no_color: bool) -> String {
 
 /// Exit codes following sysexits convention:
 /// 0 = success, 64 = usage error, 65 = data format error, 69 = service unavailable (network/partial),
+/// 70 = SSRF-blocked target, 71 = WAF-blocked target,
 /// 74 = I/O error, 76 = protocol error, 77 = forbidden (robots.txt), 78 = config error
 #[derive(Debug, Clone, PartialEq)]
 pub enum CliExit {
@@ -142,6 +150,10 @@ pub enum CliExit {
     DataFormatError(String),
     /// Exit 69 — network / service unavailable
     NetworkError(String),
+    /// Exit 70 — the SSRF guard refused the target before any socket opened
+    SsrfBlocked(String),
+    /// Exit 71 — a WAF/CAPTCHA challenge blocked the target
+    WafBlocked(String),
     /// Exit 74 — I/O error
     IoError(String),
     /// Exit 76 — protocol error
@@ -265,6 +277,30 @@ pub fn scraper_failure_exit_when_internal_fatal(
     (internal_fatal > 0).then(|| {
         CliExit::ScraperFailure(format!(
             "Scraper failure: {internal_fatal} internal error(s) out of {} URLs",
+            failures.len()
+        ))
+    })
+}
+
+/// Typed override — EVERY failure is a WAF/CAPTCHA challenge →
+/// [`CliExit::WafBlocked`] (exit 71).
+///
+/// Deliberately narrower than the class mapping: it fires only when the whole
+/// failure set is [`ScraperError::WafBlocked`], so a run that also hit a real
+/// fault keeps its more specific code. A refused-by-WAF endpoint is not an
+/// outage (69) and not a robots.txt permission rule (77): the origin answered
+/// and told us no.
+#[must_use]
+pub fn waf_blocked_exit_when_all_failures_are_waf(
+    failures: &[(String, ScraperError)],
+) -> Option<CliExit> {
+    (!failures.is_empty()
+        && failures
+            .iter()
+            .all(|(_, e)| matches!(e, ScraperError::WafBlocked { .. })))
+    .then(|| {
+        CliExit::WafBlocked(format!(
+            "every URL was blocked by a WAF/CAPTCHA challenge ({} URL(s))",
             failures.len()
         ))
     })
@@ -410,6 +446,14 @@ impl std::process::Termination for CliExit {
             CliExit::NetworkError(msg) => {
                 eprintln!("Error: {msg}");
                 ExitCode::from(EXIT_UNAVAILABLE)
+            },
+            CliExit::SsrfBlocked(msg) => {
+                eprintln!("Error: {msg}");
+                ExitCode::from(EXIT_SSRF_BLOCKED)
+            },
+            CliExit::WafBlocked(msg) => {
+                eprintln!("Error: {msg}");
+                ExitCode::from(EXIT_WAF_BLOCKED)
             },
             CliExit::IoError(msg) => {
                 eprintln!("Error: {msg}");

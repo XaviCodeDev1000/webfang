@@ -289,16 +289,20 @@ async fn panic_probe_tool_is_advertised_on_the_real_stack() {
     );
 }
 
-/// A panicking `tools/call` answers HTTP 200 with a JSON-RPC result carrying
-/// `isError: true` — a normal tool error, not a dropped stream, not a
-/// JSON-RPC error envelope, and with the panic payload withheld.
+/// A panicking `tools/call` answers HTTP 200 with a JSON-RPC `-32603` error
+/// carrying the SHARED English message — the same envelope the middleware
+/// produces for a panic it catches, and with the panic payload withheld
+/// (#S14). Session survival is `session_survives_a_panicking_tool_call`; this
+/// test pins the envelope.
 ///
-/// Bounded on purpose: a session that did NOT survive would leave the request
-/// hanging rather than failing, so without this deadline the regression reports
-/// itself as a nextest slow-timeout kill (which is how the pre-fix behavior was
-/// observed) instead of as a named assertion failure.
+/// The shared text is duplicated here on purpose: this is the external pin an
+/// integrator can audit, and the library constant it mirrors is
+/// `mcp_server::panic_containment::PANIC_CONTAINED_MESSAGE`.
+const SHARED_PANIC_MESSAGE: &str = "Internal MCP server error (panic contained). \
+     The request failed unexpectedly; the session is still active.";
+
 #[tokio::test]
-async fn panicking_tool_call_answers_200_with_is_error_and_no_payload() {
+async fn panicking_tool_call_answers_with_the_shared_internal_error() {
     let (base_url, _handle) = start_panic_probe_server().await;
     let client = Client::new();
     let session_id = init_session(&client, &base_url).await;
@@ -311,30 +315,20 @@ async fn panicking_tool_call_answers_200_with_is_error_and_no_payload() {
         "a contained panic must be HTTP 200 with a JSON-RPC result, got {status}: {text}"
     );
     let response: Value = extract_json(&text).expect("response parses as JSON-RPC");
-    assert!(
-        response.get("error").is_none(),
-        "containment produces a tool RESULT, not a protocol error: {response}"
+    let error = response
+        .get("error")
+        .expect("a contained panic must answer the shared JSON-RPC error envelope");
+    assert_eq!(
+        error["code"], -32603,
+        "the shared envelope is -32603 internal error: {response}"
     );
-    let result = response
-        .get("result")
-        .expect("a contained panic must still answer a JSON-RPC result");
-    assert!(
-        is_tool_error(result),
-        "the contained panic must be flagged isError: {response}"
-    );
-
-    let message = tool_text(result);
-    assert!(
-        !message.is_empty(),
-        "the client must get an explanation, not an empty body: {response}"
+    assert_eq!(
+        error["message"], SHARED_PANIC_MESSAGE,
+        "the message must be the shared English text, identical on stdio: {response}"
     );
     assert!(
         !text.contains(PANIC_MARKER),
         "the panic payload must never reach the client: {text}"
-    );
-    assert!(
-        !message.contains("panicked") && !message.contains("panic"),
-        "the user-facing message must be a plain explanation, not the panic text: {message}"
     );
 }
 

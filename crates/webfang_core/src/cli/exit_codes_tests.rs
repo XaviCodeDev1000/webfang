@@ -72,6 +72,55 @@ fn report_phase_all_blocked_returns_forbidden() {
 }
 
 #[test]
+fn report_phase_all_waf_blocked_returns_71() {
+    // #S14: every failure is a WAF/CAPTCHA challenge — the origin answered
+    // and refused. Not an outage (69), not a robots.txt rule (77).
+    let failures = vec![
+        (
+            "https://a.example.com/".to_string(),
+            crate::error::ScraperError::waf_blocked("https://a.example.com/", "Cloudflare"),
+        ),
+        (
+            "https://b.example.com/".to_string(),
+            crate::error::ScraperError::waf_blocked("https://b.example.com/", "DataDome"),
+        ),
+    ];
+
+    match report_phase(&[], &failures, 0, 0) {
+        Some(CliExit::WafBlocked(msg)) => assert!(
+            msg.contains("2 URL(s)"),
+            "the refusal must name how many targets were refused: {msg}"
+        ),
+        other => panic!("expected WafBlocked (71), got: {other:?}"),
+    }
+
+    // A mixed set keeps the more specific network fallback: only an ALL-WAF
+    // run is a WAF refusal.
+    let mixed = vec![
+        (
+            "https://a.example.com/".to_string(),
+            crate::error::ScraperError::waf_blocked("https://a.example.com/", "Cloudflare"),
+        ),
+        (
+            "https://c.example.com/".to_string(),
+            crate::error::ScraperError::Network(Box::new(std::io::Error::other("reset"))),
+        ),
+    ];
+    assert!(matches!(
+        report_phase(&[], &mixed, 0, 0),
+        Some(CliExit::NetworkError(_))
+    ));
+    assert!(matches!(
+        batch_exit_code(0, mixed.len(), &mixed),
+        CliExit::NetworkError(_)
+    ));
+    assert!(matches!(
+        batch_exit_code(0, failures.len(), &failures),
+        CliExit::WafBlocked(_)
+    ));
+}
+
+#[test]
 fn report_phase_mixed_success_and_blocked_proceeds() {
     // Some pages scraped, the rest blocked: content was produced, so the run
     // proceeds to export exactly as before blocked counting existed.

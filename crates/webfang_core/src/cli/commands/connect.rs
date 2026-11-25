@@ -115,6 +115,29 @@ async fn register(provider: &ProviderConfig, path: &Path) -> CliExit {
 /// returned verbatim so the message names the missing piece (URL gate, model,
 /// connection, status, parse).
 async fn validate_endpoint(provider: &ProviderConfig) -> Result<(), CliExit> {
+    // #S14: the SSRF refusal is decided BEFORE the adapter is built and stays
+    // out of the `ConfigError → NetworkError` remap below. A forbidden target
+    // is not a network failure: 69 tells automation to retry a request that
+    // must never leave the machine.
+    //
+    // The verdict uses the SAME predicate the adapter's guard applies, with
+    // the provider's own `allow_loopback` and `network_policy` — a self-hosted
+    // loopback endpoint (`allow_loopback: true`) or an allowlisted LAN CIDR is
+    // legitimate, and refusing it here would break providers that work today.
+    if let Some(host) = provider.base_url.host_str() {
+        if crate::domain::ssrf_guard::redirect_literal_blocked_with_policy(
+            Some(host),
+            provider.allow_loopback,
+            &provider.network_policy,
+        ) {
+            return Err(CliExit::SsrfBlocked(format!(
+                "provider '{}' refused by the SSRF guard: host '{host}' is a forbidden \
+                 internal address (internal network/cloud metadata access blocked)",
+                provider.id
+            )));
+        }
+    }
+
     let providers = ProvidersConfig {
         providers: vec![provider.clone()],
     };
@@ -135,18 +158,20 @@ async fn validate_endpoint(provider: &ProviderConfig) -> Result<(), CliExit> {
             provider.id
         ))),
         // `build_embedding_provider` maps BOTH construction failures (bad
-        // `--model`, an SSRF loopback rejection) and probe failures
-        // (connection, status, parse) onto `CliExit::ConfigError`, with the
-        // real cause in the message. The exit code is remapped to
-        // `NetworkError` (69) because a `connect` that could not validate an
-        // endpoint is, from the operator's seat, an endpoint that did not
-        // answer.
+        // `--model`) and probe failures (connection, status, parse) onto
+        // `CliExit::ConfigError`, with the real cause in the message. The exit
+        // code is remapped to `NetworkError` (69) because a `connect` that
+        // could not validate an endpoint is, from the operator's seat, an
+        // endpoint that did not answer.
+        //
+        // The SSRF refusal is NOT in that set: the entry guard answers it above
+        // (#S14), before the adapter exists, so it leaves with 70.
         //
         // Known limitation: a construction failure that is NOT a network
-        // problem (an HTTP 401 for a wrong model, or the loopback rejection)
-        // also lands on 69. Distinguishing them needs `build_embedding_provider`
-        // to surface the category separately; until then the message — not the
-        // exit code — carries the cause.
+        // problem (an HTTP 401 for a wrong model) still lands on 69.
+        // Distinguishing it needs `build_embedding_provider` to surface the
+        // category separately; until then the message — not the exit code —
+        // carries the cause.
         Err(CliExit::ConfigError(msg)) => Err(CliExit::NetworkError(msg)),
         Err(other) => Err(other),
     }

@@ -345,3 +345,45 @@ fn ingestion_payload_too_large_maps_to_data_format_error_65() {
     assert!(matches!(exit, CliExit::DataFormatError(_)));
     assert_eq!(exit.report(), ExitCode::from(EXIT_DATA_ERROR));
 }
+
+#[test]
+fn waf_override_when_every_failure_is_a_waf_challenge_maps_to_71() {
+    // #S14: an all-WAF failure set is a refusal by the origin, not an outage.
+    let failures = vec![
+        (
+            "https://a.example.com/".to_string(),
+            crate::error::ScraperError::waf_blocked("https://a.example.com/", "Cloudflare"),
+        ),
+        (
+            "https://b.example.com/".to_string(),
+            crate::error::ScraperError::waf_blocked("https://b.example.com/", "DataDome"),
+        ),
+    ];
+    let exit = waf_blocked_exit_when_all_failures_are_waf(&failures);
+    assert!(matches!(exit, Some(CliExit::WafBlocked(_))));
+    assert_eq!(
+        exit.expect("all-WAF set must be refused").report(),
+        ExitCode::from(EXIT_WAF_BLOCKED)
+    );
+}
+
+#[test]
+fn waf_override_requires_every_failure_to_be_a_waf_challenge() {
+    assert_eq!(waf_blocked_exit_when_all_failures_are_waf(&[]), None);
+
+    let mixed = vec![
+        (
+            "https://a.example.com/".to_string(),
+            crate::error::ScraperError::waf_blocked("https://a.example.com/", "Cloudflare"),
+        ),
+        (
+            "https://b.example.com/".to_string(),
+            crate::error::ScraperError::Network(Box::new(std::io::Error::other("reset"))),
+        ),
+    ];
+    assert_eq!(
+        waf_blocked_exit_when_all_failures_are_waf(&mixed),
+        None,
+        "a mixed set must keep the more specific network routing"
+    );
+}

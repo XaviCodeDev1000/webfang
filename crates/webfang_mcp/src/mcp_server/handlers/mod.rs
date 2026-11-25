@@ -33,25 +33,24 @@ pub(crate) mod test_support;
 ///
 /// # Test-only surface shipped in release builds — read before changing this
 ///
-/// When `WEBFANG_MCP_TEST_PANIC_TOOL` is set in the process environment, this
-/// registry ALSO advertises `test_panic_probe`, a tool whose body panics on
-/// purpose. That is deliberate (#1626, PC-3), and the tradeoff is:
+/// When `WEBFANG_MCP_TEST_PANIC_TOOL` is set in the process environment of a
+/// DEVELOPMENT build, this registry ALSO advertises `test_panic_probe`, a tool
+/// whose body panics on purpose. That is deliberate (#1626, PC-3, #S14), and
+/// the tradeoff is:
 ///
-/// - **It ships in release builds.** Gating it behind `cfg(test)` would make
-///   it invisible to the one thing it exists for: an integration test that
-///   spawns the real `webfang-mcp-stdio` binary and drives JSON-RPC over
-///   stdio, where the in-crate `#[cfg(test)]` seam cannot be seen. There is no
-///   production tool that panics on demand, so without a wire-reachable
-///   trigger the E2E half of the contract ("a stdio round trip asserting a
-///   record exists after a contained panic") is not testable.
+/// - **Development builds only.** `cfg(test)` would make it invisible to the
+///   one thing it exists for: an integration test that spawns the real
+///   `webfang-mcp-stdio` binary and drives JSON-RPC over stdio, where the
+///   in-crate `#[cfg(test)]` seam cannot be seen. A release build ignores the
+///   variable entirely, so a shipped server can never advertise it.
 /// - **It is contained, not a foot-gun.** The panic is caught by the existing
 ///   `catch_unwind` in `McpHandler::call_tool`: the session survives, the
 ///   caller gets the normal `isError: true` result, and the process keeps
 ///   serving. It cannot crash the server, and it grants no access to anything
 ///   the real tools do not already expose.
-/// - **It exists only when an operator sets the variable.** Unset or empty, the
-///   advertised surface is byte-for-byte what it was before this was added,
-///   which the `tools.len() == MCP_TOOL_COUNT` stdio assertion pins.
+/// - **It exists only when an operator sets the variable.** Unset or empty, or
+///   in a release build, the advertised surface is byte-for-byte what it was
+///   before this was added, which the `tools.len() == 36` stdio assertion pins.
 /// - **What it costs:** a deployment that sets the variable in production gets
 ///   one extra advertised tool that always fails. That is a configuration
 ///   mistake with a visible symptom, not a latent vulnerability — and the

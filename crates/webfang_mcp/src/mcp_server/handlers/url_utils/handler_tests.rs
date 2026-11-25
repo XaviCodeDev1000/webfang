@@ -33,46 +33,43 @@ async fn validate_url_valid() {
 }
 
 #[tokio::test]
-async fn validate_url_invalid_returns_json_not_error() {
+async fn validate_url_invalid_is_invalid_params() {
     let (handler, _tmp) = test_handler().await;
-    // Bug #7 regression: invalid URL must return a tool-level result
-    // with valid:false, NOT a protocol-level McpError (issue #590).
-    let res = handler
+    // #S14: an invalid URL is a protocol-level refusal (-32602), and the
+    // diagnostic fields travel in the error data rather than in a result.
+    let err = handler
         .validate_url(Parameters(ValidateUrlParams {
             url: "not a url".to_string(),
         }))
         .await
-        .expect("invalid URL must return Ok with JSON payload, not Err");
-    let text = result_text(&res);
+        .expect_err("invalid URL must be refused with -32602, not answered as a result");
+    assert_eq!(err.code.0, -32602, "invalid params, got: {err:?}");
+    let data = err
+        .data
+        .as_ref()
+        .expect("the refusal must carry its diagnostic fields");
+    assert_eq!(data["valid"], false);
     assert!(
-        text.contains("\"valid\": false"),
-        "invalid URL must report valid:false, got: {text}"
-    );
-    assert!(
-        text.contains("reason"),
-        "invalid URL must include a reason field, got: {text}"
+        data["reason"].as_str().is_some_and(|r| !r.is_empty()),
+        "the refusal must explain itself, got: {data}"
     );
 }
 
 #[tokio::test]
 async fn validate_url_rejects_non_http_scheme() {
     let (handler, _tmp) = test_handler().await;
-    // Issue #606: a non-http(s) scheme must be reported valid:false, not
-    // accepted as valid:true.
-    let res = handler
+    // Issue #606: a non-http(s) scheme must be refused, not accepted.
+    let err = handler
         .validate_url(Parameters(ValidateUrlParams {
             url: "ftp://example.com/file".to_string(),
         }))
         .await
-        .expect("validate_url returns Ok");
-    let text = result_text(&res);
-    assert!(
-        text.contains("\"valid\": false"),
-        "ftp scheme must be valid:false, got: {text}"
-    );
-    assert!(
-        text.contains("scheme"),
-        "reason must mention the scheme, got: {text}"
+        .expect_err("ftp scheme must be refused");
+    assert_eq!(err.code.0, -32602, "invalid params, got: {err:?}");
+    let data = err.data.as_ref().expect("refusal data");
+    assert_eq!(
+        data["reason_code"], "unsupported_scheme",
+        "the slug must name the scheme refusal, got: {data}"
     );
 }
 

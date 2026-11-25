@@ -2,22 +2,16 @@
 //! Bodies are verbatim from the original inline test module.
 
 use super::tests_common::test_handler;
-use crate::mcp_server::{McpState, MCP_TOOL_COUNT};
+use crate::mcp_server::McpState;
 use webfang_core::config::Config;
 use webfang_core::di::Container;
 #[tokio::test]
 async fn test_handler_builds_with_all_tools() {
     let handler = test_handler().await;
     let tools = handler.tool_router.list_all();
-    // The EXACT count, not a floor (#1817): "at least 35" let the registry
-    // drift in either direction without failing, and the figure is read
-    // from the one place that owns it.
-    assert_eq!(
-        tools.len(),
-        MCP_TOOL_COUNT,
-        "the server must advertise exactly {MCP_TOOL_COUNT} tools, got {}",
-        tools.len()
-    );
+    // The exact count is pinned EXTERNALLY by `tests/stdio_handshake.rs`
+    // (#1817, #S14): asserting it against a value derived from this same
+    // router would be tautological, so this test checks composition instead.
 
     let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
     assert!(tool_names.contains(&"scrape_url"));

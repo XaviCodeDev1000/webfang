@@ -7,8 +7,9 @@
 //! handlers wire `params.validate()?` as the first statement, so invalid
 //! parameters are rejected at the protocol boundary with code `-32602`
 //! (invalid params) before any network access or semaphore acquisition.
-//! Exceptions: `validate_url` (returns tool-level `{"valid": false}`) and
-//! `detect_obsidian_vault` (accepts absolute paths) — see bug #590.
+//! Exception: `detect_obsidian_vault` (accepts absolute paths) — see bug #590.
+//! `validate_url` now refuses an unusable target with `-32602` too (#S14); its
+//! diagnostic fields ride in the error `data`.
 //!
 //! Layout (T7 slice-12, issue #1887): the rejection cases share one
 //! arrange-act skeleton ([`invoke`]) and are grouped into three case tables —
@@ -351,15 +352,6 @@ struct AcceptCase {
 /// Acceptance rows: bug-#7/#8 fixtures plus the over-rejection guards.
 fn accept_cases() -> Vec<AcceptCase> {
     vec![
-        // Bug #7 fix: `validate_url` no longer calls `params.validate()?` — it
-        // returns a JSON tool result for ALL inputs (`file://` is a valid URL
-        // per RFC 3986, so it reports valid:true with scheme:file).
-        AcceptCase {
-            name: "validate_url file:// returns tool result (bug #7)",
-            tool: "validate_url",
-            args: json!({ "url": "file:///etc/passwd" }),
-            check_body: true,
-        },
         // Bug #8 fix: absolute paths are accepted (no -32602). The tool
         // returns a result (vault not found, but not a validation error).
         AcceptCase {
@@ -425,4 +417,28 @@ async fn valid_params_are_not_rejected() {
             );
         }
     }
+}
+
+/// #S14: `validate_url` refuses a target it cannot use at the PROTOCOL level
+/// (`-32602`), like every sibling tool's parameter validation, and keeps its
+/// diagnostic fields in the error `data`. This is why it is no longer in the
+/// acceptance table above.
+#[tokio::test]
+async fn validate_url_non_http_scheme_is_invalid_params() {
+    let resp = invoke("validate_url", json!({ "url": "file:///etc/passwd" })).await;
+
+    assert_eq!(
+        error_code(&resp),
+        Some(JSONRPC_INVALID_PARAMS),
+        "a non-http(s) target must be -32602, got: {resp}"
+    );
+    let data = &resp["error"]["data"];
+    assert_eq!(
+        data["valid"], false,
+        "the refusal must stay explicit: {resp}"
+    );
+    assert_eq!(
+        data["reason_code"], "unsupported_scheme",
+        "the programmatic reason must survive: {resp}"
+    );
 }

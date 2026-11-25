@@ -19,8 +19,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::Notify;
 use webfang_core::cli::error::{CliExit, EXIT_IO_ERROR};
 use webfang_mcp::mcp_server::{
-    build_container, build_mcp_state, default_dom_inspector, panic_hook::setup_panic_hook,
-    validation::MAX_BLOB_LEN, McpHandler, McpState, MCP_TOOL_COUNT,
+    build_container, build_mcp_state, default_dom_inspector, mcp_tool_count,
+    panic_hook::setup_panic_hook, validation::MAX_BLOB_LEN, McpHandler, McpState,
 };
 
 /// Webfang MCP Server — Stdio transport.
@@ -30,7 +30,8 @@ use webfang_mcp::mcp_server::{
     version,
     about = "Webfang MCP Server (stdio transport)",
     long_about = format!(
-        "Exposes {MCP_TOOL_COUNT} tools via the Model Context Protocol over stdin/stdout."
+        "Exposes {} tools via the Model Context Protocol over stdin/stdout.",
+        mcp_tool_count()
     )
 )]
 struct Args {

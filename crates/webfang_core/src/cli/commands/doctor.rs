@@ -185,6 +185,26 @@ fn check_credential(provider: &ProviderConfig) -> Result<(), CliExit> {
 
 /// Build the real adapter and probe the endpoint, reporting reachability.
 async fn diagnose_reachability(provider: &ProviderConfig) -> CliExit {
+    // #S14: a target the SSRF guard forbids is decided here, before the
+    // adapter, and leaves with 70 instead of the 69 the `ConfigError →
+    // NetworkError` remap below would report. The verdict honours the
+    // provider's `allow_loopback` and `network_policy`, exactly like the guard
+    // the adapter builds.
+    if let Some(host) = provider.base_url.host_str() {
+        if crate::domain::ssrf_guard::redirect_literal_blocked_with_policy(
+            Some(host),
+            provider.allow_loopback,
+            &provider.network_policy,
+        ) {
+            println!("Connection: refused by the SSRF guard — forbidden internal host '{host}'");
+            return CliExit::SsrfBlocked(format!(
+                "the embeddings provider '{}' was refused by the SSRF guard: host '{host}' is a \
+                 forbidden internal address",
+                provider.id
+            ));
+        }
+    }
+
     let providers = ProvidersConfig {
         providers: vec![provider.clone()],
     };

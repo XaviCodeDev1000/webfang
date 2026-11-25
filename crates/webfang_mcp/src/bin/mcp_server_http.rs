@@ -20,8 +20,9 @@ use webfang_mcp::mcp_server::server::{
     DEFAULT_MAX_SESSIONS, DEFAULT_MCP_ADDR, DEFAULT_SESSION_CAP_WINDOW_SECS,
     MAX_ALLOWED_SESSIONS_CAP, REDACTED_CREDENTIAL,
 };
-use webfang_mcp::mcp_server::MCP_TOOL_COUNT;
-use webfang_mcp::mcp_server::{build_container, build_mcp_state, default_dom_inspector, McpState};
+use webfang_mcp::mcp_server::{
+    build_container, build_mcp_state, default_dom_inspector, mcp_tool_count, McpState,
+};
 
 /// Webfang MCP Server — Streamable HTTP transport.
 ///
@@ -39,7 +40,8 @@ use webfang_mcp::mcp_server::{build_container, build_mcp_state, default_dom_insp
     version,
     about = "Webfang MCP Server (HTTP transport)",
     long_about = format!(
-        "Exposes {MCP_TOOL_COUNT} tools via the Model Context Protocol over Streamable HTTP."
+        "Exposes {} tools via the Model Context Protocol over Streamable HTTP.",
+        mcp_tool_count()
     )
 )]
 struct Args {

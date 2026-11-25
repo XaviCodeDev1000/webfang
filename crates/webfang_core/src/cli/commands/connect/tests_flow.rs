@@ -171,3 +171,33 @@ async fn connect_rejects_an_illegal_provider_id_before_touching_the_network() {
 // pre-planted that exact name with a symlink and connect truncated the
 // victim through it.
 // ---------------------------------------------------------------------
+
+/// #S14: a target the SSRF entry guard forbids leaves with 70, before the
+/// adapter is built and before the `ConfigError → NetworkError` remap — a
+/// forbidden address is not an endpoint that failed to answer, and 69 told
+/// automation to retry what must never run.
+#[test]
+fn connect_refuses_a_forbidden_literal_endpoint_with_exit_70() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let mut provider = test_provider("connect-ssrf");
+    provider.base_url = url::Url::parse("http://10.0.0.1/v1").expect("url");
+    provider.allow_loopback = true;
+
+    let exit = runtime
+        .block_on(validate_endpoint(&provider))
+        .expect_err("a private literal must be refused before any socket opens");
+
+    use std::process::Termination as _;
+
+    assert!(
+        matches!(&exit, CliExit::SsrfBlocked(_)),
+        "expected SsrfBlocked (70), got: {exit:?}"
+    );
+    assert_eq!(
+        exit.report(),
+        std::process::ExitCode::from(crate::cli::error::EXIT_SSRF_BLOCKED)
+    );
+}
