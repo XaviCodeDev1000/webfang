@@ -154,8 +154,9 @@ the closest equivalent module: trait in `application/crawler/engine.rs`, domain 
 `domain/entities/` (constructor + `TryFrom` + `Display`/`Debug`/`PartialEq`), adapter in
 `infrastructure/`, new error in the layer's error file.
 
-**Avoid giant components:** `pre-commit` enforces `scripts/check_file_size.sh` (500-line hard
-limit + descending ratchet). Split a touched file; never widen the baseline.
+**Avoid giant components:** `pre-commit` enforces `scripts/check_file_size.sh` over
+`find crates -name '*.rs' -not -path '*/tests/*'` (500-line hard limit + descending ratchet).
+Split a touched file; never widen the baseline.
 
 ### Error stratification
 

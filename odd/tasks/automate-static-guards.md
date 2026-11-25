@@ -30,4 +30,6 @@ L3 (independent review, blocker): `gentle-ai-verify` reproduced a fresh-checkout
 
 L4 (recheck of the blocker only): harness OK with 6 guards, `shellcheck` clean, runner OK, `check_agents_doc.sh` OK, `git diff --check` clean. AGENTS.md unchanged at 620 lines / 39879 bytes.
 
-L5 (next): push the new commits to the open PR #3045 only on explicit authorization; the PR title currently names only the first slice and should be widened because 2+ commits make it the changelog line.
+L5 (delivery): PR #3045 was merged by the maintainer before these four commits were pushed, so they were cherry-picked onto `main@cd15e330` in a new worktree (`chore-engram-guards`) and delivered as PR #3054 with linked issue #3053 approved by the owner.
+
+L6 (CI red, fixed): CI `Repo guards` failed case 2.2 of `scripts/test_file_size_preflight.sh` — the harness three-way lock requires the exact `find crates -name '*.rs' -not -path '*/tests/*'` expression in `AGENTS.md`, and the trim had removed it. Restored the expression in the file-size rule line; harness now 118/0, `check_agents_doc.sh` OK at 621 lines / 39946 bytes. The local gate's code lane does not run that harness, which is why local GREEN did not predict CI.
