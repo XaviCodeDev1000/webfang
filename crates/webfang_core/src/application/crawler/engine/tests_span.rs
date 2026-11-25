@@ -16,6 +16,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// proven shape of the sibling entry tests) under a real FileTraceLayer,
 /// so both records are read back from the parsed JSONL.
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 fn crawl_site_with_options_span_records_outcome_and_summary_duration_ms() {
     // #1615 (F11 / G-3 / G-4 / G-5): this path applies the literal-IP
     // entry guard, which refuses wiremock's 127.0.0.1.

@@ -9,6 +9,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// exact instance, so nonzero traffic proves the same `Arc` is shared by
 /// every task context derived from the session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn ports_injected_pool_reaches_crawl_workers() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;
@@ -47,6 +51,10 @@ async fn ports_injected_pool_reaches_crawl_workers() {
 /// fix the flag-built pool was attached to the engine mirror only, which
 /// the session path never read, silently dropping per-domain gating.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn session_pool_enabled_flag_installs_pool_into_session_ports() {
     let seed = Url::parse("https://example.com").expect("valid seed URL");
     let config = CrawlerConfig::builder(seed).max_depth(0).build();
@@ -69,6 +77,10 @@ async fn session_pool_enabled_flag_installs_pool_into_session_ports() {
 /// `application::container::build_crawl_session_pool` and the crawl still
 /// completes — the port-gated fetch path must not block a healthy domain.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn crawl_site_with_options_session_pool_enabled_crawls_through_port() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;
@@ -106,6 +118,10 @@ async fn crawl_site_with_options_session_pool_enabled_crawls_through_port() {
 /// set (robots from config, capture off, checkpoint off) until removal.
 #[allow(deprecated)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn deprecated_crawl_site_shim_matches_explicit_options_entry() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;
@@ -165,6 +181,10 @@ async fn deprecated_crawl_site_shim_matches_explicit_options_entry() {
 /// seam — same pages captured, same content.
 #[allow(deprecated)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn deprecated_crawl_site_capturing_shim_matches_content_sink_option() {
     let _entry_off = entry_off();
     use crate::application::crawler::content_sink::{CrawlContentSink, InMemoryContentSink};

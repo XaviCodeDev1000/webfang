@@ -9,6 +9,10 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 // ——— PersistenceMode::with_persistence wiring (5c) ———
 
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn with_persistence_disabled_leaves_checkpoint_disabled() {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let config = CrawlerConfig::builder(seed).build();
@@ -25,6 +29,10 @@ async fn with_persistence_disabled_leaves_checkpoint_disabled() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn with_persistence_checkpoint_configures_path_and_interval() {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let config = CrawlerConfig::builder(seed).build();
@@ -47,6 +55,10 @@ async fn with_persistence_checkpoint_configures_path_and_interval() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn with_persistence_resume_only_leaves_checkpoint_disabled() {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let config = CrawlerConfig::builder(seed).build();
@@ -145,6 +157,10 @@ async fn mount_linked_site(server: &MockServer, link_count: usize) {
 /// #1823 Delete verdict: a fully-completed crawl deletes its checkpoint
 /// at close, and `shutdown()` must not resurrect it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn shutdown_leaves_no_checkpoint_after_fully_completed_run() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;
@@ -182,6 +198,10 @@ async fn shutdown_leaves_no_checkpoint_after_fully_completed_run() {
 /// #1823 Write verdict: a truncated crawl keeps its checkpoint, and
 /// `shutdown()` must not rewrite it byte-for-byte.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn shutdown_does_not_rewrite_checkpoint_after_truncated_run() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;
@@ -232,6 +252,10 @@ async fn shutdown_does_not_rewrite_checkpoint_after_truncated_run() {
 /// #1823 Skip verdict: persistence disabled means no checkpoint file is
 /// ever created — by the run or by `shutdown()`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn shutdown_writes_no_checkpoint_when_persistence_disabled() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;
@@ -276,6 +300,10 @@ async fn shutdown_writes_no_checkpoint_when_persistence_disabled() {
 /// before any close verdict — the prior checkpoint on disk must be left
 /// byte-for-byte untouched (the state-damage scenario behind the issue).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn seed_excluded_run_leaves_prior_checkpoint_untouched() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;

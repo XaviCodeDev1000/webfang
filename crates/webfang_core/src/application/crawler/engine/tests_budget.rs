@@ -10,6 +10,10 @@ use url::Url;
 /// budget-model tier derived from the detector seam, independent of
 /// `CrawlerConfig.concurrency`.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn raising_crawler_concurrency_leaves_rate_limiter_burst_unchanged() {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let low = CrawlerConfig::builder(seed.clone())
@@ -80,6 +84,10 @@ fn rate_limiter_burst_sweep_matches_model_across_core_counts() {
 /// into `BudgetModel::build`, so the scheduler spawn bound (Operation.crawl)
 /// and rate-limiter burst reflect the override instead of the auto table.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn session_engine_consumes_config_budget_overrides() {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let overrides = BudgetOverrides {
@@ -110,6 +118,10 @@ async fn session_engine_consumes_config_budget_overrides() {
 /// exactly the model derived from those same default overrides through
 /// the canonical detector seam — the channel changes nothing when unset.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn session_engine_default_overrides_keep_auto_derivation() {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let expected = BudgetModel::build(
@@ -179,6 +191,10 @@ fn remaining_budget_saturates_without_underflow() {
 /// drain. Pre-fix the first path breaks without `cancel_run`, so this
 /// fails; post-fix both paths cancel.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn first_budget_exit_break_path_cancels_in_flight_work() {
     use crate::application::crawler::collector::CrawlMessage;
     use crate::domain::DiscoveredUrl;

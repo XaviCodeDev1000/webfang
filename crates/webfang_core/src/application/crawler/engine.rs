@@ -65,23 +65,23 @@ pub use entry::crawl_site_with_options;
 pub use entry::{crawl_site, crawl_site_capturing};
 
 mod build;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_autoscale;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_budget;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_checkpoint;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_common;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_pause;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_pool;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_span;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_stalled;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)]
 mod tests_termination;
 
 /// Shared shutdown signal — set to `true` when SIGINT/SIGTERM received.

@@ -1,0 +1,55 @@
+# Objective: recover Miri coverage from the crawler-family module-level `not(miri)` gates of #3027.
+# Branch: refactor/miri-crawler-gates from origin/main cd15e330. Delivery: single PR, one family per PR, own dispatch baseline. Test runner: scoped `cargo miri test --lib -- <family>::` plus `bash scripts/check_miri_lane_invariants.sh` and `bash scripts/test_miri_lane_invariants.sh`.
+
+## Specs
+
+S1 (verbatim, user): "El slice natural siguiente sería la familia crawler, con su baseline y su PR separado. No lo arranco sin tu ok."
+
+S2 (verbatim, user): "hay que consultar la documentacion oficial antes si no esta en engram para aplicar". Official Miri README consulted: `cfg(miri)` is set for interpreted code; `#[cfg_attr(miri, ignore)]` is the documented way to skip a test; `cargo miri test <filter>` forwards filters to the harness; there is no exhaustive list of unsupported operations (Miri reports them at runtime); Miri has no shims for platform-specific APIs or FFI (networking included). Consequence: gates with a written interpreter-limit reason are legitimate, and every ungated removal must be arbitrated by a scoped run.
+
+S3 (verbatim, issue #3027): "Work one family per PR, sequentially, with its own before/after `workflow_dispatch` baseline". Crawler family scope verbatim: "**Crawler family** — `application/crawler/engine.rs` (9), `crawl_task.rs` (5), `rate_limiter.rs` (3), `rate_limiter/jitter.rs` (2), `export_factory.rs` (2), plus the single-gate files (`url_validator.rs`, `resource_downloader.rs`, `link_extractor.rs`, `sitemap_parser/parse.rs`, `readability.rs`, `dom_inspector_tests.rs`, `extractor/mod.rs`, `author_extractor/mod.rs`)."
+
+S4 (verbatim, issue #3027 acceptance): "- `Miri (core)` runs more tests after each family PR than its own baseline, with 0 UB and 0 failures." "- Every removed module gate is replaced by per-test gates carrying a written reason." "- The static guard and its RED-control harness stay green; no declared surface becomes vacuous."
+
+S5 (verbatim, issue #3027 caveat): "Some module gates are correct and must stay: `domain/html_cleaner.rs`, `infrastructure/converter/htmd_converter.rs` and `application/fragment_markdown.rs` are declared UB surfaces (`clean_html` → `lol_html::rewrite_str`, servo_arc Tree-Borrows UB, servo/stylo#210) where a text marker cannot separate the tests that reach it." These three files are OUT of scope and must not be touched.
+
+S6 (verbatim, issue #3027 closing note): "any further recovery should be tracked as its own family/PR rather than assumed complete by this closure". #3027 is CLOSED (COMPLETED); the PR needs a new issue carrying `status:approved`, never `Closes part of #3027`.
+
+S7 (verbatim, repo record `odd/tasks/miri-ub-lane.md`): "Un test con `#[cfg_attr(miri, ignore = \"…\")]` queda `ignored` bajo Miri: la corrida iba a reportar '2 passed, 1 ignored' **sin ejecutar el brazo de error**, o sea, el arbitraje era lógicamente vacío — la evidencia de un falso verde. La secuencia correcta (sacar el gate, correr, y recién ahí decidir)". Every gate decision needs a scoped run with the gate removed.
+
+S8 (baseline, verified): green `workflow_dispatch` 45663803492 on main — all six Miri jobs success; `Miri (core)` 1148 passed / 0 failed / 120 ignored vs earlier green 1067 / 0 / 100. The latest push to main (run 5693) has Miri jobs `skipped` by path filter and is not a baseline.
+
+S9 (scope measurement, verified by explorer): actual tree has 26 in-scope module gates, not the issue's 27: `crawl_task.rs` has 4 gates (303/307/311/315), not 5. No `UB_SURFACE_ENTRIES` row currently names an in-scope file or marker.
+
+## Tasks
+
+T1 (S1-S3, S6, S9) — inline — done — worktree `refactor-miri-crawler-gates` bootstrapped, three isolation checks green; read-only exploration mapped the 26 gates; new issue with `status:approved` still pending before PR.
+T2 (S2, S7) — inline — done — scoped form verified: `RUSTUP_TOOLCHAIN=nightly-2026-08-27` + the lane's five `MIRIFLAGS` + `cargo miri test --lib -- <filter> --test-threads=1` from the direnv-loaded worktree; each gate arbitrated by a RED run with the gate removed and a GREEN rerun after adding it.
+T3 (S3, S4, S7) — inline — done — `application/crawler/engine.rs` nine module gates replaced by `#[cfg(test)]`; 24 per-test `cfg_attr(miri, ignore)` with written reasons (23 × `TLS_method` via `session_engine`, 1 × `sigaction` in the ctrl_c test), plus the pilot gate on `tests_pause`. Scoped Miri: 12 passed / 0 failed / 25 ignored; guard and RED-control harness both exit 0.
+T4 (S3, S4, S7) — inline — pending — `crawl_task.rs`, `rate_limiter.rs`, `rate_limiter/jitter.rs`, `export_factory.rs`: same per-test arbitration; keep time/token-bucket helpers gated only where runtime proves it.
+T5 (S3, S4, S7) — inline — pending — single-gate files (`url_validator.rs`, `resource_downloader.rs`, `link_extractor.rs`, `sitemap_parser/parse.rs`, `readability.rs`, `dom_inspector_tests.rs`, `extractor/mod.rs`, `author_extractor/mod.rs`); `link_extractor.rs` already has two correct per-test gates, extend rather than duplicate.
+T6 (S4, S5, S8) — inline — pending — guard + RED-control harness green, `cargo check`/clippy/fmt, full dispatch baseline comparison, work-unit commits. Push/PR are the owner's decision and stay pending.
+
+Route: inline for every task. No writer trigger (no independent parallel units of behavior; the changes share one guard contract and one arbitration loop). One read-only explorer was used for the map (mapping trigger), per the orchestrator rules. Delivery strategy `ask-on-risk`; forecast well under 400 authored changed lines; single PR, no chain.
+
+## Log
+
+L1 (user, verbatim): "El slice natural siguiente sería la familia crawler, con su baseline y su PR separado. No lo arranco sin tu ok."
+
+L2 (user, verbatim): "hay que consultar la documentacion oficial antes si no esta en engram para aplicar"
+
+L3 (user, verbatim): "OK"
+
+L4: Official docs consulted before any proposal or edit, per L2. Context7 `/rust-lang/miri` README: cfg(miri), cfg_attr(miri, ignore), cargo miri test filters, no supported-operation list, FFI/platform APIs unimplemented. Repo records `odd/tasks/miri-preflight-gates.md` and `odd/tasks/miri-ub-lane.md` read in full; the latter's L7 fixes the arbitration order.
+
+L5: Verified state before planning: issue #3027 CLOSED with a closing note requiring its own family/PR; dispatch 45663803492 green on all six Miri jobs; latest main push has Miri skipped; HEAD/worktree cd15e330; identity gate exit 0; codegraph and codedb both indexed at the worktree root.
+
+L6: Explorer handoff: 26 in-scope module gates; no existing `UB_SURFACE_ENTRIES` row for these files; `engine.rs` gates wrap `#[path]` child files so hidden tests are not in engine.rs; `crawl_task.rs` has 4 gates not 5; `url_validator.rs` in scope is `infrastructure/crawler/url_validator.rs`; `dom_inspector_tests.rs` gates only the DefaultDomInspector module. Triage: obvious removals (`engine/tests_common.rs` with 0 tests), obvious per-test gate conversions (time/wiremock/spawn/FFI modules), and a runtime-arbitration set (jitter, rate_limiter support, crawl_task children, sitemap parse, readability, extractor).
+
+L7: Risk: item 3 — `UB_SURFACE_ENTRIES` is an internal contract consumed by the guard and its harness; a wrong marker can make the guard vacuous or falsely red. Mitigation: guard + harness + scoped Miri + full dispatch comparison.
+
+L8: Next step: capture the pinned scoped-Miri command form from `ci.yml`, check for competing local builds, then start T2 with a RED arbitration run.
+
+L9: T2/T3 evidence. No competing local build was running (only MCP stdio processes; load ≈0.9). Pilot: `tests_pause` needed `tests_common` ungated too (otherwise E0432), then `autoscale_pause_is_judged_by_its_own_watchdog` aborted on `TLS_method`; with its per-test gate the module reported 2 passed / 1 ignored. Full engine arbitration ran 37 tests individually: 13 PASS, 24 FAIL (23 × `TLS_method`, 1 × `sigaction` in `the_default_source_is_a_cancellable_ctrl_c_wait`). After the 24 per-test gates, the whole `application::crawler::engine::` scope reports 12 passed / 0 failed / 25 ignored. Counting caveat: the baseline dispatch's `Miri (core)` includes `application::`, but the infra modules of this family live in other jobs; the final comparison will use all six jobs, not only core.
+
+L10: Work-unit 1 = this document + the engine gates and their 24 per-test reasons + the T2/T3 evidence. Risk item 3 (guard contract) stays contained: no `UB_SURFACE_ENTRIES` row was changed because no declared surface lives in this family; guard and harness prove the contract intact.
