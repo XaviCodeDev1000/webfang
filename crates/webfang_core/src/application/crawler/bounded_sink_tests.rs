@@ -363,6 +363,37 @@ async fn reader_over_a_missing_spool_reports_io() {
 
 // ===== WU2 (#2611): the durable-bytes watermark =====
 
+/// S12: the watermark is a durability claim, so it may only advance after
+/// the spool file has been fsynced. The counter is the deterministic witness
+/// for that syscall; the file length proves the published offset is exact.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn durable_bytes_advances_only_after_fsync() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sink = sink_in(&dir, 2).await;
+    let before = super::spool_writer::SPOOL_FSYNC_COUNT.load(Ordering::Relaxed);
+
+    sink.capture("https://example.com/a", "<p>durable</p>");
+    for _ in 0..100 {
+        if sink.durable_bytes() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let durable = sink.durable_bytes();
+    assert!(durable > 0, "the writer must publish a nonzero watermark");
+    assert!(
+        super::spool_writer::SPOOL_FSYNC_COUNT.load(Ordering::Relaxed) > before,
+        "the watermark must not advance on flush() alone"
+    );
+    let len = tokio::fs::metadata(sink.spool_path())
+        .await
+        .expect("spool metadata")
+        .len();
+    assert_eq!(durable, len, "published bytes must match the fsynced file");
+    sink.finish().await.expect("flush");
+}
+
 /// The watermark is 0 on a fresh sink: no page has been handed to the OS,
 /// so an incremental flush started right after construction converts from
 /// the beginning (nothing) — it must never see a stale non-zero offset.

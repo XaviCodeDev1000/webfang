@@ -118,11 +118,9 @@ pub struct BoundedFileSink {
     captured: AtomicUsize,
     dropped: AtomicUsize,
     buffer: usize,
-    /// Bytes of the spool handed to the OS by the writer's `flush()` — the
-    /// durable-bytes watermark (WU2, #2611). Updated by the writer task after
-    /// every per-page flush; read by the incremental flush to decide how far
-    /// conversion may proceed. `flush()` is an OS handoff, NOT an fsync, so
-    /// this watermark is best-effort by contract (design S6).
+    /// Bytes of the spool fsynced by the writer — the durable-bytes watermark
+    /// (WU2, #2611, hardening S12). Updated only after the per-page `sync_all`;
+    /// read by the incremental flush to decide how far conversion may proceed.
     durable_bytes: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
@@ -240,17 +238,12 @@ impl BoundedFileSink {
         self.dropped.load(Ordering::Relaxed)
     }
 
-    /// Bytes of the spool the writer has handed to the OS (WU2, #2611).
+    /// Bytes of the spool the writer has fsynced (WU2, #2611; S12).
     ///
-    /// Every page append ends with a `flush()`, so this watermark always sits
-    /// on a record boundary: re-reading the spool up to it yields only complete
-    /// records. It is the offset the incremental flush converts from and the
-    /// sidecar persists as `watermark_bytes`.
-    ///
-    /// Best-effort by contract (design S6): `flush()` hands bytes to the OS
-    /// page cache, it is NOT an fsync — a power loss may still truncate the
-    /// file behind this number. That residual risk is accepted and documented;
-    /// the recovery paths (`recover`, OrphanSpool) treat the tail with doubt.
+    /// Every page append ends with `flush()` then `sync_all()` before the
+    /// watermark is published, so this offset always sits on a record boundary
+    /// and is durable across power loss. It is the offset the incremental
+    /// flush converts from and the sidecar persists as `watermark_bytes`.
     #[must_use]
     pub fn durable_bytes(&self) -> u64 {
         self.durable_bytes

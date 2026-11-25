@@ -34,7 +34,7 @@ pub(super) fn full_record(url: &str) -> RawRecord {
 // --- E5: load_or_init fresh-start policy with named-path warning ------
 
 #[test]
-fn corrupt_file_yields_fresh_store_via_load_or_init() {
+fn corrupt_file_is_a_typed_error_via_load_or_init() {
     let (_dir, store) = temp_store("corrupt.test");
     fs::write(store.state_path(), b"{{{{not json").unwrap();
 
@@ -42,12 +42,17 @@ fn corrupt_file_yields_fresh_store_via_load_or_init() {
         matches!(store.load(), Err(RecordStoreError::Corrupt { .. })),
         "raw load surfaces the typed error"
     );
-    let loaded = store.load_or_init();
-    assert!(loaded.is_empty(), "policy converts to fresh start");
+    let err = store
+        .load_or_init()
+        .expect_err("corruption must be operator-visible, never a fresh empty store");
+    assert!(
+        matches!(err, RecordStoreError::Corrupt { .. }),
+        "the typed cause must survive load_or_init: {err}"
+    );
 }
 
 #[test]
-fn unsupported_version_never_silently_discards_via_load_or_init() {
+fn unsupported_version_is_a_typed_error_via_load_or_init() {
     let (_dir, store) = temp_store("future.test");
     let future = r#"{"version":99,"records":{}}"#;
     fs::write(store.state_path(), future).unwrap();
@@ -56,8 +61,13 @@ fn unsupported_version_never_silently_discards_via_load_or_init() {
         store.load(),
         Err(RecordStoreError::UnsupportedVersion { found: 99, .. })
     ));
-    let loaded = store.load_or_init();
-    assert!(loaded.is_empty(), "explicit policy applies");
+    let err = store
+        .load_or_init()
+        .expect_err("a newer schema must never degrade to a fresh empty store");
+    assert!(
+        matches!(err, RecordStoreError::UnsupportedVersion { found: 99, .. }),
+        "the typed cause must survive load_or_init: {err}"
+    );
     assert!(
         store.state_path().exists(),
         "original file left untouched for forensics"

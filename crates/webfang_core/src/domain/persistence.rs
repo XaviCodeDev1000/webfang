@@ -427,9 +427,14 @@ pub trait RecordStorePort: Send + Sync {
     /// for unreadable state; callers apply the named-path fresh-start policy.
     fn load(&self) -> Result<DomainRecords, RecordStoreError>;
 
-    /// Load without ever discarding prior history: unreadable files degrade
-    /// to an empty in-memory view (the original bytes stay on disk).
-    fn load_or_init(&self) -> DomainRecords;
+    /// Load prior history, surfacing unreadable state as an operator-visible
+    /// error instead of an empty in-memory view. The original bytes stay on
+    /// disk for forensics.
+    ///
+    /// # Errors
+    /// [`RecordStoreError::Corrupt`] / [`RecordStoreError::UnsupportedVersion`]
+    /// and every I/O or backup failure from the underlying store.
+    fn load_or_init(&self) -> Result<DomainRecords, RecordStoreError>;
 }
 
 /// Domain-owned seam over the legacy JSON-per-domain state store (#1097).

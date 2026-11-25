@@ -30,10 +30,25 @@ pub(super) struct StoreFile {
 /// plumbing without real disk state (D6: integration fidelity comes from the
 /// SIGKILL harness, mocks only cover error plumbing).
 pub(crate) trait StoreFs: Send + Sync {
-    /// Create/truncate + write_all + flush (page cache; NO fsync by contract).
+    /// Create/truncate + write_all + flush + `sync_all` on the temp file.
+    /// The write is durable BEFORE the caller's rename(2).
     fn write(&self, path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()>;
-    /// rename(2) — the atomicity and commit-point primitive.
+    /// rename(2) — the atomicity and commit-point primitive — followed by a
+    /// `sync_all` of the parent directory so the new name survives a crash.
     fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()>;
+}
+
+/// Flush the directory entry a rename created. POSIX exposes a directory as
+/// a file for `fsync(2)`; platforms without that facility keep rename
+/// atomicity but cannot explicitly sync the directory entry.
+fn sync_parent_dir(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Production backend over [`std::fs`].
@@ -44,11 +59,13 @@ impl StoreFs for RealFs {
     fn write(&self, path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
         let mut file = std::fs::File::create(path)?;
         file.write_all(bytes)?;
-        file.flush()
+        file.flush()?;
+        file.sync_all()
     }
 
     fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-        std::fs::rename(from, to)
+        std::fs::rename(from, to)?;
+        sync_parent_dir(to)
     }
 }
 

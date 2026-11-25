@@ -8,12 +8,11 @@
 //!   "updated_at": 0, "records": { "<canonical_url>": { ... } } }
 //! ```
 //!
-//! # Durability scope (loud non-goal)
+//! # Durability scope
 //!
-//! Writes are atomic against process death via same-directory temp file +
-//! [`std::fs::rename`] (rename(2)). There is deliberately NO fsync: a power
-//! loss may lose the last rename even though the process observed success.
-//! Process-crash durability is the contract; power-loss durability is not.
+//! Writes are atomic via same-directory temp file + rename(2). The temp file
+//! is fsynced before the rename and the parent directory is fsynced after it,
+//! so a successful `save` is durable across power loss, not only process death.
 //!
 
 use std::fs;
@@ -38,9 +37,9 @@ pub(crate) const CURRENT_VERSION: u32 = 2;
 
 pub use crate::domain::page_state::MIGRATED_V1_RUN_ID;
 
-/// Typed failures of the record store. Callers apply the named-path
-/// fresh-start policy (`load_or_init`) on [`RecordStoreError::Corrupt`] and
-/// [`RecordStoreError::UnsupportedVersion`] — never silently (Gate 2).
+/// Typed failures of the record store. `load_or_init` propagates every one
+/// of them as an operator-visible error; it never fabricates an empty store
+/// over unreadable state (Gate 2).
 ///
 /// The enum itself lives in `domain::exporter` next to the port it guards;
 /// this re-export keeps the historical `record_store::RecordStoreError` path
@@ -366,38 +365,19 @@ impl RecordStore {
         self.save_locked(&records, now_millis())
     }
 
-    /// E5 policy wrapper: corrupt or unsupported-version state files are
-    /// converted to a fresh empty store — WITH a warning naming the file,
-    /// never silently (Gate 2). The original bytes stay on disk for
-    /// forensics; only the caller decides to overwrite them later.
-    #[must_use]
-    pub fn load_or_init(&self) -> DomainRecords {
-        match self.load() {
-            Ok(records) => records,
-            Err(
-                err @ (RecordStoreError::Corrupt { .. }
-                | RecordStoreError::UnsupportedVersion { .. }),
-            ) => {
-                tracing::warn!(error = %err, "record store unreadable; starting FRESH per explicit policy — original file preserved for inspection");
-                DomainRecords::new()
-            },
-            Err(RecordStoreError::Io { path, source }) => {
-                tracing::warn!(error = %source, file = %path.display(), "record store I/O failure; starting FRESH per explicit policy");
-                DomainRecords::new()
-            },
-            Err(RecordStoreError::Backup { path, source }) => {
-                tracing::warn!(error = %source, file = %path.display(), "record store backup failure; starting FRESH per explicit policy");
-                DomainRecords::new()
-            },
-            // Unreachable today: load() only surfaces Io/Corrupt/
-            // UnsupportedVersion/Backup; InvalidRecord is produced by the
-            // writer-side constructor. Matched exhaustively so a future
-            // error variant can never silently fall through (fail-closed).
-            Err(err @ RecordStoreError::InvalidRecord { .. }) => {
-                tracing::warn!(error = %err, "record store rejected an invalid record; starting FRESH per explicit policy");
-                DomainRecords::new()
-            },
-        }
+    /// Load the persisted records, refusing to substitute an empty store.
+    ///
+    /// A corrupt or unsupported-version file is an operator-visible error:
+    /// the typed cause is returned unchanged and logged at `error` level.
+    /// The original bytes stay on disk for forensics.
+    ///
+    /// # Errors
+    ///
+    /// Every [`RecordStoreError`] from [`Self::load`] is propagated.
+    pub fn load_or_init(&self) -> Result<DomainRecords, RecordStoreError> {
+        self.load().inspect_err(|err| {
+            tracing::error!(error = %err, "record store unreadable; refusing to start with fresh state — original file preserved");
+        })
     }
 
     /// D2/E6 invariant table applied at the single persistence seam.
@@ -445,7 +425,7 @@ impl RecordStorePort for RecordStore {
         RecordStore::load(self)
     }
 
-    fn load_or_init(&self) -> DomainRecords {
+    fn load_or_init(&self) -> Result<DomainRecords, RecordStoreError> {
         RecordStore::load_or_init(self)
     }
 }

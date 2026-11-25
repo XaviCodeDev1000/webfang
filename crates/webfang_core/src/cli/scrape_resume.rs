@@ -45,9 +45,9 @@ pub fn resolve_default_state_dir() -> PathBuf {
 ///
 /// # Errors
 ///
-/// Currently never fails: state-store creation is lazy and infallible, so
-/// the `Ok` arm always carries the outcome. The `Result` is kept so callers
-/// (and a future eager factory) keep the `CliExit::IoError` route.
+/// [`CliExit::IoError`] when the resume store is unreadable: corruption or
+/// an unsupported version is an operator-visible failure, never a silent
+/// fresh start that would re-drive committed work.
 pub async fn apply_resume_mode(
     urls_to_scrape: Vec<Url>,
     mode: &PersistenceMode,
@@ -75,8 +75,9 @@ pub async fn apply_resume_mode(
     let filtered = match (state_store.as_ref(), mode.is_resume()) {
         (Some(store), true) => {
             let record_store = record_store_bridge(store.as_ref());
-            warn_unreadable_state(&record_store);
-            filter_committed(urls_to_scrape, &record_store).0
+            filter_committed(urls_to_scrape, &record_store)
+                .map_err(|e| CliExit::IoError(e.to_string()))?
+                .0
         },
         _ => urls_to_scrape,
     };

@@ -15,7 +15,7 @@ use url::Url;
 
 use crate::domain::page_state::Committed;
 use crate::domain::page_state::Stateful;
-use crate::domain::persistence::{DomainRecords, RawRecord, RecordStorePort};
+use crate::domain::persistence::{DomainRecords, RawRecord, RecordStoreError, RecordStorePort};
 use crate::domain::url_validation::{normalize_url, NormalizeConfig};
 
 /// Canonical dedup form: strip fragments/queries, unify `www.` with apex.
@@ -73,11 +73,16 @@ impl std::fmt::Display for RunId {
     }
 }
 
-/// Load this store's records without ever discarding prior history (A2):
-/// unreadable files degrade to an empty in-memory view WITH a named-path
-/// warning (`RecordStorePort::load_or_init`) — the original bytes stay on disk.
+/// Compatibility loader for the export-factory path, which cannot propagate
+/// a store failure. Unreadable state is logged at `error` level (never a quiet
+/// warning) and the original bytes stay on disk. The resume gate calls
+/// [`RecordStorePort::load_or_init`] directly so it can fail closed.
+#[must_use]
 pub(crate) fn load_preserving(store: &dyn RecordStorePort) -> DomainRecords {
-    store.load_or_init()
+    store.load_or_init().unwrap_or_else(|err| {
+        tracing::error!(error = %err, "record store unreadable; compatibility path continues without prior state");
+        DomainRecords::new()
+    })
 }
 
 /// The `.bak` sibling path for `path`, preserving the artifact's extension.
@@ -165,11 +170,15 @@ pub(crate) fn preserve_pre_migration_backup(path: &std::path::Path) {
 ///
 /// Records are looked up by canonical URL, so `www.`/apex variants of a
 /// committed page share one entry (spec www/apex scenario).
+///
+/// # Errors
+/// [`RecordStoreError`] when the store cannot be read: the run must not
+/// silently re-drive work whose committed state is unreadable.
 pub fn filter_committed(
     urls: impl IntoIterator<Item = Url>,
     store: &dyn RecordStorePort,
-) -> (Vec<Url>, RunId) {
-    let records = load_preserving(store);
+) -> Result<(Vec<Url>, RunId), RecordStoreError> {
+    let records = store.load_or_init()?;
     let original = urls.into_iter().collect::<Vec<_>>();
     let pending: Vec<Url> = original
         .iter()
@@ -184,7 +193,7 @@ pub fn filter_committed(
             "resume gate: skipping COMMITTED records only"
         );
     }
-    (pending, RunId::new())
+    Ok((pending, RunId::new()))
 }
 
 /// Type-level skip decision: true iff the record for `url` reconstructs as
@@ -331,7 +340,8 @@ mod tests {
 
                 let candidate_urls: Vec<Url> =
                     candidates.iter().map(|u| Url::parse(u).unwrap()).collect();
-                let (pending, _) = filter_committed(candidate_urls, &store);
+                let (pending, _) =
+                    filter_committed(candidate_urls, &store).expect("fresh store must load");
 
                 let pending_strs: Vec<String> = pending.iter().map(Url::to_string).collect();
                 assert_eq!(

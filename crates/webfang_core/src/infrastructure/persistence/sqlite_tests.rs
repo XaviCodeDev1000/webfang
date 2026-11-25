@@ -291,8 +291,8 @@ mod sqlite {
         // (proves the post_create hook runs on each connection).
         let (_dir, pool) = fresh_pool(4).await;
         assert_eq!(pragma_string(&pool, "journal_mode").await, "wal");
-        // synchronous: 0=OFF,1=NORMAL,2=FULL,3=EXTRA — NORMAL must be 1.
-        assert_eq!(pragma_int(&pool, "synchronous").await, 1);
+        // synchronous: 0=OFF,1=NORMAL,2=FULL,3=EXTRA — S12 requires FULL.
+        assert_eq!(pragma_int(&pool, "synchronous").await, 2);
         assert_eq!(pragma_int(&pool, "cache_size").await, -4000);
     }
 

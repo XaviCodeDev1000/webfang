@@ -159,6 +159,7 @@ async fn filter_committed_batch(
         })
         .await
         .map_err(|e| CliExit::IoError(format!("No se pudo leer el estado de resume: {e}")))?
+        .map_err(|e| CliExit::IoError(format!("No se pudo leer el estado de resume: {e}")))?
     };
     let pending_set: std::collections::HashSet<String> =
         pending.iter().map(|u| u.as_str().to_string()).collect();

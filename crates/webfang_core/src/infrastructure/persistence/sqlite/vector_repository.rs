@@ -7,7 +7,7 @@ use crate::error::ScraperError;
 use crate::infrastructure::persistence::pool::Pool;
 
 use super::blob::{bytes_to_f32_vec, f32_slice_to_bytes};
-use super::connection::create_memory_pool;
+use super::connection::{create_memory_pool, verify_integrity};
 use super::schema::{enforce_schema_version, SCHEMA_DDL};
 
 // ============================================================================
@@ -65,14 +65,19 @@ impl SqliteVectorRepository {
     ///
     /// # Errors
     ///
-    /// Returns [`ScraperError::Persistence`] if the schema marker belongs to
-    /// another version, or if the DDL batch fails.
+    /// Returns [`ScraperError::Persistence`] if `PRAGMA integrity_check` fails,
+    /// the schema marker belongs to another version, or the DDL batch fails.
     pub async fn setup_schema(pool: &Pool) -> Result<(), ScraperError> {
         let conn = pool
             .get()
             .await
             .map_err(|e| ScraperError::persistence(format!("obtener conexión del pool: {e}")))?;
         conn.interact(|c| {
+            // Startup integrity gate: an unreadable database is an error,
+            // never a reason to create a fresh schema over it. Runs before
+            // any DDL so a refused file is never written to.
+            verify_integrity(c)
+                .map_err(|e| ScraperError::persistence(format!("integrity_check: {e}")))?;
             // Gate before DDL: refusing after the tables were created would
             // mean this build had already written to a file it cannot read.
             enforce_schema_version(c)?;
