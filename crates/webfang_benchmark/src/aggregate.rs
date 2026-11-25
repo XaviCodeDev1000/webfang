@@ -30,6 +30,13 @@ pub struct TraceLine {
     /// Raw `message` field from the trace line, if present.
     #[serde(default)]
     pub message: Option<String>,
+    /// Top-level `span` field (span-close records; the `slow`, `stages` and
+    /// `counts` queries in `scripts/analyze-trace.sh` read it).
+    #[serde(default)]
+    pub span: Option<String>,
+    /// Top-level correlation id of the trace line (`trace <trace_id>` query).
+    #[serde(default)]
+    pub trace_id: Option<String>,
     /// `"span_close"` on span-close records (top-level, per FileTraceLayer).
     #[serde(default)]
     pub record: Option<String>,

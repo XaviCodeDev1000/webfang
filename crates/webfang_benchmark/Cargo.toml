@@ -37,6 +37,10 @@ path = "src/bin/bench_tier_a.rs"
 name = "bench_live"
 path = "src/bin/bench_live.rs"
 
+[[bin]]
+name = "analyze_trace"
+path = "src/bin/analyze_trace.rs"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 url = { workspace = true }
