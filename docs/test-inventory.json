@@ -752,7 +752,7 @@
       "path": "crates/webfang_core/tests/dns_tls_exit_code_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 6,
+      "test_count": 1,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"
@@ -1724,7 +1724,7 @@
       "path": "crates/webfang_test_utils/tests/redaction_cross_platform.rs",
       "crate": "webfang_test_utils",
       "area": "tests",
-      "test_count": 5,
+      "test_count": 10,
       "ignored_count": 0,
       "snapshot_usage": false,
       "tier": "integration_mock"

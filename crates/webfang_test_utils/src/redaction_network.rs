@@ -54,3 +54,27 @@ pub(crate) fn collapse_connection_surface(text: String) -> String {
         .replace_all(&text, r#"cause: "<NET_CAUSE>""#)
         .into_owned()
 }
+
+/// Collapse the platform-dependent resolver payload after webfang's own
+/// `DNS error:` wrapper to ONE token.
+///
+/// A comma is not a safe boundary: macOS `getaddrinfo` reports EAI_NONAME as
+/// "nodename nor servname provided, or not known", so stopping at the first
+/// comma used to leave ", or not known" in the snapshot. The payload ends at
+/// `, url: ` (error line), `]` (`[Failed: ...]` summary), ` at ` (the retry
+/// WARN), a newline (the final `Failed to scrape ...` line), or end of text.
+/// `regex` has no lookahead, so the delimiter is captured and re-emitted by
+/// the replacement.
+///
+/// This lived in one CLI test file; keeping it here means every snapshot that
+/// captures a resolution failure gets the same rule without opting in.
+#[must_use]
+pub(crate) fn collapse_resolver_payload(text: String) -> String {
+    static RESOLVER: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(DNS error: )[^\]\n]*?(, url: |\]|\s+at\s|\n|$)")
+            .expect("valid resolver payload regex")
+    });
+    RESOLVER
+        .replace_all(&text, "${1}<RESOLVER>${2}")
+        .into_owned()
+}

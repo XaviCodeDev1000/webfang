@@ -2,7 +2,7 @@
 //! output so committed snapshots are stable across machines, platforms and
 //! runs.
 
-use crate::redaction_network::collapse_connection_surface;
+use crate::redaction_network::{collapse_connection_surface, collapse_resolver_payload};
 use regex::Regex;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -16,7 +16,8 @@ pub fn redact_temp_path(dir: &Path, text: &str) -> String {
 /// Redact common non-deterministic output so snapshots are stable run-to-run:
 /// the temp dir, ISO-8601 log timestamps, dynamic wiremock ports, ANSI color
 /// escape sequences, source line numbers, tracing module and file paths,
-/// trace/correlation UUIDs, and the OS-dependent network-failure surface.
+/// trace/correlation UUIDs, the OS-dependent network-failure surface, and the
+/// platform-dependent resolver payload.
 ///
 /// This is THE chain: `webfang_core`'s test harness re-exports it rather
 /// than keeping a second copy (#1649 — the copies drifted, and only this
@@ -101,5 +102,8 @@ pub fn redact_nondeterministic(dir: &Path, text: &str) -> String {
     // #1631 + #2836: one canonical token for the OS-dependent connection
     // surface and the classified cause. Rules and rationale live with the
     // collapse in the redaction_network module, not here.
-    collapse_connection_surface(text)
+    let text = collapse_connection_surface(text);
+    // Last rule: the resolver payload sees the same text the committed
+    // snapshots carried when the collapse lived in a single test file.
+    collapse_resolver_payload(text)
 }

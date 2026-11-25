@@ -133,6 +133,7 @@ slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 # caso y queda por debajo del `global-timeout = "1h"` del perfil `ci`.
 [[profile.default.overrides]]
 filter = 'test(=the_retired_shims_are_unknown_arguments)'
+slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 
 # Los dos tests de PARIDAD CLI-vs-MCP (#2685): cada uno levanta un servidor
 # MCP, corre un crawl y exporta, y compara registro a registro. Son tests de
@@ -367,11 +368,10 @@ slow-timeout = { period = "45s", terminate-after = 2, grace-period = "5s" }
 # de tests de medición, que no son flaky sino largos). global-timeout 45m
 # cubre la corrida filtrada completa; el job tiene timeout-minutes: 60.
 # Hereda de `default` (0.9.115+): default-filter (los ai_integration quedan
-# fuera del sweep) y flaky-result=fail — acá un flaky ES un finding, la lane
-# existe para reportarlos.
+# fuera del sweep), los retries con backoff y flaky-result=fail — acá un
+# flaky ES un finding, la lane existe para reportarlos.
 test-threads = 2
 threads-required = 1
-retries = { backoff = "exponential", count = 2, delay = "1s" }
 fail-fast = false
 slow-timeout = { period = "600s", terminate-after = 1, grace-period = "30s" }
 global-timeout = "45m"

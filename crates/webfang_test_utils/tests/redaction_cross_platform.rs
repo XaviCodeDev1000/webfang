@@ -69,3 +69,62 @@ fn issue_2836_makes_both_connect_failures_agree() {
     assert_eq!(linux, windows, "both platforms must redact identically");
     assert_eq!(linux, "error de red: <NET_ERR>, cause: \"<NET_CAUSE>\"");
 }
+
+/// The resolver payload after webfang's own `DNS error:` wrapper is owned by
+/// the central chain: a test-local copy can be forgotten by the next snapshot.
+/// A comma is NOT a safe boundary — macOS `getaddrinfo` reports EAI_NONAME as
+/// "nodename nor servname provided, or not known".
+#[test]
+fn resolver_payload_with_internal_comma_is_fully_redacted() {
+    let dir = Path::new("/tmp/test");
+    let input = "DNS error: nodename nor servname provided, or not known, url: https://webfang-dns-test.invalid/, stage: scrape";
+    assert_eq!(
+        redact_nondeterministic(dir, input),
+        "DNS error: <RESOLVER>, url: https://webfang-dns-test.invalid/, stage: scrape"
+    );
+}
+
+/// The `[Failed: ...]` summary bound is a closing bracket, not a comma.
+#[test]
+fn resolver_payload_in_failed_summary_is_fully_redacted() {
+    let dir = Path::new("/tmp/test");
+    let input = "[Failed: Other error: error de red: DNS error: nodename nor servname provided, or not known] Finished: 1 total";
+    assert_eq!(
+        redact_nondeterministic(dir, input),
+        "[Failed: Other error: error de red: DNS error: <RESOLVER>] Finished: 1 total"
+    );
+}
+
+/// Retry WARN lines end in ` at <FILE>.rs:<LINE>` (#2835).
+#[test]
+fn resolver_payload_in_retry_warning_is_fully_redacted() {
+    let dir = Path::new("/tmp/test");
+    let input = "WARN: name resolution failed — retrying, error: DNS error: nodename nor servname provided, or not known at <FILE>.rs:<LINE>";
+    assert_eq!(
+        redact_nondeterministic(dir, input),
+        "WARN: name resolution failed — retrying, error: DNS error: <RESOLVER> at <FILE>.rs:<LINE>"
+    );
+}
+
+/// The final `Failed to scrape ...` line ends at a newline, not at `, url: `.
+#[test]
+fn resolver_payload_at_end_of_line_is_fully_redacted() {
+    let dir = Path::new("/tmp/test");
+    let input = "Failed to scrape https://webfang-dns-test.invalid/: error de red: DNS error: nodename nor servname provided, or not known\nNo pages were successfully scraped";
+    assert_eq!(
+        redact_nondeterministic(dir, input),
+        "Failed to scrape https://webfang-dns-test.invalid/: error de red: DNS error: <RESOLVER>\nNo pages were successfully scraped"
+    );
+}
+
+/// The Linux payload has no internal comma: its redacted shape must stay
+/// byte-identical so existing snapshots remain valid.
+#[test]
+fn linux_payload_keeps_the_committed_snapshot_shape() {
+    let dir = Path::new("/tmp/test");
+    let input = "DNS error: Name or service not known, url: https://webfang-dns-test.invalid/, cause: \"dns_resolution\"";
+    assert_eq!(
+        redact_nondeterministic(dir, input),
+        "DNS error: <RESOLVER>, url: https://webfang-dns-test.invalid/, cause: \"dns_resolution\""
+    );
+}
