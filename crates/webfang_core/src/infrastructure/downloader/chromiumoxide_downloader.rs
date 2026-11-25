@@ -8,8 +8,11 @@
 //! that returns an explicit "not enabled" error from every `fetch` call.
 
 #[cfg(feature = "chromium")]
+#[path = "obscura_downloader/sandbox.rs"]
+mod sandbox_helper;
+#[cfg(feature = "chromium")]
 use {
-    super::obscura_downloader::sandbox::{sandbox_wrapper_or_binary, REAL_BINARY_ENV},
+    super::obscura_downloader::sandbox::sandbox_wrapper_or_binary,
     chromiumoxide::browser::HeadlessMode,
     chromiumoxide::cdp::browser_protocol::network::{
         CookieParam, EnableParams as NetworkEnableParams, EventLoadingFailed, EventLoadingFinished,
@@ -450,22 +453,14 @@ impl Downloader for ChromiumoxideDownloader {
                 DownloadError::Internal(format!("failed to create Chrome profile dir: {e}"))
             })?;
 
-            // S3: the sandbox seam picks the wrapper or the configured binary; a missing prerequisite never fails the fetch.
-            let launch = sandbox_wrapper_or_binary(self.chrome_binary.as_deref());
-            // 3. Browser config with sandbox bypass for CI/Docker.
-            let mut config_builder = BrowserConfig::builder()
-                .headless_mode(HeadlessMode::True)
-                .no_sandbox()
-                .launch_timeout(CHROME_LAUNCH_TIMEOUT)
-                .user_data_dir(profile.path());
-            if let Some(path) = &launch.executable {
-                config_builder = config_builder.chrome_executable(path);
-            }
-            // The wrapper consumes and strips this before Chrome is exec'd.
-            if let Some(binary) = &launch.real_binary {
-                config_builder =
-                    config_builder.env(REAL_BINARY_ENV, binary.to_string_lossy().into_owned());
-            }
+            let config_builder = sandbox_helper::apply_launch(
+                BrowserConfig::builder()
+                    .headless_mode(HeadlessMode::True)
+                    .no_sandbox()
+                    .launch_timeout(CHROME_LAUNCH_TIMEOUT)
+                    .user_data_dir(profile.path()),
+                sandbox_wrapper_or_binary(self.chrome_binary.as_deref()),
+            );
             let config = config_builder
                 .build()
                 // LCOV_EXCL_LINE defensive: browser-config-build — static builder flags cannot fail at runtime

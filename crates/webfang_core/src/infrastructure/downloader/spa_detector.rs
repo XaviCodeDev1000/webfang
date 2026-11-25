@@ -167,10 +167,8 @@ fn count_visible_text(html: &str) -> VisibleTextCount {
 /// # Arguments
 ///
 /// * `html` - Raw HTML content of the page (the body sample under inspection)
-/// * `ctx` - Full [`InspectionContext`] built by the caller from the fetched
-///   page. Its `ignore_waf` flag controls the REQ-WAF-07 bypass: when `true`
-///   the inspection yields a clean verdict and the page is classified by
-///   normal spa/static logic instead of [`SpaSignal::WafBlocked`].
+/// * `ctx` - Caller-built [`InspectionContext`]; its `ignore_waf` flag controls
+///   the REQ-WAF-07 bypass (clean verdict → normal spa/static classification).
 ///
 /// # Returns
 ///
@@ -193,12 +191,10 @@ fn count_visible_text(html: &str) -> VisibleTextCount {
 /// assert!(matches!(detect_spa(spa, &ctx), SpaSignal::SpaDetected(_)));
 /// ```
 pub fn detect_spa(html: &str, ctx: &InspectionContext) -> SpaSignal {
-    // Check for WAF challenges first via the shared inspection verdict
-    // (REQ-WAF-10) — challenge pages are not real SPAs. The caller supplies the
-    // full inspection context (status, headers, content-type, body sample and
-    // cookies) and owns the `ignore_waf` policy; there is no hardcoded short
-    // circuit here (S11). WAF detection therefore sees the real HTTP status
-    // and control headers instead of a degraded, status-less context.
+    // Check WAF challenges first via the shared verdict (REQ-WAF-10): challenge
+    // pages are not real SPAs. The caller owns the full `InspectionContext` and
+    // its `ignore_waf` policy (REQ-WAF-07/S11) — no hardcoded short circuit, so
+    // detection sees the real HTTP status and control headers.
     let verdict = WafInspector::inspect(html, ctx);
     if verdict.is_blocked {
         return SpaSignal::WafBlocked;
@@ -241,6 +237,11 @@ pub fn detect_spa(html: &str, ctx: &InspectionContext) -> SpaSignal {
 mod tests {
     use super::*;
 
+    /// Test-only wrapper: classify with the caller's default inspection context.
+    fn detect_default(html: &str) -> SpaSignal {
+        detect_spa(html, &InspectionContext::default())
+    }
+
     #[test]
     fn test_static_content_normal_page() {
         let html = r#"<!DOCTYPE html>
@@ -253,10 +254,7 @@ mod tests {
   </article>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::StaticContent
-        );
+        assert_eq!(detect_default(html), SpaSignal::StaticContent);
     }
 
     #[test]
@@ -269,9 +267,8 @@ mod tests {
   <script src="/static/js/bundle.js"></script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
-            signal,
+            detect_default(html),
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "React #root"
         ));
     }
@@ -286,7 +283,7 @@ mod tests {
   <script src="/js/app.js"></script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, &InspectionContext::default());
+        let signal = detect_default(html);
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::MountPoint(_))
@@ -303,9 +300,8 @@ mod tests {
   <script id="__NEXT_DATA__" type="application/json">{"props":{}}</script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
-            signal,
+            detect_default(html),
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "Next.js"
         ));
     }
@@ -320,9 +316,8 @@ mod tests {
   <script>window.__NUXT__={}</script>
 </body>
 </html>"#;
-        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
-            signal,
+            detect_default(html),
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "Nuxt.js"
         ));
     }
@@ -336,9 +331,8 @@ mod tests {
   <app-root></app-root>
 </body>
 </html>"#;
-        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
-            signal,
+            detect_default(html),
             SpaSignal::SpaDetected(SpaReason::MountPoint(ref m)) if m == "Angular app-root"
         ));
     }
@@ -346,9 +340,8 @@ mod tests {
     #[test]
     fn test_insufficient_text_empty() {
         let html = "";
-        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
-            signal,
+            detect_default(html),
             SpaSignal::SpaDetected(SpaReason::InsufficientText(0))
         ));
     }
@@ -356,9 +349,8 @@ mod tests {
     #[test]
     fn test_insufficient_text_short() {
         let html = "<html></html>"; // 0 visible chars < 50
-        let signal = detect_spa(html, &InspectionContext::default());
         assert!(matches!(
-            signal,
+            detect_default(html),
             SpaSignal::SpaDetected(SpaReason::InsufficientText(_))
         ));
     }
@@ -375,7 +367,7 @@ mod tests {
              <script>{fat_script}</script></head><body></body></html>"
         );
         assert!(html.len() > 5_000, "fixture must be a fat raw-HTML shell");
-        let signal = detect_spa(&html, &InspectionContext::default());
+        let signal = detect_default(&html);
         assert!(
             matches!(
                 signal,
@@ -396,7 +388,7 @@ mod tests {
             "b".repeat(100),
             "c".repeat(100),
         );
-        let signal = detect_spa(&html, &InspectionContext::default());
+        let signal = detect_default(&html);
         assert!(
             matches!(
                 signal,
@@ -418,10 +410,7 @@ mod tests {
   <div id="root"><article><h1>Server rendered</h1><p>This content was hydrated server-side and is fully readable without executing any JavaScript at all.</p></article></div>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::StaticContent
-        );
+        assert_eq!(detect_default(html), SpaSignal::StaticContent);
     }
 
     #[test]
@@ -435,10 +424,7 @@ mod tests {
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::WafBlocked
-        );
+        assert_eq!(detect_default(html), SpaSignal::WafBlocked);
     }
 
     #[test]
@@ -450,10 +436,7 @@ mod tests {
   <div class="g-recaptcha" data-sitekey="abc123"></div>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::WafBlocked
-        );
+        assert_eq!(detect_default(html), SpaSignal::WafBlocked);
     }
 
     #[test]
@@ -466,10 +449,7 @@ mod tests {
   <div class="h-captcha" data-sitekey="abc123"></div>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::WafBlocked
-        );
+        assert_eq!(detect_default(html), SpaSignal::WafBlocked);
     }
 
     #[test]
@@ -483,10 +463,7 @@ mod tests {
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::WafBlocked
-        );
+        assert_eq!(detect_default(html), SpaSignal::WafBlocked);
     }
 
     #[test]
@@ -497,10 +474,7 @@ mod tests {
         // prose carries enough visible text to stay static under the #758
         // text gate.
         let html = r#"<html><body><article><p>This site is protected by cloudflare and this sentence is long enough to pass the visible text threshold.</p></article></body></html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::StaticContent
-        );
+        assert_eq!(detect_default(html), SpaSignal::StaticContent);
     }
 
     #[test]
@@ -513,18 +487,13 @@ mod tests {
   <div id="challenge-running">Checking your browser...</div>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::WafBlocked
-        );
+        assert_eq!(detect_default(html), SpaSignal::WafBlocked);
     }
 
     #[test]
     fn test_detect_spa_ignore_waf_true_t1_not_blocked() {
-        // S11: the escalation gate reads `ignore_waf` from the caller-supplied
-        // InspectionContext instead of a hardcoded bool short circuit. The same
-        // body is clean under the opted-out context and blocked under the
-        // default one — the policy is configurable, not compiled into detect_spa.
+        // S11: `ignore_waf` comes from the caller's context, not a hardcoded
+        // short circuit — the same body is clean opted-out, blocked by default.
         let html = r#"<!DOCTYPE html>
 <html>
 <body>
@@ -542,10 +511,8 @@ mod tests {
 
     #[test]
     fn test_detect_spa_ignore_waf_true_t1_with_spa_marker_escalates() {
-        // Triangulation: with `ignore_waf` set in the context, a T1 challenge
-        // that ALSO carries an SPA mount point is classified by normal spa
-        // logic (SpaDetected), not WafBlocked. The default-context mirror is
-        // test_waf_checked_before_spa (WafBlocked).
+        // Triangulation: with `ignore_waf` set, a T1 challenge that ALSO carries
+        // an SPA mount point is SpaDetected, not WafBlocked (mirror: test_waf_checked_before_spa).
         let html = r#"<!DOCTYPE html>
 <html>
 <body>
@@ -567,17 +534,14 @@ mod tests {
     fn test_static_content_exact_threshold() {
         // Exactly 50 visible chars should be considered static (not insufficient)
         let html = format!("<html><body>{}</body></html>", "a".repeat(50));
-        assert_eq!(
-            detect_spa(&html, &InspectionContext::default()),
-            SpaSignal::StaticContent
-        );
+        assert_eq!(detect_default(&html), SpaSignal::StaticContent);
     }
 
     #[test]
     fn test_static_content_below_threshold() {
         // 49 visible chars should be insufficient
         let html = format!("<html><body>{}</body></html>", "a".repeat(49));
-        let signal = detect_spa(&html, &InspectionContext::default());
+        let signal = detect_default(&html);
         assert!(matches!(
             signal,
             SpaSignal::SpaDetected(SpaReason::InsufficientText(49))
@@ -605,7 +569,7 @@ mod tests {
   </footer>
 </body>
 </html>"#;
-        let signal = detect_spa(html, &InspectionContext::default());
+        let signal = detect_default(html);
         assert!(
             matches!(
                 &signal,
@@ -629,7 +593,7 @@ mod tests {
             "b".repeat(40),
         );
         // 80 visible chars total, all inside boilerplate regions.
-        let signal = detect_spa(&html, &InspectionContext::default());
+        let signal = detect_default(&html);
         assert!(
             matches!(
                 &signal,
@@ -653,7 +617,7 @@ mod tests {
             "b".repeat(30),
         );
         // 60 visible chars, all anchor text.
-        let signal = detect_spa(&html, &InspectionContext::default());
+        let signal = detect_default(&html);
         assert!(
             matches!(
                 &signal,
@@ -684,10 +648,7 @@ mod tests {
   <footer><p>Copyright 2026 Example Site. All rights reserved.</p></footer>
 </body>
 </html>"#;
-        assert_eq!(
-            detect_spa(html, &InspectionContext::default()),
-            SpaSignal::StaticContent
-        );
+        assert_eq!(detect_default(html), SpaSignal::StaticContent);
     }
 
     /// #785 edge: content exactly at the threshold (50 chars of paragraph
@@ -700,10 +661,7 @@ mod tests {
             "b".repeat(80),
             "a".repeat(50),
         );
-        assert_eq!(
-            detect_spa(&html, &InspectionContext::default()),
-            SpaSignal::StaticContent
-        );
+        assert_eq!(detect_default(&html), SpaSignal::StaticContent);
     }
 
     /// #785: when content text is insufficient, a mount-point marker still
@@ -716,7 +674,7 @@ mod tests {
   <div id="root"></div>
   <footer><p>Some footer credit text here</p></footer>
 </body></html>"#;
-        let signal = detect_spa(html, &InspectionContext::default());
+        let signal = detect_default(html);
         assert!(
             matches!(
                 &signal,

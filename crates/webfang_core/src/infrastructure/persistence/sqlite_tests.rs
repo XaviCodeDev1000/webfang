@@ -6,6 +6,14 @@ use crate::domain::text_chunker::ByteSpan;
 use crate::infrastructure::persistence::pool::Pool;
 use tempfile::TempDir;
 
+#[cfg(not(miri))]
+#[path = "sqlite_tests/bulk.rs"]
+mod bulk;
+
+#[cfg(not(miri))]
+#[path = "sqlite_tests/pragmas.rs"]
+mod pragmas;
+
 // ====================================================================
 // Pure serialization round-trips (Miri-safe — no FFI, no I/O)
 // ====================================================================
@@ -54,7 +62,7 @@ mod sqlite {
     use super::*;
 
     /// Build a fresh pool over a temp-file DB and run the schema.
-    async fn fresh_pool(size: usize) -> (TempDir, Pool) {
+    pub(super) async fn fresh_pool(size: usize) -> (TempDir, Pool) {
         let dir = TempDir::new().expect("tempdir");
         let db_path = dir.path().join("crawl.db");
         let pool = create_pool(&db_path, size).expect("create_pool");
@@ -83,7 +91,7 @@ mod sqlite {
         .expect("count")
     }
 
-    async fn pragma_string(pool: &Pool, pragma: &str) -> String {
+    pub(super) async fn pragma_string(pool: &Pool, pragma: &str) -> String {
         let sql = format!("PRAGMA {pragma}");
         let conn = pool.get().await.expect("get");
         conn.interact(move |c| c.query_row(&sql, [], |row| row.get::<_, String>(0)))
@@ -92,7 +100,7 @@ mod sqlite {
             .expect("pragma row")
     }
 
-    async fn pragma_int(pool: &Pool, pragma: &str) -> i64 {
+    pub(super) async fn pragma_int(pool: &Pool, pragma: &str) -> i64 {
         let sql = format!("PRAGMA {pragma}");
         let conn = pool.get().await.expect("get");
         conn.interact(move |c| c.query_row(&sql, [], |row| row.get::<_, i64>(0)))
@@ -286,17 +294,6 @@ mod sqlite {
     }
 
     #[tokio::test]
-    async fn test_wal_pragmas_applied_to_connection() {
-        // A freshly-created pooled connection must carry all three pragmas
-        // (proves the post_create hook runs on each connection).
-        let (_dir, pool) = fresh_pool(4).await;
-        assert_eq!(pragma_string(&pool, "journal_mode").await, "wal");
-        // synchronous: 0=OFF,1=NORMAL,2=FULL,3=EXTRA — S12 requires FULL.
-        assert_eq!(pragma_int(&pool, "synchronous").await, 2);
-        assert_eq!(pragma_int(&pool, "cache_size").await, -4000);
-    }
-
-    #[tokio::test]
     async fn test_db_file_created_when_absent() {
         let dir = TempDir::new().expect("tempdir");
         let db_path = dir.path().join("nested").join("crawl.db");
@@ -339,7 +336,7 @@ mod sqlite {
     // ================================================================
 
     /// Build a fresh schema-initialized repo over a temp-file DB.
-    async fn fresh_repo(size: usize) -> (TempDir, SqliteVectorRepository) {
+    pub(super) async fn fresh_repo(size: usize) -> (TempDir, SqliteVectorRepository) {
         let (dir, pool) = fresh_pool(size).await;
         let repo = SqliteVectorRepository::new(pool);
         (dir, repo)
@@ -384,28 +381,6 @@ mod sqlite {
         let msg = err.to_string();
         assert!(msg.contains("corrupto"), "missing Spanish marker: {msg}");
         assert!(msg.contains('5'), "missing length in message: {msg}");
-    }
-
-    #[tokio::test]
-    async fn bulk_chunk_vectors_skip_null_embeddings() {
-        let (_dir, repo) = fresh_repo(4).await;
-        let url = "https://example.com/bulk";
-        repo.save_resource(url, "Bulk", "hash-bulk", 1)
-            .await
-            .expect("save_resource");
-        let embedding = vec![1.0_f32, 0.0, 0.0];
-        repo.save_chunk("with", url, 0, "valid", Some(&embedding), None)
-            .await
-            .expect("save_chunk with embedding");
-        repo.save_chunk("without", url, 1, "null embedding", None, None)
-            .await
-            .expect("save_chunk without embedding");
-
-        let rows = repo.load_chunk_vectors(None).await.expect("bulk read");
-        assert_eq!(rows.len(), 1, "NULL-embedding rows must be filtered");
-        assert_eq!(rows[0].id, "with");
-        assert_eq!(rows[0].content, "valid");
-        assert_eq!(rows[0].embedding, embedding);
     }
 
     #[tokio::test]
