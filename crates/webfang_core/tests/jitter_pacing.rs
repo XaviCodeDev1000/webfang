@@ -241,10 +241,14 @@ async fn retry_after_is_respected_while_the_jitter_is_active() {
 
 /// #2610 (laboratory T5): the CEILING and the DISTRIBUTION of the jittered gaps.
 ///
-/// The floor is proved above; what no test pinned is the other half of the
-/// contract. The jitter adds `U[0, jitter]` to the base delay, so the gap must
-/// ALSO never exceed `delay + jitter`, and the mean gap over many samples must
-/// be the documented `delay + jitter/2` — the rate an operator actually pays.
+/// The floor is proved by `jitter_paces_every_request_not_only_the_refills` and
+/// `jittered_floor_holds_above_concurrency_one`; it is deliberately NOT asserted
+/// here. Those tests give the floor a band wide relative to server-side latency,
+/// while the contract itself is about SCHEDULED dispatch slots (#2610 S4: a late
+/// wake-up can only shorten a measured gap). This test owns the other half: the
+/// jitter adds `U[0, jitter]` to the base delay, so the gap must ALSO never
+/// exceed `delay + jitter`, and the mean gap over many samples must be the
+/// documented `delay + jitter/2` — the rate an operator actually pays.
 ///
 /// The bands are wide on purpose: the mean is a statistic over 49 gaps and the
 /// ceiling carries a slack for the sleep's overshoot. A band tight enough to
@@ -271,15 +275,10 @@ async fn jittered_gaps_stay_within_the_ceiling_and_average_the_documented_rate()
         "every batch URL must arrive exactly once (a skip would fake a pass)"
     );
 
-    let floor = std::time::Duration::from_millis((SPACING_TOLERANCE * DELAY as f64) as u64);
     let ceiling = std::time::Duration::from_millis(DELAY + JITTER + CEILING_SLACK_MS);
     let mut gaps: Vec<u64> = Vec::with_capacity(arrivals.len() - 1);
     for pair in arrivals.windows(2) {
         let gap = pair[1].duration_since(pair[0]);
-        assert!(
-            gap >= floor,
-            "server-side gap {gap:?} < {floor:?} — the pacing floor was broken"
-        );
         assert!(
             gap <= ceiling,
             "server-side gap {gap:?} > {ceiling:?} — the jitter over-spread the gap"
