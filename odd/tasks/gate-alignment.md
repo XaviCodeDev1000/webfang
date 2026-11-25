@@ -16,7 +16,7 @@ S4. Scope: exactly three edited/added automation files (`odd/gates/canonical-che
 
 T1 | S1-S4 | inline | completed | commit: 5107a05f (Risk: item 5 — shared gate configuration)
 T2 | S3 | inline | completed | commit: 34cfcb51
-T3 | S3 | inline | completed | commit: PENDING
+T3 | S3 | inline | completed | commit: 4532c4b8
 
 ## Log
 
@@ -36,4 +36,4 @@ L7 (Phase 2 verification): `scripts/tests/test_canonical_gate_alignment.sh` comp
 
 L8 (native review): RDD assess over `origin/main...HEAD` returned `risk: high` (shell harness) and `review_due: true`. Owner granted candidate consent; START froze lineage `review-dfea25d004e9899e` with lenses `review-readability,review-reliability`; both captures were admitted as `completed`. The refuter refuted R2-003; three other severe findings (R2-001, R2-002, R3-DefaultRecipeRegression) were inconclusive because the probe was unavailable on this runtime. Authority escalated with `unknown_causality` and STATUS reached a terminal `stop` (`native_stop_required`). No acknowledgement or approval was burned; delivery remains ordinary repository policy. PR #3052 stays open; no merge performed.
 
-L9 (CI wiring verification): the spec now names CI as the authoritative source and lists the alignment harness under `## Verification` without changing the four canonical commands. `repo-guards` runs `bash scripts/tests/test_canonical_gate_alignment.sh` next to the existing guard/harness steps; no other step, job, `gate.needs` or `scripts/ci_fast_gate_coverage.tsv` was touched. Verified: PyYAML `yaml.safe_load` exit 0; alignment harness exit 0 (11 passed / 0 failed — five GREEN assertions and six RED negations unchanged); `test_ci_gate_structure.sh` exit 0 (27 assertions, 10 self-tests; TSV ↔ `gate.needs` intact); `actionlint` exit 0. No Rust changes, so no cargo check/clippy/doc run. Work unit: PENDING.
+L9 (CI wiring verification): the spec now names CI as the authoritative source and lists the alignment harness under `## Verification` without changing the four canonical commands. `repo-guards` runs `bash scripts/tests/test_canonical_gate_alignment.sh` next to the existing guard/harness steps; no other step, job, `gate.needs` or `scripts/ci_fast_gate_coverage.tsv` was touched. Verified: PyYAML `yaml.safe_load` exit 0; alignment harness exit 0 (11 passed / 0 failed — five GREEN assertions and six RED negations unchanged); `test_ci_gate_structure.sh` exit 0 (27 assertions, 10 self-tests; TSV ↔ `gate.needs` intact); `actionlint` exit 0. No Rust changes, so no cargo check/clippy/doc run. Work unit: 4532c4b8.
