@@ -34,6 +34,7 @@ Everything not here is searched in Engram: `mem_search` (MCP) or `engram search 
 
 | Fact | Source of truth |
 |---|---|
+| Engram project identity | `.engram/config.json` (`project_name`), ahead of git remote detection |
 | Support-line state | `.github/support.json` (`jq`), rendered into `SUPPORT.md` |
 | Inter-crate dependency graph | `cargo metadata` + `scripts/check_dependency_direction.sh` |
 | MCP tool count | `crates/webfang_mcp/tests/stdio_handshake.rs` |
@@ -561,12 +562,10 @@ waits for `MERGED`. The queue is the normal path to `main` (no direct merge); ne
 `--admin`, no strategy flag (the queue owns the method). `BEHIND` is not fatal. Batches are queue
 groups: same base, disjoint files (`scripts/ci_pr_overlap.sh`); the queue does not resolve conflicts.
 
-**Watcher fallback:** if the script exits 4 while the PR is verifiably ready (`mergeStateStatus`
-`CLEAN` **and** every required context reported green in the rollup), enqueue manually with a
-bare `gh pr merge <N>` (no strategy flag) and poll `state` until `MERGED`. It replaces the
-waiting, never the verification: a context that has not *reported* green is the #1011
-false-green mode, not a candidate. The queue deletes the remote branch on merge. Diagnosis:
-`merge-when-green context read fallback manual enqueue` in Engram.
+**Watcher fallback:** on exit 4 with `mergeStateStatus` `CLEAN` and every required context
+reported green in the rollup, enqueue with a bare `gh pr merge <N>` (no strategy flag) and poll
+to `MERGED`. It replaces the waiting, never the verification: an unreported context is the #1011
+false-green mode. Detail: `merge-when-green context read fallback manual enqueue` in Engram.
 
 **Breaking change (maintainer decision):** the `!` marker must sit on the surface the lander
 keeps. SQUASH + **one commit** → the commit subject (`type!:`, `type(scope)!:`); SQUASH + **two
