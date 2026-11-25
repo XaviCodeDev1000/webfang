@@ -22,7 +22,8 @@ assertions, or reviewing a snapshot diff. Skip for pure unit tests inside a modu
   Cycle: nextest (`.snap.new`) → `cargo insta review` (review every diff) → nextest green. Never
   commit pending `.snap.new` (gitignored).
 - `redact_nondeterministic()` is mandatory (TempDir → `[TEMP_PATH]`, timestamps → `[TIMESTAMP]`,
-  ports → `[PORT]`, ANSI → `[ANSI]`); extra fields via `insta::with_settings!({ add_filter(...) })`.
+  ports → `[PORT]`, ANSI → `[ANSI]`); extra fields via `insta::Settings::clone_current()` +
+  `add_filter(...)` + `.bind(...)` (see `crates/webfang_core/tests/behavioral/main.rs`).
 - No real network: wiremock for HTTP, TempDir for the filesystem; injected time and randomness.
 - Six-node diagnostic: observable behavior (public ports), ephemeral adapters, semantic
   assertions, effort in stable domain logic, Arrange ≤5 lines, absolute determinism. An Arrange
