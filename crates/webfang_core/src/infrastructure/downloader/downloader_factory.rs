@@ -280,6 +280,6 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> SandboxLau
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "downloader_factory/tests.rs"]
 mod tests;
