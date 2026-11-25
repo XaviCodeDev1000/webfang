@@ -1,4 +1,4 @@
-use crate::domain::providers::ProviderConfig;
+use crate::domain::providers::{ProviderConfig, RedactedUrl};
 
 /// Splice `provider` into the `providers` array of `document`, in place.
 ///
@@ -10,7 +10,7 @@ pub(super) fn upsert_provider(
     document: &mut toml_edit::DocumentMut,
     provider: &ProviderConfig,
 ) -> Result<(), std::io::Error> {
-    let entry = toml_edit::ser::to_document(provider)
+    let mut entry = toml_edit::ser::to_document(provider)
         .map_err(|e| {
             std::io::Error::other(format!(
                 "no se pudo serializar el provider '{}': {e}",
@@ -19,6 +19,12 @@ pub(super) fn upsert_provider(
         })?
         .as_table()
         .clone();
+
+    // The config file is the source of truth for the endpoint. `ProviderConfig`'s
+    // `Serialize` hook redacts userinfo for OUTPUT sinks (`--trace-file`, debug
+    // dumps), so the redacted text must never be written back: re-insert the
+    // configured URL verbatim or a re-`connect` silently drops the credential.
+    entry.insert("base_url", toml_edit::value(provider.base_url.as_str()));
 
     // `providers` missing, wrong type, or empty: start a fresh array of
     // tables. `entry` is an inline-shaped table from serde; `to_string` is
@@ -239,14 +245,15 @@ fn cross_endpoint_error(
         .get("id")
         .and_then(toml_edit::Item::as_str)
         .unwrap_or(UNREADABLE);
-    let existing_url = existing
-        .get("base_url")
-        .and_then(toml_edit::Item::as_str)
-        .unwrap_or(UNREADABLE);
-    let incoming_url = incoming
-        .get("base_url")
-        .and_then(toml_edit::Item::as_str)
-        .unwrap_or(UNREADABLE);
+    // Both URLs are rendered without userinfo: this error reaches stderr, and a
+    // configured endpoint may carry inline credentials.
+    let redacted = |item: Option<&toml_edit::Item>| {
+        item.and_then(toml_edit::Item::as_str)
+            .map(|url| RedactedUrl::from_str_lossy(url).to_string())
+            .unwrap_or_else(|| UNREADABLE.to_string())
+    };
+    let existing_url = redacted(existing.get("base_url"));
+    let incoming_url = redacted(incoming.get("base_url"));
 
     std::io::Error::new(
         std::io::ErrorKind::InvalidData,

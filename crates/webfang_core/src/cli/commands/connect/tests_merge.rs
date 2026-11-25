@@ -18,6 +18,48 @@ fn write_provider_appends_a_parseable_record() {
     assert!(written.has_capability(Capability::Embedding));
 }
 
+/// The config file is the source of truth for the endpoint. `ProviderConfig`'s
+/// `Serialize` hook redacts userinfo for output sinks; the record `connect`
+/// writes back must keep the configured URL verbatim, or the next run loses
+/// the credential.
+#[test]
+fn write_provider_preserves_base_url_userinfo_in_the_config_file() {
+    let (_dir, path) = temp_config();
+    let mut provider = test_provider("connect-userinfo");
+    provider.base_url = url::Url::parse("https://user:s3cret@host.example.test/v1").expect("url");
+
+    write_provider(&path, &provider).expect("append record");
+
+    let written = std::fs::read_to_string(&path).expect("read back");
+    assert!(
+        written.contains("https://user:s3cret@host.example.test/v1"),
+        "the redacting Serialize hook must not reach the config file\n---\n{written}"
+    );
+    let loaded = crate::cli::config::ConfigDefaults::load_explicit(&path)
+        .expect("written config must parse");
+    assert_eq!(loaded.providers[0].base_url.username(), "user");
+    assert_eq!(loaded.providers[0].base_url.password(), Some("s3cret"));
+}
+
+/// A re-`connect` of the same credentialed endpoint must not be mistaken for a
+/// different host (the comparison runs on the persisted URL, not the redacted
+/// rendering) and must keep the credential.
+#[test]
+fn reconnect_keeps_a_credentialed_endpoint_and_does_not_refuse_it() {
+    let (_dir, path) = temp_config();
+    let endpoint = url::Url::parse("https://user:s3cret@host.example.test/v1").expect("url");
+    let mut provider = test_provider("connect-userinfo");
+    provider.base_url = endpoint.clone();
+    write_provider(&path, &provider).expect("first write");
+
+    write_provider(&path, &provider).expect("same endpoint must merge, not refuse");
+
+    let loaded = crate::cli::config::ConfigDefaults::load_explicit(&path)
+        .expect("written config must parse");
+    assert_eq!(loaded.providers.len(), 1);
+    assert_eq!(loaded.providers[0].base_url, endpoint);
+}
+
 /// A first run has no `webfang/` directory yet — the write must create it
 /// rather than fail after the endpoint probe already succeeded.
 #[test]
