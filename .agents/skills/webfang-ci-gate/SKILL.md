@@ -21,12 +21,14 @@ Skip for read-only exploration.
   evidence. Verify with `cargo fmt --all -- --check`.
 - Read the coverage report before pushing: for every `NOT covered` job you touched, run that
   job's check by hand. The local gate mirrors `gate.needs`, not the whole workflow.
-- Pre-commit replicates CI exactly: `cargo check` + `cargo clippy --all-targets --all-features
-  -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` + `cargo fmt --all
-  -- --check` + `env RUSTDOCFLAGS=-D warnings cargo doc --workspace --all-features --no-deps`.
-- `pre-commit` has two gates: `identity-gate.sh` runs first and is **fail-closed** (missing
-  `.worktree-identity`, inherited `CARGO_TARGET_DIR` or detached HEAD deny the commit);
-  `review-gate.sh` stays fail-open for review verdicts. A green review gate is not a green commit.
+- `pre-commit` has three gates: `identity-gate.sh` first and `static-guards.sh` second (both
+  **fail-closed**; missing `.worktree-identity`, inherited `CARGO_TARGET_DIR`, detached HEAD or
+  any static-guard violation deny the commit), then `review-gate.sh`, fail-open for review verdicts.
+  A green review gate is not a green commit.
+- Run the four cargo commands by hand before push — the hook does NOT run them:
+  `cargo check` + `cargo clippy --all-targets --all-features -- -D warnings
+  -W clippy::cognitive_complexity -W clippy::too_many_lines` + `cargo fmt --all -- --check` +
+  `env RUSTDOCFLAGS=-D warnings cargo doc --workspace --all-features --no-deps`.
 - Shell harnesses in `scripts/tests/` are not wired into `ci_fast_gate.sh` lanes. When scripts or
   hooks change, run `bash -n`, `shellcheck` and the relevant harnesses by hand.
 - Deliberate local exceptions (toolchain, artifact-guards, full security, test-full depth) are

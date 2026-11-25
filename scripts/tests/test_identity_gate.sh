@@ -224,6 +224,7 @@ mkdir -p "$HOOKS" "$LIBS"
 cp "$GATE" "$POST_COMMIT" "$ROOT/scripts/githooks/pre-commit" "$HOOKS/"
 cp "$ROOT/scripts/lib/worktree_paths.sh" "$ROOT/scripts/lib/identity_attestation.sh" "$LIBS/"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$HOOKS/review-gate.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOOKS/static-guards.sh"
 chmod +x "$HOOKS/"*
 valid_attestation
 CARGO_TARGET_DIR="$MISMATCH_TARGET" git -C "$MISMATCH_WT" \

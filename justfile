@@ -1,13 +1,15 @@
-# justfile — webfang
-# Esto es para tareas manuales (outer loop).
+# justfile - webfang
+# Local manual tasks (outer loop).
 
-# -- Verificación --
+# -- Verification --
 
 default: check
 
 check:
-    cargo fmt --check
-    cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -A clippy::uninlined_format_args -A clippy::case_sensitive_file_extension_comparisons -A clippy::doc_markdown -A clippy::needless_raw_string_hashes -A clippy::missing_errors_doc -A clippy::must_use_candidate -A clippy::redundant_closure -A clippy::match_same_arms -A clippy::items_after_statements -A clippy::missing_panics_doc -A clippy::module_name_repetitions -A clippy::too_many_lines -A clippy::too_many_arguments -A clippy::struct_excessive_bools -A clippy::similar_names -A clippy::cast_precision_loss -A clippy::cast_possible_truncation -A clippy::cast_sign_loss -A clippy::default_trait_access -A clippy::wildcard_imports -A clippy::enum_glob_use -A clippy::explicit_iter_loop -A clippy::map_unwrap_or -A clippy::if_not_else -A clippy::manual_let_else -A clippy::needless_continue -A clippy::needless_pass_by_value -A clippy::return_self_not_must_use -A clippy::single_match_else -A clippy::trivially_copy_pass_by_ref -A clippy::struct_field_names -A clippy::assigning_clones -A clippy::float_cmp -A clippy::cast_lossless -A clippy::unused_async -A clippy::format_push_string -A clippy::used_underscore_binding -A clippy::unnested_or_patterns -A clippy::single_char_pattern -A clippy::redundant_else -A clippy::needless_late_init -A clippy::explicit_iter_loop -A clippy::unused_self -A clippy::redundant_closure_for_method_calls -A clippy::used_underscore_items -A clippy::cast_possible_wrap -A clippy::non_std_lazy_statics -A clippy::stable_sort_primitive -A clippy::unnecessary_debug_formatting -A clippy::unnecessary_semicolon -A clippy::explicit_into_iter_loop -A clippy::manual_assert -A duplicate_macro_attributes -A clippy::unreadable_literal
+    cargo check
+    cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines
+    cargo fmt --all -- --check
+    env "RUSTDOCFLAGS=-D warnings" cargo doc --workspace --all-features --no-deps
 
 check-fast:
     cargo check
@@ -19,27 +21,27 @@ check-docs-truth:
 
 # -- Tests --
 
-# Refresca el índice de CodeDB (el agente lo necesita para saber qué cambió)
+# Refresh the CodeDB index (agents need it to know what changed)
 analyze:
-    codedb index . || echo "CodeDB ya estaba actualizado"
+    codedb index . || echo "CodeDB was already up to date"
 
-# Tests durante desarrollo → SOLO lo afectado (8-25 segundos típico)
+# Development tests: only the affected scope (typically 8-25 seconds)
 test-dev:
-    @echo "🚀 Ejecutando tests solo de cambios..."
+    @echo "🚀 Running tests for changed code..."
     cargo nextest run \
         --no-fail-fast \
         --profile dev
 
-# Tests completos para agentes (gate final)
+# Full test suite for agents (final gate)
 test:
-    @echo "🧪 Ejecutando suite completa de tests..."
+    @echo "🧪 Running the full test suite..."
     cargo nextest run \
         --no-fail-fast \
         --profile agent
 
-# Tests con filtro preciso (cuando sabés exactamente qué módulos cambiaron)
+# Tests with a precise filter (when you know exactly which modules changed)
 test-filter filter:
-    @echo "🎯 Ejecutando tests filtrados: {{filter}}"
+    @echo "🎯 Running filtered tests: {{filter}}"
     cargo nextest run \
         --no-fail-fast \
         --profile dev \
@@ -48,7 +50,7 @@ test-filter filter:
 test-ai:
     cargo nextest run --profile agent --features ai
 
-# -- Auditoría --
+# -- Audit --
 
 audit:
     cargo audit
@@ -80,41 +82,41 @@ fix-typos:
 # -- Setup --
 
 setup:
-    @echo "Verificando herramientas..."
-    @which cargo-nextest || (echo "Falta: cargo binstall cargo-nextest"; exit 1)
-    @which just || (echo "Falta: cargo binstall just"; exit 1)
-    @which cargo-machete || (echo "Falta: cargo binstall cargo-machete"; exit 1)
-    @which cargo-audit || (echo "Falta: cargo binstall cargo-audit"; exit 1)
-    @which cargo-deny || (echo "Falta: cargo binstall cargo-deny"; exit 1)
-    @which typos || (echo "Falta: cargo binstall typos-cli"; exit 1)
-    @which sccache || (echo "Falta: sccache"; exit 1)
-    @echo "Setup completo — todas las herramientas verificadas"
+    @echo "Checking tools..."
+    @which cargo-nextest || (echo "Missing: cargo binstall cargo-nextest"; exit 1)
+    @which just || (echo "Missing: cargo binstall just"; exit 1)
+    @which cargo-machete || (echo "Missing: cargo binstall cargo-machete"; exit 1)
+    @which cargo-audit || (echo "Missing: cargo binstall cargo-audit"; exit 1)
+    @which cargo-deny || (echo "Missing: cargo binstall cargo-deny"; exit 1)
+    @which typos || (echo "Missing: cargo binstall typos-cli"; exit 1)
+    @which sccache || (echo "Missing: sccache"; exit 1)
+    @echo "Setup complete - all tools verified"
 
 # =============================================
-# WATCH MODE (el que más vas a usar con el agente)
+# WATCH MODE (the one used most with the agent)
 # =============================================
 
-# Modo desarrollo automático: vigila cambios y ejecuta solo tests afectados
+# Automatic development mode: watches changes and runs only the affected tests
 watch-dev:
-    @echo "👀 Modo watch activado - tests inteligentes"
-    @echo "   (Detén con Ctrl+C)"
+    @echo "👀 Watch mode enabled - smart tests"
+    @echo "   (Stop with Ctrl+C)"
     cargo watch --clear \
         --watch . \
         --ignore "target/" \
         --ignore "logs/" \
         --shell "just test-dev-with-impact"
 
-# Versión optimizada: excluye AI integration del ciclo de desarrollo
+# Optimized version: excludes AI integration from the development loop
 test-dev-with-impact:
-    @echo "🚀 Ejecutando tests de desarrollo..."
-    @echo "🎯 Ejecutando tests optimizados (excluyendo AI integration)..."
+    @echo "🚀 Running development tests..."
+    @echo "🎯 Running optimized tests (excluding AI integration)..."
     cargo nextest run \
         --profile dev \
         --no-fail-fast \
         -E "not test(ai_integration)"
 
 # =============================================
-# FUZZING (seguridad — detecta vulns y panics)
+# FUZZING (security - detects vulnerabilities and panics)
 # =============================================
 
 # ----------------------------------------------------------------------------
@@ -142,7 +144,7 @@ test-dev-with-impact:
 # HTTP-header-like inputs stay small (max_len=4096).
 # ----------------------------------------------------------------------------
 
-# Smoke test: ejecuta cada target por 5 segundos
+# Smoke test: runs each target for 5 seconds
 fuzz-smoke:
     #!/usr/bin/env bash
     set -u
@@ -167,7 +169,7 @@ fuzz-smoke:
     done
     echo "✅ All targets smoke-tested"
 
-# Fuzz un target específico por N segundos (default: 60)
+# Fuzz a specific target for N seconds (default: 60)
 fuzz-target target seconds="60":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -188,7 +190,7 @@ fuzz-target target seconds="60":
     echo "🎯 Fuzzing {{target}} for {{seconds}}s..."
     cargo +nightly fuzz run "{{target}}" -- $(fuzz_flags "{{target}}") -max_total_time={{seconds}}
 
-# Fuzz todos los targets por 10 minutos (para CI nocturno)
+# Fuzz all targets for 10 minutes (for nightly CI)
 fuzz-full:
     #!/usr/bin/env bash
     set -u
@@ -213,95 +215,98 @@ fuzz-full:
     done
     echo "✅ Full fuzz suite complete"
 
-# Coverage report: qué tan bien cubre el fuzzing el código
+# Coverage report: how well fuzzing covers the code
 fuzz-coverage target:
     @echo "📊 Generating coverage for {{target}}..."
     cargo +nightly fuzz coverage {{target}}
     @echo "✅ Coverage report in fuzz/coverage/{{target}}/"
 
-# Limpiar artifacts de fuzzing (corpus, crashes, coverage)
+# Clean fuzzing artifacts (corpus, crashes, coverage)
 fuzz-clean:
     @echo "🧹 Cleaning fuzz artifacts..."
     rm -rf fuzz/artifacts/*/crash-* fuzz/artifacts/*/oom-* fuzz/artifacts/*/leak-*
     @echo "✅ Fuzz artifacts cleaned"
 
 # =============================================
-# CI / GATE FINAL (antes de commit / PR)
+# CI / FINAL GATE (before commit / PR)
 # =============================================
 
-# Validación completa: fmt + clippy + tests completos
+# Full validation: the canonical gate plus the focused test suite
 test-ci:
-    @echo "🔥 Iniciando GATE FINAL (CI)..."
-    @echo "1/4 → Formateando código..."
+    @echo "Starting the final gate (CI)..."
+    @echo "1/5 → cargo check..."
+    cargo check
+    @echo "2/5 → Clippy (strict)..."
+    cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines
+    @echo "3/5 → Format check (--all)..."
     cargo fmt --all -- --check
-    @echo "2/4 → Ejecutando Clippy (strict)..."
-    cargo clippy --all-targets --all-features -- -D warnings
-    @echo "3/4 → Refrescando CodeDB..."
-    codedb index . || echo "CodeDB ya estaba actualizado"
-    @echo "4/4 → Ejecutando suite completa de tests..."
+    @echo "4/5 → Rustdoc (deny warnings)..."
+    env "RUSTDOCFLAGS=-D warnings" cargo doc --workspace --all-features --no-deps
+    @echo "5/5 → Full test suite..."
+    codedb index . || echo "CodeDB was already up to date"
     cargo nextest run \
         --profile ci \
         --no-fail-fast
-    @echo "✅ CI PASADO - Listo para commit/push/PR"
+    @echo "CI gate passed - ready to commit/push/PR"
 
-# Versión rápida para cuando solo quieres tests + clippy (sin fmt)
+# Quick version: tests + strict clippy only (skips fmt and rustdoc)
 test-ci-quick:
-    @echo "🔥 CI rápido (clippy + tests)..."
-    cargo clippy --all-targets --all-features -- -D warnings
-    codedb index . || echo "CodeDB ya estaba actualizado"
+    @echo "Quick CI (clippy + tests)..."
+    cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines
+    codedb index . || echo "CodeDB was already up to date"
     cargo nextest run --profile ci --no-fail-fast
-    @echo "✅ CI rápido pasado"
+    @echo "Quick CI gate passed"
 
-# -- Documentación --
+# -- Documentation --
 
-# Ruta del wiki combinado (Obsidian vault)
+# Path of the combined wiki (Obsidian vault)
 wiki_output := home_dir() / "Documentos" / "obsidian" / "webfang" / "wiki.md"
 
-# Descarga la documentación combinada (narrativa + API rustdoc) generada en CI.
-# Todo el cómputo pesado (mdBook build/test/linkcheck + cargo doc +
-# rustdoc-markdown) corre en GitHub Actions; localmente solo PULL del último
-# run exitoso de main. Requiere: gh CLI autenticado (gh auth login).
+# Downloads the combined documentation (narrative + rustdoc API) generated in CI.
+# All heavy work (mdBook build/test/linkcheck + cargo doc + rustdoc-markdown)
+# runs in GitHub Actions; locally this only pulls the latest successful main
+# run. Requires an authenticated gh CLI (gh auth login).
 docs:
-    @echo "📚 Descargando documentación generada en CI..."
+    @echo "📚 Downloading documentation generated in CI..."
     @mkdir -p "$(dirname '{{wiki_output}}')"
-    @# Sin guardia previa de `gh auth status`: consulta el keyring y da falsos
-    @# negativos transitorios aunque gh funcione; el fallo real ya lo nombra.
+    @# No pre-guard on `gh auth status`: it queries the keyring and can report
+    @# transient false negatives even when gh works; the real failure is named below.
     @RUN_ID=$(gh run list -R XaviCode1000/webfang --workflow docs.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId') \
-    || { echo "⚠️  gh run list falló — ¿token de gh? Probá: gh auth login"; exit 1; }; \
-    test -n "$RUN_ID" || { echo "⚠️  Sin runs exitosos de docs.yml en main"; exit 1; }; \
-    echo "   Run de main: $RUN_ID"; \
+    || { echo "⚠️  gh run list failed - check the gh token: gh auth login"; exit 1; }; \
+    test -n "$RUN_ID" || { echo "⚠️  No successful docs.yml runs on main"; exit 1; }; \
+    echo "   Main run: $RUN_ID"; \
     rm -rf target/docs-llm && \
     gh run download -R XaviCode1000/webfang "$RUN_ID" -n webfang-docs-llm -D target/docs-llm
-    @# El artifact puede tener el layout de directorio (post-#734) — acepto ambos.
+    @# The artifact may use a directory layout (post-#734) - accept both.
     @FULL=target/docs-llm/webfang-docs-full.md; \
     test -f "$FULL" || FULL=target/docs-llm/webfang-docs-llm/webfang-docs-full.md; \
     test -f "$FULL" || FULL=target/docs-llm/webfang-docs-llm.md; \
-    test -f "$FULL" || { echo "⚠️  No encontré webfang-docs-full.md en el artifacto"; exit 1; }; \
+    test -f "$FULL" || { echo "⚠️  webfang-docs-full.md not found in the artifact"; exit 1; }; \
     cp "$FULL" "{{wiki_output}}"
-    @# Aviso de frescura: el header "Source commit:" del monolito (audit B30)
-    @# vs el HEAD local. Docs más nuevas que HEAD son el caso normal (main
-    @# adelantado localmente); solo se advierte cuando quedan atrás o divergen.
+    @# Freshness notice: the "Source commit:" header of the monolith (audit B30)
+    @# vs the local HEAD. Docs newer than HEAD are the normal case (main is
+    @# ahead locally); warn only when they lag behind or diverge.
     @ART_SHA=$(sed -n 's/^Source commit: //p' "{{wiki_output}}" | head -n1); \
     HEAD_SHA=$(git rev-parse HEAD 2>/dev/null); \
     if [ -n "$ART_SHA" ] && [ -n "$HEAD_SHA" ] && [ "$ART_SHA" != "$HEAD_SHA" ]; then \
       if git merge-base --is-ancestor "$ART_SHA" "$HEAD_SHA" >/dev/null 2>&1; then \
-        echo "⚠️  La doc es del commit $(printf '%s\n' "$ART_SHA" | cut -c1-7), anterior a tu HEAD ($(printf '%s\n' "$HEAD_SHA" | cut -c1-7)): el CI puede no haber terminado para tus últimos commits."; \
+        echo "⚠️  Docs are from commit $(printf '%s\n' "$ART_SHA" | cut -c1-7), older than your HEAD ($(printf '%s\n' "$HEAD_SHA" | cut -c1-7)): CI may not have finished for your latest commits."; \
       elif ! git merge-base --is-ancestor "$HEAD_SHA" "$ART_SHA" >/dev/null 2>&1; then \
-        echo "⚠️  La doc ($(printf '%s\n' "$ART_SHA" | cut -c1-7)) y tu HEAD ($(printf '%s\n' "$HEAD_SHA" | cut -c1-7)) divergieron."; \
+        echo "⚠️  Docs ($(printf '%s\n' "$ART_SHA" | cut -c1-7)) and your HEAD ($(printf '%s\n' "$HEAD_SHA" | cut -c1-7)) diverged."; \
       fi; \
     fi
-    @echo "✅ Documentación actualizada (desde CI, último run exitoso de main):"
+    @echo "✅ Documentation updated (from CI, latest successful main run):"
     @ls -lh "{{wiki_output}}" | awk '{print "  " $NF " (" $5 ")"}'
 
-# Preview local del mdBook (liviano, sin remoto): construye y sirve solo la
-# narrativa en http://localhost:3000. No genera rustdoc ni el artefacto LLM.
+# Lightweight local mdBook preview (no remote): builds and serves only the
+# narrative at http://localhost:3000. Does not generate rustdoc or the LLM artifact.
 docs-local:
-    @echo "🔧 Preview local del mdBook (sin remoto)..."
+    @echo "🔧 Local mdBook preview (no remote)..."
     @mise install aqua:rust-lang/mdBook
     @mdbook build docs
-    @echo "📖 Sirviendo en http://localhost:3000 — Ctrl+C para salir"
+    @echo "📖 Serving at http://localhost:3000 - Ctrl+C to stop"
     @mdbook serve docs -p 3000
 
-# Regenera el capítulo de referencia CLI desde el binario (drift manual)
+# Regenerate the CLI reference chapter from the binary (manual drift)
 cli-doc-regen:
     @scripts/gen-cli-reference.sh

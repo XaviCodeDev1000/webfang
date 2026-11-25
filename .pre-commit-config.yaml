@@ -1,18 +1,20 @@
 # =============================================================================
 # Pre-commit hooks for Rust projects
 # =============================================================================
-# Instalar: pre-commit install
-# Ejecutar manualmente: pre-commit run --all-files
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
 #
 # Hooks:
-#   1. rustfmt --check: Verifica formato (falla si no está formateado)
-#   2. clippy: Verifica linting (falla si hay warnings)
-#   3. actionlint: Valida workflows de GitHub Actions (falla con errores de semántica)
+#   1. rustfmt-check: verify formatting (fails when unformatted)
+#   2. clippy: verify linting (fails on warnings)
+#   3. actionlint: validate GitHub Actions workflows
+#   4. zizmor: audit GitHub Actions workflows for security issues
+#   5. trailing-whitespace / end-of-file-fixer / check-yaml / check-added-large-files
 #
-# Uso:
-#   - pre-commit run --all-files  # Verificar todo
-#   - cargo fmt                    # Auto-formatear antes de commit
-#   - git commit                   # Commitear (ejecuta hooks)
+# Usage:
+#   - pre-commit run --all-files  # verify everything
+#   - cargo fmt --all             # format before committing
+#   - git commit                  # commit (runs hooks)
 # =============================================================================
 
 repos:
@@ -22,18 +24,18 @@ repos:
 
   - repo: local
     hooks:
-      # Check formatting (NO modifica, solo verifica)
+      # Check formatting (does not modify files)
       - id: rustfmt-check
         name: rustfmt (check)
         description: Check Rust code format
         entry: cargo
-        args: ["fmt", "--", "--check"]
+        args: ["fmt", "--all", "--", "--check"]
         language: system
         pass_filenames: false
         types: [rust]
         exclude: "^target/"
 
-      # Lint (falla con warnings)
+      # Lint (fails on warnings)
       - id: clippy
         name: clippy
         description: Lint Rust code
@@ -44,12 +46,12 @@ repos:
         types: [rust]
         exclude: "^target/"
 
-      # Valida workflows de GitHub Actions (detecta errores de semántica que
-      # check-yaml no ve, p.ej. pasos anidados dentro de un bloque `run: |`).
-      # Requiere shellcheck en PATH (mise lo instala) para analizar los
-      # bloques `run:`. Los -ignore son deuda preexistente de estilo
-      # (SC2086 etc.) — NO ignorar códigos estructurales como SC2215.
-      # Mantener en sync con el paso "Lint GitHub Actions workflows" en ci.yml.
+      # Validate GitHub Actions workflows (catches semantic errors that
+      # check-yaml misses, e.g. nested steps inside a `run: |` block).
+      # Requires shellcheck in PATH (installed by mise) for `run:` blocks.
+      # The -ignore entries are pre-existing style debt (SC2086 etc.);
+      # never ignore structural codes such as SC2215.
+      # Keep in sync with the "Lint GitHub Actions workflows" step in ci.yml.
       - id: actionlint
         name: actionlint
         description: Lint GitHub Actions workflows
@@ -75,9 +77,9 @@ repos:
         files: ^\.github/workflows/.*\.ya?ml$
         pass_filenames: false
 
-      # Auditoría estática de seguridad de GitHub Actions (zizmor).
-      # Detecta inyección de plantillas, persistencia indebida de credenciales
-      # y permisos excesivos.
+      # Static security audit of GitHub Actions (zizmor).
+      # Detects template injection, unintended credential persistence
+      # and excessive permissions.
       - id: zizmor
         name: zizmor (security audit)
         description: Security audit GitHub Actions workflows
@@ -114,7 +116,7 @@ repos:
         name: Check for large files
 
 # =============================================================================
-# Configuración global
+# Global configuration
 # =============================================================================
 default_install_hook_types: [pre-commit]
 default_stages: [pre-commit]
