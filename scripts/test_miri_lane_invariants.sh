@@ -287,9 +287,9 @@ mod tests {
 }
 EOF
 
-  # retry (#3027): the wiremock-backed status-exhaustion test builds a wreq
-  # Client and reaches `TLS_method` in btls FFI. The pure backoff cases and the
-  # loopback-refused dial beside it stay under the interpreter.
+  # retry (#3027, #3032 follow-up): BOTH tests that build a wreq Client reach
+  # `TLS_method` in btls FFI — wiremock is not the primitive. The pure backoff
+  # cases never build a client and stay under the interpreter.
   cat >"$root/crates/webfang_core/src/application/http_client/retry.rs" <<'EOF'
 #[cfg(test)]
 mod tests {
@@ -299,8 +299,15 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg_attr(miri, ignore = "TLS_method (btls FFI) unsupported by Miri")]
+    #[cfg_attr(miri, ignore = "TLS_method (btls FFI) via Client::builder unsupported by Miri")]
+    async fn exhaustion_after_transport_failures_delivers_the_classified_cause() {
+        let client = Client::builder().build().unwrap();
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore = "TLS_method (btls FFI) via Client::builder unsupported by Miri")]
     async fn exhaustion_after_status_failures_stays_bare() {
+        let client = Client::builder().build().unwrap();
         let server = wiremock::MockServer::start().await;
     }
 }
@@ -754,24 +761,36 @@ mod tests {
     }
 }'
 
-# retry (#3027): `MockServer::start` is the marker that separates the
-# wiremock-backed status-exhaustion test from the pure backoff cases. Without
-# its per-test gate the test reaches `TLS_method` (btls FFI) and aborts the
-# whole lane before any `cli::` test runs (dispatch 45490558291).
+# retry (#3027, #3032 follow-up): `Client::builder()` is the marker — the
+# status AND the transport tests build a wreq Client and reach `TLS_method`
+# (btls FFI). Dispatch 45490558291 aborted on the first; after that gate,
+# dispatch 45638266501 aborted on the sibling. Each ungated builder test must
+# FAIL, so both shapes are controlled here.
 red_surface "retry-status" "crates/webfang_core/src/application/http_client/retry.rs" \
-'rejects an ungated wiremock-backed status-exhaustion test' \
+'rejects an ungated status-exhaustion test that builds a client' \
 '#[cfg(test)]
 mod tests {
     #[tokio::test]
     async fn exhaustion_after_status_failures_stays_bare() {
+        let client = Client::builder().build().unwrap();
         let server = wiremock::MockServer::start().await;
     }
 }'
 
-# Vacuity, per entry: no wiremock setup left in the retry file means the
+red_surface "retry-transport" "crates/webfang_core/src/application/http_client/retry.rs" \
+'rejects an ungated transport-exhaustion test that builds a client' \
+'#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn exhaustion_after_transport_failures_delivers_the_classified_cause() {
+        let client = Client::builder().build().unwrap();
+    }
+}'
+
+# Vacuity, per entry: no client builder left in the retry file means the
 # declared TLS_method surface is no longer being inspected.
 red_surface "retry-status-vacuity" "crates/webfang_core/src/application/http_client/retry.rs" \
-'rejects a retry file whose wiremock marker disappeared' \
+'rejects a retry file whose client-builder marker disappeared' \
 '#[cfg(test)]
 mod tests {
     #[test]
