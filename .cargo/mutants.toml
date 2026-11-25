@@ -76,4 +76,16 @@ examine_globs = [
 exclude_globs = [
   "**/mod.rs",
   "crates/webfang_core/src/lib.rs",
+  # cfg(feature = chromium) only: the PR-diff and weekly jobs build the DEFAULT
+  # feature set, so every mutant in these two files is compiled out. An inert
+  # mutant can never be killed by a test: it reports missed, or a false caught
+  # whenever an unrelated test happens to be red. #3051 showed both halves —
+  # five mutants of ChromiumoxideDownloader::fetch reported 4 caught / 1
+  # unviable while the WAF exit-code tests were red, and 2 missed / 2 timeouts
+  # (run 45715460562) the moment that suite went green, with no change to the
+  # function. downloader_factory.rs is the same sandbox surface but compiles
+  # everywhere, so it stays in scope. Covering this stack needs a chromium
+  # feature mutation lane; this entry is the honest state until then.
+  "crates/webfang_core/src/infrastructure/downloader/chromiumoxide_downloader.rs",
+  "crates/webfang_core/src/infrastructure/downloader/obscura_downloader/sandbox.rs",
 ]
