@@ -20,8 +20,32 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::domain::embedding_port::cosine_similarity_fail_closed;
 use crate::domain::text_chunker::ByteSpan;
 use crate::error::ScraperError;
+
+/// A stored chunk embedding, ready for in-memory cosine ranking.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChunkVector {
+    /// Chunk row id from the general `chunks` table.
+    pub id: String,
+    /// The chunk's text content.
+    pub content: String,
+    /// The decoded little-endian `f32` embedding.
+    pub embedding: Vec<f32>,
+}
+
+impl ChunkVector {
+    /// Score this chunk against a query with the same fail-closed cosine helper
+    /// used to rank `note_chunks`.
+    ///
+    /// Returns `None` on a dimension mismatch: the chunk must be skipped, never
+    /// ranked as a zero score.
+    #[must_use]
+    pub fn cosine_score(&self, query: &[f32]) -> Option<f32> {
+        cosine_similarity_fail_closed(query, &self.embedding)
+    }
+}
 
 /// Domain trait for vector persistence (dependency inversion).
 ///
@@ -106,6 +130,24 @@ pub trait VectorRepository: Send + Sync {
         &'a self,
         chunk_id: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<f32>>, ScraperError>> + Send + 'a>>;
+
+    /// Load every chunk that has an embedding from the general `chunks` table.
+    ///
+    /// When `resource_url` is `Some`, only that resource's chunks are returned.
+    /// Rows with a `NULL` embedding are excluded, and no matching rows is a
+    /// successful empty vector. Write-only sinks use the default and contribute
+    /// no readable chunks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScraperError::Persistence`] on a database failure or a corrupt
+    /// embedding BLOB.
+    fn load_chunk_vectors<'a>(
+        &'a self,
+        _resource_url: Option<&'a str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChunkVector>, ScraperError>> + Send + 'a>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
 }
 
 /// Blanket impl so `Arc<dyn VectorRepository + Send + Sync>` satisfies
@@ -152,6 +194,13 @@ impl<T: VectorRepository + ?Sized> VectorRepository for std::sync::Arc<T> {
         chunk_id: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<f32>>, ScraperError>> + Send + 'a>> {
         (**self).get_vector(chunk_id)
+    }
+
+    fn load_chunk_vectors<'a>(
+        &'a self,
+        resource_url: Option<&'a str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChunkVector>, ScraperError>> + Send + 'a>> {
+        (**self).load_chunk_vectors(resource_url)
     }
 }
 
@@ -342,6 +391,35 @@ impl VectorRepository for MultiVectorRepository {
             match first_err {
                 Some(e) => Err(e),
                 None => Ok(None),
+            }
+        })
+    }
+
+    fn load_chunk_vectors<'a>(
+        &'a self,
+        resource_url: Option<&'a str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChunkVector>, ScraperError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut first_err: Option<ScraperError> = None;
+            for repo in &self.repos {
+                match repo.load_chunk_vectors(resource_url).await {
+                    Ok(rows) if !rows.is_empty() => return Ok(rows),
+                    Ok(_) => {},
+                    Err(e) => {
+                        tracing::error!(
+                            resource_url = ?resource_url,
+                            error = %e,
+                            "vector sink load_chunk_vectors failed"
+                        );
+                        if first_err.is_none() {
+                            first_err = Some(e);
+                        }
+                    },
+                }
+            }
+            match first_err {
+                Some(e) => Err(e),
+                None => Ok(Vec::new()),
             }
         })
     }
