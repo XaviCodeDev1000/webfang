@@ -12,22 +12,35 @@
 //! delegation, missing `arapuca`) degrades to a direct browser exec: a
 //! missing sandbox must never fail a run. All APIs used here are safe.
 
-use std::env;
-use std::fs;
+use std::process::ExitCode;
+
+#[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+#[cfg(target_os = "linux")]
+use std::process::Command;
+#[cfg(target_os = "linux")]
+use std::{env, fs};
 
 #[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
 
+#[cfg(target_os = "linux")]
 use webfang_core::infrastructure::downloader::obscura_downloader::sandbox::{
     arapuca_args, cgroup_delegation, find_in_path, resolve_arapuca, task_id, REAL_BINARY_ENV,
 };
 
 /// Browser names tried in order when no explicit path is configured.
+///
+/// Mirrors chromiumoxide's own detection list (unstable channels excluded), so
+/// the wrapper never picks a different browser than the downloader would have
+/// launched on its own. `CHROME` is checked before this list, exactly like
+/// chromiumoxide does.
+#[cfg(target_os = "linux")]
 const BROWSER_CANDIDATES: &[&str] = &[
-    "google-chrome",
+    "chrome",
+    "chrome-browser",
     "google-chrome-stable",
+    "google-chrome",
     "chromium",
     "chromium-browser",
 ];
@@ -94,11 +107,13 @@ fn run() -> ExitCode {
 /// in the downloaders; this standalone binary has no subscriber installed, so
 /// it carries the same run id in its stderr line and the parent process owns
 /// the FileTraceLayer event.
+#[cfg(target_os = "linux")]
 fn warn_skip(reason: &str, task_id: &str) {
     eprintln!("webfang-sandbox-wrapper: sandbox=skipped layer=3 reason={reason} task_id={task_id}");
 }
 
 /// Replace the current process, propagating `exec` failures to the caller.
+#[cfg(target_os = "linux")]
 fn exec(binary: &Path, args: &[String]) -> ExitCode {
     let mut command = Command::new(binary);
     command.args(args);
@@ -113,6 +128,7 @@ fn exec(binary: &Path, args: &[String]) -> ExitCode {
 }
 
 /// Extract `--user-data-dir=<path>` from the browser's argv.
+#[cfg(target_os = "linux")]
 fn parse_user_data_dir(args: &[String]) -> Option<PathBuf> {
     let raw = args
         .iter()
@@ -120,12 +136,16 @@ fn parse_user_data_dir(args: &[String]) -> Option<PathBuf> {
     (!raw.is_empty()).then(|| PathBuf::from(raw))
 }
 
-/// Resolve the real browser from the explicit override, then from `PATH`.
+/// Resolve the real browser from the explicit override, then `CHROME`, then
+/// the PATH candidates — the same precedence chromiumoxide's detection uses.
+#[cfg(target_os = "linux")]
 fn resolve_real_browser() -> Option<PathBuf> {
-    if let Some(path) = env::var_os(REAL_BINARY_ENV) {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Some(path);
+    for key in [REAL_BINARY_ENV, "CHROME"] {
+        if let Some(path) = env::var_os(key) {
+            let path = PathBuf::from(path);
+            if path.is_file() {
+                return Some(path);
+            }
         }
     }
     BROWSER_CANDIDATES
@@ -133,7 +153,7 @@ fn resolve_real_browser() -> Option<PathBuf> {
         .find_map(|name| find_in_path(name))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{arapuca_args, parse_user_data_dir};
 

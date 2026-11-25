@@ -129,6 +129,24 @@ pub fn find_in_path(name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// Resolve the executable a [`Path`] names, for the `:ro` binary mount.
+///
+/// A bare name (`obscura`, the default) has no parent —
+/// `Path::parent()` returns an empty path — so mounting `binary_directory`
+/// would mount the current directory and exec the name from a directory that
+/// does not contain it. Resolve it on `PATH` exactly like the OS would on
+/// spawn; `None` when a bare name is not on `PATH`, which makes the caller
+/// skip the sandbox instead of mounting an unrelated directory.
+pub fn resolve_executable(binary: &Path) -> Option<PathBuf> {
+    if binary.is_absolute() {
+        return Some(binary.to_path_buf());
+    }
+    if binary.components().count() > 1 {
+        return std::path::absolute(binary).ok();
+    }
+    find_in_path(&binary.to_string_lossy())
+}
+
 /// Absolute directory containing `binary`, for the `:ro` binary mount.
 pub fn binary_directory(binary: &Path) -> PathBuf {
     let parent = binary.parent().unwrap_or_else(|| Path::new("."));
@@ -212,6 +230,18 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> SandboxLau
         executable: configured.map(Path::to_path_buf),
         real_binary: None,
     };
+    // The wrapper execs the real browser, so it needs the path. When the
+    // caller pinned none, resolve it with chromiumoxide's own detection
+    // (`CHROME`, usual install paths, registry) instead of the wrapper's
+    // short PATH list — otherwise routing the launch through the wrapper
+    // would swap (or fail to find) the browser chromiumoxide would have
+    // picked on its own.
+    let real_binary = configured.map(Path::to_path_buf).or_else(|| {
+        chromiumoxide::detection::default_executable(
+            chromiumoxide::detection::DetectionOptions::default(),
+        )
+        .ok()
+    });
     if let Some(reason) = sandbox.skip_reason() {
         tracing::warn!(
             event = "sandbox_skipped",
@@ -234,7 +264,7 @@ pub(crate) fn sandbox_wrapper_or_binary(configured: Option<&Path>) -> SandboxLau
             );
             SandboxLaunch {
                 executable: Some(path),
-                real_binary: configured.map(Path::to_path_buf),
+                real_binary,
             }
         },
         None => {
@@ -257,7 +287,7 @@ mod tests {
 
     use url::Url;
 
-    use super::{arapuca_args, SandboxConfig};
+    use super::{arapuca_args, resolve_executable, SandboxConfig};
     #[cfg(feature = "chromium")]
     use super::{resolve_wrapper_path, sandbox_wrapper_or_binary, SANDBOX_WRAPPER_ENV};
     use crate::infrastructure::downloader::obscura_downloader::{Downloader, ObscuraDownloader};
@@ -457,6 +487,82 @@ mod tests {
             wrapper.to_str().expect("utf8 path"),
         )]);
         assert_eq!(resolve_wrapper_path(), Some(wrapper));
+    }
+
+    /// The default configuration names a bare binary (`obscura`); the sandbox
+    /// mount must be the directory that actually holds it.
+    #[tokio::test]
+    async fn bare_binary_name_mounts_the_directory_that_actually_holds_it() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let obscura = script(tmp.path(), "obscura", OBSCURA_BODY);
+        let arapuca = script(tmp.path(), "arapuca", ARAPUCA_BODY);
+        // PREPEND the fixture dir: the fake arapuca script itself calls
+        // `dirname`, so replacing PATH wholesale would break the fixture.
+        let path_var = format!(
+            "{}:{}",
+            tmp.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let _env = webfang_test_utils::EnvGuard::with(&[
+            (ARAPUCA_ENV, arapuca.to_str().expect("utf8 path")),
+            (CGROUP_ENV, "on"),
+            (TASK_ENV, "tenant-8"),
+            ("PATH", path_var.as_str()),
+        ]);
+
+        let downloader = ObscuraDownloader::new(5, "obscura");
+        assert_eq!(fetch_with(&downloader).await, "<p>ok</p>");
+
+        let recorded = std::fs::read_to_string(tmp.path().join("argv.txt")).expect("arapuca argv");
+        let argv: Vec<&str> = recorded.lines().collect();
+        assert_eq!(
+            argv[6],
+            format!("{}:ro", tmp.path().display()),
+            "the :ro mount must be the binary's real directory, never the cwd"
+        );
+        assert_eq!(
+            argv[argv.len() - 5],
+            obscura.to_str().expect("utf8 path"),
+            "the sandboxed exec must use the resolved absolute binary"
+        );
+    }
+
+    #[test]
+    fn resolve_executable_never_falls_back_to_the_current_directory() {
+        assert_eq!(
+            resolve_executable(Path::new("webfang-definitely-not-an-executable")),
+            None,
+            "an unresolved bare name must skip the sandbox, never mount the cwd"
+        );
+        assert_eq!(
+            resolve_executable(Path::new("/usr/bin/obscura")),
+            Some(PathBuf::from("/usr/bin/obscura"))
+        );
+        let relative = resolve_executable(Path::new("./bin/obscura"))
+            .expect("a relative path with a separator resolves against the cwd");
+        assert!(relative.is_absolute());
+    }
+
+    /// Chromiumoxide's detection honours `CHROME`; the wrapper must receive
+    /// that resolved path when the caller did not pin one.
+    #[cfg(feature = "chromium")]
+    #[test]
+    fn auto_detected_browser_is_forwarded_through_the_wrapper_override() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let arapuca = script(tmp.path(), "arapuca", "exit 0\n");
+        let wrapper = script(tmp.path(), "webfang-sandbox-wrapper", "exit 0\n");
+        let detected = script(tmp.path(), "branded-chrome", "exit 0\n");
+        let _env = webfang_test_utils::EnvGuard::with(&[
+            (ARAPUCA_ENV, arapuca.to_str().expect("utf8 path")),
+            (CGROUP_ENV, "on"),
+            (TASK_ENV, "tenant-7"),
+            (SANDBOX_WRAPPER_ENV, wrapper.to_str().expect("utf8 path")),
+            ("CHROME", detected.to_str().expect("utf8 path")),
+        ]);
+
+        let launch = sandbox_wrapper_or_binary(None);
+        assert_eq!(launch.executable, Some(wrapper));
+        assert_eq!(launch.real_binary, Some(detected));
     }
 
     #[cfg(feature = "chromium")]

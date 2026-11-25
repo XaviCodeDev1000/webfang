@@ -51,7 +51,7 @@ use super::{DownloadError, Downloader, FetchedPage};
 #[path = "../downloader_factory.rs"]
 pub mod sandbox;
 
-use sandbox::{arapuca_args, SandboxConfig};
+use sandbox::{arapuca_args, resolve_executable, SandboxConfig};
 
 /// Memory budget for one Obscura subprocess (~30 MB).
 const OBSCURA_MEMORY_COST: usize = 30_000_000;
@@ -315,15 +315,24 @@ impl ObscuraDownloader {
         if let Some(reason) = self.sandbox.skip_reason() {
             trace_sandbox_skipped(2, &self.sandbox.task_id, reason, &binary);
         } else if let Some(arapuca) = &self.sandbox.arapuca {
-            trace_sandbox_applied(2, &self.sandbox.task_id, &binary);
-            let mut command = Command::new(arapuca);
-            command.args(arapuca_args(
-                &self.binary,
-                None,
-                &self.sandbox.task_id,
-                &inner,
-            ));
-            return configure_child(command);
+            // The mount must be the directory that holds the real executable.
+            // A bare name (`obscura`, the default) has no parent, so resolve
+            // it on PATH; an unresolved name skips the sandbox rather than
+            // mounting the current directory.
+            match resolve_executable(&self.binary) {
+                Some(resolved) => {
+                    trace_sandbox_applied(2, &self.sandbox.task_id, &binary);
+                    let mut command = Command::new(arapuca);
+                    command.args(arapuca_args(&resolved, None, &self.sandbox.task_id, &inner));
+                    return configure_child(command);
+                },
+                None => trace_sandbox_skipped(
+                    2,
+                    &self.sandbox.task_id,
+                    "obscura binary not found on PATH",
+                    &binary,
+                ),
+            }
         }
 
         let mut command = Command::new(&self.binary);

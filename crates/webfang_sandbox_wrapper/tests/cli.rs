@@ -3,6 +3,12 @@
 //! Both tests use ephemeral shell fixtures (no real browser, no real
 //! arapuca, no cgroup access) and exercise the compiled binary through its
 //! process boundary. Environment overrides are restored by `EnvGuard`.
+//!
+//! The wrapper is Linux-only: on every other platform it exits with a
+//! diagnostic, so this target compiles empty there instead of failing the
+//! workspace `--tests` run.
+
+#![cfg(target_os = "linux")]
 
 use std::fs;
 use std::io;
