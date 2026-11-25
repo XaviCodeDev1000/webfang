@@ -460,9 +460,9 @@ pub fn process_results_with_chunks(
     ))
 }
 
-#[cfg(all(test, not(miri)))] // tokio_util CancellationToken + time-sensitive drains
+#[cfg(test)]
 mod tests_ai_chunks;
-#[cfg(all(test, not(miri)))] // tokio_util CancellationToken + time-sensitive drains
+#[cfg(test)]
 mod tests_ai_drain;
 #[cfg(test)]
 mod tests_common;

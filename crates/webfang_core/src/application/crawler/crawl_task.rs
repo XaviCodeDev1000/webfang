@@ -32,7 +32,7 @@ use sessions::{acquire_session, report_session_success};
 // The #[path] test modules glob `use super::*`; the intra-crate lint only
 // excludes cfg(test) regions of the SAME file (ADR-0010, B36), so the
 // concrete test queue is imported here, not in the test sibling.
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 use crate::infrastructure::crawler::UrlQueue;
 
 /// Execute a single crawl task using shared context.
@@ -298,18 +298,18 @@ async fn extract_and_queue_links(
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 #[path = "crawl_task_support_tests.rs"]
 mod tests_support;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 #[path = "crawl_task_fetch_tests.rs"]
 mod tests_fetch;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 #[path = "crawl_task_pipeline_tests.rs"]
 mod tests_pipeline;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 #[path = "crawl_task_errors_tests.rs"]
 mod tests_errors;
