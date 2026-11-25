@@ -1,5 +1,5 @@
 [package]
-name = "webfang-sandbox-wrapper"
+name = "webfang_sandbox_wrapper"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

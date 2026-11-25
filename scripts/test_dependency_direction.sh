@@ -61,6 +61,7 @@ members = [
   "crates/webfang_cli",
   "crates/webfang_test_utils",
   "crates/webfang_benchmark",
+  "crates/webfang_sandbox_wrapper",
 ]
 exclude = ["fuzz"]
 
@@ -70,6 +71,7 @@ webfang_mcp = { path = "crates/webfang_mcp" }
 webfang_cli = { path = "crates/webfang_cli" }
 webfang_test_utils = { path = "crates/webfang_test_utils" }
 webfang_benchmark = { path = "crates/webfang_benchmark" }
+webfang_sandbox_wrapper = { path = "crates/webfang_sandbox_wrapper" }
 EOF
 }
 
@@ -102,7 +104,7 @@ EOF
 # reset_fixture — a clean five-crate tree, so every case starts from scratch.
 reset_fixture() {
   local crate
-  for crate in webfang_core webfang_mcp webfang_cli webfang_test_utils webfang_benchmark; do
+  for crate in webfang_core webfang_mcp webfang_cli webfang_test_utils webfang_benchmark webfang_sandbox_wrapper; do
     mkdir -p "$tmp/crates/$crate/src"
     : > "$tmp/crates/$crate/src/lib.rs"
     write_clean_manifest "$crate"
