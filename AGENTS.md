@@ -140,8 +140,8 @@ webfang/                          # virtual workspace root (no [package])
   import.
 - **Dev tier:** any crate may target `webfang_test_utils` from `[dev-dependencies]` (it is
   the shared harness and is never published). An edge from `[dependencies]` is prohibited.
-- Gate: `scripts/check_dependency_direction.sh` (runs in the `repo-guards` job of `ci.yml`),
-  with its semantics harness `scripts/test_dependency_direction.sh`.
+- Gate: `scripts/check_dependency_direction.sh` (pre-commit + CI); semantics in
+  `scripts/test_dependency_direction.sh`.
 
 ### Intra-crate layers (Clean Architecture)
 
@@ -154,8 +154,8 @@ the closest equivalent module: trait in `application/crawler/engine.rs`, domain 
 `domain/entities/` (constructor + `TryFrom` + `Display`/`Debug`/`PartialEq`), adapter in
 `infrastructure/`, new error in the layer's error file.
 
-**Avoid giant components:** no new file over ~500 lines; if you touch one that already exceeds
-it, split it. Largest files: `find crates -name '*.rs' -not -path '*/tests/*' | xargs wc -l | sort -rn | head`.
+**Avoid giant components:** `pre-commit` enforces `scripts/check_file_size.sh` (500-line hard
+limit + descending ratchet). Split a touched file; never widen the baseline.
 
 ### Error stratification
 
@@ -531,31 +531,13 @@ squashes: **two or more** commits → the PR title; **exactly one** → that com
 title is ignored). `cliff.toml` keeps only the first line. **Set the commit subject of a
 one-commit branch to the line you want in the changelog** — renaming the PR changes nothing.
 
-**Pre-commit (must replicate CI exactly):**
+**Verification before push:** `pre-commit` already enforces the static guards
+(`scripts/githooks/static-guards.sh`). Run `bash scripts/ci_fast_gate.sh` and the four cargo
+commands in the `webfang-ci-gate` skill; `--all-features` is mandatory (narrow clippy would
+delete `chromium`-gated imports) and `cargo fmt` without `--check` is a fixer, not evidence.
 
-```bash
-cargo check && cargo clippy --all-targets --all-features -- -D warnings \
-  -W clippy::cognitive_complexity -W clippy::too_many_lines \
-  && cargo fmt --all -- --check \
-  && env "RUSTDOCFLAGS=-D warnings" cargo doc --workspace --all-features --no-deps
-```
-
-- `--all-features` is a **safety flag**: `chromium`-gated code has its only consumers behind
-  `#[cfg(feature = "chromium")]`, so clippy without it sees those imports as dead and
-  `clippy --fix` would **delete** them. Never auto-fix against a narrower feature set.
-- A bare `cargo fmt` is a **fixer** (rewrites the tree, exits 0 regardless): green from it is not
-  evidence. Verify with `--check` and commit the result.
-- The fourth command replicates CI's `doc-quality` job (denies rustdoc lints);
-  `check`/`clippy`/`fmt` never document an item.
-
-**Checklist before opening the PR:**
-
-- [ ] `bash scripts/ci_fast_gate.sh` GREEN; coverage report read (every `NOT covered` job you touched run by hand)
-- [ ] Full pre-commit gate above; `cargo nextest run` (at least the affected module)
-- [ ] `git diff --stat main...HEAD` reviewed: only expected files changed
-- [ ] English only; new public items documented; `CHANGELOG.md` untouched
-- [ ] One `type:*` label + linked issue **with** `status:approved` + conventional branch
-- [ ] Worktree branch matches the directory; no `checkout`/`switch`/`stash` this session
+**Before the PR:** gate GREEN with coverage read, `git diff --stat main...HEAD` reviewed, one
+`type:*` label + approved linked issue, English only, `CHANGELOG.md` untouched.
 
 **Merge:** `scripts/merge-when-green.sh <PR> --queue` — waits for required checks, enqueues,
 waits for `MERGED`. The queue is the normal path to `main` (no direct merge); never `--auto` or
@@ -578,10 +560,10 @@ refuses both (exit 5). Never leave the `!` only on a surface the chosen strategy
 drift); the merge method is read from the tracked mirror `.github/merge-queue.json`. Fail
 closed; the local guard is defense in depth. Operational detail: **obs #2309**.
 
-**Hooks and verification:** `pre-commit`/`pre-push` consult the review gate; enable the wiring on
-a fresh clone with `git config core.hooksPath scripts/githooks`. Wait for CI with the non-blocking
-pattern (`gh run list --workflow=ci.yml …`), never `gh run watch` under a short timeout; a push
-that timed out did not necessarily fail (verify with `git ls-remote`). Detail: **obs #2316**.
+**Hooks:** `git config core.hooksPath scripts/githooks` on a fresh clone; `pre-commit` = identity +
+static guards + review, `pre-push` = review + main-push gate. Wait for CI with `gh run list
+--workflow=ci.yml …`, never `gh run watch` under a short timeout; a timed-out push may have landed
+(verify with `git ls-remote`). Detail: **obs #2316**.
 
 **There are no stacked PRs in this repo.** `scripts/check-topology.sh` admits only the
 head-prefix → base pairs of its table; **no feature head prefix may target another working
