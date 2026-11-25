@@ -20,10 +20,7 @@ use webfang_mcp::mcp_server::server::{
     DEFAULT_MAX_SESSIONS, DEFAULT_MCP_ADDR, DEFAULT_SESSION_CAP_WINDOW_SECS,
     MAX_ALLOWED_SESSIONS_CAP, REDACTED_CREDENTIAL,
 };
-use webfang_mcp::mcp_server::{
-    build_container, build_mcp_state, default_dom_inspector, mcp_tool_count, McpState,
-};
-
+use webfang_mcp::mcp_server::{build_container, build_mcp_state, default_dom_inspector, McpState};
 /// Webfang MCP Server — Streamable HTTP transport.
 ///
 /// # Redacted `Debug` (#1615, F9)
@@ -39,10 +36,7 @@ use webfang_mcp::mcp_server::{
     name = "webfang-mcp",
     version,
     about = "Webfang MCP Server (HTTP transport)",
-    long_about = format!(
-        "Exposes {} tools via the Model Context Protocol over Streamable HTTP.",
-        mcp_tool_count()
-    )
+    long_about = "Exposes the scraper tool registry via the Model Context Protocol over Streamable HTTP."
 )]
 struct Args {
     /// Bind address (host:port) for the MCP server.

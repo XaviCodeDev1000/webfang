@@ -187,6 +187,30 @@ async fn first_termination_signal(
     names[index]
 }
 
+/// Stop the checkpoint flush watch and join it under a bounded budget.
+///
+/// #S13: timing out over a `JoinHandle` only DROPS it, which detaches the task
+/// — the watch keeps running past the batch. The handle is aborted on timeout
+/// and then joined, so nothing is left behind. Lives here, next to the run's
+/// other shutdown coordination, because the batch flow that spawns the watch is
+/// already at its file-size budget.
+pub(crate) async fn stop_flush_watch(done: CancellationToken, task: Option<JoinHandle<()>>) {
+    done.cancel();
+    let Some(mut handle) = task else {
+        return;
+    };
+    let grace = crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
+        .saturating_add(std::time::Duration::from_secs(1));
+    if tokio::time::timeout(grace, &mut handle).await.is_err() {
+        warn!(
+            timeout_secs = grace.as_secs(),
+            "flush watch exceeded its shutdown budget — aborting it"
+        );
+        handle.abort();
+        let _ = handle.await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

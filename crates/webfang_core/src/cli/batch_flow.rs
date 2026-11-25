@@ -211,7 +211,7 @@ async fn run_batch_crawl(
 
     // The crawl is over: stop the watch loop and let its FINAL flush (bounded
     // by FLUSH_SHUTDOWN_TIMEOUT) run before the sink closes.
-    stop_flush_watch(flush_done, flush_task).await;
+    crate::cli::shutdown::stop_flush_watch(flush_done, flush_task).await;
 
     if cancel.is_cancelled() {
         warn!("shutdown requested — exporting the pages captured so far");
@@ -224,31 +224,6 @@ async fn run_batch_crawl(
     flush_batch_sink(&sink).await?;
 
     Ok((summary, sink))
-}
-
-/// Stop the checkpoint flush watch and join it under a bounded budget.
-///
-/// #S13: timing out over the handle only DROPS it, which detaches the task —
-/// the watch kept running past the batch. The handle is aborted on timeout and
-/// then joined, so nothing is left behind.
-async fn stop_flush_watch(
-    done: tokio_util::sync::CancellationToken,
-    task: Option<tokio::task::JoinHandle<()>>,
-) {
-    done.cancel();
-    let Some(mut handle) = task else {
-        return;
-    };
-    let grace = crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
-        .saturating_add(std::time::Duration::from_secs(1));
-    if tokio::time::timeout(grace, &mut handle).await.is_err() {
-        warn!(
-            timeout_secs = grace.as_secs(),
-            "flush watch exceeded its shutdown budget — aborting it"
-        );
-        handle.abort();
-        let _ = handle.await;
-    }
 }
 
 /// Spawn the checkpoint flush watch when `--export-checkpoint` is on, else

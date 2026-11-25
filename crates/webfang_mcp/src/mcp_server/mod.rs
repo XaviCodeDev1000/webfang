@@ -287,8 +287,8 @@ impl ServerHandler for McpHandler {
     /// works on every transport (stdio included), because containment happens
     /// at the dispatch boundary rather than at the HTTP boundary. The answer is
     /// the SHARED envelope (#S14): JSON-RPC `-32603` with
-    /// [`panic_containment::PANIC_CONTAINED_MESSAGE`], identical to what the
-    /// HTTP middleware returns for a panic it catches.
+    /// `panic_containment::PANIC_CONTAINED_MESSAGE`, identical to what the HTTP
+    /// middleware returns for a panic it catches.
     ///
     /// `AssertUnwindSafe` is the honest annotation: the guarded future borrows
     /// `&self` across awaits, which the compiler cannot prove unwind-safe,

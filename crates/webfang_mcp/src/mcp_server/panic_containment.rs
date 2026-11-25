@@ -55,17 +55,9 @@ use serde_json::Value;
 /// maps to.
 pub(crate) const JSONRPC_INTERNAL_ERROR: i64 = -32603;
 
-/// User-facing body of a contained panic, shared by EVERY transport (#S14).
-///
-/// The HTTP middleware answers `-32603` with this exact text and the in-handler
-/// panic arm (`McpHandler::call_tool`) raises the same `-32603` with it over
-/// stdio, so a client parses one envelope whichever transport delivered it.
-///
-/// Fixed text: the panic payload may embed request data, so it goes to the
-/// trace, never to the client.
-pub(crate) const PANIC_CONTAINED_MESSAGE: &str =
-    "Internal MCP server error (panic contained). The request failed unexpectedly; \
-     the session is still active.";
+/// Body of a contained panic, shared by EVERY transport (#S14): the payload
+/// itself may embed request data, so it goes to the trace only.
+pub(crate) const PANIC_CONTAINED_MESSAGE: &str = "Internal MCP server error (panic contained). The request failed unexpectedly; the session is still active.";
 
 /// Upper bound on how many body bytes are pulled while looking for the id.
 ///
