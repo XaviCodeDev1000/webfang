@@ -34,6 +34,7 @@ Everything not here is searched in Engram: `mem_search` (MCP) or `engram search 
 
 | Fact | Source of truth |
 |---|---|
+| Engram project identity | `.engram/config.json` (`project_name`), ahead of git remote detection |
 | Support-line state | `.github/support.json` (`jq`), rendered into `SUPPORT.md` |
 | Inter-crate dependency graph | `cargo metadata` + `scripts/check_dependency_direction.sh` |
 | MCP tool count | `crates/webfang_mcp/tests/stdio_handshake.rs` |
