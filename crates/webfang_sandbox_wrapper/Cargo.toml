@@ -9,6 +9,9 @@ repository.workspace = true
 description = "Linux browser wrapper that runs WebFang's browser subprocesses inside arapuca"
 publish = false
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "webfang-sandbox-wrapper"
 path = "src/main.rs"
