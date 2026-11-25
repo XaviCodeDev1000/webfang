@@ -166,10 +166,10 @@ Commit: `feat(multitenancy): scoped paths and bounded resources`
 - T1 — S1 — inline — migrate wreq release line — BLOCKED (rustc 1.91.1 vs required 1.98; see L8)
 - T2 — S2 — inline — vendor arapuca with browser profile — DONE (slice `feat/runtime-hardening-02-arapuca`, commit `ed75c5de`)
 - T3 — S3 — delegated — sandbox L2 and L3 subprocesses — DONE (commits 18f0db48, 195680c7, 9f23141a; native review escalated, informational)
-- T4 — S4 — inline — sandbox tracing events — pending
+- T4 — S4 — delegated — sandbox tracing events — DONE (commit c307bb2b)
 - T5 — S5 — inline — upstream profile slice — pending
-- T6 — S6 — inline — lint and init hygiene — pending
-- T7 — S7 — inline — chunks bulk reader — pending
+- T6 — S6 — delegated — lint and init hygiene — DONE (commit 421b91de)
+- T7 — S7 — delegated — chunks bulk reader — DONE (commit bb341aa4)
 - T8 — S8 — inline — macOS and Windows CI proof — pending
 - T9 — S9 — inline — SSRF bypass confinement — pending
 - T10 — S10 — inline — credential redaction — pending
