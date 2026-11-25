@@ -311,7 +311,10 @@ impl LlmPort for OpenAiLlmClient {
                     AttemptOutcome::Terminal(status) => {
                         return Err(ScraperError::Http {
                             status,
-                            url: self.base_url.to_string(),
+                            // The configured base URL may carry inline
+                            // credentials; the error text is an output sink.
+                            url: crate::domain::providers::RedactedUrl::from_url(&self.base_url)
+                                .to_string(),
                         });
                     },
                     AttemptOutcome::Retry {
