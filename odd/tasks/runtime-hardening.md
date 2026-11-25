@@ -171,17 +171,17 @@ Commit: `feat(multitenancy): scoped paths and bounded resources`
 - T6 — S6 — delegated — lint and init hygiene — DONE (commit 421b91de)
 - T7 — S7 — delegated — chunks bulk reader — DONE (commit bb341aa4)
 - T8 — S8 — inline — macOS and Windows CI proof — pending
-- T9 — S9 — inline — SSRF bypass confinement — pending
-- T10 — S10 — inline — credential redaction — pending
-- T11 — S11 — inline — L3 WAF classification — pending
-- T12 — S12 — inline — durable persistence — pending
+- T9 — S9 — delegated — SSRF bypass confinement — DONE (commit badc2dab)
+- T10 — S10 — delegated — credential redaction — DONE (commit a34e6ef8)
+- T11 — S11 — delegated — L3 WAF classification — DONE (commit a2fe1da7)
+- T12 — S12 — delegated — durable persistence — DONE (commit 89324c06; surface extended with parent adjudication)
 - T13 — S13 — inline — bounded shutdown and pools — pending
 - T14 — S14 — inline — MCP and CLI error contracts — pending
-- T15 — S15 — inline — measured benchmark metrics — pending
-- T16 — S16 — inline — completion retry and input envelope — pending
+- T15 — S15 — delegated — measured benchmark metrics — BLOCKED (no safe real page-size API in pinned deps; see L12)
+- T16 — S16 — delegated — completion retry and input envelope — DONE (commit b7507b8f)
 - T17 — S17 — inline — tenant-scoped paths and resources — pending
 
-Route declaration: all work stays inline in the implementation worktree; no writer or explorer delegation is planned. Work-unit commits carry each spec; commit identities are recorded here as they land.
+Route declaration: T3, T4, T6, T7, T9-T12, T15 and T16 were delegated to bounded writers with explicit edit surfaces and skills; the parent owns all commits and seams. Work-unit commits carry each spec; commit identities are recorded here as they land.
 
 ## Log
 
@@ -204,3 +204,7 @@ L8 — S1 blocker evidence: a throwaway branch from `main` changed `wreq` to `0.
 L9 — T2 evidence: commit `ed75c5de` on `feat/runtime-hardening-02-arapuca`, re-anchored onto `origin/main` (`e640bbe6`) so `origin/main...HEAD` is `0 1`. `vendor/arapuca/` is the exact commit `2ec2daa224018418cf10e1aa46c989cbebc746b1`; `diff -rq` against a pristine clone shows only `src/seccomp.rs` changed, and its diff contains only the four requested edits (ptrace removed from kill list and inserted into the EPERM map; landlock_* and memfd_create removed from kill list and inserted into the ENOSYS map). `cargo check`, full clippy and `cargo fmt --all -- --check` green; `cargo tree -e features -i arapuca` shows no `microvm`, `reqwest`, `krun`, `openssl`, `gpt` or `nbd` edge. `cargo doc --workspace --all-features --no-deps` exited 0 but rustc emitted ICE reports (eight `rustc-ice-*.txt` files) — they were deleted, not committed; the doc gate's exit code is recorded but the ICE is an environment defect, not verified proof. Slice diff is ~42k added lines (vendored source), far over the 400-line review budget: `chained-pr` classifies vendor diffs as `size:exception` candidates; no exception has been granted.
 
 L10 — T3 evidence: implemented on the integration branch by a bounded writer (RED→GREEN recorded), commit `18f0db48`; native review (`review-193c25885116e368`) found duplicated sandbox helpers and an ignored configured browser. One bounded correction (120-line budget) shared the helpers via `sandbox` and forwarded the configured binary through `REAL_BINARY_ENV`, stripped before exec; dependency-direction policy and its 16-case harness were updated to admit the new crate. Commits `195680c7`, `9f23141a`. Re-review lineage `review-31403166fd086777` ended in `native_stop_required` with one inconclusive finding (`R2-001`, unknown causality) — informational, no approval to infer. Live E2E with arapuca was not exercised (binary absent); fixtures and smoke tests are green.
+
+L11 — Delegated batches: T4 (c307bb2b) added four structured sandbox events with a JSONL field-existence test; T6 (421b91de) converted one lint suppression to `#[expect]` and moved global init to `LazyLock`; T7 (bb341aa4) added the general `chunks` bulk reader with NULL-embedding filtering. Full `cargo check`, clippy with `-D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines`, `cargo fmt --all -- --check`, direction gate (16/16 harness cases) and `cargo nextest run --all-features` are green.
+
+L12 — Second batch: T9 (badc2dab) confined both SSRF env hatches to `cfg(test)` with production twins returning false and three E2E proofs at exit 69; T10 (a34e6ef8) added `RedactedUrl` and redacted every URL-valued tracing sink with a property test; T11 (a2fe1da7) classified L3 output and built a real `InspectionContext`; T12 (89324c06) added fsync-before-rename, fsync-backed durable bytes, SQLite `synchronous = FULL` + integrity check, and typed corruption errors, after parent adjudication extended the edit surface; T16 (b7507b8f) added bounded completion retries and the untrusted-input envelope. T15 was blocked at its own spec gate: no safe API for the real page size exists in pinned declared dependencies (`libc::sysconf` is unsafe, `sysinfo` keeps `page_size_b` private, `nix::sysconf` is only transitive) and S15 forbids `unsafe` and new dependencies — no files changed, decision pending. Two cross-unit contract failures were fixed in commit efa4d0b8 (wrapper inherits workspace lints; AI boundary prefix tracks the S16 system prompt). Full workspace `cargo nextest run --all-features` is green.
