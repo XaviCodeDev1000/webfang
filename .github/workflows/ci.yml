@@ -664,6 +664,12 @@ jobs:
       # same partition. Text-parse harness, no cargo, <1s.
       - name: CI gate structure harness
         run: bash scripts/test_ci_gate_structure.sh
+      # Canonical check gate alignment harness: keeps the four commands in
+      # odd/gates/canonical-check-spec.md aligned with their justfile,
+      # pre-commit and CI mirrors. Hermetic string/args comparison only:
+      # no cargo, just, pre-commit or rustdoc execution.
+      - name: Canonical gate alignment harness
+        run: bash scripts/tests/test_canonical_gate_alignment.sh
       # Semantics harness for the fast gate's lane decision (A1, A2, B45).
       # The gate decides HOW MUCH to verify, and three of the fixes that make
       # that decision fail-closed shipped with no test at all: the path
