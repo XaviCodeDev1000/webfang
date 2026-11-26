@@ -1,2 +1,2 @@
 # Total time spent waiting, per pacing scope.
-scripts/analyze-trace.sh debug.jsonl pacing
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl pacing

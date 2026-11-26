@@ -79,8 +79,10 @@ query below reads:
 
 ## Query cookbook
 
-A ready-made script lives at `scripts/analyze-trace.sh`. The most useful
-queries:
+The `analyze_trace` workspace binary queries the trace JSONL. Run it from a
+source checkout with `cargo run -q -p webfang_benchmark --bin analyze_trace --
+<trace.jsonl> <command>` (it replaces the former `scripts/analyze-trace.sh`).
+The most useful queries:
 
 ### Reconstruct one run by top-level trace_id
 
@@ -90,7 +92,7 @@ queries:
 
 `$ROOT` is the 16-hex root span `Id` (top-level `trace_id`, EPHEMERAL to the
 run). It returns every page plus errors for that run. The same query is
-`scripts/analyze-trace.sh debug.jsonl trace $ROOT`.
+`cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl trace $ROOT`.
 
 ### All errors, with full context
 
