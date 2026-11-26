@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# test_ci_plan.sh — semantics harness for scripts/ci_plan.sh (#2282).
+# test_ci_plan.sh — semantics harness for the Rust `ci_plan` binary (#2282).
 #
 # Pins the event -> comparison-SHA contract and the crossplatform table:
 # pull_request / merge_group / push are path-aware, schedule/dispatch/unknown
@@ -8,9 +8,15 @@ set -euo pipefail
 # throwaway `git init` trees under mktemp; this harness never reads or writes
 # the repository and never invokes cargo.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLAN="${CI_PLAN:-$SCRIPT_DIR/ci_plan.sh}"
-CLASSIFIER="${CI_PLAN_CLASSIFIER:-$SCRIPT_DIR/ci_path_classifier.sh}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLAN="${CI_PLAN:-${CARGO_TARGET_DIR:-$SCRIPT_DIR/target}/debug/ci_plan}"
+if [[ ! -x "$PLAN" ]]; then
+  # ci_plan.rs is std-only: rustc builds it in <1s, with no cargo graph.
+  mkdir -p "$(dirname "$PLAN")" || exit 2
+  rustc --edition 2021 -O "$SCRIPT_DIR/crates/webfang_benchmark/src/bin/ci_plan.rs" -o "$PLAN" || exit 2
+fi
+CLASSIFIER="${CI_PLAN_CLASSIFIER:-$SCRIPT_DIR/scripts/ci_path_classifier.sh}"
+CROSSPLATFORM="${CI_PLAN_CROSSPLATFORM:-$SCRIPT_DIR/scripts/ci_crossplatform_scope.sh}"
 
 fail=0
 PASSED=0
@@ -69,7 +75,8 @@ run_plan() {
       PUSH_BEFORE_SHA="${5:-}" \
       PUSH_AFTER_SHA="${6:-}" \
       CI_PLAN_CLASSIFIER="${CLASSIFIER_OVERRIDE:-$CLASSIFIER}" \
-      bash "$PLAN" 2>"$ERR_FILE"
+      CI_PLAN_CROSSPLATFORM="$CROSSPLATFORM" \
+      "$PLAN" 2>"$ERR_FILE"
   )
 }
 

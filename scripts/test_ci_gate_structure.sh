@@ -6,9 +6,10 @@ set -euo pipefail
 # validates) and pins the structural contract of the CI Gate:
 #
 #   1. gate.needs is exactly {change-scope} ∪ FULL_PRODUCERS, where
-#      FULL_PRODUCERS/NARROW_PRODUCERS are read from scripts/ci_plan.sh — the
-#      planner is the single source of truth, so a producer renamed or added
-#      there without gate wiring fails here.
+#      FULL_PRODUCERS/NARROW_PRODUCERS are read from the planner source
+#      (crates/webfang_benchmark/src/bin/ci_plan.rs) — the planner is the
+#      single source of truth, so a producer renamed or added there without
+#      gate wiring fails here.
 #   2. NARROW ⊆ FULL and every producer entry is a declared job id.
 #   3. Every declared job is either in gate.needs or on an explicit advisory
 #      allowlist — a new non-advisory job without gate wiring fails.
@@ -44,7 +45,26 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_YML="${CI_GATE_STRUCTURE_YML:-$SCRIPT_DIR/../.github/workflows/ci.yml}"
-PLAN="${CI_PLAN:-$SCRIPT_DIR/ci_plan.sh}"
+
+# The guard must read the literals from the planner CI ACTUALLY executes, not
+# from a potentially stale copy: derive it from ci.yml's `run:` step. T3 flips
+# that step to the Rust binary and this picks it up without a second edit.
+LIVE_PLANNER="$(sed -n 's|^[[:space:]]*run:[[:space:]]*bash[[:space:]]\+\(scripts/ci_plan[^[:space:]]*\).*$|\1|p' "$CI_YML" | head -1)"
+case "$LIVE_PLANNER" in
+  *.sh) PLAN_DEFAULT="$SCRIPT_DIR/$(basename "$LIVE_PLANNER")" ;;
+  *)    PLAN_DEFAULT="$SCRIPT_DIR/../crates/webfang_benchmark/src/bin/ci_plan.rs" ;;
+esac
+PLAN="${CI_PLAN:-$PLAN_DEFAULT}"
+
+# S3/B1: the guard must validate the planner CI actually executes. A drift
+# between ci.yml's `run:` step and the file we read would certify a planner
+# nobody runs.
+CI_PLAN_RUN="$(grep -nE '^[[:space:]]*run:[[:space:]]*bash[[:space:]]+scripts/ci_plan\.sh' "$CI_YML" | head -1 || true)"
+if [[ -n "$CI_PLAN_RUN" && "$PLAN" != *"/ci_plan.sh" && -z "${CI_PLAN:-}" ]]; then
+  echo "FAIL: ci.yml still runs scripts/ci_plan.sh but the guard reads $PLAN"
+  exit 1
+fi
+
 COVERAGE="${CI_FAST_GATE_COVERAGE:-$SCRIPT_DIR/ci_fast_gate_coverage.tsv}"
 FAST_GATE="${CI_FAST_GATE:-$SCRIPT_DIR/ci_fast_gate.sh}"
 
@@ -71,12 +91,12 @@ NARROW_PRODUCERS="$(sed -n 's/^NARROW_PRODUCERS="\(.*\)"$/\1/p' "$PLAN")"
 if [[ -n "$FULL_PRODUCERS" ]]; then
   ok "FULL_PRODUCERS is non-empty ($FULL_PRODUCERS)"
 else
-  bad "FULL_PRODUCERS is empty or missing in ci_plan.sh"
+  bad "FULL_PRODUCERS is empty or missing in the planner source"
 fi
 if [[ -n "$NARROW_PRODUCERS" ]]; then
   ok "NARROW_PRODUCERS is non-empty ($NARROW_PRODUCERS)"
 else
-  bad "NARROW_PRODUCERS is empty or missing in ci_plan.sh"
+  bad "NARROW_PRODUCERS is empty or missing in the planner source"
 fi
 
 to_set() { tr ',' '\n' <<<"$1" | tr ' ' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort | uniq; }

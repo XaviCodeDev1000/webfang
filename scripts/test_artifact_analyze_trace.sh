@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# scripts/test_artifact_analyze_trace.sh — semantics harness for
-# scripts/analyze-trace.sh (audit B28).
+# scripts/test_artifact_analyze_trace.sh — semantics harness for the Rust
+# `analyze_trace` binary (audit B28; migrated from scripts/analyze-trace.sh).
 #
 # The `trace <trace_id>` command interpolated the id into the jq PROGRAM
 # text. A quote broke the program, and a crafted value rewrote the filter
@@ -21,7 +21,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$ROOT/scripts/analyze-trace.sh"
+SCRIPT="${CARGO_TARGET_DIR:-$ROOT/target}/debug/analyze_trace"
+if [[ ! -x "$SCRIPT" ]]; then
+  cargo build --manifest-path "$ROOT/Cargo.toml" -p webfang_benchmark --bin analyze_trace -q || exit 2
+fi
 
 # Scratch lives on a real disk, never on the tmpfs of /tmp.
 SCRATCH="${WEBSITE_TEST_SCRATCH:-$HOME/.cache/tmp/webfang-artifact-tests}"
@@ -48,7 +51,7 @@ bad() {
   fail=$((fail + 1))
 }
 
-echo "analyze-trace.sh"
+echo "analyze_trace"
 
 trace="$WORKDIR/trace.jsonl"
 cat >"$trace" <<'TRACEEOF'
@@ -61,7 +64,7 @@ TRACEEOF
 # NEGATION: before the fix, the trace id was interpolated into the jq PROGRAM:
 # a quote broke the program and a crafted id rewrote the filter, so "trace"
 # answered with the whole run. These cases accept that.
-out="$(bash "$SCRIPT" "$trace" trace 'tr-002' 2>&1)"
+out="$("$SCRIPT" "$trace" trace 'tr-002' 2>&1)"
 rc=$?
 count="$(printf '%s\n' "$out" | grep -c 'tr-002')"
 if [ "$rc" -eq 0 ] && [ "$count" -eq 1 ]; then
@@ -72,7 +75,7 @@ else
 fi
 
 # --- an id with a quote is a value, not a program ----------------------------
-out="$(bash "$SCRIPT" "$trace" trace 'tr-001"x' 2>&1)"
+out="$("$SCRIPT" "$trace" trace 'tr-001"x' 2>&1)"
 rc=$?
 if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
   ok "an id containing a quote selects nothing and does not break jq (rc=$rc)"
@@ -82,7 +85,7 @@ else
 fi
 
 # --- a crafted id cannot rewrite the filter ---------------------------------
-out="$(bash "$SCRIPT" "$trace" trace 'x" or .message != "x' 2>&1)"
+out="$("$SCRIPT" "$trace" trace 'x" or .message != "x' 2>&1)"
 rc=$?
 count="$(printf '%s\n' "$out" | grep -c 'trace_id')"
 if [ "$count" -eq 0 ]; then
@@ -93,7 +96,7 @@ else
 fi
 
 # --- a missing id still fails closed ----------------------------------------
-out="$(bash "$SCRIPT" "$trace" trace '' 2>&1)"
+out="$("$SCRIPT" "$trace" trace '' 2>&1)"
 rc=$?
 if [ "$rc" -ne 0 ]; then
   ok "a missing id is refused (rc=$rc)"
@@ -102,7 +105,7 @@ else
 fi
 
 # --- the other commands are unaffected --------------------------------------
-out="$(bash "$SCRIPT" "$trace" progress 2>&1)"
+out="$("$SCRIPT" "$trace" progress 2>&1)"
 rc=$?
 count="$(printf '%s\n' "$out" | grep -c 'pages')"
 if [ "$rc" -eq 0 ] && [ "$count" -eq 3 ]; then
@@ -114,8 +117,8 @@ fi
 
 echo
 if [ "$fail" -eq 0 ]; then
-  echo "analyze-trace.sh: $pass passed, 0 failed"
+  echo "analyze_trace: $pass passed, 0 failed"
   exit 0
 fi
-echo "analyze-trace.sh: $pass passed, $fail failed"
+echo "analyze_trace: $pass passed, $fail failed"
 exit 1

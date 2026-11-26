@@ -223,9 +223,10 @@ operation shares a `trace_id`; each page gets its own `span_id`.
 webfang --url https://example.com --trace-file debug.jsonl -vvv
 
 # Reconstruct one operation, list errors, find the slowest spans
-scripts/analyze-trace.sh debug.jsonl trace <trace_id>
-scripts/analyze-trace.sh debug.jsonl errors
-scripts/analyze-trace.sh debug.jsonl slow 20
+# (analyze_trace is a workspace tooling binary, not part of the release archive)
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl trace <trace_id>
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl errors
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl slow 20
 ```
 
 See [docs/src/debugging.md](docs/src/debugging.md) for the full query cookbook and
@@ -514,7 +515,7 @@ cargo build --release -p webfang_cli
 |----------|--------|
 | [AGENTS.md](AGENTS.md) | AI agent instructions, code intelligence integration |
 | [docs/src/installation.md](docs/src/installation.md) | Verified install + uninstall for the binaries-only release: asset names, per-shell checksums, platform floors |
-| [docs/src/debugging.md](docs/src/debugging.md) | Tracing, correlation IDs, `jq` query cookbook (`scripts/analyze-trace.sh`) |
+| [docs/src/debugging.md](docs/src/debugging.md) | Tracing, correlation IDs, query cookbook (`analyze_trace` binary + `jq` samples) |
 | [docs/src/troubleshooting.md](docs/src/troubleshooting.md) | Common failures: slow crawls, silent errors, WAF blocks, local/internal targets refused by the SSRF guard |
 | [docs/ssrf-layers.md](docs/ssrf-layers.md) | Which SSRF layer blocks what, and which `WEBFANG_*` variable lifts which layer |
 | [docs/src/overview.md](docs/src/overview.md) | Architecture, crate map and what each piece is for |

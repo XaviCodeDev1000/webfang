@@ -7,8 +7,9 @@ Common problems and how to diagnose them with WebFang's built-in tracing.
 > is the first place to look.
 
 > Generate a trace first: `webfang --url <URL> --trace-file debug.jsonl -vvv`,
-> then query it with `scripts/analyze-trace.sh` or `jq`. See
-> [debugging.md](debugging.md) for the full query cookbook.
+> then query it with the `analyze_trace` workspace binary (from a source
+> checkout: `cargo run -q -p webfang_benchmark --bin analyze_trace -- …`) or
+> `jq`. See [debugging.md](debugging.md) for the full query cookbook.
 
 ---
 
@@ -42,8 +43,10 @@ before you file anything.
 **Diagnose:**
 
 ```bash
-scripts/analyze-trace.sh debug.jsonl slow 20      # slowest spans
-scripts/analyze-trace.sh debug.jsonl stages       # time per pipeline stage
+# slowest spans
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl slow 20
+# time per pipeline stage
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl stages
 ```
 
 **Common causes:**
@@ -62,8 +65,10 @@ Every operational error is logged as a structured `ERROR` event with `url`,
 `stage`, and (when available) `trace_id`.
 
 ```bash
-scripts/analyze-trace.sh debug.jsonl errors       # all errors with context
-scripts/analyze-trace.sh debug.jsonl urls-failed  # unique failed URLs
+# all errors with context
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl errors
+# unique failed URLs
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl urls-failed
 ```
 
 **Common causes by `stage`:**
@@ -149,7 +154,7 @@ emits its run summary, where the refused seed shows up as `errors: 1` on `total_
 ```bash
 webfang http://127.0.0.1:8080/ --dry-run -v --trace-file debug.jsonl
 jq -c 'select((.message // "") | test("SSRF|crawl completed"))' debug.jsonl
-scripts/analyze-trace.sh debug.jsonl errors
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl errors
 ```
 
 One trap inside the trap: the hostname row above is not a bug waiting to be fixed, and
@@ -199,7 +204,8 @@ set it — is in `docs/ssrf-layers.md`.
 ## WAF / bot detection blocks
 
 ```bash
-scripts/analyze-trace.sh debug.jsonl waf          # WAF challenges + banned domains
+# WAF challenges + banned domains
+cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl waf
 ```
 
 If you see `WAF challenge detected` errors:
@@ -217,7 +223,7 @@ If you see `WAF challenge detected` errors:
 
 - One **crawl** shares a single `trace_id`. Filter by it:
   ```bash
-  scripts/analyze-trace.sh debug.jsonl trace <trace_id>
+  cargo run -q -p webfang_benchmark --bin analyze_trace -- debug.jsonl trace <trace_id>
   ```
 - Each **page** is a `crawl_page` span with its own `span_id` under that
   `trace_id`.

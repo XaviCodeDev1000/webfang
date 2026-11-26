@@ -270,7 +270,7 @@ before validating, or pacing after dialing, is rejected in review even if its te
 **Iron rule:** every feature, hot path or behavior change ships with observability — untraceable
 code is not finished. Stack: `tracing` + **FileTraceLayer** (`--trace-file out.jsonl`) + native
 correlation IDs. **No external metrics backend**: emit a structured `tracing` event, query the
-JSONL (`docs/src/debugging.md`, `scripts/analyze-trace.sh`).
+JSONL (`docs/src/debugging.md`, `analyze_trace` workspace binary).
 
 | Situation | Requirement |
 |---|---|
