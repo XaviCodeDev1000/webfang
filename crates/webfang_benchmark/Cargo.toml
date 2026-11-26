@@ -41,6 +41,10 @@ path = "src/bin/bench_live.rs"
 name = "analyze_trace"
 path = "src/bin/analyze_trace.rs"
 
+[[bin]]
+name = "ci_plan"
+path = "src/bin/ci_plan.rs"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
 url = { workspace = true }
