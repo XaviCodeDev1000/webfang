@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "generated_at": "2026-11-25T17:43:40+00:00",
-  "head_sha": "1c67bff9a150e296b4c10008831e53ca91c01ab5",
-  "head_date": "2026-11-25T17:17:08Z",
-  "head_subject": "chore(support): declare the pending publication of v9.2.4",
+  "generated_at": "2026-11-26T22:16:52+00:00",
+  "head_sha": "2eb122a67a93685420e1daf8cf9030756f364e7e",
+  "head_date": "2026-11-26T21:11:35Z",
+  "head_subject": "feat(bench): measured RSS from VmRSS with declared cost fallback (#3066)",
   "workspace_version": "9.2.4",
   "toolchain": {
-    "channel": "1.91.1",
-    "rust_version": "1.91",
-    "mise_rust": "1.91.1",
+    "channel": "1.100.0",
+    "rust_version": "1.100",
+    "mise_rust": "1.100.0",
     "components": [
       "rustfmt",
       "clippy"
@@ -21,16 +21,18 @@
       "crates/webfang_mcp",
       "crates/webfang_cli",
       "crates/webfang_test_utils",
-      "crates/webfang_benchmark"
+      "crates/webfang_benchmark",
+      "crates/webfang_sandbox_wrapper"
     ],
     "members_inherit": [
       "crates/webfang_core",
       "crates/webfang_mcp",
       "crates/webfang_cli",
       "crates/webfang_test_utils",
-      "crates/webfang_benchmark"
+      "crates/webfang_benchmark",
+      "crates/webfang_sandbox_wrapper"
     ],
-    "members_inherit_count": 5,
+    "members_inherit_count": 6,
     "member_overrides": [],
     "excluded": {
       "fuzz/Cargo.toml": "2021",
@@ -109,58 +111,58 @@
     "x86_64-unknown-linux-gnu"
   ],
   "toolchain_pins": {
-    "dtolnay_steps": 36,
-    "dtolnay_references": 38,
+    "dtolnay_steps": 37,
+    "dtolnay_references": 39,
     "sha_prefixes": {
-      "6bed0761d984": 30,
+      "6bed0761d984": 31,
       "02cb101ec7c4": 3,
       "be39649afda9": 3
     },
     "stable_explicit": [
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2314,
-        "value": "1.91.1"
+        "line": 2328,
+        "value": "1.100.0"
       },
       {
         "file": ".github/workflows/release.yml",
         "line": 210,
-        "value": "1.91.1"
+        "value": "1.100.0"
       },
       {
         "file": ".github/workflows/release.yml",
         "line": 585,
-        "value": "1.91.1"
+        "value": "1.100.0"
       }
     ],
     "stable_explicit_count": 3,
     "nightly_explicit": [
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2431,
+        "line": 2445,
         "value": "nightly-2026-08-27"
       },
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2501,
+        "line": 2515,
         "value": "nightly-2026-08-27"
       },
       {
         "file": ".github/workflows/ci.yml",
-        "line": 2614,
+        "line": 2628,
         "value": "nightly-2026-08-27"
       }
     ],
     "nightly_explicit_count": 3
   },
   "counts": {
-    "rust_files": 887,
-    "assert_matches": 505,
-    "lossy_into_owned": 29,
-    "lossy_to_string": 12,
-    "all_into_owned": 92,
+    "rust_files": 906,
+    "assert_matches": 519,
+    "lossy_into_owned": 30,
+    "lossy_to_string": 13,
+    "all_into_owned": 95,
     "strip_prefix_unwrap_or": 14,
-    "if_let": 644,
+    "if_let": 668,
     "allow_unsafe_code": 9,
     "unsafe_blocks": 15,
     "static_mut": 0,
@@ -189,7 +191,7 @@
     "major_target": "10.0.0",
     "backport_line": "9.2",
     "eol_on_release": "9.1",
-    "msrv_compat_toolchain": "1.91.1",
+    "msrv_compat_toolchain": "1.100.0",
     "miri_gate_wording": "advisory revisado, sin rojos nuevos atribuibles al bump",
     "edition_flip": "atomic",
     "support_rotation": "auto: rotate-stable, third line back from STABLE"

@@ -366,7 +366,7 @@ jobs:
       # carry ONE source of RAM (`sysinfo`, never `sys-info`, whose unit was
       # undocumented), NO `built`/`git2`/`libgit2-sys` (they fed a function with
       # zero call sites), NO `once_cell` in the manifests (std carries
-      # `LazyLock` since 1.80 and the MSRV is 1.91), and NO browser in the
+      # `LazyLock` since 1.80 and the MSRV is 1.100), and NO browser in the
       # DEFAULT workspace graph (the benchmark declares its own forwarding
       # `chromium` feature instead of forcing it onto `webfang_core`).
       #
@@ -470,7 +470,7 @@ jobs:
       # Toolchain pin drift gate (#2475): the Rust version is declared twice and
       # nothing related the two. rust-toolchain.toml carries it as text, while
       # every workflow carries a `dtolnay/rust-toolchain@<sha>` whose version
-      # lives inside the action's own action.yml — invisible to `grep 1.91.1`.
+      # lives inside the action's own action.yml — invisible to `grep 1.100.0`.
       # When #2310 bumped 1.88.0 -> 1.91.1 the release pin stayed on the old
       # branch, the aarch64 cross target landed on the wrong toolchain, and
       # v7.0.0 published no artifacts at all. A comment describing that trap is
@@ -2325,7 +2325,7 @@ jobs:
         with:
           # Required by scripts/check_toolchain_drift.sh (#2475): a step that
           # installs a target must name the toolchain it lands on.
-          toolchain: 1.91.1
+          toolchain: 1.100.0
           target: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
         with:
@@ -2410,7 +2410,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # rust-toolchain.toml pins 1.91.0 and would override the nightly toolchain
+      # rust-toolchain.toml pins 1.100.0 and would override the nightly toolchain
       # for `cargo miri` (miri is nightly-only). RUSTUP_TOOLCHAIN (env var) has
       # the HIGHEST rustup precedence — above rust-toolchain.toml and above
       # rustup directory overrides (`override: true` on dtolnay/rust-toolchain

@@ -175,7 +175,7 @@ impl StoreFs for FailAfterRenames {
     fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
         if self
             .ok_renames
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |n| (n > 0).then(|| n - 1),

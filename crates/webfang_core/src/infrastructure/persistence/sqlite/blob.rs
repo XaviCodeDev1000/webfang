@@ -41,17 +41,9 @@ pub(super) fn bytes_to_f32_vec(b: &[u8]) -> Result<Vec<f32>, ScraperError> {
             b.len()
         )));
     }
-    b.chunks_exact(4)
-        .map(|chunk| {
-            // `chunks_exact(4)` yields exactly 4-byte slices, so `try_into` is
-            // infallible here. A failure would indicate a stdlib bug — hence
-            // `expect` for a true invariant (rust-skills `err-expect-bugs-only`).
-            #[allow(clippy::expect_used)]
-            let arr: [u8; 4] = chunk
-                .try_into()
-                // LCOV_EXCL_LINE defensive: chunks-exact-invariant — try_into on a 4-byte slice cannot fail
-                .expect("chunks_exact(4) garantiza 4 bytes por fragmento");
-            Ok(f32::from_le_bytes(arr))
-        })
+    b.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| Ok(f32::from_le_bytes(*chunk)))
         .collect()
 }

@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/XaviCodeDev1000/webfang/actions/workflows/ci.yml/badge.svg)](https://github.com/XaviCodeDev1000/webfang/actions)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.91+-orange)](https://rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.100+-orange)](https://rust-lang.org)
 <!-- The badges above are LIVE (shields.io reads the workflow) or static-but-checked
      facts (license, MSRV). Static COUNTS are deliberately absent: a hand-written test or
      Miri count drifts silently. scripts/check_docs_claims.sh fails on a new static
@@ -74,7 +74,7 @@ and every on-disk root an install leaves behind:
 <details>
 <summary>Install from source (contributors, not an end-user route)</summary>
 
-Requires Rust 1.91, a C/C++ compiler, and **`cmake`** — `wreq` → `btls` →
+Requires Rust 1.100, a C/C++ compiler, and **`cmake`** — `wreq` → `btls` →
 `btls-sys` (formerly `boring2`/`boring-sys2`) compiles BoringSSL from C++ on first build, and without
 `cmake` the failure surfaces deep in a build script with an error that says
 nothing about the real cause.
@@ -505,7 +505,7 @@ cargo build --release -p webfang_cli
 - **Error types:** see the error stratification in [AGENTS.md](AGENTS.md)
 - **User-facing errors and internal logs:** English.
 
-**Stack:** Rust 1.91 · Tokio · wreq (TLS fingerprint) · scraper 0.27 · lol_html
+**Stack:** Rust 1.100 · Tokio · wreq (TLS fingerprint) · scraper 0.27 · lol_html
 
 ---
 

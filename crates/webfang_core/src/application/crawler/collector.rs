@@ -157,11 +157,11 @@ impl ResultsCollector {
     pub(crate) async fn send(
         &self,
         msg: CrawlMessage,
-    ) -> Result<(), mpsc::error::SendError<CrawlMessage>> {
+    ) -> Result<(), Box<mpsc::error::SendError<CrawlMessage>>> {
         // Every message on this channel is a success URL; update the counter
         // synchronously for is_full() checks.
         self.counter.fetch_add(1, Ordering::Relaxed);
-        self.tx.send(msg).await
+        self.tx.send(msg).await.map_err(Box::new)
     }
 
     /// Recolectar y retornar resultados

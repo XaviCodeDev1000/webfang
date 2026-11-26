@@ -1,9 +1,9 @@
 [tools]
 # === Core ===
 # MSRV toolchain. Exact patch, equal to rust-toolchain.toml's channel: mise
-# resolves a bare "1.91" to the latest patch and would drift from the pinned
+# resolves a bare "1.100" to the latest patch and would drift from the pinned
 # rustfmt (with 1.88 this could not happen — it only ever had one patch).
-rust = "1.91.1"
+rust = "1.100.0"
 
 # === Build acceleration ===
 # mold is deliberately NOT installed: there is no way to scope it to
