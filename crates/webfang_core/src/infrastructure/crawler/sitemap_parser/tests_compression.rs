@@ -20,6 +20,7 @@ async fn gzip_compress(data: &[u8]) -> Vec<u8> {
 /// Before the fix, `CompressionHandler` trusted the `.gz` extension and
 /// decompressed again -> "decompression failed: Invalid gzip header".
 /// After the fix, extension without magic bytes passes through.
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 async fn test_sitemap_gz_with_content_encoding_header() {
     let _entry_off = EnvGuard::entry_guard_off();
@@ -49,6 +50,7 @@ async fn test_sitemap_gz_with_content_encoding_header() {
 /// #757 case (b): a gzip body behind a `.gz` URL WITHOUT a transport
 /// `content-encoding` header. Today this works; it must keep working —
 /// magic-byte sniffing detects gzip and the handler decompresses.
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 async fn test_sitemap_gz_body_without_content_encoding() {
     let _entry_off = EnvGuard::entry_guard_off();
@@ -77,6 +79,7 @@ async fn test_sitemap_gz_body_without_content_encoding() {
 /// with no compression headers. Before the fix this failed with
 /// "Invalid gzip header" because the extension forced decompression;
 /// after the fix, magic-byte sniffing passes it through untouched.
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 async fn test_sitemap_lying_gz_extension_with_plain_body() {
     let _entry_off = EnvGuard::entry_guard_off();
