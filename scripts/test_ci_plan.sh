@@ -11,8 +11,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLAN="${CI_PLAN:-${CARGO_TARGET_DIR:-$SCRIPT_DIR/target}/debug/ci_plan}"
 if [[ ! -x "$PLAN" ]]; then
-  echo "FAIL: ci_plan binary not found at $PLAN (build: cargo build -p webfang_benchmark --bin ci_plan)"
-  exit 2
+  # ci_plan.rs is std-only: rustc builds it in <1s, with no cargo graph.
+  mkdir -p "$(dirname "$PLAN")" || exit 2
+  rustc --edition 2021 -O "$SCRIPT_DIR/crates/webfang_benchmark/src/bin/ci_plan.rs" -o "$PLAN" || exit 2
 fi
 CLASSIFIER="${CI_PLAN_CLASSIFIER:-$SCRIPT_DIR/scripts/ci_path_classifier.sh}"
 CROSSPLATFORM="${CI_PLAN_CROSSPLATFORM:-$SCRIPT_DIR/scripts/ci_crossplatform_scope.sh}"

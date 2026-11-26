@@ -23,8 +23,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${CARGO_TARGET_DIR:-$ROOT/target}/debug/analyze_trace"
 if [[ ! -x "$SCRIPT" ]]; then
-  echo "FAIL: analyze_trace binary not found at $SCRIPT (build: cargo build -p webfang_benchmark --bin analyze_trace)" >&2
-  exit 2
+  cargo build --manifest-path "$ROOT/Cargo.toml" -p webfang_benchmark --bin analyze_trace -q || exit 2
 fi
 
 # Scratch lives on a real disk, never on the tmpfs of /tmp.

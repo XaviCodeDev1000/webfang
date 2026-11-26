@@ -1310,6 +1310,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      # The trace analyzer harness builds the analyze_trace binary on demand;
+      # pin the toolchain so the build is deterministic across runners.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
       # B21 (atomic publication), B29 (fence flavour), B30 (derived date)
       - name: LLM bundle producer
         run: |
