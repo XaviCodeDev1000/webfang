@@ -283,7 +283,7 @@ fn read_close_tag(html: &str, start: usize) -> Option<(String, usize)> {
     Some((name, end))
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::ports::MarkdownConverter;
@@ -297,6 +297,7 @@ mod tests {
     /// The locator invariant at the conversion seam: when the per-block join
     /// reproduces the whole-document conversion, every block's span must cut
     /// the annotated markdown at exactly the bytes that block produced.
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn annotated_blocks_reconstruct_the_whole_document_markdown() {
         let html = "<h1>Título</h1><p>Primer párrafo.</p><p>Segundo párrafo.</p>";
@@ -330,6 +331,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn annotated_conversion_degrades_honestly_when_join_diverges() {
         // Inline content spanning two top-level elements (a table split by a
@@ -350,6 +352,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_convert_heading() {
         let html = "<h1>Main Title</h1>";
@@ -357,6 +360,7 @@ mod tests {
         assert!(md.contains("# Main Title"));
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_convert_paragraph() {
         let html = "<p>This is a paragraph.</p>";
@@ -364,6 +368,7 @@ mod tests {
         assert!(md.contains("This is a paragraph."));
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_convert_nested_structure() {
         let html = "<article><h1>Title</h1><p>Intro</p><h2>Section</h2><p>Content</p></article>";
@@ -374,6 +379,7 @@ mod tests {
         assert!(md.contains("Content"));
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_convert_empty_html() {
         let html = "";
@@ -381,6 +387,7 @@ mod tests {
         assert_eq!(md, "");
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_code_block_uses_backticks() {
         let html = "<pre><code>fn main() {}</code></pre>";
@@ -388,6 +395,7 @@ mod tests {
         assert!(md.contains("```"), "Expected fenced code blocks, got: {md}");
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_boilerplate_removed() {
         let html = "<html><body><nav>Menu</nav><main><h1>Title</h1><p>Content</p></main><footer>Copyright</footer></body></html>";
@@ -402,6 +410,7 @@ mod tests {
     // Error path tests
     // ============================================================================
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_convert_links_to_markdown() {
         let html = r#"<p>Visit <a href="https://example.com">Example</a> for more info.</p>"#;
@@ -412,6 +421,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_convert_lists() {
         let html = r#"
@@ -435,6 +445,7 @@ mod tests {
         assert!(md.contains("Second"));
     }
 
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     #[test]
     fn test_convert_tables() {
         let html = r#"

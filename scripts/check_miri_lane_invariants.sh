@@ -176,6 +176,7 @@ UB_SURFACE_ENTRIES=(
   "crates/webfang_core/src/domain/html_cleaner.rs~clean_html~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/scraper_service/scraper_service_tests.rs~scrape_with_config~1~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/infrastructure/converter/htmd_converter.rs~HtmdConverter.convert|converter.convert~0~clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
+  "crates/webfang_core/src/infrastructure/converter/html_to_markdown.rs~convert_to_markdown~0~convert_to_markdown -> clean_html -> lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210; RED run 2026-11-26: ABORT at annotated_blocks_reconstruct_the_whole_document_markdown)"
   "crates/webfang_core/src/application/batch/spool_export.rs~convert_lines|convert_spool~0~extract_page_content → clean_html → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/application/extraction/selector_serialization_tests.rs~serialize_case~0~serialize_matches → absolutize_urls (application/fragment_urls.rs) → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
   "crates/webfang_core/src/cli/batch_flush_tests.rs~flush_spool_tail|convert_spool~0~flush_spool_tail → convert_spool → extract_content → extract_with_selector → serialize_matches → lol_html::rewrite_str (servo_arc Tree-Borrows UB, servo/stylo#210)"
