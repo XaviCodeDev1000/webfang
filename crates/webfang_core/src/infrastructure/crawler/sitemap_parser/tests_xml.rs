@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client) not supported by Miri: TLS_method"
+)]
 #[tokio::test]
 async fn test_parse_simple_sitemap() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -22,6 +26,10 @@ async fn test_parse_simple_sitemap() {
         .any(|u| u.url.as_str() == "https://example.com/page1"));
 }
 
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client) not supported by Miri: TLS_method"
+)]
 #[tokio::test]
 async fn test_parse_sitemap_with_duplicates() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -41,6 +49,10 @@ async fn test_parse_sitemap_with_duplicates() {
     assert_eq!(urls.len(), 2);
 }
 
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client) not supported by Miri: TLS_method"
+)]
 #[tokio::test]
 async fn test_parse_empty_sitemap() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -54,6 +66,10 @@ async fn test_parse_empty_sitemap() {
     assert!(matches!(result, Err(SitemapError::NoUrlsFound)));
 }
 
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client) not supported by Miri: TLS_method"
+)]
 #[tokio::test]
 async fn test_parse_malformed_xml() {
     let xml = r#"<?xml version="1.0"?>
@@ -76,6 +92,10 @@ async fn test_parse_malformed_xml() {
     }
 }
 
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client) not supported by Miri: TLS_method"
+)]
 #[tokio::test]
 async fn test_filter_invalid_schemes() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -100,6 +120,10 @@ async fn test_filter_invalid_schemes() {
         .all(|u| u.url.scheme() == "http" || u.url.scheme() == "https"));
 }
 
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client) not supported by Miri: TLS_method"
+)]
 #[tokio::test]
 async fn test_parse_sitemap_with_namespaces() {
     let xml = r#"<?xml version="1.0" encoding="UTF-8"?>

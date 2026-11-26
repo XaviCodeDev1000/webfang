@@ -44,13 +44,17 @@ mod tests {
 // (`builder_methods`, 600 divs) spin indefinitely under the interpreter. In CI
 // this module hung the whole infra-fast job until the 60m timeout (#751, run
 // 31983525568: 31 tests never completed). Regular (non-Miri) runs keep coverage.
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod default_dom_inspector_tests {
     use crate::domain::DomInspectorPort;
     use crate::infrastructure::scraper::dom_inspector::DefaultDomInspector;
 
     // --- DefaultDomInspector::inspect tests ---
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_counts_tags_correctly() {
         let html = r#"<html>
@@ -101,6 +105,10 @@ mod default_dom_inspector_tests {
         assert_eq!(report.max_depth, 4);
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_respects_node_cap() {
         // Generate HTML with 20 elements, cap at 10.
@@ -116,6 +124,10 @@ mod default_dom_inspector_tests {
         assert_eq!(report.element_count, 10);
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_empty_html_returns_minimal_report() {
         // The HTML5 parser creates implicit html/head/body even for empty input.
@@ -134,6 +146,10 @@ mod default_dom_inspector_tests {
         assert!(report.common_ids.is_empty());
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_max_depth_calculation() {
         let inspector = DefaultDomInspector::new();
@@ -160,6 +176,10 @@ mod default_dom_inspector_tests {
         assert!(deep_report.max_depth >= 1);
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_class_frequency_sorted_descending() {
         let html = r#"<html><body>
@@ -183,6 +203,10 @@ mod default_dom_inspector_tests {
 
     // --- DefaultDomInspector::suggest tests ---
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_above_threshold() {
         let html = r#"<html><body>
@@ -198,6 +222,10 @@ mod default_dom_inspector_tests {
         assert!((suggestions[0].score - 1.0).abs() < f64::EPSILON);
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_below_threshold() {
         // Use a selector that shares no similarity with any DOM element
@@ -212,6 +240,10 @@ mod default_dom_inspector_tests {
         assert!(suggestions.is_empty());
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_class_selector() {
         let html = r#"<html><body>
@@ -229,6 +261,10 @@ mod default_dom_inspector_tests {
         );
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_id_selector() {
         let html = r#"<html><body>
@@ -246,6 +282,10 @@ mod default_dom_inspector_tests {
         );
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_tag_selector() {
         let html = r#"<html><body>
@@ -263,6 +303,10 @@ mod default_dom_inspector_tests {
         );
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_sorted_by_score_descending() {
         let html = r#"<html><body>
@@ -285,6 +329,10 @@ mod default_dom_inspector_tests {
         }
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_truncated_to_top_5() {
         // Many similar candidates
@@ -302,6 +350,10 @@ mod default_dom_inspector_tests {
         assert!(suggestions.len() <= 5);
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "scraper::Selector servo_arc 0.4.3 Tree-Borrows UB in Arc::drop"
+    )]
     #[test]
     fn test_default_inspector_suggest_empty_html() {
         let document = scraper::Html::parse_document("");
@@ -311,6 +363,10 @@ mod default_dom_inspector_tests {
         assert!(suggestions.is_empty());
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "large DOM build (600 divs) exceeds the Miri lane budget: 600s timeout"
+    )]
     #[test]
     fn test_default_inspector_builder_methods() {
         let inspector = DefaultDomInspector::new()

@@ -185,6 +185,10 @@ fn a_gap_of_exactly_one_period_is_not_a_burst() {
 /// rows, because every input is a fixed seed (S2). Running it also prints
 /// the report (nextest: `--success-output=final`).
 #[test]
+#[cfg_attr(
+    miri,
+    ignore = "wall-clock-driven full jitter sensitivity sweep exceeds the Miri lane budget (>600s)"
+)]
 fn the_full_measurement_covers_every_cell_and_reproduces() {
     let first = measure();
     let expected_cells = FIXED_WINDOW_MAX.len()

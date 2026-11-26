@@ -36,6 +36,10 @@ fn pause_watchdog_comes_from_the_crawler_config() {
 /// it must NOT be judged by `worker_wait_bound`: a deliberate throttle is not
 /// a hung worker. The pause survives several worker bounds and only ends at
 /// its own give-up threshold, with the state that explains why.
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 #[tokio::test]
 async fn autoscale_pause_is_judged_by_its_own_watchdog() {
     use crate::application::crawler::concurrency_level::{

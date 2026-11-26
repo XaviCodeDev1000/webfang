@@ -44,9 +44,9 @@ use crate::error::ScraperError;
 mod jitter;
 use jitter::JitterSchedule;
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod test_support;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_rng_fallback;
 
 /// Clock used by the governor rate limiters.
@@ -416,7 +416,7 @@ impl From<GovernorLimiter<NotKeyed, InMemoryState, GovernorClock, GovernorMiddle
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::test_support::{capture_trace, wait_events};
     use super::*;

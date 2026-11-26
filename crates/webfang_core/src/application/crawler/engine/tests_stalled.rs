@@ -42,6 +42,10 @@ fn stalled_shape() -> (
 /// timeout the runner had (240 s in CI, reported as `TERMINATING`). The 2 s
 /// guard turns a regression into a failed assertion instead of a hung test.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn wedged_worker_ends_the_run_instead_of_spinning() {
     let (mut engine, task_ctx, mut tasks) = stalled_shape();
 
@@ -110,6 +114,10 @@ impl PipelineStage for NeverStage {
 /// headroom over the 13s floor (CI-load tolerant) and still sits clearly
 /// below the old 24s shape, so either regression flips the assertion.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn stalled_run_returns_partial_results_in_the_error() {
     let _entry_off = entry_off();
     let server = MockServer::start().await;
@@ -166,6 +174,10 @@ async fn stalled_run_returns_partial_results_in_the_error() {
 /// Pins the other side of the fix, so nobody "solves" the spin by failing
 /// every iteration with an empty frontier.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn empty_frontier_with_worker_in_flight_is_not_a_stall() {
     let (mut engine, task_ctx, mut tasks) = stalled_shape();
 

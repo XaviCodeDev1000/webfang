@@ -242,7 +242,7 @@ impl super::SharedRateLimiter {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod sensitivity;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests;

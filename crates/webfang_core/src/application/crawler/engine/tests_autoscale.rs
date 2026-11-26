@@ -8,6 +8,10 @@ use url::Url;
 /// background task, and asserts the shared concurrency level reaches
 /// `Critical` without ever touching real sysinfo.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn with_autoscale_uses_injected_ram_probe() {
     #[derive(Debug)]
     struct HighPressureProbe;
@@ -60,6 +64,10 @@ async fn with_autoscale_uses_injected_ram_probe() {
 /// alive and polling a probe no one reads. The engine must hold the handle
 /// and end it in `shutdown`, exactly like `signal_handle`.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn autoscale_probe_handle_is_owned_and_aborted_by_shutdown() {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let config = CrawlerConfig::builder(seed).build();

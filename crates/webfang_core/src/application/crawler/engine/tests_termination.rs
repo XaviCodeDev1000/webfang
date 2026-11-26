@@ -7,6 +7,10 @@ use url::Url;
 /// returned, truncated to what the collector already held — URLs, error
 /// count and breakdown, with the rendered failure preserved verbatim.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "btls-sys FFI (wreq Client via session_engine) not supported by Miri: TLS_method"
+)]
 async fn fail_run_with_partials_carries_collected_urls() {
     use crate::application::crawler::collector::CrawlMessage;
     use crate::domain::DiscoveredUrl;
@@ -120,6 +124,10 @@ async fn a_never_delivering_source_leaves_the_run_alone() {
 /// that panics and stays cancellable, which is what every construction
 /// site that never injects a platform source relies on.
 #[tokio::test]
+#[cfg_attr(
+    miri,
+    ignore = "SIGINT handler registration via sigaction is not supported by Miri"
+)]
 async fn the_default_source_is_a_cancellable_ctrl_c_wait() {
     let waiter = tokio::spawn(TerminationSource::default().wait());
     tokio::task::yield_now().await;
