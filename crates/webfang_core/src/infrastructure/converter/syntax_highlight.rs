@@ -75,10 +75,14 @@ pub fn highlight_code_blocks(markdown: &str) -> String {
         .to_string()
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg_attr(
+        miri,
+        ignore = "syntect SyntaxSet::load_defaults_newlines hangs under Miri (scoped run stalled >30m on test_highlight_python_code)"
+    )]
     #[test]
     fn test_highlight_rust_code() {
         let md = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
@@ -86,6 +90,10 @@ mod tests {
         assert!(highlighted.contains("<span"));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "syntect SyntaxSet::load_defaults_newlines hangs under Miri (scoped run stalled >30m on test_highlight_python_code)"
+    )]
     #[test]
     fn test_highlight_python_code() {
         let md = "```python\nprint('Hello')\n```";
@@ -107,6 +115,10 @@ mod tests {
         assert_eq!(highlighted, "");
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "syntect SyntaxSet::load_defaults_newlines hangs under Miri (scoped run stalled >30m on test_highlight_python_code)"
+    )]
     #[test]
     fn test_multiple_identical_code_blocks() {
         // BUG FIX: Two identical blocks must both be processed
@@ -120,6 +132,10 @@ mod tests {
         assert!(!highlighted.contains("```"));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "syntect SyntaxSet::load_defaults_newlines hangs under Miri (scoped run stalled >30m on test_highlight_python_code)"
+    )]
     #[test]
     fn test_html_not_wrapped_in_backticks() {
         // FORMAT FIX: HTML must NOT be wrapped in backticks
@@ -130,6 +146,10 @@ mod tests {
         assert!(highlighted.contains("<pre")); // Direct HTML
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "syntect SyntaxSet::load_defaults_newlines hangs under Miri (scoped run stalled >30m on test_highlight_python_code)"
+    )]
     #[test]
     fn test_lazy_initialization() {
         // PERFORMANCE: Verify LazyLock statics compile and work
@@ -138,6 +158,10 @@ mod tests {
         // If this compiles, LazyLock is working
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "syntect SyntaxSet::load_defaults_newlines hangs under Miri (scoped run stalled >30m on test_highlight_python_code)"
+    )]
     #[test]
     fn test_unknown_language_fallback() {
         // Unknown language should keep original Markdown
@@ -146,6 +170,10 @@ mod tests {
         assert!(highlighted.contains("```unknownlang"));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "syntect SyntaxSet::load_defaults_newlines hangs under Miri (scoped run stalled >30m on test_highlight_python_code)"
+    )]
     #[test]
     fn test_multiline_code_blocks() {
         // (?s) flag test: dots must match newlines
