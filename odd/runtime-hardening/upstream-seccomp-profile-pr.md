@@ -25,4 +25,4 @@ Browser runtimes (Chromium, obscura) probe `memfd_create` and the Landlock sysca
 
 Only `src/seccomp.rs` and `tests/run.rs`. No new dependency, no feature-flag change, no change to Strict.
 
-Upstream PR: _pending_
+Upstream PR: https://github.com/LeGambiArt/arapuca/pull/118
