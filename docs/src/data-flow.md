@@ -139,7 +139,7 @@ carries **operational metadata only**:
 
 | Path (Linux / XDG) | What lives there | Created by | Removal |
 | :--- | :--- | :--- | :--- |
-| `~/.webfang/crawl.db` | SQLite database (crawl results / RAG export) | Any run that persists results; override with `WEBFANG_DB_PATH` / `--db-path` | Delete the file |
+| `~/.webfang/crawl.db` (under `webfang/tenants/<id>/` when `WEBFANG_TENANT_ID` is set) | SQLite database (crawl results / RAG export) | Any run that persists results; override with `WEBFANG_DB_PATH` / `--db-path` | Delete the file |
 | `~/.cache/webfang/state/` | Export state JSON plus the JSON-per-domain record store (one versioned envelope per site) | Resume/checkpoint runs; override with `--state-dir` | Delete the directory |
 | `<run persistence root>/.webfang-batch-capture.jsonl` | The **batch spool**: every page body the batch fetched, verbatim | Batch runs, until the batch finishes and it is discarded | Discarded at the end of a healthy batch; a crashed run leaves it, and the next batch run sweeps stale spools — or delete it by hand |
 | `~/.config/webfang/` | `config.toml` and the encrypted credential store `credentials.age` | Configuration and `webfang connect` | Delete the directory (also part of uninstall) |
@@ -188,7 +188,7 @@ code | crates/webfang_core/src/infrastructure/llm/client.rs | chat/completions
 code | crates/webfang_core/src/infrastructure/llm/remote_embedding.rs | /embeddings
 code | crates/webfang_core/src/cli/llm_wire.rs | build_llm_provider
 code | crates/webfang_core/src/cli/batch_spool.rs | .webfang-batch-capture.jsonl
-code | crates/webfang_core/src/infrastructure/autotuning.rs | crawl.db
+code | crates/webfang_core/src/domain/paths.rs | DEFAULT_DB_FILE
 code | crates/webfang_core/src/domain/local_secret_store.rs | credentials.age
 code | crates/webfang_core/src/domain/proxy_config.rs | ValidatedProxy
 code | crates/webfang_core/src/infrastructure/llm/http_client.rs | build_llm_client
