@@ -4,6 +4,7 @@ use webfang_test_utils::EnvGuard;
 /// Bug #9 regression: a 404 response must yield SitemapError::HttpError
 /// ("server returned 404"), NOT SitemapError::InvalidContentType. Status
 /// MUST be checked BEFORE content-type (issue #590).
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 async fn test_sitemap_404_yields_http_error_not_content_type() {
     let _entry_off = EnvGuard::entry_guard_off();
@@ -30,6 +31,7 @@ async fn test_sitemap_404_yields_http_error_not_content_type() {
 }
 
 // Gap B: parse_with_depth — depth=0 returns MaxDepthExceeded without HTTP
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 async fn test_parse_from_url_depth_zero_returns_error() {
     let config = SitemapConfig::builder().max_depth(0).build();
@@ -40,6 +42,7 @@ async fn test_parse_from_url_depth_zero_returns_error() {
     assert!(matches!(result, Err(SitemapError::MaxDepthExceeded)));
 }
 
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 #[ignore = "requires network — hits real DNS for invalid-host-xyz-12345.com"]
 async fn test_parse_from_url_depth_one_attempts_fetch() {

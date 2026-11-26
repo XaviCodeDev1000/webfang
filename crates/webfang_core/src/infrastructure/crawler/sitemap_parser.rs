@@ -256,17 +256,17 @@ impl SitemapParserPort for SitemapParser {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_compression;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_config;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_fetch;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_resolve_url;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_support;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 use tests_support as test_support;
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests_waf;

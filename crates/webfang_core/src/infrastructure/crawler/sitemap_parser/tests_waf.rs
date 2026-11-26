@@ -19,6 +19,7 @@ const CHALLENGE_HTML: &str =
 /// typed `SitemapError::WafChallenge` with host context and evidence chain,
 /// plus a structured trace event — not a generic XML parse failure (#879).
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn parse_from_url_waf_challenge_body_returns_typed_error_and_trace_event() {
     let _entry_off = EnvGuard::entry_guard_off();
     let buf = LogBuffer::run(|| {
@@ -61,6 +62,7 @@ fn parse_from_url_waf_challenge_body_returns_typed_error_and_trace_event() {
 /// A challenge served by ONE child of a sitemap index must hard-abort the
 /// whole index with `WafChallenge` (HybridRouter parity) instead of being
 /// swallowed into `AllChildrenFailed` (#879).
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 async fn index_child_waf_challenge_propagates_typed_error() {
     let _entry_off = EnvGuard::entry_guard_off();
@@ -99,6 +101,7 @@ async fn index_child_waf_challenge_propagates_typed_error() {
 
 /// A benign sitemap body that merely mentions a WAF vendor at status 200 is
 /// Fingerprint-tier evidence and must NOT raise `WafChallenge` (REQ-WAF-09).
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 #[tokio::test]
 async fn benign_sitemap_body_mentioning_vendor_is_not_a_challenge() {
     let _entry_off = EnvGuard::entry_guard_off();

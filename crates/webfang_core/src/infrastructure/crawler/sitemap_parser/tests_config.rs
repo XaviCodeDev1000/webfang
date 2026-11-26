@@ -23,6 +23,7 @@ fn test_config_default() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn test_parser_has_gzip() {
     let parser_gzip =
         SitemapParser::with_config(SitemapConfig::builder().gzip_enabled(true).build()).unwrap();
@@ -54,12 +55,14 @@ fn test_config_builder_zero_falls_back_to_defaults() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn test_max_depth_accessor() {
     let parser = SitemapParser::with_config(SitemapConfig::builder().max_depth(7).build()).unwrap();
     assert_eq!(parser.max_depth(), 7);
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn test_max_depth_default() {
     let parser = SitemapParser::new().unwrap();
     assert_eq!(parser.max_depth(), 3);
@@ -68,18 +71,21 @@ fn test_max_depth_default() {
 // -- #323: tls_emulation is honored, not hardcoded --
 
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn test_new_defaults_to_chrome145_profile() {
     let parser = SitemapParser::new().unwrap();
     assert_eq!(parser.tls_emulation(), wreq_util::Profile::Chrome145);
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn test_with_config_defaults_to_chrome145_profile() {
     let parser = SitemapParser::with_config(SitemapConfig::default()).unwrap();
     assert_eq!(parser.tls_emulation(), wreq_util::Profile::Chrome145);
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn test_with_config_and_profile_accepts_custom_profile() {
     let parser = SitemapParser::with_config_and_profile(
         SitemapConfig::default(),
@@ -90,6 +96,7 @@ fn test_with_config_and_profile_accepts_custom_profile() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "wreq/btls TLS_method FFI (unsupported by Miri)")]
 fn test_with_config_and_profile_accepts_firefox_profile() {
     let parser = SitemapParser::with_config_and_profile(
         SitemapConfig::builder().max_depth(2).build(),
