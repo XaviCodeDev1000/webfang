@@ -7,6 +7,7 @@ use serial_test::serial;
 /// isolates per process, which hides the race), so every test that reads
 /// or mutates the escape hatch is `#[serial]` to keep the guard's state
 /// consistent (pattern: metrics.rs).
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 #[serial]
 async fn scrape_url_rejects_loopback() {
@@ -43,6 +44,7 @@ fn scrape_url_invalid_url_is_unrepresentable() {
     );
 }
 
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 #[serial]
 async fn scrape_with_options_rejects_loopback() {
@@ -80,6 +82,7 @@ fn scrape_with_options_invalid_url_is_unrepresentable() {
     );
 }
 
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 #[serial]
 async fn scrape_batch_rejects_loopback() {
@@ -143,6 +146,7 @@ fn zero_limits_are_rejected() {
     assert!(crawl.is_err(), "max_pages 0 must be rejected: {crawl:?}");
 }
 
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 #[serial]
 async fn discover_urls_rejects_loopback() {
@@ -174,6 +178,7 @@ fn discover_urls_invalid_url_is_unrepresentable() {
     );
 }
 
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 #[serial]
 async fn detect_spa_rejects_loopback() {

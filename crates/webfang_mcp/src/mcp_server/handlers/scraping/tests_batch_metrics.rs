@@ -42,6 +42,7 @@ fn record(
     );
 }
 
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 async fn batch_metrics_multi_domain_attributed_per_host() {
     // OBS-MCP-BATCH-001: a batch spanning two hosts must record one
@@ -66,6 +67,7 @@ async fn batch_metrics_multi_domain_attributed_per_host() {
     );
 }
 
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 async fn batch_metrics_single_domain_regression_guard() {
     let (handler, _tmp) = test_handler().await;
@@ -84,6 +86,7 @@ async fn batch_metrics_single_domain_regression_guard() {
     assert_eq!(snap.success_count, 1, "all-success batch is Success");
 }
 
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 async fn batch_metrics_mixed_outcomes_per_domain() {
     // A domain with both a success and a failure is Partial; a domain

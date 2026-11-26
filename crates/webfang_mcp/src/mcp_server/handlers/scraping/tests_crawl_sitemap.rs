@@ -77,6 +77,7 @@ fn filter_ssrf_safe_keeps_internal_drops_external_literal() {
 /// REQ-02: an internal `sitemap_url` is rejected at entry (guard ON) with
 /// the SSRF message, before any sitemap fetch. The seed uses a public
 /// literal IP so its own validation resolves locally (no DNS dependency).
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Container::new")]
 #[tokio::test]
 #[serial]
 async fn crawl_with_sitemap_rejects_internal_sitemap_url() {
