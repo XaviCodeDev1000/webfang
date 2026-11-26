@@ -94,10 +94,9 @@ fn recommendation_for(keyring_available: bool, detected: &Option<PathBuf>) -> Au
 /// XP-F-05 (#1608): la base sale del helper único de platform paths
 /// (`dirs::config_dir`); en Linux respeta `XDG_CONFIG_HOME` como antes.
 fn default_encrypted_file_path() -> PathBuf {
-    crate::domain::paths::config_base_dir()
-        .unwrap_or_else(|| PathBuf::from(".config"))
-        .join("webfang")
-        .join("credentials.age")
+    // S17: tenant-scoped when an identifier is set, so two identifiers never
+    // share one secret file.
+    crate::domain::paths::default_credentials_path()
 }
 
 /// Comprueba el backend de keyring compilado para la plataforma actual.

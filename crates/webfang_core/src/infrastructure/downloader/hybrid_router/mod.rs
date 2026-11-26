@@ -77,6 +77,57 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
         }
     }
 
+    /// Build a hybrid router around an explicit governor.
+    ///
+    /// Calibration seam behind [`new`](Self::new), mirroring
+    /// [`ResourceGovernor::with_max_instances`](super::resource_governor::ResourceGovernor::with_max_instances):
+    /// lets a test drive the admission boundary (permits exhausted, or a
+    /// warning-level reduction to zero) without fabricating host RAM pressure.
+    #[cfg(test)]
+    pub(crate) fn with_governor(
+        layer1: L1,
+        layer2: L2,
+        layer3: L3,
+        ignore_waf: bool,
+        governor: ResourceGovernor,
+    ) -> Self {
+        Self {
+            layer1,
+            layer2,
+            layer3,
+            governor,
+            ignore_waf,
+        }
+    }
+
+    /// Refuse an escalation the governor did not grant a permit for (S17).
+    ///
+    /// `check_resources` answers how many permits this layer could take right
+    /// now; `Ok(0)` is a denial exactly like the error arms — the warning-level
+    /// halving exists to stop escalation under pressure, not to be ignored by
+    /// the last caller that only matched `Err`.
+    fn check_escalation_budget(&self, url: &Url, layer: u8) -> Result<(), DownloadError> {
+        match self.governor.check_resources() {
+            Ok(permits) if permits > 0 => Ok(()),
+            Ok(_) => {
+                warn!(
+                    url = %url,
+                    layer,
+                    "ResourceGovernor denied escalation layer: no permits available"
+                );
+                Err(DownloadError::from(
+                    super::resource_governor::ResourceError::Insufficient(
+                        "no escalation permits available".to_string(),
+                    ),
+                ))
+            },
+            Err(e) => {
+                warn!(url = %url, layer, error = %e, "ResourceGovernor denied escalation layer");
+                Err(DownloadError::from(e))
+            },
+        }
+    }
+
     /// Build the inspection context from the real response instead of the
     /// degraded context the spa detector used to synthesize internally.
     ///
@@ -157,10 +208,7 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
         debug!("Layer 2 (Obscura): attempting fetch for {url}");
 
         // Check resources before spawning a subprocess
-        if let Err(e) = self.governor.check_resources() {
-            warn!(url = %url, layer = 2, error = %e, "ResourceGovernor denied escalation layer");
-            return Err(DownloadError::from(e));
-        }
+        self.check_escalation_budget(url, 2)?;
 
         match self.layer2.fetch(url).await {
             Ok(page) if !page.html.is_empty() => {
@@ -196,10 +244,7 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
         // --- Layer 3: Chromiumoxide CDP ---
         debug!("Layer 3 (Chromiumoxide): attempting fetch for {url}");
 
-        if let Err(e) = self.governor.check_resources() {
-            warn!(url = %url, layer = 3, error = %e, "ResourceGovernor denied escalation layer");
-            return Err(DownloadError::from(e));
-        }
+        self.check_escalation_budget(url, 3)?;
 
         match self.layer3.fetch(url).await {
             Ok(page) => {

@@ -295,6 +295,37 @@ async fn test_layer2_empty_escalates_to_layer3() {
     assert_escalates_to_layer3(&router, "https://spa.example.com").await;
 }
 
+/// S17: `check_resources` returning `Ok(0)` is a DENIAL. With the only permit
+/// already held, the router must refuse the escalation before the L2 layer
+/// runs instead of acquiring (and blocking on) a permit the governor did not
+/// grant.
+#[tokio::test]
+async fn exhausted_governor_denies_escalation_to_layer2() {
+    use super::super::resource_governor::ResourceGovernor;
+
+    let governor = ResourceGovernor::with_max_instances(1, CancellationToken::new());
+    let held = governor.acquire().await.expect("the single permit is free");
+
+    let router = HybridRouter::with_governor(
+        StubDownloader::spa_page(),
+        StubDownloader::static_page(),
+        StubDownloader::static_page().with_interactions(true),
+        false,
+        governor,
+    );
+
+    let url: Url = "https://spa.example.com".parse().unwrap();
+    let err = router
+        .fetch(&url)
+        .await
+        .expect_err("escalation must be denied with zero permits");
+    assert!(
+        err.to_string().contains("no escalation permits available"),
+        "expected the resource denial, got: {err}"
+    );
+    drop(held);
+}
+
 /// S5 (#2722 H3): a WAF challenge that obscura RENDERS (its response body
 /// carries the challenge markup) must abort the escalation exactly like an
 /// explicit L2 error — the router must classify the L2 body, not accept

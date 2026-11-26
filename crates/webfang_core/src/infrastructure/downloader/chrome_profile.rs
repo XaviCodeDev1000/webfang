@@ -27,8 +27,14 @@ impl ChromeProfileDir {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
 
-        let mut dir = env::temp_dir();
-        dir.push(format!(
+        // S17: a tenant-or-run scope keeps browser profiles under its own
+        // root. The per-launch unique subdirectory stays inside that base, so
+        // two identifiers never share a profile and concurrent launches never
+        // share one directory either.
+        let base = crate::domain::paths::TenantScope::current()
+            .chrome_profile_dir()
+            .unwrap_or_else(env::temp_dir);
+        let dir = base.join(format!(
             "webfang-chrome-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -126,5 +132,33 @@ mod tests {
         let dir = profile.path();
         let default_dir = env::temp_dir().join("chromiumoxide-runner");
         assert_ne!(dir, default_dir, "profile dir should not be the default");
+    }
+
+    /// S17: a tenant-scoped run keeps its browser profile under the tenant
+    /// root, so two identifiers never share a profile directory.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn scoped_tenant_profile_lives_under_its_root() {
+        use webfang_test_utils::EnvGuard;
+
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let guard = EnvGuard::with(&[
+            ("XDG_CONFIG_HOME", tmp.path().to_str().expect("utf8 tmp")),
+            ("WEBFANG_TENANT_ID", "tenant-a"),
+        ]);
+
+        let profile = ChromeProfileDir::new().expect("profile created");
+        let expected_root = tmp
+            .path()
+            .join("webfang")
+            .join("tenants")
+            .join("tenant-a")
+            .join("chrome-profile");
+        assert!(
+            profile.path().starts_with(&expected_root),
+            "profile {:?} must live under {expected_root:?}",
+            profile.path()
+        );
+        drop(guard);
     }
 }

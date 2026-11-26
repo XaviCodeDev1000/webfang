@@ -53,6 +53,90 @@ const WARNING_THRESHOLD: u8 =
 const CRITICAL_THRESHOLD: u8 =
     crate::domain::budget::derivation::RamThresholds::DEFAULT_CRITICAL_PERCENT;
 
+/// cgroup v2 memory limit (unified hierarchy).
+const CGROUP_V2_MEMORY_LIMIT: &str = "/sys/fs/cgroup/memory.max";
+/// cgroup v2 current usage.
+const CGROUP_V2_MEMORY_USAGE: &str = "/sys/fs/cgroup/memory.current";
+/// cgroup v1 memory limit.
+const CGROUP_V1_MEMORY_LIMIT: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
+/// cgroup v1 current usage.
+const CGROUP_V1_MEMORY_USAGE: &str = "/sys/fs/cgroup/memory/memory.usage_in_bytes";
+
+/// Values at or above this floor are cgroup "unlimited" sentinels (`max`, or
+/// v1's huge page-aligned number), never a real ceiling.
+const CGROUP_UNLIMITED_FLOOR: u64 = 1 << 60;
+
+/// Admission decision from observed RAM pressure and free permits (S17).
+///
+/// Extracted from [`ResourceGovernor::check_resources`] so the `available / 2`
+/// reduction is testable at its boundary: at the warning threshold with ONE
+/// free permit the result is `Ok(0)`, and the routers must refuse the
+/// escalation rather than acquire a permit that was never granted.
+fn admit_permits(usage: u8, available: usize) -> Result<usize, ResourceError> {
+    if usage >= CRITICAL_THRESHOLD {
+        return Err(ResourceError::RamTooHigh(usage));
+    }
+    if usage >= WARNING_THRESHOLD {
+        return Ok(available / 2);
+    }
+    Ok(available)
+}
+
+/// Parse a cgroup limit file value. `None` means "no finite limit here".
+fn parse_cgroup_limit(raw: &str) -> Option<u64> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw == "max" {
+        return None;
+    }
+    let limit: u64 = raw.parse().ok()?;
+    if limit == 0 || limit >= CGROUP_UNLIMITED_FLOOR {
+        None
+    } else {
+        Some(limit)
+    }
+}
+
+/// Parse a cgroup usage file value. `0` is a real reading, not "absent".
+fn parse_cgroup_usage(raw: &str) -> Option<u64> {
+    raw.trim().parse().ok()
+}
+
+fn read_cgroup(path: &str) -> Option<String> {
+    std::fs::read_to_string(path).ok()
+}
+
+/// The finite cgroup memory limit for this process, when one exists (S17).
+fn cgroup_memory_limit() -> Option<u64> {
+    read_cgroup(CGROUP_V2_MEMORY_LIMIT)
+        .as_deref()
+        .and_then(parse_cgroup_limit)
+        .or_else(|| {
+            read_cgroup(CGROUP_V1_MEMORY_LIMIT)
+                .as_deref()
+                .and_then(parse_cgroup_limit)
+        })
+}
+
+/// Current cgroup memory usage, when the same hierarchy exposes it.
+fn cgroup_memory_usage() -> Option<u64> {
+    read_cgroup(CGROUP_V2_MEMORY_USAGE)
+        .as_deref()
+        .and_then(parse_cgroup_usage)
+        .or_else(|| {
+            read_cgroup(CGROUP_V1_MEMORY_USAGE)
+                .as_deref()
+                .and_then(parse_cgroup_usage)
+        })
+}
+
+/// Integer percentage, saturating at 100 (never zero-total division).
+fn percent(used: u64, total: u64) -> u8 {
+    if total == 0 {
+        return 0;
+    }
+    u8::try_from(used.saturating_mul(100) / total).unwrap_or(100)
+}
+
 /// `operation` field of every event this governor emits (#1610).
 const RESOURCE_GOVERNOR_OPERATION: &str = "browser.resource_governor.acquire";
 
@@ -111,23 +195,23 @@ impl ResourceGovernor {
     /// right now (0 when denied).
     pub fn check_resources(&self) -> Result<usize, ResourceError> {
         let usage = Self::ram_usage_percent();
-
-        if usage >= CRITICAL_THRESHOLD {
-            warn!("RAM usage {usage}% >= {CRITICAL_THRESHOLD}%: new Chrome instances denied");
-            return Err(ResourceError::RamTooHigh(usage));
-        }
-
         let available = self.semaphore.available_permits();
+        let decision = admit_permits(usage, available);
 
-        if usage >= WARNING_THRESHOLD {
-            let reduced = available / 2;
-            warn!(
-                "RAM usage {usage}% >= {WARNING_THRESHOLD}%: available permits reduced {available} -> {reduced}"
-            );
-            return Ok(reduced);
+        match &decision {
+            Err(ResourceError::RamTooHigh(usage)) => {
+                warn!("RAM usage {usage}% >= {CRITICAL_THRESHOLD}%: new Chrome instances denied");
+            },
+            Err(ResourceError::Insufficient(_)) => {},
+            Ok(reduced) if *reduced < available => {
+                warn!(
+                    "RAM usage {usage}% >= {WARNING_THRESHOLD}%: available permits reduced {available} -> {reduced}"
+                );
+            },
+            Ok(_) => {},
         }
 
-        Ok(available)
+        decision
     }
 
     /// Acquire an owned semaphore permit, returning an error when resources
@@ -206,23 +290,36 @@ impl ResourceGovernor {
         }
     }
 
-    /// Total system RAM in bytes.
+    /// Memory ceiling for calibration, in bytes.
+    ///
+    /// A container's cgroup limit is the honest ceiling (S17): the host's RAM
+    /// is not addressable, so deriving Chrome instances from it makes a
+    /// 2 GiB container schedule like a 64 GiB host. Falls back to system RAM
+    /// when no finite cgroup limit exists (bare metal, or an unlimited
+    /// sentinel).
     fn total_ram_bytes() -> u64 {
+        if let Some(limit) = cgroup_memory_limit() {
+            return limit;
+        }
         let mut sys = System::new();
         sys.refresh_memory();
         sys.total_memory()
     }
 
     /// RAM usage as a percentage (0–100).
+    ///
+    /// Uses the cgroup's own usage against its limit when both are readable,
+    /// so pressure is measured against the memory this process can actually
+    /// consume; otherwise measures host RAM exactly as before.
     pub fn ram_usage_percent() -> u8 {
+        if let Some(limit) = cgroup_memory_limit() {
+            if let Some(used) = cgroup_memory_usage() {
+                return percent(used.min(limit), limit);
+            }
+        }
         let mut sys = System::new();
         sys.refresh_memory();
-        let total = sys.total_memory();
-        if total == 0 {
-            return 0;
-        }
-        let used = sys.used_memory();
-        ((used * 100) / total) as u8
+        percent(sys.used_memory(), sys.total_memory())
     }
 }
 

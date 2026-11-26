@@ -36,9 +36,9 @@ pub const DEFAULT_MAX_RESOURCE_BYTES: u64 = 25 * 1024 * 1024;
 /// Minimum DB connection pool size (frozen design decision #6: floor 4).
 pub const MIN_DB_POOL_SIZE: usize = 4;
 
-/// Default SQLite database path: `~/.webfang/crawl.db`.
-pub const DEFAULT_DB_DIR: &str = ".webfang";
-pub(crate) const DEFAULT_DB_FILE: &str = "crawl.db";
+// The database path policy lives in `domain::paths` (single definition of
+// where webfang writes); re-exported here so existing callers keep the path.
+pub use crate::domain::paths::{default_db_path, DEFAULT_DB_DIR};
 
 // ============================================================================
 // Environment variable names (frozen design decision #12 — snake-upper)
@@ -134,17 +134,6 @@ pub fn detect_ram_budget() -> u64 {
     #[cfg(not(feature = "persistence"))]
     {
         FALLBACK_RAM_BUDGET_BYTES
-    }
-}
-
-/// Default SQLite database path: `~/.webfang/crawl.db`.
-///
-/// Falls back to `./crawl.db` when the home directory cannot be determined.
-#[must_use]
-pub fn default_db_path() -> PathBuf {
-    match dirs::home_dir() {
-        Some(home) => home.join(DEFAULT_DB_DIR).join(DEFAULT_DB_FILE),
-        None => PathBuf::from(DEFAULT_DB_FILE),
     }
 }
 
@@ -412,7 +401,7 @@ mod tests {
     #[test]
     fn test_default_db_path_under_home() {
         let p = default_db_path();
-        assert!(p.ends_with(DEFAULT_DB_FILE));
+        assert!(p.ends_with(crate::domain::paths::DEFAULT_DB_FILE));
         assert!(p.to_string_lossy().contains(DEFAULT_DB_DIR));
     }
 

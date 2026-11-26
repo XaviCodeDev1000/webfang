@@ -199,16 +199,7 @@ const AGE_IDENTITY_ENV: &str = "WEBFANG_AGE_IDENTITY";
 /// `pub(crate)`: el wizard (`infrastructure::wizard`) reutiliza esta ruta para
 /// generar el archivo — una sola definición de "dónde vive la identity", no dos
 /// que puedan divergir.
-pub(crate) fn default_identity_path() -> std::path::PathBuf {
-    // XP-F-05 (#1608): la base sale del helper único de platform paths
-    // (`dirs::config_dir` — XDG en Linux, %APPDATA% en Windows, ~/Library/
-    // Application Support en macOS). El fallback ".config" es el fail-soft
-    // que este sitio ya tenía cuando no hay home.
-    crate::domain::paths::config_base_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from(".config"))
-        .join("webfang")
-        .join("identity.key")
-}
+pub(crate) use crate::domain::paths::default_identity_path;
 
 /// Resuelve la identidad `age`: env si está configurado (override de CI),
 /// si no el archivo local por defecto. Verifica permisos 0600 en el archivo.

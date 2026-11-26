@@ -10,6 +10,23 @@ use dashmap::DashMap;
 /// Entries retained per Asset-tier permit in the dedup cache.
 pub const ASSET_CACHE_ENTRIES_PER_PERMIT: usize = 8_192;
 
+/// Asset-tier permits assumed by [`DEFAULT_ASSET_CACHE_CAPACITY`].
+///
+/// Mirrors the budget model's default asset concurrency (3), so the default
+/// bound is the same number the composition roots derive explicitly instead
+/// of a second, invented constant.
+pub const DEFAULT_ASSET_TIER_PERMITS: usize = 3;
+
+/// Finite default dedup-cache bound for [`Downloader::new`](super::Downloader::new).
+///
+/// `Downloader::new` used to take the unbounded legacy path (`usize::MAX`), so
+/// any caller that did not go through a composition root grew the registry
+/// linearly with the crawl. A finite default makes the bound a property of the
+/// type; explicit overrides still go through
+/// [`Downloader::with_asset_cache_capacity`](super::Downloader::with_asset_cache_capacity).
+pub const DEFAULT_ASSET_CACHE_CAPACITY: usize =
+    ASSET_CACHE_ENTRIES_PER_PERMIT * DEFAULT_ASSET_TIER_PERMITS;
+
 /// Derive the bounded asset-cache capacity from the budget model's Asset
 /// tier. Single source of truth with every other derived bound.
 #[must_use]
