@@ -7,8 +7,10 @@
 
 use super::*;
 use crate::error::ErrorClass;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use wiremock::matchers::{header, method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
 
 const VALID_BODY: &str = r#"{"choices":[{"message":{"content":"{\"items\":[]}"}}],
     "usage":{"prompt_tokens":11,"completion_tokens":7}}"#;
@@ -30,6 +32,52 @@ fn client_for(server: &MockServer) -> OpenAiLlmClient {
         ApiKey::new("sk-test"),
     )
     .expect("client builds")
+}
+
+/// Deterministic schedule: zero jitter, no sleeping, and a recorder for the
+/// computed delay so `Retry-After` is observable without wall-clock waits.
+static LAST_DELAY_MS: AtomicU64 = AtomicU64::new(0);
+
+fn deterministic_schedule() -> RetrySchedule {
+    RetrySchedule {
+        max_attempts: 3,
+        base_ms: 1,
+        max_ms: 2,
+        jitter_ms: |_| 0,
+        sleep: |delay| {
+            LAST_DELAY_MS.store(delay.as_millis() as u64, Ordering::SeqCst);
+            Box::pin(async {})
+        },
+    }
+}
+
+fn client_for_with_retry(server: &MockServer) -> OpenAiLlmClient {
+    let mut client = client_for(server);
+    client.retry = deterministic_schedule();
+    client
+}
+
+/// Per-attempt status sequence, capped at the final status once exhausted.
+struct StatusSequence {
+    calls: Arc<AtomicUsize>,
+    statuses: &'static [u16],
+}
+
+impl Respond for StatusSequence {
+    fn respond(&self, _request: &wiremock::Request) -> ResponseTemplate {
+        let index = self.calls.fetch_add(1, Ordering::SeqCst);
+        let status = self.statuses[index.min(self.statuses.len() - 1)];
+        let mut template = ResponseTemplate::new(status);
+        if status == 200 {
+            template = template.set_body_string(VALID_BODY);
+        } else {
+            template = template.set_body_string("{}");
+            if status == 429 {
+                template = template.insert_header("retry-after", "1");
+            }
+        }
+        template
+    }
 }
 
 async fn mount(server: &MockServer, status: u16, body: &str) {
@@ -133,6 +181,62 @@ async fn rate_limited_maps_to_transient_backoff() {
         "429 must be Http{{429}}, got: {err:?}"
     );
     assert_eq!(err.classify(), ErrorClass::TransientBackoff);
+}
+
+#[tokio::test]
+async fn rate_limited_with_retry_after_retries_the_budget_and_honors_header() {
+    let server = MockServer::start().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(StatusSequence {
+            calls: Arc::clone(&calls),
+            statuses: &[429, 429, 200],
+        })
+        .mount(&server)
+        .await;
+
+    let result = client_for_with_retry(&server)
+        .send_completion(test_request())
+        .await
+        .expect("the third attempt succeeds");
+
+    assert_eq!(result.content, r#"{"items":[]}"#);
+    assert_eq!(calls.load(Ordering::SeqCst), 3, "two retries, then success");
+    assert!(
+        LAST_DELAY_MS.load(Ordering::SeqCst) >= 1_000,
+        "Retry-After: 1 must be honored, got {}ms",
+        LAST_DELAY_MS.load(Ordering::SeqCst)
+    );
+}
+
+#[tokio::test]
+async fn terminal_401_is_not_retried() {
+    let server = MockServer::start().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(StatusSequence {
+            calls: Arc::clone(&calls),
+            statuses: &[401],
+        })
+        .mount(&server)
+        .await;
+
+    let err = client_for_with_retry(&server)
+        .send_completion(test_request())
+        .await
+        .expect_err("401 must fail");
+
+    assert!(
+        matches!(&err, ScraperError::Http { status: 401, .. }),
+        "401 must stay Http{{401}}, got: {err:?}"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "terminal 4xx must not retry"
+    );
 }
 
 #[tokio::test]

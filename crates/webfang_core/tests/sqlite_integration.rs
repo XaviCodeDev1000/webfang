@@ -187,6 +187,45 @@ async fn test_save_chunk_without_embedding() {
     assert_eq!(result, None, "no embedding should return None");
 }
 
+/// Bulk reader returns only embedded chunks and feeds the cosine ranking
+/// used for note chunks (file-backed DB).
+#[tokio::test]
+async fn bulk_chunk_reader_reads_only_embedded_chunks() {
+    let (_tmp, repo) = file_backed_repo("bulk-chunks.db").await;
+    let url = "https://example.com/bulk";
+    repo.save_resource(url, "Bulk", "h-bulk", 100)
+        .await
+        .unwrap();
+
+    let embedding = vec![1.0_f32, 0.0, 0.0, 0.0];
+    repo.save_chunk("valid", url, 0, "embedded", Some(&embedding), None)
+        .await
+        .unwrap();
+    repo.save_chunk("null", url, 1, "not embedded", None, None)
+        .await
+        .unwrap();
+
+    let rows = repo
+        .load_chunk_vectors(Some(url))
+        .await
+        .expect("bulk read must succeed with a resource filter");
+    assert_eq!(rows.len(), 1, "the NULL-embedding chunk must be excluded");
+    assert_eq!(rows[0].id, "valid");
+    assert_eq!(rows[0].content, "embedded");
+    assert_eq!(rows[0].embedding, embedding);
+
+    let score = rows[0]
+        .cosine_score(&embedding)
+        .expect("equal dimensions must rank");
+    assert!((score - 1.0).abs() < 1e-6, "identical vectors score 1.0");
+
+    let empty = repo
+        .load_chunk_vectors(Some("https://example.com/other"))
+        .await
+        .expect("an empty result is not an error");
+    assert!(empty.is_empty(), "no rows match the other resource");
+}
+
 /// get_vector for nonexistent chunk returns None (file-backed DB).
 #[tokio::test]
 async fn test_get_vector_nonexistent() {

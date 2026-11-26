@@ -51,9 +51,48 @@ fn normalize_captured(s: &str) -> String {
         .join(" ")
 }
 
-/// Run `webfang` against `url` in production posture (entry guard enforced —
-/// the harness default is disarmed, so remove it explicitly).
-async fn run_production(url: &str) -> (Output, MockServer) {
+/// `std_cmd()` with both non-test SSRF hatches set in the child environment.
+/// The hatches are only test seams: a production build ignores them, which is
+/// exactly what the S9 tests assert. Every other env/arg decision stays in the
+/// caller so `spawn_budgeted` still snapshots the final command.
+fn command_with_ssrf_bypasses() -> std::process::Command {
+    let mut command = common::std_cmd();
+    command
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_VALIDATING_RESOLVER_ENV,
+            "1",
+        )
+        .env(
+            webfang_core::domain::ssrf_guard::DISABLE_REDIRECT_GUARD_ENV,
+            "1",
+        );
+    command
+}
+
+/// Append the scrape argv shared by every matrix row. Only the target URL,
+/// output directory and timeout ceiling vary; the zero-retry posture stays.
+fn with_scrape_args(
+    command: &mut std::process::Command,
+    url: &str,
+    out_dir: &std::path::Path,
+    timeout_secs: &str,
+) {
+    command
+        .arg("--url")
+        .arg(url)
+        .arg("--single-page")
+        .arg("--ignore-robots")
+        .arg("--output")
+        .arg(out_dir)
+        .arg("--timeout-secs")
+        .arg(timeout_secs)
+        .arg("--max-retries")
+        .arg("0");
+}
+
+/// Run `webfang` against `url`. `bypass_vars` sets both SSRF test hatches in
+/// the child environment to prove a non-test build ignores them (S9).
+async fn run_production_with(url: &str, bypass_vars: bool) -> (Output, MockServer) {
     let mock_server = MockServer::start().await;
     // Tripwire: if any request reached the network, the mock would record it.
     Mock::given(method("GET"))
@@ -72,21 +111,20 @@ async fn run_production(url: &str) -> (Output, MockServer) {
     // BEFORE the call — the harness snapshots them and rebuilds the command
     // per attempt — and every assertion stays outside, on the returned
     // `Output`.
-    let mut command = common::std_cmd();
-    command
-        .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
-        .arg("--url")
-        .arg(url)
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    let mut command = if bypass_vars {
+        command_with_ssrf_bypasses()
+    } else {
+        common::std_cmd()
+    };
+    command.env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV);
+    with_scrape_args(&mut command, url, out_dir.path(), "5");
     let output = common::spawn_budgeted("run_production", command, None).await;
     (output, mock_server)
+}
+
+/// Production posture without any test hatch set (the original matrix).
+async fn run_production(url: &str) -> (Output, MockServer) {
+    run_production_with(url, false).await
 }
 
 /// Assert the pinned rejection contract for a forbidden IP literal:
@@ -94,17 +132,21 @@ async fn run_production(url: &str) -> (Output, MockServer) {
 /// scrape failure), user-facing SSRF message, and zero outbound.
 async fn assert_rejected_literal(url: &str, expected_ip: &str, deny_reason: &str) {
     let (output, mock_server) = run_production(url).await;
-    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert_entry_rejection(output, mock_server, expected_ip, deny_reason).await;
+}
 
-    assert!(
-        !output.status.success(),
-        "forbidden literal must fail: {url} stderr={stderr}"
-    );
-    let code = output.status.code().unwrap_or(0);
-    assert_eq!(code, 69, "exit code contract (EX_UNAVAILABLE): {stderr}");
+async fn assert_entry_rejection(
+    output: Output,
+    mock_server: MockServer,
+    expected_ip: &str,
+    deny_reason: &str,
+) {
+    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert!(!output.status.success(), "must fail: {stderr}");
+    assert_eq!(output.status.code(), Some(69), "exit 69: {stderr}");
     assert!(
         stderr.contains("SSRF detected") && stderr.contains(expected_ip),
-        "typed rejection naming the offending IP missing. {deny_reason}\nstderr: {stderr}"
+        "typed rejection missing. {deny_reason}\nstderr: {stderr}"
     );
     let requests = mock_server
         .received_requests()
@@ -112,8 +154,7 @@ async fn assert_rejected_literal(url: &str, expected_ip: &str, deny_reason: &str
         .expect("wiremock request journal");
     assert!(
         requests.is_empty(),
-        "entry guard fired after a socket opened — {deny_reason}; got {} requests",
-        requests.len()
+        "guard fired after a socket opened — {deny_reason}"
     );
 }
 
@@ -241,18 +282,13 @@ async fn row7_hostname_answering_private_range_is_blocked_at_connect() {
     // Budgeted spawn (#2658 backlog): args/envs set before the call are
     // snapshotted by `spawn_budgeted` and rebuilt per attempt.
     let mut command = common::std_cmd();
-    command
-        .env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV)
-        .arg("--url")
-        .arg(format!("http://localhost:{port}/"))
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    command.env_remove(webfang_core::domain::ssrf_guard::DISABLE_ENTRY_GUARD_ENV);
+    with_scrape_args(
+        &mut command,
+        &format!("http://localhost:{port}/"),
+        out_dir.path(),
+        "5",
+    );
     let output = common::spawn_budgeted(
         "row7_hostname_answering_private_range_is_blocked_at_connect",
         command,
@@ -303,17 +339,12 @@ async fn row8_redirect_to_forbidden_literal_is_never_followed() {
     // Budgeted spawn (#2658 backlog): harness posture kept — `std_cmd()`
     // already disarms only the entry layer, exactly like `cmd()` did here.
     let mut command = common::std_cmd();
-    command
-        .arg("--url")
-        .arg(format!("{}/redir", mock_server.uri()))
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("5")
-        .arg("--max-retries")
-        .arg("0");
+    with_scrape_args(
+        &mut command,
+        &format!("{}/redir", mock_server.uri()),
+        out_dir.path(),
+        "5",
+    );
     let output = common::spawn_budgeted(
         "row8_redirect_to_forbidden_literal_is_never_followed",
         command,
@@ -385,17 +416,7 @@ the ephemeral local listener.</p>
     // Budgeted spawn (#2658 backlog): harness posture kept — `std_cmd()`
     // already sets the entry-guard disarmer, as the comment above states.
     let mut command = common::std_cmd();
-    command
-        .arg("--url")
-        .arg(mock_server.uri())
-        .arg("--single-page")
-        .arg("--ignore-robots")
-        .arg("--output")
-        .arg(out_dir.path())
-        .arg("--timeout-secs")
-        .arg("10")
-        .arg("--max-retries")
-        .arg("0");
+    with_scrape_args(&mut command, &mock_server.uri(), out_dir.path(), "10");
     let output = common::spawn_budgeted(
         "row9_positive_control_loopback_is_reachable_when_entry_guard_disarmed",
         command,
@@ -414,6 +435,85 @@ the ephemeral local listener.</p>
         !md_files.is_empty(),
         "positive control must write a Markdown artifact under {:?}",
         out_dir.path()
+    );
+}
+
+// ============================================================================
+// S9 — a non-test build ignores BOTH SSRF test hatches
+// ============================================================================
+
+/// Dial-time: the literal entry guard stays armed with both hatches set.
+#[tokio::test]
+async fn ssrf_bypass_vars_cannot_disarm_dial_guard() {
+    let (output, mock) = run_production_with("http://192.168.1.1:59999/", true).await;
+    assert_entry_rejection(output, mock, "192.168.1.1", "hatches must be ignored").await;
+}
+
+/// Connect-time: the validating resolver stays armed with both hatches set.
+#[tokio::test]
+async fn ssrf_bypass_vars_cannot_disarm_connect_resolver() {
+    let port = port_provider::bind_any().await.expect("ephemeral port");
+    let out_dir = tempfile::TempDir::new().expect("temp output dir");
+    let mut command = command_with_ssrf_bypasses();
+    with_scrape_args(
+        &mut command,
+        &format!("http://localhost:{port}/"),
+        out_dir.path(),
+        "5",
+    );
+    let output = common::spawn_budgeted(
+        "ssrf_bypass_vars_cannot_disarm_connect_resolver",
+        command,
+        None,
+    )
+    .await;
+    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(69), "dial must fail: {stderr}");
+    assert!(
+        stderr.contains("name resolution failed"),
+        "resolver hatch leaked: {stderr}"
+    );
+}
+
+/// Redirect-time: the literal redirect stop stays armed with both hatches set.
+#[tokio::test]
+async fn ssrf_bypass_vars_cannot_disarm_redirect_guard() {
+    let mock = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redir"))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("location", "http://127.0.0.2:9/forbidden"),
+        )
+        .mount(&mock)
+        .await;
+    let out_dir = tempfile::TempDir::new().expect("temp output dir");
+    let mut command = command_with_ssrf_bypasses();
+    with_scrape_args(
+        &mut command,
+        &format!("{}/redir", mock.uri()),
+        out_dir.path(),
+        "5",
+    );
+    let output = common::spawn_budgeted(
+        "ssrf_bypass_vars_cannot_disarm_redirect_guard",
+        command,
+        None,
+    )
+    .await;
+    let stderr = normalize_captured(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(69),
+        "redirect must fail: {stderr}"
+    );
+    assert!(
+        stderr.contains("302"),
+        "redirect hop was followed: {stderr}"
+    );
+    assert_eq!(
+        mock.received_requests().await.expect("journal").len(),
+        1,
+        "only the seed request may hit the mock server"
     );
 }
 

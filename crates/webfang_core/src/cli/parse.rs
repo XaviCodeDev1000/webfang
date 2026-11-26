@@ -17,9 +17,13 @@ pub fn handle_completions(shell: Shell) -> CliExit {
         Shell::PowerShell => clap_complete::Shell::PowerShell,
         Shell::Zsh => clap_complete::Shell::Zsh,
     };
-    generate_completions::<Args>(clap_shell)
-        .map(|_| CliExit::Success)
-        .unwrap_or_else(|_| CliExit::UsageError("completion generation failed".into()))
+    // #S14: the cause travels with the failure. `unwrap_or_else` replaced the
+    // real error with a generic sentence, so an operator could not tell a
+    // write failure from an unsupported shell.
+    match generate_completions::<Args>(clap_shell) {
+        Ok(()) => CliExit::Success,
+        Err(e) => CliExit::UsageError(format!("completion generation failed: {e}")),
+    }
 }
 
 /// Parse asset naming strategy from CLI string.

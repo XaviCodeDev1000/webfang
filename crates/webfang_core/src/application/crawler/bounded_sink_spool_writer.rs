@@ -17,6 +17,34 @@ use super::backlog::Backlog;
 use super::BoundedSinkError;
 use crate::application::crawler::content_sink::CapturedPage;
 
+/// Test-only witness for the per-page `fsync`. The syscall has no public
+/// result, so this is the deterministic way for a test to prove the durable
+/// watermark did not advance on `flush()` alone.
+#[cfg(test)]
+pub(super) static SPOOL_FSYNC_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Flush, fsync, and only then publish the durable byte count.
+///
+/// One seam for all three append paths keeps the watermark honest: `flush()`
+/// alone is an OS handoff, `sync_all()` is the durability point.
+async fn publish_durable(
+    writer: &mut BufWriter<tokio::fs::File>,
+    durable_bytes: &std::sync::atomic::AtomicU64,
+) -> Result<(), BoundedSinkError> {
+    use std::sync::atomic::Ordering;
+
+    writer.flush().await?;
+    writer.get_ref().sync_all().await?;
+    durable_bytes.store(
+        writer.get_ref().metadata().await.map_or(0, |m| m.len()),
+        Ordering::Release,
+    );
+    #[cfg(test)]
+    SPOOL_FSYNC_COUNT.fetch_add(1, Ordering::Relaxed);
+    Ok(())
+}
+
 /// Background writer: drains both hand-off halves and appends one JSON object
 /// per line.
 ///
@@ -34,34 +62,23 @@ pub(super) async fn spool_writer(
     cancel: CancellationToken,
     durable_bytes: std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) -> Result<usize, BoundedSinkError> {
-    use std::sync::atomic::Ordering;
-
     let mut writer = BufWriter::new(file);
     let mut written = 0usize;
 
     loop {
         while let Ok(page) = rx.try_recv() {
             write_page(&mut writer, &page, &mut written).await?;
-            // WU2 (#2611): hand the page's bytes to the OS and publish the
-            // durable position BEFORE waiting for more work. A SIGKILL between
-            // two pages can then lose at most the page being written, never
-            // the ones already flushed — the watermark the incremental flush
-            // converts from stays honest.
-            writer.flush().await?;
-            durable_bytes.store(
-                writer.get_ref().metadata().await.map_or(0, |m| m.len()),
-                Ordering::Release,
-            );
+            // WU2 (#2611), S12: fsync the page's bytes and only THEN publish
+            // the durable position, before waiting for more work. A crash
+            // between two pages can lose at most the page being written —
+            // the watermark the incremental flush converts stays honest.
+            publish_durable(&mut writer, &durable_bytes).await?;
         }
         for page in backlog.drain() {
             write_page(&mut writer, &page, &mut written).await?;
             // Same per-page durability as the channel path above: the backlog
             // drains page by page, so the watermark advances with it.
-            writer.flush().await?;
-            durable_bytes.store(
-                writer.get_ref().metadata().await.map_or(0, |m| m.len()),
-                Ordering::Release,
-            );
+            publish_durable(&mut writer, &durable_bytes).await?;
         }
 
         // Only a closed channel can end the stream, and only once it is closed,
@@ -86,11 +103,7 @@ pub(super) async fn spool_writer(
             next = rx.recv() => {
                 if let Some(page) = next {
                     write_page(&mut writer, &page, &mut written).await?;
-                    writer.flush().await?;
-                    durable_bytes.store(
-                        writer.get_ref().metadata().await.map_or(0, |m| m.len()),
-                        Ordering::Release,
-                    );
+                    publish_durable(&mut writer, &durable_bytes).await?;
                 }
                 // `None`: every sender is gone. Loop to drain the backlog and
                 // re-check the exit condition rather than breaking here.

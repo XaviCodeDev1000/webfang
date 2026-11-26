@@ -1,15 +1,53 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::ScraperError;
-use crate::infrastructure::persistence::pool::{Config, Hook, HookError, Manager, Pool, Runtime};
+use crate::infrastructure::persistence::pool::{
+    rusqlite, Config, Hook, HookError, Manager, Pool, Runtime, Timeouts,
+};
+
+/// Explicit pool wait budgets (#S13): acquiring a connection, creating one and
+/// recycling one are all bounded, so a stalled database file cannot hang a
+/// caller forever. `deadpool` leaves every timeout unset by default.
+const POOL_TIMEOUTS: Timeouts = Timeouts {
+    wait: Some(Duration::from_secs(30)),
+    create: Some(Duration::from_secs(10)),
+    recycle: Some(Duration::from_secs(10)),
+};
 
 /// WAL + per-connection pragmas, applied on every new pooled connection via the
 /// `post_create` hook. `journal_mode=WAL` is persistent (DB header); the other
 /// two are per-connection and therefore MUST be set on each connection.
 const INIT_PRAGMAS: &str = "\
 PRAGMA journal_mode = WAL;\
-PRAGMA synchronous = NORMAL;\
+PRAGMA synchronous = FULL;\
 PRAGMA cache_size = -4000;";
+
+/// Typed failure of the startup `PRAGMA integrity_check`.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum IntegrityCheckError {
+    /// The check ran and reported corruption.
+    #[error("sqlite integrity_check reported corruption: {detail}")]
+    Corrupt {
+        /// Diagnostic rows returned by the pragma.
+        detail: String,
+    },
+    /// The check could not run (unreadable or malformed database file).
+    #[error("sqlite integrity_check could not run: {0}")]
+    Unavailable(#[source] rusqlite::Error),
+}
+
+/// Run `PRAGMA integrity_check` on a connection and classify its result.
+pub(crate) fn verify_integrity(conn: &rusqlite::Connection) -> Result<(), IntegrityCheckError> {
+    let result: String = conn
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(IntegrityCheckError::Unavailable)?;
+    if result.trim().eq_ignore_ascii_case("ok") {
+        Ok(())
+    } else {
+        Err(IntegrityCheckError::Corrupt { detail: result })
+    }
+}
 
 // ============================================================================
 // Pool construction
@@ -38,6 +76,7 @@ pub fn create_pool(db_path: &Path, pool_size: usize) -> Result<Pool, ScraperErro
     let manager = Manager::from_config(&cfg, Runtime::Tokio1);
     let pool = Pool::builder(manager)
         .max_size(pool_size.max(1))
+        .timeouts(POOL_TIMEOUTS)
         .runtime(Runtime::Tokio1)
         .post_create(pragma_hook())
         .build()
@@ -56,6 +95,7 @@ pub fn create_memory_pool() -> Result<Pool, ScraperError> {
     let manager = Manager::from_config(&cfg, Runtime::Tokio1);
     let pool = Pool::builder(manager)
         .max_size(1)
+        .timeouts(POOL_TIMEOUTS)
         .runtime(Runtime::Tokio1)
         // No post_create hook: in-memory databases don't support WAL mode.
         .build()
@@ -63,10 +103,28 @@ pub fn create_memory_pool() -> Result<Pool, ScraperError> {
     Ok(pool)
 }
 
-/// `post_create` hook applying the WAL-mode pragmas to each new connection.
+/// `post_create` hook applying the WAL-mode pragmas to each new connection,
+/// plus the startup integrity gate.
+///
+/// `PRAGMA integrity_check` is O(database size), so it runs once per POOL —
+/// claimed before the first connection verifies, on the first connection the
+/// pool creates — never on every new connection. The pragmas still run on
+/// every connection because `synchronous` and `cache_size` are per-connection.
+///
+/// The check runs BEFORE the pragmas: a corrupt file must not first be
+/// rewritten by `journal_mode=WAL` and then reported as a generic pragma
+/// failure.
 fn pragma_hook() -> Hook {
-    Hook::async_fn(|obj, _metrics| {
+    let integrity_checked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    Hook::async_fn(move |obj, _metrics| {
+        let integrity_checked = std::sync::Arc::clone(&integrity_checked);
         Box::pin(async move {
+            if !integrity_checked.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                obj.interact(|conn| verify_integrity(conn))
+                    .await
+                    .map_err(|e| HookError::message(format!("integrity_check (interact): {e}")))?
+                    .map_err(|e| HookError::message(format!("integrity_check: {e}")))?;
+            }
             obj.interact(|conn| conn.execute_batch(INIT_PRAGMAS))
                 .await
                 .map_err(|e| HookError::message(format!("init pragmas (interact): {e}")))?

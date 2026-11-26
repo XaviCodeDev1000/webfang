@@ -332,15 +332,18 @@ async fn corrupt_state_file_is_reported_to_the_user() {
         !stderr.contains("panicked"),
         "corrupt state must not panic: {stderr}"
     );
-    // `Advertencia` is Spanish-only: the English `tracing::WARN` that exists
-    // today cannot satisfy it, which is exactly the defect (P8-3).
+    // S12: corruption is a typed, operator-visible error, not a warning that
+    // silently restarts from an empty store. `CliExit::IoError` prints it.
     assert!(
-        stderr.contains("Advertencia"),
-        "corrupt state must be reported to the user in Spanish, not only as an \
-         internal English log line; got stderr:\n{stderr}"
+        stderr.contains("record store file is corrupt"),
+        "the typed corruption error must reach the user; got stderr:\n{stderr}"
     );
     assert!(
         stderr.contains(&corrupt.display().to_string()),
-        "the corrupt-state message must name the offending path; got stderr:\n{stderr}"
+        "the corrupt-state error must name the offending path; got stderr:\n{stderr}"
+    );
+    assert!(
+        !output.status.success(),
+        "an unreadable resume store must fail the run, not restart from zero"
     );
 }

@@ -6,8 +6,9 @@ members = [
     "crates/webfang_cli",
     "crates/webfang_test_utils",
     "crates/webfang_benchmark",
+    "crates/webfang_sandbox_wrapper",
 ]
-exclude = ["fuzz", "tools/intra-crate-lint"]
+exclude = ["fuzz", "tools/intra-crate-lint", "vendor/arapuca"]
 
 [workspace.package]
 version = "9.2.4"
@@ -30,6 +31,11 @@ webfang_test_utils = { path = "crates/webfang_test_utils" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
+
+# Sandbox (S2): vendored from https://github.com/LeGambiArt/arapuca at
+# commit 2ec2daa224018418cf10e1aa46c989cbebc746b1. All optional features stay
+# off; `microvm` (and its reqwest edge) is deliberately never enabled.
+arapuca = { path = "vendor/arapuca", default-features = false }
 
 # HTTP & Networking
 wreq = { version = "6.0.0-rc.29", features = ["gzip", "brotli", "stream", "json", "cookies"] }

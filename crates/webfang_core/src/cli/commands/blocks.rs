@@ -20,7 +20,7 @@
 
 use crate::domain::model_profile::{ModelProfileRegistry, ProfileProvenance};
 use crate::domain::network_policy::NetworkPolicyMode;
-use crate::domain::providers::ProviderConfig;
+use crate::domain::providers::{ProviderConfig, RedactedUrl};
 
 /// Resolve the character budget BOTH diagnostics render and the run chunks
 /// with (S10/T2b). An explicit operator flag wins; otherwise the shipped
@@ -42,23 +42,6 @@ pub(crate) fn governing_budget(
     })
 }
 
-/// Render a provider base URL for diagnostics with its userinfo removed.
-///
-/// The URL is cloned, so config load and request egress keep the configured
-/// value: only the text printed by `doctor` / `show` is redacted. A credential
-/// embedded in the authority (`https://user:secret@host/v1`) must never reach
-/// the terminal, logs or `--trace-file`, while the scheme, host, port, path and
-/// query stay identifiable.
-fn redacted_base_url(base_url: &url::Url) -> String {
-    let mut redacted = base_url.clone();
-    // A cannot-be-a-base URL has no authority to strip: credential-looking
-    // text can remain in its path. Never fail open by printing it verbatim.
-    if redacted.set_username("").is_err() || redacted.set_password(None).is_err() {
-        return "<redacted provider url>".to_owned();
-    }
-    redacted.to_string()
-}
-
 /// Print the shared provider block: the identity of the run.
 ///
 /// `explicit` tells whether the operator NAMED this provider (through
@@ -77,7 +60,7 @@ pub fn print_provider_block(provider: &ProviderConfig, explicit: bool) {
     println!("  id: {}", provider.id);
     println!("  display_name: {}", provider.display_name);
     println!("  kind: {:?}", provider.kind);
-    println!("  base_url: {}", redacted_base_url(&provider.base_url));
+    println!("  base_url: {}", RedactedUrl::from_url(&provider.base_url));
     println!(
         "  capabilities: {:?}",
         provider

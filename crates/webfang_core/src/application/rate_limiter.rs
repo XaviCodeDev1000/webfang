@@ -213,7 +213,7 @@ impl<'a> PacingContext<'a> {
 /// surface, stderr is the human one.
 pub fn record_pacing_wait(ctx: &PacingContext<'_>, waited: Duration, outcome: &'static str) {
     let waited_ms = waited.as_millis() as u64;
-    let url = ctx.url.unwrap_or("unknown");
+    let url = crate::domain::providers::RedactedUrl::from_option_str(ctx.url).to_string();
     match ctx.correlation {
         Some(correlation) => {
             tracing::debug!(

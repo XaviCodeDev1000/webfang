@@ -147,6 +147,47 @@ async fn sidecar_round_trips_and_clears() {
     clear_sidecar(dir.path()).await.expect("idempotent clear");
 }
 
+/// S12: a sidecar is not durably published until the temp file AND its
+/// parent directory have been fsynced. The counter is the deterministic
+/// witness for a syscall with no other observable result; the round-trip
+/// proves the watermark reached the final path.
+#[tokio::test]
+async fn sidecar_watermark_is_persisted_after_fsync() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let before = SIDECAR_DURABILITY_SYNCS.load(Ordering::Relaxed);
+    let sidecar = running_sidecar(
+        &SpoolIdentity {
+            first_line_sha256: Some("deadbeef".to_string()),
+        },
+        dir.path(),
+        &options(),
+        7_890,
+    );
+
+    write_sidecar(dir.path(), &sidecar).await.expect("write");
+    let read = read_sidecar(dir.path())
+        .await
+        .expect("read")
+        .expect("present");
+    assert_eq!(read, sidecar, "watermark reaches the durable final path");
+    assert_eq!(read.watermark_bytes, 7_890);
+    assert!(
+        !dir.path()
+            .join(format!(
+                "{}.tmp",
+                crate::application::batch::progress::BATCH_PROGRESS_FILE
+            ))
+            .exists(),
+        "the temp file must be gone after the rename"
+    );
+    assert_eq!(
+        SIDECAR_DURABILITY_SYNCS.load(Ordering::Relaxed) - before,
+        2,
+        "temp file and parent directory must each be fsynced once"
+    );
+}
+
 #[test]
 fn batch_namespace_is_stable_per_output_dir_and_differs_across() {
     let a = batch_namespace(Path::new("/tmp/vault-a"));

@@ -211,15 +211,7 @@ async fn run_batch_crawl(
 
     // The crawl is over: stop the watch loop and let its FINAL flush (bounded
     // by FLUSH_SHUTDOWN_TIMEOUT) run before the sink closes.
-    flush_done.cancel();
-    if let Some(handle) = flush_task {
-        let _ = tokio::time::timeout(
-            crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
-                .saturating_add(std::time::Duration::from_secs(1)),
-            handle,
-        )
-        .await;
-    }
+    crate::cli::shutdown::stop_flush_watch(flush_done, flush_task).await;
 
     if cancel.is_cancelled() {
         warn!("shutdown requested — exporting the pages captured so far");
@@ -302,7 +294,10 @@ fn spawn_flush_watch(
 
     // Supervised: the handle is joined in run_batch_crawl under a timeout
     // right after the crawl finishes (the watch's own final flush).
-    #[allow(clippy::disallowed_methods)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "run_batch_crawl retains this JoinHandle and joins it under a timeout after the crawl"
+    )]
     let handle = tokio::spawn(crate::cli::batch_flush::run_flush_watch(
         crate::cli::batch_flush::FlushWatchParams {
             sink,

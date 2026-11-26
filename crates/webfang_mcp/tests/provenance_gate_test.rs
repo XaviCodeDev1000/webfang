@@ -23,7 +23,7 @@
 mod common;
 use std::path::{Path, PathBuf};
 
-use webfang_mcp::mcp_server::MCP_TOOL_COUNT;
+use webfang_mcp::mcp_server::mcp_tool_count;
 
 const HANDLERS_DIR: &str = "src/mcp_server/handlers";
 
@@ -118,10 +118,11 @@ fn every_tool_description_carries_the_injection_notice() {
             }
         }
     }
+    let advertised = mcp_tool_count();
     assert!(
-        total >= MCP_TOOL_COUNT,
+        total >= advertised,
         "the tool inventory shrank: found {total} registrations, expected at \
-         least {MCP_TOOL_COUNT}"
+         least {advertised}"
     );
     assert_eq!(
         marked, total,

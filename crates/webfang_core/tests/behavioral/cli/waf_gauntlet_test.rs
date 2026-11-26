@@ -535,8 +535,14 @@ async fn scrape_once(
     )
 }
 
-/// Terminal WAF block, so the process must not keep crawling.
+/// Exit code of a failure that is NOT a WAF verdict: a generic HTTP error, a
+/// rate-limited backoff, or a challenge downgraded by `--ignore-waf`.
 const EXIT_WAF_BLOCK: i32 = 69;
+
+/// Exit code when the WAF verdict is what failed the run
+/// (`CliExit::WafBlocked`), so an operator can tell a block apart from an
+/// ordinary failure without parsing stderr.
+const EXIT_WAF_BLOCKED: i32 = 71;
 
 /// A 503 carrying `cf-mitigated` is a WAF challenge, not a plain server error.
 ///
@@ -551,8 +557,8 @@ async fn f11_503_challenge_is_classified_as_waf_not_http_error() {
 
     assert_eq!(
         code,
-        Some(EXIT_WAF_BLOCK),
-        "expected exit {EXIT_WAF_BLOCK}, got {code:?}\nstderr: {stderr}"
+        Some(EXIT_WAF_BLOCKED),
+        "expected exit {EXIT_WAF_BLOCKED}, got {code:?}\nstderr: {stderr}"
     );
     assert!(
         stderr.contains("WAF/CAPTCHA detected"),
@@ -587,7 +593,7 @@ async fn f11_403_challenge_is_classified_as_waf_without_rotating_user_agent() {
 
     let (code, stderr, hits) = scrape_once(&t, "/f11-403", &[]).await;
 
-    assert_eq!(code, Some(EXIT_WAF_BLOCK), "stderr: {stderr}");
+    assert_eq!(code, Some(EXIT_WAF_BLOCKED), "stderr: {stderr}");
     assert!(
         stderr.contains("WAF/CAPTCHA detected"),
         "a 403 + cf-mitigated challenge must be reported as a WAF block\nstderr: {stderr}"

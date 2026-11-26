@@ -261,19 +261,16 @@ async fn resume_state_and_output_in_different_directories() {
     );
 }
 
-/// A corrupt state JSON does not crash the run: `apply_resume_mode` falls back
-/// to the full URL list, so every URL is still scraped and saved.
+/// A corrupt state JSON is an operator-visible failure: the run stops before
+/// scraping instead of silently re-driving work whose state it cannot read.
 #[tokio::test]
-async fn corrupt_state_falls_back_to_full_scrape() {
+async fn corrupt_state_fails_the_run_with_a_visible_error() {
     let t = BehavioralTest::new().await;
     let sitemap_url = mount_resume_fixture(&t).await;
     let state_dir = TempDir::new().unwrap();
+    let corrupt = state_dir.path().join(format!("{DOMAIN}.json"));
 
-    std::fs::write(
-        state_dir.path().join(format!("{DOMAIN}.json")),
-        "not valid json!!!",
-    )
-    .expect("write corrupt state");
+    std::fs::write(&corrupt, "not valid json!!!").expect("write corrupt state");
 
     let output = t
         .state_dir_cmd(state_dir.path())
@@ -290,19 +287,22 @@ async fn corrupt_state_falls_back_to_full_scrape() {
         "corrupt state must not panic: {stderr}"
     );
 
-    assert_eq!(
-        count_path(&t.server, "/page1").await,
-        1,
-        "corrupt state must still scrape /page1"
-    );
-    assert_eq!(
-        count_path(&t.server, "/page2").await,
-        1,
-        "corrupt state must still scrape /page2"
+    assert!(
+        stderr.contains("record store file is corrupt"),
+        "the typed corruption error must be visible: {stderr}"
     );
     assert!(
-        t.find_files("md").len() >= 2,
-        "corrupt state must still produce .md files"
+        stderr.contains(&corrupt.display().to_string()),
+        "the error must name the offending file: {stderr}"
+    );
+    assert_eq!(
+        count_path(&t.server, "/page1").await,
+        0,
+        "no URL may be scraped when resume state is unreadable"
+    );
+    assert!(
+        t.find_files("md").is_empty(),
+        "no output may be produced from a failed resume gate"
     );
 }
 

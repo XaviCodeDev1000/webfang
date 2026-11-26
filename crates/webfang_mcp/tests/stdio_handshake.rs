@@ -45,7 +45,13 @@ use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout};
-use webfang_mcp::mcp_server::MCP_TOOL_COUNT;
+/// The EXTERNAL pin on the tool registry (#1817, #S14).
+///
+/// The library derives its count from the router itself, so this test is the
+/// one place a human audits the figure: a tool added or dropped without a
+/// deliberate bump here fails. The probe is not part of the pinned surface —
+/// it is development-only and gated by its own variable.
+const EXPECTED_TOOL_COUNT: usize = 36;
 
 /// Per-read timeout: generous enough for cold starts + BoringSSL init.
 const READ_TIMEOUT: Duration = Duration::from_secs(15);
@@ -251,10 +257,10 @@ async fn stdio_initialize_is_answered_without_model_resolution() {
 /// `tools/list` reports the full tool registry, including `extract_domain`
 /// and `get_accessibility_snapshot` (#788).
 ///
-/// The size is the EXACT pinned count, read from the one place that owns it
-/// ([`MCP_TOOL_COUNT`]) — a figure written twice is a figure that drifts
-/// (#1817). The name of this test used to say "35" while the assertion said
-/// 36; the name now says what the assertion says.
+/// The size is the EXACT pinned count ([`EXPECTED_TOOL_COUNT`]) — the one
+/// place a human audits the figure (#1817, #S14). The name of this test used
+/// to say "35" while the assertion said 36; the name now says what the
+/// assertion says.
 #[tokio::test]
 async fn stdio_tools_list_reports_the_pinned_tool_registry() {
     let mut child = spawn_stdio_server();
@@ -272,8 +278,8 @@ async fn stdio_tools_list_reports_the_pinned_tool_registry() {
         .expect("tools/list result must carry a tools array");
     assert_eq!(
         tools.len(),
-        MCP_TOOL_COUNT,
-        "the registry exposes exactly {MCP_TOOL_COUNT} tools"
+        EXPECTED_TOOL_COUNT,
+        "the registry exposes exactly {EXPECTED_TOOL_COUNT} tools"
     );
     assert!(
         tools.iter().any(|t| t["name"] == "extract_domain"),
@@ -587,9 +593,9 @@ async fn stdio_oversize_stdin_frame_is_refused_with_a_visible_reason() {
 ///
 /// The four assertions are the four halves of the contract:
 /// 1. the env switch reached the child (the probe is advertised);
-/// 2. the panicking call is CONTAINED — `isError`, plain explanation, and the
-///    payload withheld from the client (a dead transport answers nothing, and
-///    `read_json_line` would time out instead);
+/// 2. the panicking call is CONTAINED in the SHARED envelope (#S14) — JSON-RPC
+///    `-32603` with the same English message HTTP returns, payload withheld (a
+///    dead transport answers nothing, and `read_json_line` would time out);
 /// 3. the child's stderr carries the hook's structured record, message AND
 ///    location;
 /// 4. a FOLLOWING call on the SAME session still succeeds — the F2 promise
@@ -628,19 +634,19 @@ async fn stdio_contained_panic_is_recorded_with_location_and_keeps_the_session()
     });
     send(&mut stdin, &panic_call).await;
 
-    // Assert: containment, not a dead transport.
+    // Assert: containment in the shared envelope, not a dead transport.
     let response = read_json_line(&mut reader).await;
-    let result = &response["result"];
+    let error = &response["error"];
     assert_eq!(
-        result["isError"], true,
-        "a contained panic must answer a normal tool error; got: {response}"
+        error["code"], -32603,
+        "a contained panic must answer the shared -32603 envelope; got: {response}"
     );
-    let explanation = result["content"][0]["text"]
+    let explanation = error["message"]
         .as_str()
-        .expect("tool call content[0] must be a text block");
+        .expect("the error envelope must carry a message");
     assert!(
-        explanation.contains("fue contenida"),
-        "the caller must get the plain containment explanation; got: {explanation}"
+        explanation.contains("session is still active"),
+        "the caller must be told the session survived; got: {explanation}"
     );
     assert!(
         !explanation.contains(PANIC_PROBE_MESSAGE),

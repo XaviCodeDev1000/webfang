@@ -312,12 +312,11 @@ async fn apply_resume_mode_full_skips_previously_scraped_urls() {
 }
 
 #[tokio::test]
-async fn apply_resume_mode_with_corrupted_state_returns_all_urls() {
+async fn apply_resume_mode_with_corrupted_state_fails_closed() {
     let root = crate::domain::CorrelationId::new();
     let tmp = TempDir::new().unwrap();
     let state_dir = tmp.path().to_path_buf();
 
-    // Write corrupted state file
     let state_file = state_dir.join("example.com.json");
     std::fs::create_dir_all(&state_dir).unwrap();
     std::fs::write(&state_file, "not valid json!!!").unwrap();
@@ -330,18 +329,20 @@ async fn apply_resume_mode_with_corrupted_state_returns_all_urls() {
         dir: state_dir.clone(),
     };
 
-    let (filtered, state_store) =
-        apply_resume_mode(urls.clone(), &mode, "https://example.com", &root)
-            .await
-            .expect("corrupted state file should not prevent store creation");
-
-    // Corrupted state → fallback to all URLs (graceful degradation)
-    assert_eq!(
-        filtered.len(),
-        2,
-        "should return all URLs on corrupted state"
-    );
-    assert!(state_store.is_some());
+    let err = match apply_resume_mode(urls.clone(), &mode, "https://example.com", &root).await {
+        Ok(_) => panic!("unreadable resume state must be an operator-visible error"),
+        Err(err) => err,
+    };
+    match err {
+        crate::cli::error::CliExit::IoError(msg) => {
+            assert!(msg.contains("corrupt"), "typed cause must survive: {msg}");
+            assert!(
+                msg.contains(&state_file.display().to_string()),
+                "the error must name the offending file: {msg}"
+            );
+        },
+        other => panic!("expected IoError for corrupt state, got {other:?}"),
+    }
 }
 
 #[tokio::test]

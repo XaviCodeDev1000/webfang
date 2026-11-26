@@ -140,6 +140,8 @@ fn test_all_variants_map_to_named_constants() {
         (CliExit::UsageError("test".into()), EXIT_USAGE_ERROR),
         (CliExit::DataFormatError("test".into()), EXIT_DATA_ERROR),
         (CliExit::NetworkError("test".into()), EXIT_UNAVAILABLE),
+        (CliExit::SsrfBlocked("test".into()), EXIT_SSRF_BLOCKED),
+        (CliExit::WafBlocked("test".into()), EXIT_WAF_BLOCKED),
         (CliExit::IoError("test".into()), EXIT_IO_ERROR),
         (CliExit::ProtocolError("test".into()), EXIT_PROTOCOL),
         (CliExit::ConfigError("test".into()), EXIT_CONFIG),

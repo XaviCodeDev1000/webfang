@@ -6,7 +6,7 @@
 //! default (which an agent reads as a dead transport, not a server error).
 
 use super::{build_mcp_router_with_service, jsonrpc_panic_response, ServerOptions};
-use crate::mcp_server::panic_containment::{JSONRPC_INTERNAL_ERROR, PANIC_HTTP_ERROR};
+use crate::mcp_server::panic_containment::{JSONRPC_INTERNAL_ERROR, PANIC_CONTAINED_MESSAGE};
 use crate::mcp_server::render_panic_payload;
 use axum::http::{header, Method, StatusCode};
 use axum::response::Response;
@@ -104,34 +104,33 @@ async fn panic_mapping_answers_jsonrpc_internal_error_without_payload() {
         "the OUTER backstop reads no body, so the id is null by rule: {parsed}"
     );
     assert_eq!(parsed["error"]["code"], JSONRPC_INTERNAL_ERROR);
-    assert_eq!(parsed["error"]["message"], PANIC_HTTP_ERROR);
+    assert_eq!(parsed["error"]["message"], PANIC_CONTAINED_MESSAGE);
     assert!(
         !text.contains("sk-do-not-leak"),
         "the panic payload must never reach the client: {text}"
     );
 }
 
-/// The user-facing text is Spanish, per the project convention for
-/// user-facing errors (tracing fields and code comments stay English).
+/// #S14: ONE envelope for every transport.
 ///
-/// Pinned on markers an English sentence cannot contain (the article `La`
-/// and a Spanish-specific character — `ñ`, or an accented vowel): an "is
-/// it non-empty / is it lowercase" check would pass on the English
-/// translation of the same sentence, so it would pin nothing.
+/// `PANIC_CONTAINED_MESSAGE` is the text the HTTP middleware puts in its
+/// `-32603` body AND the text the in-handler panic arm raises as `-32603` over
+/// stdio, so the constant is transport-neutral and English — the repository's
+/// rule for every user-facing artifact. Pinned on content a translation could
+/// not satisfy: a client that reads `session is still active` knows the
+/// session survived, and no Spanish character may sneak back in.
 #[test]
-fn panic_messages_are_spanish() {
-    for (label, message) in [
-        ("http", PANIC_HTTP_ERROR),
-        ("tool", crate::mcp_server::PANIC_CONTAINED_TOOL_ERROR),
-    ] {
-        let has_spanish_char = message
-            .chars()
-            .any(|c| matches!(c, 'ñ' | 'á' | 'é' | 'í' | 'ó' | 'ú'));
-        assert!(
-            message.contains("La ") && has_spanish_char,
-            "the {label} message must be Spanish, got: {message}"
-        );
-    }
+fn contained_panic_message_is_shared_and_english() {
+    let message = PANIC_CONTAINED_MESSAGE;
+    assert!(
+        message.is_ascii(),
+        "the shared containment message must be English (no Spanish accents), got: {message}"
+    );
+    assert!(
+        message.starts_with("Internal MCP server error")
+            && message.contains("session is still active"),
+        "the message must name the condition and the surviving session, got: {message}"
+    );
 }
 
 /// `render_panic_payload` must be total: it never panics, never returns

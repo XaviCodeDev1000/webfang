@@ -116,6 +116,13 @@ pub(crate) fn report_phase(
         if let Some(exit) = crate::cli::error::scraper_failure_exit_when_internal_fatal(failures) {
             return Some(exit);
         }
+        // #S14: a run whose failures are ALL WAF challenges reports 71 — the
+        // origin answered and refused, which is neither an outage (69) nor a
+        // robots.txt rule (77).
+        if let Some(exit) = crate::cli::error::waf_blocked_exit_when_all_failures_are_waf(failures)
+        {
+            return Some(exit);
+        }
         if let Some(exit) = permanent_io_error_for_failures(failures) {
             return Some(exit);
         }
@@ -181,6 +188,9 @@ pub(crate) fn batch_exit_code(
         // arm delegates to its canonical mapping function in `cli::error`
         // (#839) so every exit-code decision has exactly one implementation.
         if let Some(exit) = crate::cli::error::scraper_failure_exit_when_internal_fatal(errors) {
+            return exit;
+        }
+        if let Some(exit) = crate::cli::error::waf_blocked_exit_when_all_failures_are_waf(errors) {
             return exit;
         }
         if let Some(exit) = permanent_io_error_for_failures(errors) {

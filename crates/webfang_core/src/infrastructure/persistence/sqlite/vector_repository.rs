@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::domain::repository::VectorRepository;
+use crate::domain::repository::{ChunkVector, VectorRepository};
 use crate::domain::text_chunker::ByteSpan;
 use crate::error::ScraperError;
 use crate::infrastructure::persistence::pool::Pool;
@@ -65,8 +65,9 @@ impl SqliteVectorRepository {
     ///
     /// # Errors
     ///
-    /// Returns [`ScraperError::Persistence`] if the schema marker belongs to
-    /// another version, or if the DDL batch fails.
+    /// Returns [`ScraperError::Persistence`] if the pool's startup
+    /// `PRAGMA integrity_check` fails (surfaced by the first `pool.get()`),
+    /// the schema marker belongs to another version, or the DDL batch fails.
     pub async fn setup_schema(pool: &Pool) -> Result<(), ScraperError> {
         let conn = pool
             .get()
@@ -285,6 +286,59 @@ impl VectorRepository for SqliteVectorRepository {
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
                 Err(e) => Err(ScraperError::persistence(format!("get_vector: {e}"))),
             }
+        })
+    }
+
+    fn load_chunk_vectors<'a>(
+        &'a self,
+        resource_url: Option<&'a str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ChunkVector>, ScraperError>> + Send + 'a>> {
+        Box::pin(async move {
+            type LoadedChunkRow = (String, String, Vec<u8>);
+            const ALL_CHUNKS: &str = "SELECT id, content, embedding_vector FROM chunks \
+                                      WHERE embedding_vector IS NOT NULL";
+            const RESOURCE_CHUNKS: &str = "SELECT id, content, embedding_vector FROM chunks \
+                                           WHERE embedding_vector IS NOT NULL AND resource_url = ?1";
+
+            // Own the filter before `interact`: its closure must be `Send + 'static`.
+            let url = resource_url.map(str::to_owned);
+            let conn = self.pool.get().await.map_err(|e| {
+                ScraperError::persistence(format!("obtener conexión del pool: {e}"))
+            })?;
+            let rows: Vec<LoadedChunkRow> = conn
+                .interact(move |c| {
+                    let (sql, params): (&str, Vec<&str>) = match url.as_deref() {
+                        Some(url) => (RESOURCE_CHUNKS, vec![url]),
+                        None => (ALL_CHUNKS, Vec::new()),
+                    };
+                    let mut stmt = c.prepare(sql)?;
+                    let rows = stmt.query_map(
+                        rusqlite::params_from_iter(params.iter().copied()),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Vec<u8>>(2)?,
+                            ))
+                        },
+                    )?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                })
+                .await
+                .map_err(|e| {
+                    ScraperError::persistence(format!("load_chunk_vectors (interact): {e}"))
+                })?
+                .map_err(|e| ScraperError::persistence(format!("load_chunk_vectors: {e}")))?;
+
+            let mut result = Vec::with_capacity(rows.len());
+            for (id, content, bytes) in rows {
+                result.push(ChunkVector {
+                    id,
+                    content,
+                    embedding: bytes_to_f32_vec(&bytes)?,
+                });
+            }
+            Ok(result)
         })
     }
 }

@@ -1,31 +1,25 @@
-//! Incremental spool flush (slice 2, WU3 — #2611).
-//!
-//! The batch captures pages into the spool as they are fetched, but without a
-//! flush policy the `.md` conversion happens ONLY at the clean close — the
-//! exact behavior that loses 403 captured pages to a kill (#2611's report).
-//! This module is the policy: every `N` captured pages (or on graceful
-//! shutdown, WU5) the spool tail past the watermark is converted with the
-//! SAME pipeline the clean close and `webfang recover` use, written to the
-//! output directory, and the sidecar's watermark advances.
+//! Incremental spool flush (WU3, #2611): convert the spool tail every `N`
+//! pages (or on graceful close) with the same pipeline as the clean close and
+//! `webfang recover`, then advance the sidecar watermark.
 //!
 //! # Ordering (design S6, per page)
 //!
-//! `.md` written → COMMITTED record → watermark advanced. A page whose
-//! extraction fails still advances the watermark (it is consumed bytes —
-//! the clean-close export would fail on it too); an I/O write failure does
-//! NOT advance the watermark and blocks the spool's discard, so nothing is
-//! lost and nothing is double-exported.
+//! `.md` written → COMMITTED record → watermark advanced. Extraction failures
+//! still consume bytes; I/O failures do not advance the watermark, so nothing
+//! is lost or double-exported.
 //!
-//! # Resume contract (S9, verified assumption)
+//! # Resume contract (S9)
 //!
-//! The `content_hash` recorded in a COMMITTED is the SHA-256 of the
-//! `ScrapedContent` text the flush wrote — the same field the export's
-//! `CommitSession::decide` matches against the `export.jsonl` hash index, so
-//! a resume that finds a pre-watermark COMMITTED skips it for this output.
+//! The COMMITTED `content_hash` is the SHA-256 of the written `ScrapedContent`,
+//! matching the export's `export.jsonl` hash index so resume skips it.
+//!
+//! S12: the sidecar's temp file and parent directory are fsynced around the
+//! rename before the watermark is considered published.
 
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt as _;
 use tracing::{info, instrument, warn};
 
 use crate::application::batch::progress::{
@@ -37,22 +31,25 @@ use crate::domain::CorrelationId;
 use crate::infrastructure::output::file_saver::{save_results, ObsidianOptions};
 use crate::OutputFormat;
 
+/// Test-only witness for the two `sync_all` calls that publish a sidecar.
+/// A file flush has no public result, so tests observe the syscalls here.
+#[cfg(test)]
+pub(crate) static SIDECAR_DURABILITY_SYNCS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 /// Result of one incremental flush of the spool tail.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct FlushOutcome {
-    /// Pages converted AND written in this flush.
+    /// Pages converted and written in this flush.
     pub exported: usize,
-    /// The exported `(url, content)` pairs, for the COMMITTED seam (WU4).
-    /// Cleared before returning when the caller has no store, to keep the
-    /// flush's memory bounded on huge tails.
+    /// Exported pairs for the COMMITTED seam; cleared without a store to
+    /// bound memory on huge tails.
     pub pages: Vec<(String, crate::domain::ScrapedContent)>,
-    /// Pages whose extraction failed (watermark advanced past them — the
-    /// clean close would fail on them identically).
+    /// Pages whose extraction failed; their bytes are still consumed.
     pub failed: usize,
-    /// Corrupt spool lines skipped (consumed bytes, counted).
+    /// Corrupt spool lines skipped (consumed bytes).
     pub skipped_corrupt: u64,
-    /// The new durable watermark after this flush. Equals the caller's
-    /// `from_offset` when the flush exported nothing.
+    /// New durable watermark; equals `from_offset` when nothing was exported.
     pub watermark: u64,
 }
 
@@ -167,22 +164,27 @@ pub fn running_sidecar(
     }
 }
 
-/// Persist the sidecar atomically (write temp + rename, the repo's one
-/// crash-safe pattern).
+/// Persist the sidecar durably: fsync temp, rename, fsync parent directory.
 ///
 /// # Errors
-///
-/// Surfaces I/O failures to the caller — the flush caller logs them and
-/// keeps running (a sidecar write failure degrades NEXT-run salvage to
-/// OrphanSpool, it does not kill the live run).
+/// I/O failures are logged by the flush caller; the live run continues.
 pub async fn write_sidecar(root: &Path, sidecar: &BatchProgressV1) -> std::io::Result<()> {
     use crate::application::batch::progress::BATCH_PROGRESS_FILE;
 
     let path = root.join(BATCH_PROGRESS_FILE);
     let tmp = root.join(format!("{BATCH_PROGRESS_FILE}.tmp"));
     let bytes = serde_json::to_vec(sidecar).map_err(std::io::Error::other)?;
-    tokio::fs::write(&tmp, &bytes).await?;
-    tokio::fs::rename(&tmp, &path).await
+    let mut file = tokio::fs::File::create(&tmp).await?;
+    file.write_all(&bytes).await?;
+    file.sync_all().await?;
+    drop(file);
+    tokio::fs::rename(&tmp, &path).await?;
+    // POSIX directory fsync; platforms without it keep rename atomicity.
+    #[cfg(unix)]
+    tokio::fs::File::open(root).await?.sync_all().await?;
+    #[cfg(test)]
+    SIDECAR_DURABILITY_SYNCS.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 /// Read the sidecar for the salvage decision paths (absent = None).
@@ -202,12 +204,10 @@ pub async fn read_sidecar(root: &Path) -> std::io::Result<Option<BatchProgressV1
     }
 }
 
-/// Remove the sidecar after a clean close: the spool is deleted (discard)
-/// or fully exported, so a sidecar describing a dead offset would only
-/// mislead the next acquisition into `OrphanSpool` quarantine.
+/// Remove the sidecar after a clean close: a dead offset would mislead the
+/// next acquisition into `OrphanSpool` quarantine.
 ///
 /// # Errors
-///
 /// Absent file is success; real I/O failures propagate.
 pub async fn clear_sidecar(root: &Path) -> std::io::Result<()> {
     use crate::application::batch::progress::BATCH_PROGRESS_FILE;

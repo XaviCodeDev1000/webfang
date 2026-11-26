@@ -11,11 +11,12 @@
 //! integration test that spawns the real binary, so the trigger has to be
 //! reachable from the wire.
 //!
-//! The switch is the PRESENCE of [`PANIC_PROBE_ENV`] with a non-empty value
-//! (same `WEBFANG_*` convention as `WEBFANG_AI_MODEL_ID`): an operator has to
-//! set it, deliberately, per process. Absent or empty, [`build_router`] is
-//! never called by the registry and the advertised tool surface is byte-for-byte
-//! what it was before this module existed.
+//! The switch is the PRESENCE of [`PANIC_PROBE_ENV`] with a non-empty value in
+//! a DEVELOPMENT build (#S14): an operator has to set it, deliberately, per
+//! process, and a release binary ignores it entirely — a shipped server never
+//! advertises a tool that always fails. Absent or empty, or in a release build,
+//! [`build_router`] is never called by the registry and the advertised tool
+//! surface is byte-for-byte what it was before this module existed.
 //!
 //! The panic is raised inside the dispatch future and contained by the EXISTING
 //! `catch_unwind` in `McpHandler::call_tool` — this module adds no second
@@ -55,11 +56,18 @@ pub const PANIC_PROBE_MESSAGE: &str = "webfang-pc3-panic-probe: deliberate tool 
 
 /// Is the panic probe enabled in this process?
 ///
-/// Presence-with-a-value of [`PANIC_PROBE_ENV`], matching how
-/// `WEBFANG_AI_MODEL_ID` is treated elsewhere: a read-only env query, so it
-/// needs none of the `webfang_test_utils` mutation serialization (#1126).
+/// TWO conditions, both required (#S14): a non-empty [`PANIC_PROBE_ENV`] AND a
+/// development build (`cfg!(debug_assertions)`). The environment switch alone
+/// let a release deployment advertise a tool that always fails just by setting
+/// a variable; a test trigger has no business being reachable from a shipped
+/// binary. Development builds keep the end-to-end coverage the probe exists
+/// for, because the binary the stdio test spawns is the debug one.
+///
+/// A read-only env query, so it needs none of the `webfang_test_utils` mutation
+/// serialization (#1126).
 pub fn panic_probe_enabled() -> bool {
-    std::env::var_os(PANIC_PROBE_ENV).is_some_and(|value| !value.is_empty())
+    cfg!(debug_assertions)
+        && std::env::var_os(PANIC_PROBE_ENV).is_some_and(|value| !value.is_empty())
 }
 
 /// Build the router carrying the single probe tool.

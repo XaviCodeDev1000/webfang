@@ -22,8 +22,9 @@ use tracing::{info, warn};
 
 /// Owns the run's signal listener and its [`CancellationToken`].
 ///
-/// The listener task is aborted on drop, so a completed run never leaves a
-/// stray signal handler behind.
+/// Dropping the guard fires the token and aborts the listener task: in-flight
+/// work sees the cancellation cooperatively, and a completed run never leaves
+/// a stray signal handler behind.
 #[derive(Debug)]
 pub struct ShutdownGuard {
     token: CancellationToken,
@@ -57,6 +58,11 @@ impl ShutdownGuard {
 
 impl Drop for ShutdownGuard {
     fn drop(&mut self) {
+        // Dropping the guard means the run is over or unwinding. Fire the
+        // token FIRST so every cooperative stage stops starting work, then
+        // stop the listener: aborting the listener alone left the pipeline
+        // running after the guard (and its owner) were gone (#S13).
+        self.token.cancel();
         self.handle.abort();
     }
 }
@@ -181,6 +187,30 @@ async fn first_termination_signal(
     names[index]
 }
 
+/// Stop the checkpoint flush watch and join it under a bounded budget.
+///
+/// #S13: timing out over a `JoinHandle` only DROPS it, which detaches the task
+/// — the watch keeps running past the batch. The handle is aborted on timeout
+/// and then joined, so nothing is left behind. Lives here, next to the run's
+/// other shutdown coordination, because the batch flow that spawns the watch is
+/// already at its file-size budget.
+pub(crate) async fn stop_flush_watch(done: CancellationToken, task: Option<JoinHandle<()>>) {
+    done.cancel();
+    let Some(mut handle) = task else {
+        return;
+    };
+    let grace = crate::cli::batch_flush::FLUSH_SHUTDOWN_TIMEOUT
+        .saturating_add(std::time::Duration::from_secs(1));
+    if tokio::time::timeout(grace, &mut handle).await.is_err() {
+        warn!(
+            timeout_secs = grace.as_secs(),
+            "flush watch exceeded its shutdown budget — aborting it"
+        );
+        handle.abort();
+        let _ = handle.await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,14 +244,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dropping_the_guard_aborts_the_listener() {
+    async fn dropping_the_guard_cancels_the_run_and_aborts_the_listener() {
         let token = {
             let guard = ShutdownGuard::install();
             guard.token()
         };
-        // The listener is gone, so nothing can cancel the token any more.
+        // #S13: the guard's owner is gone, so nothing else can stop the run —
+        // the drop itself must have fired the token.
         tokio::task::yield_now().await;
-        assert!(!token.is_cancelled());
+        assert!(
+            token.is_cancelled(),
+            "dropping the guard must cancel in-flight work"
+        );
     }
 
     /// #1835: a REJECTED registration is not a termination event. The guard

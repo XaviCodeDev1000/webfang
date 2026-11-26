@@ -20,7 +20,7 @@ use tokio::sync::Notify;
 use webfang_core::cli::error::{CliExit, EXIT_IO_ERROR};
 use webfang_mcp::mcp_server::{
     build_container, build_mcp_state, default_dom_inspector, panic_hook::setup_panic_hook,
-    validation::MAX_BLOB_LEN, McpHandler, McpState, MCP_TOOL_COUNT,
+    validation::MAX_BLOB_LEN, McpHandler, McpState,
 };
 
 /// Webfang MCP Server — Stdio transport.
@@ -29,9 +29,7 @@ use webfang_mcp::mcp_server::{
     name = "webfang-mcp-stdio",
     version,
     about = "Webfang MCP Server (stdio transport)",
-    long_about = format!(
-        "Exposes {MCP_TOOL_COUNT} tools via the Model Context Protocol over stdin/stdout."
-    )
+    long_about = "Exposes the scraper tool registry via the Model Context Protocol over stdin/stdout."
 )]
 struct Args {
     /// Allowed root directories for absolute `output_dir` and `checkpoint_dir`

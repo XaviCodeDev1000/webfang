@@ -87,7 +87,8 @@ fn committed_records_are_skipped_on_resume() {
     let (pending, _run_id) = filter_committed(
         urls(["https://skip.test/done", "https://skip.test/new"]),
         &store,
-    );
+    )
+    .expect("resume store must load");
 
     assert_eq!(
         pending,
@@ -106,7 +107,8 @@ fn exported_but_uncommitted_records_are_not_skipped() {
         )]),
     );
 
-    let (pending, _run_id) = filter_committed(urls(["https://exported.test/page"]), &store);
+    let (pending, _run_id) = filter_committed(urls(["https://exported.test/page"]), &store)
+        .expect("resume store must load");
 
     assert_eq!(
         pending.len(),
@@ -125,7 +127,8 @@ fn failed_records_re_drive_from_recorded_position() {
         )]),
     );
 
-    let (pending, _run_id) = filter_committed(urls(["https://failed.test/page"]), &store);
+    let (pending, _run_id) = filter_committed(urls(["https://failed.test/page"]), &store)
+        .expect("resume store must load");
 
     assert_eq!(
         pending.len(),
@@ -138,7 +141,8 @@ fn failed_records_re_drive_from_recorded_position() {
 fn unknown_urls_are_never_skipped() {
     let (_dir, store) = seeded_store("unknown.test", BTreeMap::new());
 
-    let (pending, _run_id) = filter_committed(urls(["https://unknown.test/fresh"]), &store);
+    let (pending, _run_id) = filter_committed(urls(["https://unknown.test/fresh"]), &store)
+        .expect("resume store must load");
 
     assert_eq!(pending.len(), 1);
 }
@@ -155,7 +159,8 @@ fn www_and_apex_urls_share_one_committed_entry() {
         )]),
     );
 
-    let (pending, _run_id) = filter_committed(urls(["https://www.canon.test/a"]), &store);
+    let (pending, _run_id) = filter_committed(urls(["https://www.canon.test/a"]), &store)
+        .expect("resume store must load");
 
     assert!(
         pending.is_empty(),
@@ -187,8 +192,10 @@ fn identical_record_sets_produce_identical_skip_sets_across_paths() {
     let batch_view = RecordStore::new("equiv.test").with_state_dir(dir.path().to_path_buf());
 
     let candidates = urls(["https://equiv.test/a", "https://equiv.test/b"]);
-    let (scrape_pending, _) = filter_committed(candidates.clone(), &scrape_view);
-    let (batch_pending, _) = filter_committed(candidates, &batch_view);
+    let (scrape_pending, _) =
+        filter_committed(candidates.clone(), &scrape_view).expect("scrape store must load");
+    let (batch_pending, _) =
+        filter_committed(candidates, &batch_view).expect("batch store must load");
 
     assert_eq!(scrape_pending, batch_pending);
     assert_eq!(scrape_pending.len(), 1, "only /a (COMMITTED) is skipped");
@@ -202,8 +209,10 @@ fn identical_record_sets_produce_identical_skip_sets_across_paths() {
 fn each_gate_call_issues_a_fresh_run_id() {
     let (_dir, store) = seeded_store("runid.test", BTreeMap::new());
 
-    let (_, first) = filter_committed(urls(["https://runid.test/x"]), &store);
-    let (_, second) = filter_committed(urls(["https://runid.test/x"]), &store);
+    let (_, first) =
+        filter_committed(urls(["https://runid.test/x"]), &store).expect("resume store must load");
+    let (_, second) =
+        filter_committed(urls(["https://runid.test/x"]), &store).expect("resume store must load");
 
     assert_ne!(first.as_str(), second.as_str(), "every run gets its own id");
     assert_eq!(first.as_str().len(), 36, "uuid v4 shape");
@@ -222,7 +231,8 @@ fn prior_records_remain_queryable_after_a_later_run_loads_the_store() {
 
     // A later run opens the same domain's store and gates its URLs.
     let later = RecordStore::new("preserve.test").with_state_dir(dir.path().to_path_buf());
-    let (pending, _) = filter_committed(urls(["https://preserve.test/other"]), &later);
+    let (pending, _) = filter_committed(urls(["https://preserve.test/other"]), &later)
+        .expect("resume store must load");
 
     assert_eq!(pending.len(), 1);
     let still_there = later.load().expect("prior records stay readable");

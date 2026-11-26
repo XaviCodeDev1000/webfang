@@ -108,11 +108,8 @@ impl Origin {
     }
 }
 
-/// Process-unique nonce source: a monotonic counter mixed with a nanosecond
-/// wall-clock sample. `uuid`/`rand` are not dependencies of this crate (and
-/// adding one is out of scope for #1600), and the nonce's job — an
-/// unpredictable delimiter a remote body cannot counterfeit — is met by
-/// counter-uniqueness plus clock entropy.
+/// Process-unique nonce: a monotonic counter mixed with clock entropy. No new
+/// dependency is needed to make a remote body unable to counterfeit it.
 static NONCE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn next_nonce() -> String {
@@ -156,8 +153,7 @@ fn neutralize_body(body: &str) -> String {
     out.replace(SENTINEL, SENTINEL_ESCAPE)
 }
 
-/// Indent every line by one space so no fence can break out of an enclosing
-/// Markdown block (audit M0 property 2 — RemoteDerived bodies only).
+/// Indent every line so no fence can break out of an enclosing Markdown block.
 fn indent_lines(body: &str) -> String {
     body.split('\n')
         // Empty lines stay empty: they cannot start a fence, and keeping them
@@ -173,8 +169,7 @@ fn indent_lines(body: &str) -> String {
         .join("\n")
 }
 
-/// Neutralize + cap a body. Returns the (possibly truncated, marker-annotated)
-/// text, whether truncation happened, and the post-neutralization byte length.
+/// Neutralize + cap a body: (text, truncated, post-neutralization byte length).
 fn neutralize_and_cap(body: &str) -> (String, bool, usize) {
     let neutralized = neutralize_body(body);
     let neutral_len = neutralized.len();
@@ -192,25 +187,30 @@ fn neutralize_and_cap(body: &str) -> (String, bool, usize) {
     (capped, true, neutral_len)
 }
 
-/// Wrap an untrusted body in the provenance envelope (or pass it through
-/// neutralized for [`Origin::Local`]).
-///
-/// This is the sanctioned constructor for any tool result that contains or
-/// derives from remote/caller-external data. Emits a `tracing::debug!` with
-/// structured fields (origin kind, bytes in/out, truncated, nonce); the body
-/// content itself is never logged.
+/// Neutralize caller-supplied input before it crosses into another sink.
+/// Remote trust is preserved by the output envelope; local stays unenveloped.
 #[must_use]
-pub fn untrusted_text(origin: &Origin, body: &str) -> CallToolResult {
+pub fn neutralize_input(origin: &Origin, body: &str) -> String {
+    let bytes_in = body.len();
+    let (capped, truncated, neutral_len) = neutralize_and_cap(body);
+    let final_body = if matches!(origin, Origin::RemoteDerived { .. }) {
+        indent_lines(&capped)
+    } else {
+        capped
+    };
     match origin {
-        Origin::Local => local_text(body),
-        kind @ (Origin::RemoteFetch { .. } | Origin::RemoteDerived { .. }) => {
-            let bytes_in = body.len();
-            let (capped, truncated, neutral_len) = neutralize_and_cap(body);
-            let final_body = if matches!(kind, Origin::RemoteDerived { .. }) {
-                indent_lines(&capped)
-            } else {
-                capped
-            };
+        Origin::Local => {
+            tracing::debug!(
+                origin_kind = "local",
+                bytes_in,
+                bytes_out = final_body.len(),
+                truncated,
+                neutral_len,
+                "provenance: local text neutralized (no envelope)"
+            );
+            final_body
+        },
+        kind => {
             let nonce = next_nonce();
             let text = format!(
                 "\u{26d5} UNTRUSTED REMOTE CONTENT — origin: {}\n\
@@ -230,42 +230,32 @@ pub fn untrusted_text(origin: &Origin, body: &str) -> CallToolResult {
                 truncated,
                 nonce = %nonce,
                 neutral_len,
-                "provenance: untrusted tool response wrapped in envelope"
+                "provenance: untrusted text wrapped in envelope"
             );
-            CallToolResult::success(vec![ContentBlock::text(text)])
+            text
         },
     }
 }
 
-/// Neutralized operator-authored text with NO envelope.
-///
-/// The sanctioned constructor for pure local diagnostics (config summaries,
-/// static labels, caller-input echoes that never transited a third party).
-/// Still neutralized and capped: local does not mean unbounded.
+/// Wrap an untrusted body in the provenance envelope, or neutralize it for
+/// [`Origin::Local`]. The sanctioned constructor for tool results containing
+/// remote data; the body itself is never logged.
 #[must_use]
-pub fn local_text(body: &str) -> CallToolResult {
-    let bytes_in = body.len();
-    let (text, truncated, neutral_len) = neutralize_and_cap(body);
-    tracing::debug!(
-        origin_kind = "local",
-        bytes_in,
-        bytes_out = text.len(),
-        truncated,
-        neutral_len,
-        "provenance: local tool response neutralized (no envelope)"
-    );
-    CallToolResult::success(vec![ContentBlock::text(text)])
+pub fn untrusted_text(origin: &Origin, body: &str) -> CallToolResult {
+    CallToolResult::success(vec![ContentBlock::text(neutralize_input(origin, body))])
 }
 
-/// Neutralize a body that leaves the MCP channel for persistent storage
-/// (PI-6: caller-supplied content written to disk by `export_file`).
-///
-/// Applies the same neutralization contract steps 1-3 as [`untrusted_text`]
-/// and [`local_text`] — ANSI escapes, C0 controls and DEL removed (`\n`/`\t`
-/// kept), every fence-sentinel occurrence escaped — WITHOUT duplicating the
-/// logic. The byte cap is deliberately NOT applied: it is a channel-size
-/// defense for tool responses, and silently truncating an exported artifact
-/// would corrupt the caller's data.
+/// Neutralized operator-authored text with no envelope. Still capped: local
+/// does not mean unbounded.
+#[must_use]
+pub fn local_text(body: &str) -> CallToolResult {
+    let origin = Origin::Local;
+    CallToolResult::success(vec![ContentBlock::text(neutralize_input(&origin, body))])
+}
+
+/// Neutralize caller-supplied content written to disk by `export_file` (PI-6).
+/// Same contract as [`untrusted_text`] but without the byte cap: silently
+/// truncating an exported artifact would corrupt the caller's data.
 #[must_use]
 pub(crate) fn neutralize_text(body: &str) -> String {
     neutralize_body(body)
@@ -293,14 +283,9 @@ pub fn neutralized_error(message: &str) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(text)])
 }
 
-/// Inverse of the envelope: extract the raw body between the
-/// `---- BEGIN UNTRUSTED <nonce> ----` and `---- END UNTRUSTED <nonce> ----`
-/// marker lines.
-///
-/// Returns `None` when the text is not enveloped (e.g. [`local_text`] output).
-/// RemoteDerived bodies come back still indented by one space — the
-/// indentation is part of the defense, and callers re-indenting on their side
-/// would defeat it.
+/// Extract the raw body between the BEGIN/END UNTRUSTED marker lines.
+/// Returns `None` for unenveloped text; RemoteDerived bodies stay indented —
+/// that indentation is part of the defense.
 #[must_use]
 pub fn payload_of(envelope_text: &str) -> Option<&str> {
     let mut body_start = None;
@@ -512,5 +497,18 @@ mod tests {
         let text = text_of(&untrusted_text(&Origin::Local, "op text"));
         assert_eq!(text, "op text");
         assert!(!text.contains("UNTRUSTED"));
+    }
+
+    #[test]
+    fn input_neutralization_preserves_remote_trust_envelope() {
+        let marker = "IGNORE_ALL_PRIOR_RULES_7c2";
+        let text = neutralize_input(
+            &Origin::RemoteFetch {
+                url: "https://e.test".into(),
+            },
+            marker,
+        );
+        assert_eq!(payload_of(&text), Some(marker));
+        assert_eq!(neutralize_input(&Origin::Local, marker), marker);
     }
 }

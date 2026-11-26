@@ -1,7 +1,7 @@
 //! MCP Server — Model Context Protocol bridge for AI agents
 //!
 //! Exposes the scraper tools across 9 categories via Streamable HTTP — the
-//! exact number is [`MCP_TOOL_COUNT`], the one place that figure lives.
+//! exact number is [`mcp_tool_count`], derived from the router itself.
 //! Architecture:
 //! - `state.rs` — McpState with embedded Container + per-category semaphores
 //! - `server.rs` — Axum router + StreamableHttpService setup
@@ -46,10 +46,7 @@ pub mod validation;
 use futures::FutureExt;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::ServerHandler;
-use rmcp::model::{
-    CallToolResponse, CallToolResult, ContentBlock, ListToolsResult, ServerCapabilities,
-    ServerConfig, Tool,
-};
+use rmcp::model::{CallToolResponse, ListToolsResult, ServerCapabilities, ServerConfig, Tool};
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer};
 
@@ -60,19 +57,20 @@ use webfang_core::di::ContainerExt;
 
 pub use state::McpState;
 
-/// The exact number of tools this server advertises.
+/// Number of tools the registry advertises in this process.
 ///
-/// ONE source for the figure (#1817): the registry is assembled by
-/// [`handlers::build_tool_router`], and every place that has to agree with
-/// that number — the server's own assertion, the stdio handshake, the
-/// provenance gate — reads it from HERE. A number written twice is a number
-/// that drifts, and two numbers that must coincide are exactly the pair that
-/// does.
+/// DERIVED from the router itself (#1817, #S14): the figure is never written
+/// down twice, so it cannot drift from the registry it describes. Every caller
+/// that has to agree with the registry — the binaries' about text, the
+/// provenance gate — reads it from here; the EXTERNAL pin a human audits lives
+/// in `tests/stdio_handshake.rs`, where a missing or extra tool fails.
 ///
 /// The env-gated panic probe (`WEBFANG_MCP_TEST_PANIC_TOOL`, #1626 PC-3) is
-/// NOT part of this count: it exists only when an operator sets that switch,
-/// and the registry it extends is not the production one.
-pub const MCP_TOOL_COUNT: usize = 36;
+/// included only when it is registered, which requires a development build.
+#[must_use]
+pub fn mcp_tool_count() -> usize {
+    handlers::build_tool_router().list_all().len()
+}
 
 /// Build a Container — fast container construction, no model resolution
 /// happens here (#759).
@@ -182,7 +180,7 @@ pub fn default_dom_inspector() -> Arc<dyn webfang_core::domain::DomInspectorPort
 ///
 /// Holds the application state and combined tool router.
 /// All the tools are registered via `#[tool]` attributes
-/// in the handler submodules — [`MCP_TOOL_COUNT`] of them.
+/// in the handler submodules; [`mcp_tool_count`] is how many.
 #[derive(Clone)]
 pub struct McpHandler {
     /// Shared application state (DI container + semaphores)
@@ -215,15 +213,6 @@ impl McpHandler {
         Self { state, tool_router }
     }
 }
-
-/// User-facing (Spanish) text a client receives when a tool panics.
-///
-/// Deliberately free of the panic payload: the payload may embed request data,
-/// and it belongs in the trace, not in an answer an agent will read back into a
-/// conversation (#1611, F2).
-const PANIC_CONTAINED_TOOL_ERROR: &str =
-    "La herramienta entró en un error interno y fue contenida. La sesión sigue activa: \
-     reintenta la llamada o usa otra herramienta.";
 
 /// Render a panic payload as a SHORT string for the trace.
 ///
@@ -294,10 +283,12 @@ impl ServerHandler for McpHandler {
     /// `super::server::build_mcp_router`) can only see panics raised on the
     /// HTTP request path, so it cannot rescue this one.
     ///
-    /// Catching it here makes the failure a normal tool error over HTTP 200
-    /// (`isError: true`), keeps the session worker alive for the next call,
-    /// and works on every transport (stdio included), because containment
-    /// happens at the dispatch boundary rather than at the HTTP boundary.
+    /// Catching it here keeps the session worker alive for the next call and
+    /// works on every transport (stdio included), because containment happens
+    /// at the dispatch boundary rather than at the HTTP boundary. The answer is
+    /// the SHARED envelope (#S14): JSON-RPC `-32603` with
+    /// `panic_containment::PANIC_CONTAINED_MESSAGE`, identical to what the HTTP
+    /// middleware returns for a panic it catches.
     ///
     /// `AssertUnwindSafe` is the honest annotation: the guarded future borrows
     /// `&self` across awaits, which the compiler cannot prove unwind-safe,
@@ -330,9 +321,10 @@ impl ServerHandler for McpHandler {
                     panic.payload = %render_panic_payload(payload.as_ref()),
                     "MCP tool panicked — contained as a tool error; session worker survives"
                 );
-                Ok(CallToolResponse::Complete(CallToolResult::error(vec![
-                    ContentBlock::text(PANIC_CONTAINED_TOOL_ERROR),
-                ])))
+                Err(McpError::internal_error(
+                    panic_containment::PANIC_CONTAINED_MESSAGE,
+                    None,
+                ))
             },
         }
     }

@@ -16,10 +16,21 @@ use crate::infrastructure::llm::http_client::build_guarded_http_client;
 /// provider response. Closes audit finding F-R3-6 (AUDIT-02
 /// rc3-closure-gate MATRIX.md): no fetch path may read an unbounded body.
 const LLM_MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Total attempts per completion: one initial send plus bounded retries.
+const LLM_MAX_ATTEMPTS: u32 = 3;
+/// Exponential backoff floor and ceiling, in milliseconds.
+const LLM_BACKOFF_BASE_MS: u64 = 50;
+const LLM_BACKOFF_MAX_MS: u64 = 1_000;
+/// Ceiling for a server-supplied `Retry-After` (no indefinite wait).
+const LLM_RETRY_AFTER_MAX_MS: u64 = 30_000;
+/// Upper bound of the wall-clock jitter added to each backoff, in ms.
+const LLM_JITTER_MAX_MS: u64 = 25;
 use serde::Deserialize;
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 use url::Url;
 
 /// Wire request for OpenAI-compatible `POST /chat/completions`.
@@ -71,6 +82,40 @@ struct Usage {
     completion_tokens: u32,
 }
 
+/// Injected retry schedule. Tests replace waiting and jitter with deterministic
+/// no-ops so attempt counts are observable without real time or randomness.
+struct RetrySchedule {
+    max_attempts: u32,
+    base_ms: u64,
+    max_ms: u64,
+    jitter_ms: fn(u32) -> u64,
+    sleep: fn(Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>,
+}
+
+impl Default for RetrySchedule {
+    fn default() -> Self {
+        Self {
+            max_attempts: LLM_MAX_ATTEMPTS,
+            base_ms: LLM_BACKOFF_BASE_MS,
+            max_ms: LLM_BACKOFF_MAX_MS,
+            jitter_ms: wall_jitter,
+            sleep: real_sleep,
+        }
+    }
+}
+
+/// Small wall-clock jitter keeps concurrent clients from retrying in lockstep.
+fn wall_jitter(attempt: u32) -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    (u64::from(nanos) + u64::from(attempt)) % LLM_JITTER_MAX_MS
+}
+
+fn real_sleep(delay: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(tokio::time::sleep(delay))
+}
+
 /// OpenAI-compatible chat/completions adapter (covers OpenAI / Ollama / vLLM).
 ///
 /// The client carries no SSRF logic of its own: `new` applies the
@@ -83,6 +128,7 @@ pub struct OpenAiLlmClient {
     client: wreq::Client,
     base_url: Url,
     api_key: ApiKey,
+    retry: RetrySchedule,
 }
 
 impl OpenAiLlmClient {
@@ -115,8 +161,127 @@ impl OpenAiLlmClient {
             client,
             base_url,
             api_key,
+            retry: RetrySchedule::default(),
         }
     }
+
+    /// One attempt: classify the status before reading any body. Terminal
+    /// 4xx and exhausted budgets report the last observed status verbatim.
+    async fn post_completion(
+        &self,
+        attempt: u32,
+        endpoint: &str,
+        wire: &CompletionRequest<'_>,
+    ) -> Result<AttemptOutcome> {
+        let response = self
+            .client
+            .post(endpoint)
+            .bearer_auth(self.api_key.expose_secret())
+            .json(wire)
+            .send()
+            .await
+            .map_err(ScraperError::from)?;
+
+        let status = response.status().as_u16();
+        if response.status().is_success() {
+            return Ok(AttemptOutcome::Success(Box::new(response)));
+        }
+        if !retryable_status(status) || attempt >= self.retry.max_attempts {
+            return Ok(AttemptOutcome::Terminal(status));
+        }
+        Ok(AttemptOutcome::Retry {
+            status,
+            retry_after: retry_after_secs(&response),
+        })
+    }
+}
+
+/// Outcome of one HTTP attempt. Only 429 and 5xx produce `Retry`; a terminal
+/// 4xx stops immediately and keeps its observed status.
+enum AttemptOutcome {
+    Success(Box<wreq::Response>),
+    Retry {
+        status: u16,
+        retry_after: Option<u64>,
+    },
+    Terminal(u16),
+}
+
+/// Delta-seconds form of `Retry-After` (RFC 9110 §10.2.3); other forms and
+/// hostile values degrade to bounded exponential backoff.
+fn retry_after_secs(response: &wreq::Response) -> Option<u64> {
+    let raw = response.headers().get("retry-after")?.to_str().ok()?;
+    let secs = raw.trim().parse::<u64>().ok()?;
+    (secs > 0).then_some(secs)
+}
+
+fn retryable_status(status: u16) -> bool {
+    status == 429 || (500..=600).contains(&status)
+}
+
+/// Exponential backoff `base * 2^(attempt-1)` capped at `max_ms`, raised to a
+/// server-supplied `Retry-After` (up to its own ceiling) and jittered. A retry
+/// never arrives before the server asked.
+fn retry_delay_ms(
+    attempt: u32,
+    retry_after: Option<u64>,
+    jitter_ms: u64,
+    base_ms: u64,
+    max_ms: u64,
+) -> u64 {
+    let exponent = attempt.saturating_sub(1).min(20);
+    let exponential = base_ms
+        .saturating_mul(2_u64.saturating_pow(exponent))
+        .min(max_ms);
+    let honored = retry_after.map_or(0, |secs| {
+        secs.saturating_mul(1_000).min(LLM_RETRY_AFTER_MAX_MS)
+    });
+    exponential
+        .max(honored)
+        .saturating_add(jitter_ms)
+        .min(LLM_RETRY_AFTER_MAX_MS)
+}
+
+/// Parse a successful response; every failure here is an honest typed error.
+async fn parse_response(response: wreq::Response) -> Result<LlmResponse> {
+    let body = crate::domain::body_cap::read_body_capped(response, LLM_MAX_BODY_BYTES)
+        .await
+        .map_err(|e| {
+            ScraperError::Extraction(format!("error al leer la respuesta del proveedor LLM: {e}"))
+        })?;
+    let parsed: CompletionResponse = serde_json::from_str(&body).map_err(|e| {
+        ScraperError::Extraction(format!("el proveedor LLM devolvió un cuerpo inválido: {e}"))
+    })?;
+
+    let choice = parsed.choices.first().ok_or_else(|| {
+        ScraperError::Extraction("el proveedor LLM no devolvió choices".to_string())
+    })?;
+
+    if choice.finish_reason.as_deref() == Some("length") {
+        return Err(ScraperError::Validation(
+            "la salida del LLM fue truncada por el límite de tokens (finish_reason=length)"
+                .to_string(),
+        ));
+    }
+
+    let (input_tokens, output_tokens) = parsed
+        .usage
+        .map(|u| (u.prompt_tokens, u.completion_tokens))
+        .unwrap_or((0, 0));
+
+    // `content: null` (tool-calls, content_filter) es Extraction honesto —
+    // nunca silencio, nunca éxito con contenido vacío.
+    let content = choice.message.content.clone().ok_or_else(|| {
+        ScraperError::Extraction(
+            "el proveedor LLM devolvió content null (tool-calls o content_filter)".to_string(),
+        )
+    })?;
+
+    Ok(LlmResponse {
+        content,
+        input_tokens,
+        output_tokens,
+    })
 }
 
 impl LlmPort for OpenAiLlmClient {
@@ -138,66 +303,43 @@ impl LlmPort for OpenAiLlmClient {
                 max_tokens: request.max_tokens,
             };
 
-            let response = self
-                .client
-                .post(endpoint)
-                .bearer_auth(self.api_key.expose_secret())
-                .json(&wire)
-                .send()
-                .await
-                .map_err(ScraperError::from)?;
-
-            let status = response.status().as_u16();
-            if !response.status().is_success() {
-                return Err(ScraperError::Http {
-                    status,
-                    url: self.base_url.to_string(),
-                });
+            let mut attempt = 0_u32;
+            loop {
+                attempt += 1;
+                match self.post_completion(attempt, &endpoint, &wire).await? {
+                    AttemptOutcome::Success(response) => return parse_response(*response).await,
+                    AttemptOutcome::Terminal(status) => {
+                        return Err(ScraperError::Http {
+                            status,
+                            // The configured base URL may carry inline
+                            // credentials; the error text is an output sink.
+                            url: crate::domain::providers::RedactedUrl::from_url(&self.base_url)
+                                .to_string(),
+                        });
+                    },
+                    AttemptOutcome::Retry {
+                        status,
+                        retry_after,
+                    } => {
+                        let jitter_ms = (self.retry.jitter_ms)(attempt);
+                        let delay_ms = retry_delay_ms(
+                            attempt,
+                            retry_after,
+                            jitter_ms,
+                            self.retry.base_ms,
+                            self.retry.max_ms,
+                        );
+                        tracing::warn!(
+                            attempt,
+                            status,
+                            delay_ms,
+                            max_attempts = self.retry.max_attempts,
+                            "retrying LLM completion after transient provider response"
+                        );
+                        (self.retry.sleep)(Duration::from_millis(delay_ms)).await;
+                    },
+                }
             }
-
-            let body = crate::domain::body_cap::read_body_capped(response, LLM_MAX_BODY_BYTES)
-                .await
-                .map_err(|e| {
-                    ScraperError::Extraction(format!(
-                        "error al leer la respuesta del proveedor LLM: {e}"
-                    ))
-                })?;
-            let parsed: CompletionResponse = serde_json::from_str(&body).map_err(|e| {
-                ScraperError::Extraction(format!(
-                    "el proveedor LLM devolvió un cuerpo inválido: {e}"
-                ))
-            })?;
-
-            let choice = parsed.choices.first().ok_or_else(|| {
-                ScraperError::Extraction("el proveedor LLM no devolvió choices".to_string())
-            })?;
-
-            if choice.finish_reason.as_deref() == Some("length") {
-                return Err(ScraperError::Validation(
-                    "la salida del LLM fue truncada por el límite de tokens (finish_reason=length)"
-                        .to_string(),
-                ));
-            }
-
-            let (input_tokens, output_tokens) = parsed
-                .usage
-                .map(|u| (u.prompt_tokens, u.completion_tokens))
-                .unwrap_or((0, 0));
-
-            // `content: null` (tool-calls, content_filter) es Extraction
-            // honesto — nunca silencio, nunca éxito con contenido vacío.
-            let content = choice.message.content.clone().ok_or_else(|| {
-                ScraperError::Extraction(
-                    "el proveedor LLM devolvió content null (tool-calls o content_filter)"
-                        .to_string(),
-                )
-            })?;
-
-            Ok(LlmResponse {
-                content,
-                input_tokens,
-                output_tokens,
-            })
         })
     }
 }

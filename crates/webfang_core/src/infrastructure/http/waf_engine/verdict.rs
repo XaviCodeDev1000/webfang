@@ -18,10 +18,23 @@
 
 use crate::domain::waf::{is_t2_blocking_status, EvidenceSource, WafEvidence, WafTier};
 
+use super::signatures::{BoundaryMode, WAF_BODY_SIGNATURES};
+
 /// Whether an HTTP status is a 5xx server error (FIX B body-vs-header carve-out).
 #[inline]
 fn is_5xx(status: Option<u16>) -> bool {
     matches!(status, Some(500..=599))
+}
+
+/// Whether a body match is a vendor marker rather than a bare vendor word.
+///
+/// Specific tokens, domains and cookie names (`_abck`, `incap_ses`,
+/// `hcaptcha.com`, …) are real mitigation signals; the `Bare` vendor words in
+/// ordinary prose are the diagnostic noise the 5xx carve-out targets (S11).
+fn is_vendor_marker(pattern: &str) -> bool {
+    WAF_BODY_SIGNATURES.iter().any(|(sig, _, tier, boundary)| {
+        sig == &pattern && *tier == WafTier::Fingerprint && *boundary != BoundaryMode::Bare
+    })
 }
 
 /// Verdict policy (REQ-WAF-05).
@@ -35,9 +48,13 @@ pub fn decide(evidences: &[WafEvidence], ctx: &crate::domain::waf::InspectionCon
                 }
                 // RES-01 extension: on 5xx a bare vendor mention in the BODY is
                 // ubiquitous diagnostic noise (the body analog of the purged
-                // cf-ray header) — not blocking. Header-sourced T2 (cf-mitigated
-                // etc.) signals active mitigation and still blocks.
-                if is_5xx(ctx.status) && ev.source == EvidenceSource::Body {
+                // cf-ray header) — not blocking. A vendor-specific marker in
+                // the body is a real signal and is retained (S11). Header-sourced
+                // T2 (cf-mitigated etc.) signals active mitigation and still blocks.
+                if is_5xx(ctx.status)
+                    && ev.source == EvidenceSource::Body
+                    && !is_vendor_marker(ev.matched_pattern)
+                {
                     continue;
                 }
                 return true;

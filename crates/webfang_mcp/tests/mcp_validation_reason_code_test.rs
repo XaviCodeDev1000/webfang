@@ -220,13 +220,15 @@ async fn numeric_bound_rejection_carries_out_of_range() {
 }
 
 // ============================================================================
-// Channel B — `validate_url`'s success-shaped diagnostic body (EC-04)
+// Channel B — `validate_url`'s refusal envelope (#S14)
 // ============================================================================
 
-/// The contract an agent author reads: the tool ALWAYS succeeds, so the
-/// `valid` boolean is the only thing that decides the answer.
+/// #S14: an unusable target is refused with `-32602`, the same code every
+/// sibling tool returns for a value it rejects, and the diagnostic fields ride
+/// in the error `data` — still prose in `reason`, still a stable slug in
+/// `reason_code`, and still no JSON-RPC code glued into the human field.
 #[tokio::test]
-async fn validate_url_non_http_scheme_is_a_success_shaped_diagnostic() {
+async fn validate_url_non_http_scheme_is_an_invalid_params_refusal() {
     let (base_url, client, session_id, _handle) = arranged().await;
 
     let resp = call_tool(
@@ -238,29 +240,24 @@ async fn validate_url_non_http_scheme_is_a_success_shaped_diagnostic() {
     )
     .await;
 
-    assert!(
-        resp.get("error").is_none(),
-        "validate_url must never answer with a protocol error, got: {resp}"
+    assert_eq!(
+        resp.get("error")
+            .and_then(|e| e.get("code"))
+            .and_then(Value::as_i64),
+        Some(-32602),
+        "a non-http scheme must be -32602, got: {resp}"
     );
-    let result = resp
-        .get("result")
-        .unwrap_or_else(|| panic!("validate_url must return a tool result, got: {resp}"));
-    assert!(
-        !is_tool_error(result),
-        "a non-http scheme is a DIAGNOSIS, not a tool error: {resp}"
-    );
-
-    let body = validate_url_body(&resp);
+    let body = &resp["error"]["data"];
     assert_eq!(
         body.get("valid").and_then(Value::as_bool),
         Some(false),
-        "an ftp URL must report valid:false: {body}"
+        "the refusal must report valid:false: {body}"
     );
 
     let reason = body
         .get("reason")
         .and_then(Value::as_str)
-        .unwrap_or_else(|| panic!("the body must carry a human-readable reason: {body}"));
+        .unwrap_or_else(|| panic!("the data must carry a human-readable reason: {body}"));
     assert!(
         !reason.contains("-32602"),
         "`reason` is a human-facing field; the JSON-RPC code must not leak into \
@@ -298,7 +295,14 @@ async fn validate_url_unparseable_reports_malformed() {
     )
     .await;
 
-    let body = validate_url_body(&resp);
+    assert_eq!(
+        resp.get("error")
+            .and_then(|e| e.get("code"))
+            .and_then(Value::as_i64),
+        Some(-32602),
+        "an unparseable URL must be -32602, got: {resp}"
+    );
+    let body = &resp["error"]["data"];
     assert_eq!(body.get("valid").and_then(Value::as_bool), Some(false));
     assert_eq!(
         body.get("reason_code").and_then(Value::as_str),

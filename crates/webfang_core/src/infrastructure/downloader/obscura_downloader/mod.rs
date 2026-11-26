@@ -34,16 +34,24 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::ExitStatus;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::time::timeout;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 use url::Url;
 
 use super::{DownloadError, Downloader, FetchedPage};
+
+/// Shared sandbox resolution; the file is declared here so both browser
+/// downloader layers consume the same mount order and skip rules.
+#[path = "../downloader_factory.rs"]
+pub mod sandbox;
+
+use sandbox::{arapuca_args, resolve_executable, SandboxConfig};
 
 /// Memory budget for one Obscura subprocess (~30 MB).
 const OBSCURA_MEMORY_COST: usize = 30_000_000;
@@ -109,6 +117,85 @@ fn parse_page_loaded_url(stderr: &str) -> Option<Url> {
     matches!(parsed.scheme(), "http" | "https").then_some(parsed)
 }
 
+/// Emit the "wrapper applied" decision into FileTraceLayer.
+///
+/// The tenant/run id is the existing per-run task id; the top-level `trace_id`
+/// is added by FileTraceLayer from the surrounding fetch span. No metrics
+/// backend, global registry or extra correlation mechanism is introduced.
+pub fn trace_sandbox_applied(layer: u8, task_id: &str, binary: &str) {
+    info!(
+        event = "sandbox_applied",
+        layer,
+        sandbox = "arapuca",
+        task_id,
+        binary,
+        "browser subprocess sandboxed"
+    );
+}
+
+/// Emit the "wrapper skipped" decision with its reason and selected binary.
+pub fn trace_sandbox_skipped(layer: u8, task_id: &str, reason: &str, binary: &str) {
+    warn!(
+        event = "sandbox_skipped",
+        layer, reason, task_id, binary, "sandbox unavailable — running browser unsandboxed"
+    );
+}
+
+/// Emit one structured event per arapuca seccomp denial found on child stderr.
+///
+/// The vendored baseline profile returns `ENOSYS` for `landlock_*` and
+/// `memfd_create` and a dedicated `EPERM` tier for `ptrace`; arapuca's debug
+/// handler prints `seccomp: blocked syscall N (name)` for trapped syscalls.
+/// Mapping the name back to errno keeps the denial actionable without
+/// changing the sandbox profile or its argv.
+pub fn trace_sandbox_denials(stderr: &str, layer: u8, task_id: &str) {
+    for line in stderr.lines() {
+        let Some(rest) = line.strip_prefix("seccomp: blocked syscall ") else {
+            continue;
+        };
+        let Some((number, tail)) = rest.split_once(' ') else {
+            continue;
+        };
+        if number.parse::<u32>().is_err() {
+            continue;
+        }
+        let syscall = tail.trim().trim_start_matches('(').trim_end_matches(')');
+        if syscall.is_empty() {
+            continue;
+        }
+        let errno = if syscall == "ptrace" {
+            "EPERM"
+        } else {
+            "ENOSYS"
+        };
+        warn!(
+            event = "sandbox_denial",
+            errno,
+            syscall,
+            syscall_nr = number,
+            layer,
+            task_id,
+            "sandbox denied a syscall"
+        );
+    }
+}
+
+/// Emit the browser subprocess exit status as a structured event.
+pub fn trace_browser_exit(status: Option<&ExitStatus>, layer: u8, task_id: &str) {
+    let (exit_status, success) = match status {
+        Some(status) => (status.to_string(), status.success()),
+        None => ("unknown (wait failed)".to_string(), false),
+    };
+    info!(
+        event = "browser_exit",
+        exit_status = exit_status.as_str(),
+        success,
+        layer,
+        task_id,
+        "browser subprocess exited"
+    );
+}
+
 /// Subprocess-based downloader that shells out to `obscura fetch --dump html`
 /// (#793 — was markdown; the downstream pipeline is HTML-only).
 ///
@@ -125,6 +212,8 @@ pub struct ObscuraDownloader {
     /// Beyond the cap the fetch aborts with
     /// [`DownloadError::BodyTooLarge`] instead of buffering unbounded output.
     max_page_bytes: u64,
+    /// Sandbox prerequisites, resolved at build time and never mutated.
+    sandbox: SandboxConfig,
 }
 
 impl ObscuraDownloader {
@@ -146,6 +235,7 @@ impl ObscuraDownloader {
             binary,
             user_agent: None,
             max_page_bytes: DEFAULT_MAX_PAGE_BYTES,
+            sandbox: SandboxConfig::resolve(),
         }
     }
 
@@ -189,7 +279,67 @@ impl Default for ObscuraDownloader {
     }
 }
 
+/// Capped stdout, stderr and exit status of the child process.
+type ChildOutput = (Vec<u8>, Vec<u8>, Option<ExitStatus>);
+
+/// Shared child wiring: the handle is owned by the awaited future with
+/// `kill_on_drop(true)`, so a timeout drops it and terminates the subprocess
+/// instead of leaving an orphan (XP-S-05, #1608).
+fn configure_child(mut command: Command) -> Command {
+    command
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    command
+}
+
 impl ObscuraDownloader {
+    /// Build the child command: wrap with `arapuca run` when the sandbox is
+    /// available, otherwise emit a structured WARN and run obscura directly.
+    fn spawn_command(&self, url_string: &str) -> Command {
+        let mut inner = vec![
+            "fetch".to_string(),
+            "--dump".to_string(),
+            "html".to_string(),
+        ];
+        // S1 (#2722 H5): the operator-pinned User-Agent travels to obscura's
+        // argv; `None` passes no flag and obscura keeps its own default UA.
+        if let Some(ua) = &self.user_agent {
+            inner.push("--user-agent".to_string());
+            inner.push(ua.clone());
+        }
+        inner.push(url_string.to_string());
+
+        let binary = self.binary.to_string_lossy();
+        if let Some(reason) = self.sandbox.skip_reason() {
+            trace_sandbox_skipped(2, &self.sandbox.task_id, reason, &binary);
+        } else if let Some(arapuca) = &self.sandbox.arapuca {
+            // The mount must be the directory that holds the real executable.
+            // A bare name (`obscura`, the default) has no parent, so resolve
+            // it on PATH; an unresolved name skips the sandbox rather than
+            // mounting the current directory.
+            match resolve_executable(&self.binary) {
+                Some(resolved) => {
+                    trace_sandbox_applied(2, &self.sandbox.task_id, &binary);
+                    let mut command = Command::new(arapuca);
+                    command.args(arapuca_args(&resolved, None, &self.sandbox.task_id, &inner));
+                    return configure_child(command);
+                },
+                None => trace_sandbox_skipped(
+                    2,
+                    &self.sandbox.task_id,
+                    "obscura binary not found on PATH",
+                    &binary,
+                ),
+            }
+        }
+
+        let mut command = Command::new(&self.binary);
+        command.args(&inner);
+        configure_child(command)
+    }
+
     #[instrument(skip(self), fields(url = %url, binary = %self.binary.display()))]
     async fn fetch_inner(&self, url: &Url) -> Result<FetchedPage, DownloadError> {
         debug!(
@@ -198,7 +348,6 @@ impl ObscuraDownloader {
         );
 
         let url_string = url.to_string();
-        let binary = self.binary.clone();
 
         // Defense in depth: a typed Url always carries a scheme (e.g. https://) so it can
         // never be mistaken for an obscura flag; reject defensively anyway.
@@ -210,113 +359,108 @@ impl ObscuraDownloader {
         }
         // LCOV_EXCL_STOP
 
-        // XP-S-05 (#1608): the child handle is owned by the awaited future
-        // with `kill_on_drop(true)`. On timeout the future (and the handle)
-        // is dropped, which terminates the subprocess — no orphaned obscura
-        // keeps fetching after the caller gave up. No Mutex is held across
-        // the await: the `Child` is moved into the future, never shared.
-        let mut command = Command::new(&binary);
-        command
-            .args(["fetch", "--dump", "html"])
-            .kill_on_drop(true)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        // S1 (#2722 H5): the operator-pinned User-Agent travels to obscura's
-        // argv; `None` passes no flag and obscura keeps its own default UA.
-        if let Some(ua) = &self.user_agent {
-            command.args(["--user-agent", ua]);
-        }
-        command.arg(&url_string);
-
-        let child = command.spawn().map_err(|e| {
+        let child = self.spawn_command(&url_string).spawn().map_err(|e| {
             DownloadError::Internal(format!("obscura process failed to start: {e}"))
         })?;
 
-        // Stage 5 of the fetch guard chain (#2722): the stdout read is capped
-        // at `max_page_bytes` (+1 detects overflow) and the stderr read at a
-        // small auxiliary cap, both drained concurrently with `wait()` so a
-        // chatty child can never deadlock the pipes or inflate memory.
         let max_page_bytes = self.max_page_bytes;
-        let result =
-            timeout(self.timeout, async move {
-                let mut child = child;
-                let stdout = child.stdout.take().ok_or_else(|| {
-                    DownloadError::Internal("obscura stdout pipe unavailable".into())
-                })?;
-                let stderr = child.stderr.take().ok_or_else(|| {
-                    DownloadError::Internal("obscura stderr pipe unavailable".into())
-                })?;
-
-                let mut out_buf = Vec::new();
-                let mut err_buf = Vec::new();
-                let mut capped_out = stdout.take(max_page_bytes.saturating_add(1));
-                let mut capped_err = stderr.take(OBSCURA_STDERR_CAP.saturating_add(1));
-                let (out_res, _, wait_res) = tokio::join!(
-                    capped_out.read_to_end(&mut out_buf),
-                    capped_err.read_to_end(&mut err_buf),
-                    child.wait(),
-                );
-                out_res.map_err(DownloadError::Io)?;
-                Ok((out_buf, err_buf, wait_res.ok()))
-            })
-            .await;
-
+        let result = timeout(self.timeout, Self::collect_child(child, max_page_bytes)).await;
+        if let Ok(Ok((_, err, status))) = &result {
+            trace_sandbox_denials(&String::from_utf8_lossy(err), 2, &self.sandbox.task_id);
+            trace_browser_exit(status.as_ref(), 2, &self.sandbox.task_id);
+        }
         match result {
-            Ok(Ok((out_bytes, err_bytes, exit_status))) => {
-                if !exit_status.is_some_and(|status| status.success()) {
-                    let stderr = String::from_utf8_lossy(&err_bytes);
-                    let reported = exit_status
-                        .map(|status| status.to_string())
-                        .unwrap_or_else(|| "unknown (wait failed)".to_string());
-                    return Err(DownloadError::Internal(format!(
-                        "obscura exited with {reported}: {stderr}"
-                    )));
-                }
-
-                // The take() reader stops at cap+1: one byte over means the
-                // rendered page exceeded the limit.
-                if out_bytes.len() as u64 > max_page_bytes {
-                    return Err(DownloadError::BodyTooLarge {
-                        limit: max_page_bytes,
-                    });
-                }
-
-                let html = String::from_utf8_lossy(&out_bytes).to_string();
-
-                // S2 (#2722 H4): obscura reports the final URL on stderr.
-                // The line is free text upstream: a parse failure degrades to
-                // the requested URL with a WARN — it never fails the fetch.
-                let final_url = parse_page_loaded_url(&String::from_utf8_lossy(&err_bytes))
-                    .unwrap_or_else(|| {
-                        warn!(
-                            url = %url,
-                            "obscura stderr did not report the final URL — keeping the requested URL"
-                        );
-                        url.clone()
-                    });
-
-                debug!(
-                    dump = "html",
-                    bytes = html.len(),
-                    final_url = %final_url,
-                    status = 200,
-                    status_source = "synthesized",
-                    "Obscura returned {} bytes",
-                    html.len()
-                );
-
-                Ok(FetchedPage {
-                    url: final_url,
-                    html,
-                    status: 200,
-                    headers: obscura_html_headers(),
-                    cookies: vec![],
-                })
-            },
-            Ok(Err(e)) => Err(e),
+            Ok(Ok(output)) => self.build_page(output, url, max_page_bytes),
+            Ok(Err(error)) => Err(error),
             Err(_) => Err(DownloadError::timeout(self.timeout.as_secs())),
         }
+    }
+
+    /// Drain both pipes concurrently with `wait()` so a chatty child can
+    /// never deadlock the pipes or inflate memory (fetch-guard stage 5).
+    async fn collect_child(
+        child: Child,
+        max_page_bytes: u64,
+    ) -> Result<ChildOutput, DownloadError> {
+        let mut child = child;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| DownloadError::Internal("obscura stdout pipe unavailable".into()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| DownloadError::Internal("obscura stderr pipe unavailable".into()))?;
+
+        let mut out_buf = Vec::new();
+        let mut err_buf = Vec::new();
+        let mut capped_out = stdout.take(max_page_bytes.saturating_add(1));
+        let mut capped_err = stderr.take(OBSCURA_STDERR_CAP.saturating_add(1));
+        let (out_res, _, wait_res) = tokio::join!(
+            capped_out.read_to_end(&mut out_buf),
+            capped_err.read_to_end(&mut err_buf),
+            child.wait(),
+        );
+        out_res.map_err(DownloadError::Io)?;
+        Ok((out_buf, err_buf, wait_res.ok()))
+    }
+
+    /// Validate the child output and synthesize the page DTO.
+    fn build_page(
+        &self,
+        (out_bytes, err_bytes, exit_status): ChildOutput,
+        url: &Url,
+        max_page_bytes: u64,
+    ) -> Result<FetchedPage, DownloadError> {
+        if !exit_status.is_some_and(|status| status.success()) {
+            let stderr = String::from_utf8_lossy(&err_bytes);
+            let reported = exit_status
+                .map(|status| status.to_string())
+                .unwrap_or_else(|| "unknown (wait failed)".to_string());
+            return Err(DownloadError::Internal(format!(
+                "obscura exited with {reported}: {stderr}"
+            )));
+        }
+
+        // The take() reader stops at cap+1: one byte over means the
+        // rendered page exceeded the limit.
+        if out_bytes.len() as u64 > max_page_bytes {
+            return Err(DownloadError::BodyTooLarge {
+                limit: max_page_bytes,
+            });
+        }
+
+        let html = String::from_utf8_lossy(&out_bytes).to_string();
+
+        // S2 (#2722 H4): obscura reports the final URL on stderr.
+        // The line is free text upstream: a parse failure degrades to
+        // the requested URL with a WARN — it never fails the fetch.
+        let final_url =
+            parse_page_loaded_url(&String::from_utf8_lossy(&err_bytes)).unwrap_or_else(|| {
+                warn!(
+                    url = %url,
+                    "obscura stderr did not report the final URL — keeping the requested URL"
+                );
+                url.clone()
+            });
+
+        debug!(
+            dump = "html",
+            bytes = html.len(),
+            final_url = %final_url,
+            status = 200,
+            status_source = "synthesized",
+            "Obscura returned {} bytes",
+            html.len()
+        );
+
+        Ok(FetchedPage {
+            url: final_url,
+            html,
+            status: 200,
+            headers: obscura_html_headers(),
+            cookies: vec![],
+        })
     }
 }
 

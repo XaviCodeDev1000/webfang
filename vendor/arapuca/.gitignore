@@ -1,0 +1,9 @@
+/target
+*.swp
+*.swo
+*~
+staging/
+doc/*.1
+AGENTS.md
+CLAUDE.md
+GEMINI.md

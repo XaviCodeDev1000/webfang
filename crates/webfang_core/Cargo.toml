@@ -31,6 +31,13 @@ adaptive-selectors = []
 mcp = []
 chromium = ["dep:chromiumoxide"]
 
+# cargo-machete only sees Rust API use. `arapuca` is here for its BINARY:
+# the sandbox launches the `arapuca` artifact this path dependency builds
+# (see `sandbox_wrapper_or_binary`), never its library API. Ignoring is
+# deliberate — dropping the edge stops building the binary the sandbox takes.
+[package.metadata.cargo-machete]
+ignored = ["arapuca"]
+
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
@@ -60,6 +67,9 @@ pathdiff = "0.2"
 # Async runtime
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+
+# Sandbox foundation (S2): vendored arapuca, all optional features off.
+arapuca = { workspace = true }
 
 # HTTP & Networking
 wreq = { workspace = true }

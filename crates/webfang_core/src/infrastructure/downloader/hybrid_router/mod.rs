@@ -20,6 +20,8 @@ use url::Url;
 use futures::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
+use crate::domain::waf::InspectionContext;
+
 use super::resource_governor::ResourceGovernor;
 use super::spa_detector::{detect_spa, SpaSignal};
 use super::{DownloadError, Downloader, FetchedPage};
@@ -59,7 +61,7 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
     /// Permit waits inside the L2/L3 escalation abort with
     /// [`DownloadError::Cancelled`] when the token fires; pass an inert
     /// [`CancellationToken::new`] where no shutdown policy exists.
-    pub(crate) fn new(
+    pub fn new(
         layer1: L1,
         layer2: L2,
         layer3: L3,
@@ -75,19 +77,46 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
         }
     }
 
+    /// Build the inspection context from the real response instead of the
+    /// degraded context the spa detector used to synthesize internally.
+    ///
+    /// Status, headers and content-type come straight from the fetched page;
+    /// the body sample is `page.html` (passed to `detect_spa` separately) and
+    /// the response cookies are carried as a synthetic `cookie` header so the
+    /// full response context reaches classification. `ignore_waf` is the
+    /// caller-configurable policy held by this router (REQ-WAF-07).
+    fn evaluation_context(&self, page: &FetchedPage) -> InspectionContext {
+        let mut headers = page.headers.clone();
+        if !page.cookies.is_empty() {
+            let cookie_header = page
+                .cookies
+                .iter()
+                .map(|cookie| format!("{}={}", cookie.name, cookie.value))
+                .collect::<Vec<_>>()
+                .join("; ");
+            headers.insert("cookie".to_string(), cookie_header);
+        }
+        InspectionContext {
+            status: Some(page.status),
+            content_type: headers.get("content-type").cloned(),
+            headers,
+            ignore_waf: self.ignore_waf,
+        }
+    }
+
     /// Inspect a [`FetchedPage`] and decide whether escalation is needed.
     ///
-    /// Returns:
-    /// - `Ok(page)` if the page has usable static content
-    /// - `Err(DownloadError)` for WAF or unrecoverable errors
-    /// - `None` when SPA detected (caller should try next layer)
-    fn evaluate_fetch(&self, page: FetchedPage) -> Result<Option<FetchedPage>, DownloadError> {
-        let signal = detect_spa(&page.html, self.ignore_waf);
+    /// Returns `Ok(true)` when the page has usable static content (the caller
+    /// returns it), `Ok(false)` when SPA detection asks for the next layer,
+    /// and `Err(DownloadError)` for a WAF challenge (which aborts escalation).
+    fn evaluate_fetch(&self, page: &FetchedPage) -> Result<bool, DownloadError> {
+        let ctx = self.evaluation_context(page);
+        let signal = detect_spa(&page.html, &ctx);
 
         match signal {
             SpaSignal::StaticContent => {
                 debug!("SPA check: static content — no escalation needed");
-                Ok(Some(page))
+                Ok(true)
             },
             SpaSignal::WafBlocked => {
                 warn!("WAF detected at fetch time — aborting escalation");
@@ -97,7 +126,7 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
             },
             SpaSignal::SpaDetected(reason) => {
                 debug!("SPA detected ({reason:?}) — escalation warranted");
-                Ok(None)
+                Ok(false)
             },
         }
     }
@@ -120,7 +149,7 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
         };
 
         // SPA detected — continue escalation; static content — return early
-        if let Some(page) = self.evaluate_fetch(page)? {
+        if self.evaluate_fetch(&page)? {
             return Ok(page);
         }
 
@@ -140,22 +169,18 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
                 // (REQ-WAF-07), a still-SPA body escalates to L3, and static
                 // content is accepted. Previously any non-empty body was
                 // accepted unclassified.
-                match self.evaluate_fetch(page)? {
-                    Some(classified) => {
-                        debug!(
-                            url = %url,
-                            layer = 2,
-                            final_url = %classified.url,
-                            status = classified.status,
-                            "Layer 2 returned {} bytes",
-                            classified.html.len()
-                        );
-                        return Ok(classified);
-                    },
-                    None => {
-                        debug!("Layer 2 body still looks like a SPA — will try Layer 3");
-                    },
+                if self.evaluate_fetch(&page)? {
+                    debug!(
+                        url = %url,
+                        layer = 2,
+                        final_url = %page.url,
+                        status = page.status,
+                        "Layer 2 returned {} bytes",
+                        page.html.len()
+                    );
+                    return Ok(page);
                 }
+                debug!("Layer 2 body still looks like a SPA — will try Layer 3");
             },
             Ok(_) => {
                 debug!("Layer 2 returned empty content — will try Layer 3");
@@ -179,6 +204,10 @@ impl<L1: Downloader, L2: Downloader, L3: Downloader> HybridRouter<L1, L2, L3> {
         match self.layer3.fetch(url).await {
             Ok(page) => {
                 debug!("Layer 3 returned {} bytes", page.html.len());
+                // S11: classify the terminal layer too. A challenge rendered by
+                // Chromiumoxide must abort; a still-SPA body cannot escalate
+                // further, so it is returned as the best available result.
+                self.evaluate_fetch(&page)?;
                 return Ok(page);
             },
             Err(DownloadError::WafChallenge(msg)) => {
