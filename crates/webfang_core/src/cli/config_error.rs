@@ -7,7 +7,7 @@
 
 /// Why a configuration file could not be used (#1659).
 ///
-/// [`ConfigDefaults::load`](super::config::ConfigDefaults::load) degrades on
+/// `ConfigDefaults::load` degrades on
 /// `NotFound` only; every other variant is reported. Messages are user-facing
 /// and therefore in English, as are the `tracing` events that accompany them.
 #[derive(Debug, thiserror::Error)]

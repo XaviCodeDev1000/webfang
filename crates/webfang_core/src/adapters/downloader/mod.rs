@@ -167,7 +167,7 @@ pub struct Downloader {
     /// failures uncached so later pages may retry).
     in_flight_downloads: DashMap<String, ()>,
     /// Maximum cached entries. [`new`](Self::new) always sets the finite
-    /// [`cache::DEFAULT_ASSET_CACHE_CAPACITY`]; `usize::MAX` = the unbounded
+    /// `cache::DEFAULT_ASSET_CACHE_CAPACITY`; `usize::MAX` = the unbounded
     /// legacy mode, reachable only through
     /// [`with_asset_cache_capacity`](Self::with_asset_cache_capacity).
     asset_cache_capacity: usize,
@@ -187,7 +187,7 @@ impl Downloader {
     /// Pre-creates output directories once to avoid runtime contention.
     ///
     /// The dedup cache is bounded to
-    /// [`cache::DEFAULT_ASSET_CACHE_CAPACITY`] entries (S17): an unbounded
+    /// `cache::DEFAULT_ASSET_CACHE_CAPACITY` entries (S17): an unbounded
     /// default made every caller that skipped a composition root grow the
     /// registry linearly with the crawl. Call
     /// [`with_asset_cache_capacity`](Self::with_asset_cache_capacity) for an
