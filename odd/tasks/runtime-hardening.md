@@ -1,5 +1,5 @@
 # ODD — Runtime hardening
-Objective: implement the agreed WebFang hardening work in reviewable units. Planning branch/worktree: `feat/runtime-hardening`. Delivery: `sequential-on-main` (one PR per work unit against `main`, merged before the next; nested PRs are forbidden by `scripts/check-topology.sh`). Slice 1 merged as PR #3051 (`5e1852f3`); T17 lives on `feat/tenant-scoped-resources` under PR #3058 (OPEN, `Closes part of #3050`). Runner: `cargo check`, `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines`, `cargo fmt --all -- --check`, `cargo nextest run`, `bash scripts/ci_fast_gate.sh`.
+Objective: implement the agreed WebFang hardening work in reviewable units. Planning branch/worktree: `feat/runtime-hardening`. Delivery: `sequential-on-main` (one PR per work unit against `main`, merged before the next; nested PRs are forbidden by `scripts/check-topology.sh`). Slice 1 merged as PR #3051 (`5e1852f3`); PR #3058 (T17) is MERGED. T5's patch record is WebFang PR #3063 (`docs/upstream-seccomp-profile`) and upstream arapuca PR #118. Runner: `cargo check`, `cargo clippy --all-targets --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines`, `cargo fmt --all -- --check`, `cargo nextest run`, `bash scripts/ci_fast_gate.sh`.
 
 Rules for the implementing agent: work only inside the worktree; `eval "$(direnv export bash)"` before cargo/git in non-interactive shells; verify the identity proxy before every commit; English only; no `.unwrap()` in production; no `unsafe` code; no external metrics backend; no `CHANGELOG.md` or `docs/` edits; no new dependency beyond S1 and S2; HTTP always uses `wreq` and keeps the guard-chain order `ValidUrl` → pacing → timeout → redirect → SSRF → retry classification → capped body; cite symbols and paths, never line numbers; commit after each unit.
 
@@ -134,7 +134,7 @@ Commit: `fix(contracts): unify MCP errors and SSRF exit codes`
 
 ### S15 — Measured benchmark metrics
 Files: `crates/webfang_benchmark/Cargo.toml`, `src/aggregate.rs`, `src/cost.rs`, benchmark harness sources, `infrastructure/observability/memory_probe.rs`.
-1. Add a measured-RSS field to `StrategyMetrics`. Sample `/proc/self/statm` with the real page size. If no safe API for page size exists in the pinned dependencies, stop this step and report the blocker; add no `unsafe` and no dependency.
+1. Add a measured-RSS field to `StrategyMetrics`. Sample current RSS from `/proc/self/status` `VmRSS` (kB × 1024): the kernel already reports bytes-derived units, so no page-size API, no `unsafe` and no new dependency are needed.
 2. Use measured RSS in `cost::estimate` where available; keep `Downloader::memory_cost()` only as an explicitly labelled fallback.
 3. Count challenge events over total attempts using `WafVerdict`/`WafTier::Challenge`, `DownloadError::WafChallenge` and `ScraperError::WafBlocked`. Never report a presence flag such as `> 0` as a rate.
 4. Generate load at a fixed target rate from a scheduled timeline and record scheduled and observed timestamps. Compute percentiles in memory. Add no HdrHistogram or other crate.
@@ -167,7 +167,7 @@ Commit: `feat(multitenancy): scoped paths and bounded resources`
 - T2 — S2 — inline — vendor arapuca with browser profile — DONE (slice `feat/runtime-hardening-02-arapuca`, commit `ed75c5de`)
 - T3 — S3 — delegated — sandbox L2 and L3 subprocesses — DONE (commits 18f0db48, 195680c7, 9f23141a; native review escalated, informational)
 - T4 — S4 — delegated — sandbox tracing events — DONE (commit c307bb2b)
-- T5 — S5 — inline — upstream profile slice — pending
+- T5 — S5 — inline — upstream profile slice — DONE (upstream PR https://github.com/LeGambiArt/arapuca/pull/118 OPEN; artifacts in WebFang PR #3063, commits `15707bd2` + `86675d05`)
 - T6 — S6 — delegated — lint and init hygiene — DONE (commit 421b91de)
 - T7 — S7 — delegated — chunks bulk reader — DONE (commit bb341aa4)
 - T8 — S8 — inline — macOS and Windows CI proof — pending
@@ -177,9 +177,9 @@ Commit: `feat(multitenancy): scoped paths and bounded resources`
 - T12 — S12 — delegated — durable persistence — DONE (commit 89324c06; surface extended with parent adjudication)
 - T13 — S13 — inline — bounded shutdown and pools — DONE (pre-squash commit `bd56cb8b`; merged to `main` via PR #3051 as `5e1852f3`)
 - T14 — S14 — inline — MCP and CLI error contracts — DONE (pre-squash commit `b7177994`; merged to `main` via PR #3051 as `5e1852f3`)
-- T15 — S15 — delegated — measured benchmark metrics — BLOCKED (no safe real page-size API in pinned deps; see L12)
+- T15 — S15 — inline — measured benchmark metrics — IN PROGRESS (S15 steps 1-2 done on `feat/measured-rss`: VmRSS reader + measured field + cost preference; steps 3-5 remain pending; see L22)
 - T16 — S16 — delegated — completion retry and input envelope — DONE (commit b7507b8f)
-- T17 — S17 — inline — tenant-scoped paths and resources — DONE (commit `849315b1`; docs follow-up `53dd8a91`; PR #3058 OPEN against `main`, `Closes part of #3050`)
+- T17 — S17 — inline — tenant-scoped paths and resources — DONE (commit `849315b1`; docs follow-up `53dd8a91`; PR #3058 MERGED; doc copy aligned in main)
 
 Route declaration: T3, T4, T6, T7, T9-T12, T15 and T16 were delegated to bounded writers with explicit edit surfaces and skills; the parent owns all commits and seams. Work-unit commits carry each spec; commit identities are recorded here as they land.
 
@@ -242,3 +242,5 @@ Además hay dos items sueltos que no son T# pero siguen abiertos:
 - Hallazgos reportados pero no cambiados (L15, requieren decisión fuera del slice): arapuca es dependencia declarada sin sitio de uso — el build no produce el binario y cada run cae al path sin sandbox; load_chunk_vectors (S7) no tiene caller de producción; neutralize_input (S16) no está conectado a los inputs de las tools; FetchedPage de L3 lleva headers vacíos, así que el "contexto real" de S11 es solo status; el job obscura-hybrid sigue reclamando tres hatches SSRF que S9 volvió test-only; y los mensajes de proxy-config en español son textos preexistentes."
 
 Reconciliation evidence (user selected "Reconciliar el doc ODD"): `origin/main` is `bc6ff197`; PR #3051 is MERGED as `5e1852f3`; issue #3050 is OPEN with `status:approved`; PR #3058 is OPEN against `main` with label `type:feature` and body carrying `Closes part of #3050`. The 13 DONE count spans both merged and open work: T1/T15 remain BLOCKED, T5/T8 pending, and T17's doc updates travel in #3058. The L20 sentence "No push, no PR, no umbrella update" was true when written but is superseded by #3058's publication. Pre-squash hashes in L16 are retained as historical evidence; the merged surface is the squash commit `5e1852f3`. Main's copy of this document remains stale until #3058 merges; this branch is the source of truth for the reconciliation. No source, CI or dependency was changed in this task.
+
+L22 (2026-11-26, user answer verbatim): "T15 con VmRSS (Recommended)". Authorized scope: S15 steps 1-2 only; steps 3-5 stay pending. Decision: S15 step 1 amended to sample current RSS from `/proc/self/status` `VmRSS` (kB × 1024) instead of `/proc/self/statm` with a real page size — the page-size blocker was real for the literal wording, but the kernel already exposes a bytes-derived value, so no `unsafe`, no new dependency and no `page_size_bytes()` constant are needed. `memory_probe::parse_vmrss_bytes` is a pure std parser; `StrategyMetrics` gains `measured_rss_bytes: Option<u64>`, documented volatile and rendered only inside the `<!-- volatile -->` block so ADR-B4 Block A stays byte-stable; `cost::estimate` prefers the measured sample and keeps the declared `Downloader::memory_cost()` as the explicitly labelled fallback. RED→GREEN observed for the parser (missing symbol → 4/4 green) and for the cost preference (missing field → cost_model_test green). Verification AFTER `cargo fmt --all` (normalization first): `cargo check --workspace --all-targets --all-features` PASS; full clippy with `-D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines` PASS; `cargo fmt --all -- --check` PASS; `cargo test -p webfang_benchmark` all targets PASS; `cargo test -p webfang_core --lib infrastructure::observability::memory_probe::tests` 4/4 PASS. T5 doc alignment folded in: PR #3058 MERGED (main `b0b03582`), upstream arapuca PR #118 OPEN, WebFang PR #3063 OPEN with `Closes part of #3050`. S15 steps 3-5 (challenge rate, open-loop latency, Tier B exclusion) are explicitly NOT in this slice.

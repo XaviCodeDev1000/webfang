@@ -41,7 +41,7 @@
       "path": "crates/webfang_benchmark/tests/cost_model_test.rs",
       "crate": "webfang_benchmark",
       "area": "tests",
-      "test_count": 3,
+      "test_count": 4,
       "ignored_count": 0,
       "snapshot_usage": false,
       "tier": "integration_mock"

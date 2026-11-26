@@ -40,6 +40,7 @@ fn metrics(pages_per_sec: f64, ram_cost_bytes: usize) -> StrategyMetrics {
             panic: 0,
         },
         ram_cost_bytes,
+        measured_rss_bytes: None,
     }
 }
 
@@ -66,6 +67,29 @@ fn full_formula_matches_hand_computation() {
         (est.webfang_usd_per_1k - expected).abs() < 1e-12,
         "expected {expected}, got {}",
         est.webfang_usd_per_1k
+    );
+}
+
+/// S15 step 2 — a measured RSS sample replaces the declared downloader
+/// estimate in the RAM-share term; the declared value stays the labelled
+/// fallback used when no sample is available.
+#[test]
+fn measured_rss_overrides_declared_estimate() {
+    let declared = metrics(100.0, 1 << 30);
+    let mut measured = declared.clone();
+    measured.measured_rss_bytes = Some(1 << 29);
+
+    let fallback = cost::estimate(&declared, &fixed_config()).expect("estimates");
+    let observed = cost::estimate(&measured, &fixed_config()).expect("estimates");
+    let expected = 0.10 * 0.5 + 0.10 * (1000.0 / 100.0 / 3600.0);
+    assert!(
+        (observed.webfang_usd_per_1k - expected).abs() < 1e-12,
+        "expected {expected}, got {}",
+        observed.webfang_usd_per_1k
+    );
+    assert!(
+        (fallback.webfang_usd_per_1k - observed.webfang_usd_per_1k).abs() > 1e-12,
+        "measured RSS must change the RAM share, not be ignored"
     );
 }
 
