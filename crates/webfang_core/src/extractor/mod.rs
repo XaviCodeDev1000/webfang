@@ -230,7 +230,7 @@ fn parse_srcset(srcset: &str) -> Vec<String> {
     urls
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

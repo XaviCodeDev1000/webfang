@@ -352,7 +352,7 @@ impl ResourceDownloader {
     }
 }
 
-#[cfg(all(test, not(miri)))] // tokio::time::timeout + spawn_blocking hang under Miri (entire module)
+#[cfg(test)]
 mod tests {
     /// #1615 (F11 / G-3 / G-4 / G-5): these tests drive real fetches against
     /// wiremock's 127.0.0.1, which the literal-IP entry guard now refuses.

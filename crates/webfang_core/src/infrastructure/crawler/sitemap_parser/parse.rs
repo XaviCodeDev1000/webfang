@@ -340,6 +340,6 @@ impl SitemapParser {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 #[path = "tests_xml.rs"]
 mod tests_xml;

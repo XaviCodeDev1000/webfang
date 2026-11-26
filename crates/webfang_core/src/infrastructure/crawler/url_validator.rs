@@ -187,7 +187,7 @@ impl UrlValidatorTrait for UrlValidator {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     /// #1615 (F11 / G-3 / G-4 / G-5): these tests drive real fetches against
     /// wiremock's 127.0.0.1, which the literal-IP entry guard now refuses.
@@ -198,17 +198,29 @@ mod tests {
     }
     use super::*;
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_url_validator_creation() {
         assert!(UrlValidator::new().is_ok());
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_url_validator_with_custom_profile() {
         assert!(UrlValidator::with_profile(wreq_util::Profile::Chrome131).is_ok());
         assert!(UrlValidator::with_profile(wreq_util::Profile::Firefox135).is_ok());
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_url_validator_with_timeout_and_profile() {
         assert!(
@@ -216,6 +228,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_filter_invalid_patterns_valid_url() {
         let validator = UrlValidator::new().unwrap();
@@ -226,6 +242,10 @@ mod tests {
         assert!(matches!(result, ValidationResult::Valid));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_filter_invalid_patterns_invalid_node_version() {
         let validator = UrlValidator::new().unwrap();
@@ -235,6 +255,10 @@ mod tests {
         assert!(matches!(result, ValidationResult::Invalid(_)));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_filter_invalid_patterns_invalid_scheme() {
         let validator = UrlValidator::new().unwrap();
@@ -244,6 +268,10 @@ mod tests {
         assert!(matches!(result, ValidationResult::Invalid(_)));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_filter_invalid_patterns_valid_node_version() {
         let validator = UrlValidator::new().unwrap();
@@ -253,6 +281,10 @@ mod tests {
         assert!(matches!(result, ValidationResult::Valid));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[test]
     fn test_filter_invalid_patterns_delegates_to_domain() {
         let validator = UrlValidator::new().unwrap();
@@ -263,6 +295,10 @@ mod tests {
         assert_eq!(from_infra, from_domain);
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[tokio::test]
     async fn test_validate_http_status_200() {
         let _entry_off = entry_off();
@@ -282,6 +318,10 @@ mod tests {
         assert!(matches!(result, Ok(ValidationResult::Valid)));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[tokio::test]
     async fn test_validate_http_status_404() {
         use wiremock::matchers::method;
@@ -300,6 +340,10 @@ mod tests {
         assert!(matches!(result, Ok(ValidationResult::Invalid(_))));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "btls-sys FFI (wreq Client via UrlValidator::new) not supported by Miri: TLS_method"
+    )]
     #[tokio::test]
     async fn test_validate_http_status_500() {
         use wiremock::matchers::method;

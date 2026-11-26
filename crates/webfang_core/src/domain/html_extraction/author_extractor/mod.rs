@@ -229,7 +229,7 @@ pub fn extract_author_from_document(
         .filter(|b| !b.is_empty())
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
