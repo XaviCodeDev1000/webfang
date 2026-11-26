@@ -30,6 +30,7 @@ fn sample(strategy: JsStrategy, ram_bytes: usize) -> StrategyMetrics {
             panic: 0,
         },
         ram_cost_bytes: ram_bytes,
+        measured_rss_bytes: None,
     }
 }
 
@@ -155,7 +156,13 @@ fn volatile_block_delimits_wall_clock_quantities() {
     let start = out.find("<!-- volatile -->").expect("open sentinel");
     let end = out.rfind("<!-- volatile -->").expect("close sentinel");
     let block_b = &out[start..end];
-    for needle in ["p50", "p95", "pages/sec", "wall-clock"] {
+    for needle in [
+        "p50",
+        "p95",
+        "pages/sec",
+        "wall-clock",
+        "Measured RSS bytes",
+    ] {
         assert!(
             block_b.contains(needle),
             "`{needle}` must be inside the volatile block"

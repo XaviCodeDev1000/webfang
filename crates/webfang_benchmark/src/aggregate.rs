@@ -312,6 +312,11 @@ pub struct StrategyMetrics {
     /// captured by the runner. This is a static estimate, not measured RSS.
     /// The field name stays stable because the harness cost model consumes it.
     pub ram_cost_bytes: usize,
+    /// Current RSS sampled when the metrics were computed, from
+    /// `/proc/self/status` `VmRSS` on Linux; `None` elsewhere. Unlike the
+    /// declared estimate this is a measurement, so it is volatile and never
+    /// rendered in the byte-compared Block A.
+    pub measured_rss_bytes: Option<u64>,
 }
 
 /// Compute metrics from classified records for one strategy run.
@@ -371,6 +376,7 @@ pub fn compute(
             panic: summary.errors_panic,
         },
         ram_cost_bytes: declared_ram_cost_bytes,
+        measured_rss_bytes: webfang_core::infrastructure::observability::memory_probe::rss_bytes(),
     })
 }
 

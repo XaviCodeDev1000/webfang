@@ -38,11 +38,14 @@ pub fn estimate(metrics: &StrategyMetrics, config: &CostConfig) -> Result<CostEs
         )));
     }
 
+    let ram_bytes = metrics
+        .measured_rss_bytes
+        .unwrap_or(metrics.ram_cost_bytes as u64);
     Ok(CostEstimate {
         webfang_usd_per_1k: infra_usd_per_1k(
             config.infra.instance_hourly_usd,
             metrics.pages_per_sec,
-            metrics.ram_cost_bytes,
+            ram_bytes,
             config.infra.instance_ram_gb,
         ),
     })
@@ -97,7 +100,7 @@ pub fn crawl4ai_usd_per_1k(
     Ok(infra_usd_per_1k(
         config.crawl4ai.instance_hourly_usd,
         pages_per_sec,
-        ram_cost_bytes,
+        ram_cost_bytes as u64,
         config.crawl4ai.instance_ram_gb,
     ))
 }
@@ -110,7 +113,7 @@ pub fn crawl4ai_usd_per_1k(
 fn infra_usd_per_1k(
     hourly_usd: f64,
     pages_per_sec: f64,
-    ram_cost_bytes: usize,
+    ram_cost_bytes: u64,
     instance_ram_gb: f64,
 ) -> f64 {
     let compute_share = hourly_usd * ((1000.0 / pages_per_sec) / (60.0 * 60.0));
