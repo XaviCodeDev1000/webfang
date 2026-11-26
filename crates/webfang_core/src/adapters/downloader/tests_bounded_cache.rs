@@ -26,7 +26,10 @@ fn bounded_asset_cache_plateaus_at_capacity() {
 
     let bounded = Downloader::with_asset_cache_capacity(DownloadConfig::default(), CAP)
         .expect("downloader builds");
-    let unbounded = Downloader::new(DownloadConfig::default()).expect("downloader builds");
+    // S17 made `new` bounded too, so the linear-growth baseline is now the
+    // explicit unbounded opt-in rather than the default constructor.
+    let unbounded = Downloader::with_asset_cache_capacity(DownloadConfig::default(), usize::MAX)
+        .expect("downloader builds");
 
     for i in 0..WORKLOAD {
         let key = format!("https://probe.example.com/assets/img-{i}.png");
@@ -44,6 +47,22 @@ fn bounded_asset_cache_plateaus_at_capacity() {
         bounded.downloaded_urls.len()
     );
     assert_eq!(unbounded.downloaded_urls.len(), WORKLOAD);
+}
+
+/// S17: the default constructor must be finite. `usize::MAX` is now an
+/// explicit opt-in, never what a caller gets by default.
+#[test]
+fn default_downloader_cache_capacity_is_finite() {
+    let downloader = Downloader::new(DownloadConfig::default()).expect("downloader builds");
+    assert_ne!(
+        downloader.asset_cache_capacity(),
+        usize::MAX,
+        "Downloader::new must not take the unbounded legacy path"
+    );
+    assert_eq!(
+        downloader.asset_cache_capacity(),
+        crate::adapters::downloader::cache::DEFAULT_ASSET_CACHE_CAPACITY
+    );
 }
 
 /// Task 5.5 — byte-identity: a workload completing entirely WITHIN the

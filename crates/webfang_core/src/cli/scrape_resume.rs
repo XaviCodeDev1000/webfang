@@ -30,6 +30,12 @@ use crate::infrastructure::export::RecordStore;
 /// exists.
 #[must_use]
 pub fn resolve_default_state_dir() -> PathBuf {
+    // S17: a tenant-or-run scope keeps checkpoints under its own root; an
+    // explicit `--state-dir` / persistence override is resolved by the caller
+    // and never reaches this default.
+    if let Some(scoped) = crate::domain::paths::TenantScope::current().state_dir() {
+        return scoped;
+    }
     crate::domain::paths::cache_base_dir()
         .unwrap_or_else(|| PathBuf::from(".cache"))
         .join("webfang")

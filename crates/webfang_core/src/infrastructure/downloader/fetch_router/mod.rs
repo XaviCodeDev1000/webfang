@@ -221,7 +221,18 @@ impl Downloader for FetchRouter {
             Self::Static(dl) => dl.fetch(url),
             Self::Hybrid(dl) => dl.fetch(url),
             Self::Full(dl, governor) => Box::pin(async move {
-                governor.check_resources().map_err(DownloadError::from)?;
+                // S17: consume the COUNT, not only the Err case. At the warning
+                // threshold the governor halves the free permits, so `Ok(0)` is
+                // a denial — acquiring then would block on a permit that was
+                // never granted.
+                let permits = governor.check_resources().map_err(DownloadError::from)?;
+                if permits == 0 {
+                    return Err(DownloadError::from(
+                        super::resource_governor::ResourceError::Insufficient(
+                            "no fetch permits available".to_string(),
+                        ),
+                    ));
+                }
                 let _permit = governor.acquire().await?;
                 dl.fetch(url).await
             }),

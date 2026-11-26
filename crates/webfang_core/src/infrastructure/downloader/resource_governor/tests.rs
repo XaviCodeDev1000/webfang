@@ -61,6 +61,52 @@ fn test_check_resources_returns_ok() {
     assert!(result.is_ok());
 }
 
+/// S17: the warning-level halving is an admission decision. ONE free permit
+/// halves to ZERO, which the routers must read as a denial, not as "some
+/// permits".
+#[test]
+fn warning_pressure_reduces_a_single_permit_to_zero() {
+    assert!(matches!(
+        super::admit_permits(super::WARNING_THRESHOLD, 1),
+        Ok(0)
+    ));
+    assert!(matches!(
+        super::admit_permits(super::WARNING_THRESHOLD, 4),
+        Ok(2)
+    ));
+    assert!(matches!(super::admit_permits(0, 3), Ok(3)));
+    assert!(matches!(
+        super::admit_permits(super::CRITICAL_THRESHOLD, 4),
+        Err(super::ResourceError::RamTooHigh(percent)) if percent == super::CRITICAL_THRESHOLD
+    ));
+}
+
+/// S17: a cgroup `max` (or v1's huge sentinel) is not a ceiling, and a zero
+/// usage reading is real data rather than "absent".
+#[test]
+fn cgroup_parsing_ignores_unlimited_sentinels() {
+    assert_eq!(super::parse_cgroup_limit("max\n"), None);
+    assert_eq!(super::parse_cgroup_limit(""), None);
+    assert_eq!(super::parse_cgroup_limit("0"), None);
+    assert_eq!(super::parse_cgroup_limit(&u64::MAX.to_string()), None);
+    assert_eq!(
+        super::parse_cgroup_limit("2147483648\n"),
+        Some(2_147_483_648)
+    );
+    assert_eq!(super::parse_cgroup_usage("0\n"), Some(0));
+    assert_eq!(super::parse_cgroup_usage("1024"), Some(1024));
+    assert_eq!(super::parse_cgroup_usage("max"), None);
+}
+
+/// S17: usage is measured against the ceiling that can actually be consumed,
+/// and a zero total never divides.
+#[test]
+fn percent_uses_the_given_ceiling() {
+    assert_eq!(super::percent(0, 0), 0);
+    assert_eq!(super::percent(512, 1024), 50);
+    assert_eq!(super::percent(u64::MAX, 1), 100);
+}
+
 #[test]
 #[cfg_attr(miri, ignore = "sysinfo sysconf (RAM probe) unsupported by Miri")]
 fn test_total_ram_nonzero() {

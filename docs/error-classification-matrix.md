@@ -4,6 +4,10 @@
 **Amendment 2026-11-18:** language rule unified to English only (owner decision, tracked in
 `odd/tasks/english-only-messages.md`). The "Spanish message" / "Spanish text" wording in the
 MCP projection table is removed. No exit code, error class or mapping changed.
+**Amendment 2026-11-26 (T14):** `CliExit` gained `SsrfBlocked` (70) and `WafBlocked` (71), so an
+endpoint the SSRF guard refuses is no longer remapped into the transient 69, and an all-WAF run
+has its own code. The MCP contract additions (panic envelope, `validate_url` params, derived tool
+count) are appended at the end; no other row changed.
 **Contract ID:** `261bdb66-197e-420f-a73b-66c0e889102d`
 **Source roadmap:** Stabilization Sprint 1-2 — Error classification (P0-err), Gate 1.
 
@@ -47,7 +51,7 @@ Exit-code knowledge stays OUT of the domain. The mapping lives in `cli/error.rs`
 | 4 | Timeout / GlobalTimeout / SlowlorisTimeout | TransientBackoff | 69 | Yes, after wait |
 | 5 | HTTP 4xx (except 429) | PermanentFatal | 64/65 per variant | No |
 | 6 | DNS failure / TLS failure | PermanentFatal | 69 / 76 | No |
-| 7 | WafChallenge / WafBlocked | PermanentFatal | 77 | No |
+| 7 | WafChallenge / WafBlocked | PermanentFatal | 71 when EVERY failure is WAF; 77 for the robots.txt rule | No |
 | 8 | Generic indeterminate Network error | TransientRetriable | 69 | Yes, bounded |
 
 Rationale for #8: indeterminate network errors are overwhelmingly transient in
@@ -159,6 +163,8 @@ carrying partial results (#2338) does not soften the class. Treatment:
 | Condition | Exit | Reason |
 |---|---|---|
 | All URLs blocked by robots.txt / WAF | 77 | Caller lacks permission, not a service fault |
+| Every failure is `ScraperError::WafBlocked` (all-WAF run) | 71 | The origin answered and refused; there is no outage to retry (T14, `waf_blocked_exit_when_all_failures_are_waf`) |
+| `connect` / `doctor` endpoint refused by the SSRF guard | 70 | Pre-socket policy refusal, not a network fault; no longer remapped into 69 (T14, `CliExit::SsrfBlocked`) |
 | ExtractionFailed (typed `matches!`) | 65 | Content-quality failure, not network |
 | Sitemap empty / empty discovery | 2 | Technical success, null result |
 | `--dry-run` whose seed the SSRF entry guard refuses | 2 | Policy refusal, not an empty site (#1381) — the refusal is pre-socket, so discovery still returns `Ok` with zero URLs |
@@ -252,3 +258,21 @@ every consumer of `ErrorClass` at the `ScraperError` layer.
     
     See `docs/ssrf-layers.md` for the `-32602` SSRF row and `crates/webfang_mcp/tests/mcp_transport_contract_test.rs`
     for the framework rows.
+
+    ## MCP contract pinned by T14
+
+    Four behaviors are contract, not implementation detail:
+
+    1. **One panic envelope on both transports.** A contained panic answers JSON-RPC `-32603`
+       carrying `PANIC_CONTAINED_MESSAGE` inside a `CallToolResult` error. HTTP and stdio share the
+       constant; a transport that answered a success-shaped result would hide the failure from the
+       agent. The panic probe itself requires a development build AND its env switch, so a release
+       binary never advertises it.
+    2. **`validate_url` refuses unusable targets as invalid params.** `valid: false` answers
+       `-32602` and keeps `valid` / `reason` / `reason_code` in the error `data`; it is never a
+       success result with a failure body.
+    3. **The tool count is derived.** `MCP_TOOL_COUNT` comes from `McpHandler::mcp_tool_count()`
+       (`list_all()`), and the external pin lives in `crates/webfang_mcp/tests/stdio_handshake.rs`
+       — there is no second hardcoded number to drift.
+    4. **Panic containment preserves the cause where the surface allows it.** `handle_completions`
+       keeps the original error chain instead of flattening it to its rendering.

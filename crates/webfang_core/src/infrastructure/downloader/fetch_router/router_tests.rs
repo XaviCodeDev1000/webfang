@@ -215,3 +215,34 @@ fn build_fetch_router_full_passes_configured_wait_mode() {
         _other => panic!("expected Full router for the wait-mode seam"),
     }
 }
+
+/// S17: the Full arm must consume the permit COUNT, not only the `Err` case.
+/// With the only permit already held, `check_resources` answers `Ok(0)` and the
+/// router must refuse the fetch before launching Chrome.
+#[tokio::test]
+async fn full_router_denies_fetch_when_no_permit_is_available() {
+    use crate::domain::downloader_port::Downloader as _;
+    use crate::infrastructure::downloader::chromiumoxide_downloader::ChromiumoxideDownloader;
+    use crate::infrastructure::downloader::resource_governor::ResourceGovernor;
+    use std::sync::Arc;
+
+    let governor = Arc::new(ResourceGovernor::with_max_instances(
+        1,
+        CancellationToken::new(),
+    ));
+    let held = governor.acquire().await.expect("the single permit is free");
+    let downloader =
+        ChromiumoxideDownloader::new(test_cookie_bridge(), PostLoadWait::None, 30, None);
+    let router = FetchRouter::Full(Arc::new(downloader), governor);
+
+    let url: url::Url = "https://example.com/page".parse().expect("valid url");
+    let err = router
+        .fetch(&url)
+        .await
+        .expect_err("an exhausted governor must deny the fetch");
+    assert!(
+        err.to_string().contains("no fetch permits available"),
+        "expected the resource denial, got: {err}"
+    );
+    drop(held);
+}

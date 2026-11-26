@@ -70,40 +70,12 @@ pub struct ConfigDefaults {
 /// operator believed was applied, so a message that omits the path is the same
 /// bug in a different costume. Messages are user-facing and therefore in
 /// English, as are the `tracing` events that accompany them.
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigLoadError {
-    /// An explicit `WEBFANG_CONFIG` override was not an absolute path.
-    #[error("WEBFANG_CONFIG must be an absolute path: {path}")]
-    NotAbsolute {
-        /// The rejected value, verbatim.
-        path: String,
-    },
-    /// No file exists at the configured path.
-    #[error("the configuration file does not exist: {path}")]
-    NotFound {
-        /// The path that was looked up.
-        path: String,
-    },
-    /// The file exists but could not be read — `PermissionDenied`, a path
-    /// that is a directory (`EISDIR`), invalid UTF-8, and friends.
-    #[error("could not read the configuration file {path}: {source}")]
-    Io {
-        /// The path that was read.
-        path: String,
-        /// The underlying I/O failure.
-        #[source]
-        source: std::io::Error,
-    },
-    /// The file was read but is not valid TOML.
-    #[error("the configuration file {path} is not valid TOML: {source}")]
-    Malformed {
-        /// The path that was parsed.
-        path: String,
-        /// The underlying TOML failure.
-        #[source]
-        source: toml::de::Error,
-    },
-}
+// Explicit `#[path]`: a bare `mod config_error;` inside `cli/config.rs`
+// resolves against `cli/config/`, not `cli/`.
+#[path = "config_error.rs"]
+mod config_error;
+
+pub use config_error::ConfigLoadError;
 
 impl ConfigDefaults {
     /// Load configuration from a TOML file, degrading to defaults.
@@ -247,10 +219,19 @@ fn explicit_config_path() -> Option<PathBuf> {
 
 /// The platform-default config path: `<config base>/webfang/config.toml`.
 fn default_config_path() -> PathBuf {
-    crate::domain::paths::config_base_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("webfang")
-        .join("config.toml")
+    // S17: tenant-scoped when `WEBFANG_TENANT_ID` is set; an explicit
+    // `WEBFANG_CONFIG` still wins, because `explicit_config_path()` is
+    // consulted before this default everywhere.
+    crate::domain::paths::default_config_path()
+}
+
+/// Validate the ambient tenant-or-run identifier before any path is resolved.
+fn validate_tenant_scope() -> Result<(), ConfigLoadError> {
+    crate::domain::paths::TenantScope::from_env()
+        .map(|_| ())
+        .map_err(|error| ConfigLoadError::InvalidTenantId {
+            reason: error.to_string(),
+        })
 }
 
 /// Load the configuration the CLI runs with, enforcing the override contract.
@@ -269,6 +250,7 @@ fn default_config_path() -> PathBuf {
 /// to keep serving and degrade with a warning, the opposite of the CLI's
 /// fail-closed startup, so it stays on [`ConfigDefaults::load`].
 pub fn load_config_defaults() -> Result<ConfigDefaults, ConfigLoadError> {
+    validate_tenant_scope()?;
     match explicit_config_path() {
         Some(path) => ConfigDefaults::load_explicit(&path),
         None => Ok(ConfigDefaults::load(&default_config_path())),
@@ -305,6 +287,7 @@ pub fn load_config_defaults() -> Result<ConfigDefaults, ConfigLoadError> {
 /// from the same read-and-parse core both loaders share; nothing is logged
 /// (see above).
 pub fn load_config_defaults_or_diag(config_path: &Path) -> Result<ConfigDefaults, ConfigLoadError> {
+    validate_tenant_scope()?;
     match explicit_config_path() {
         // Identical to the override the caller resolved — this arm is what
         // keeps an explicit `WEBFANG_CONFIG` fail-closed (#1659) for
@@ -850,6 +833,22 @@ max_pages = 20
         assert!(
             msg.contains("is not valid TOML"),
             "the error must name the file problem in English, got: {msg}"
+        );
+    }
+
+    /// S17: an invalid tenant-or-run identifier is a configuration error, not
+    /// a silent fallback to the shared default root. The check runs before any
+    /// path is resolved, so no state can be written unscoped.
+    #[test]
+    fn invalid_tenant_identifier_fails_the_config_load() {
+        use webfang_test_utils::EnvGuard;
+
+        let _guard = EnvGuard::with(&[("WEBFANG_TENANT_ID", "../escape")]);
+        let error = load_config_defaults()
+            .expect_err("an invalid identifier must fail closed, not degrade");
+        assert!(
+            matches!(error, ConfigLoadError::InvalidTenantId { .. }),
+            "expected InvalidTenantId, got: {error}"
         );
     }
 }

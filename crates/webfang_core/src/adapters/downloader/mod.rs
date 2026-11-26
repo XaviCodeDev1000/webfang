@@ -112,7 +112,7 @@ impl crate::domain::config::ScraperConfig {
     /// does not depend on `adapters` (inward-only).
     pub fn to_download_config(&self) -> DownloadConfig {
         DownloadConfig {
-            output_dir: self.output_dir.clone(),
+            output_dir: self.scoped_output_dir(),
             timeout_secs: self.download_timeout_secs,
             max_file_size: self.max_file_size.unwrap_or(50 * 1024 * 1024),
             concurrency_limit: self.download_concurrency,
@@ -122,6 +122,21 @@ impl crate::domain::config::ScraperConfig {
             asset_naming: self.asset_naming,
             ..Default::default()
         }
+    }
+
+    /// Default download directory, relocated under the tenant-or-run root.
+    ///
+    /// S17: only the untouched default (`./output`) is relocated. A value the
+    /// operator set — `--output`, a config key, a library caller's
+    /// `with_output_dir` — is preserved exactly, which is what keeps CLI and
+    /// environment overrides ahead of the scope.
+    fn scoped_output_dir(&self) -> PathBuf {
+        if self.output_dir == std::path::Path::new("./output") {
+            if let Some(scoped) = crate::domain::paths::TenantScope::current().downloads_dir() {
+                return scoped;
+            }
+        }
+        self.output_dir.clone()
     }
 }
 
@@ -151,8 +166,10 @@ pub struct Downloader {
     /// left behind by a permanent failure (`run_download` deliberately leaves
     /// failures uncached so later pages may retry).
     in_flight_downloads: DashMap<String, ()>,
-    /// Maximum cached entries. `usize::MAX` = unbounded (legacy behavior,
-    /// byte-identical to pre-cap releases).
+    /// Maximum cached entries. [`new`](Self::new) always sets the finite
+    /// `cache::DEFAULT_ASSET_CACHE_CAPACITY`; `usize::MAX` = the unbounded
+    /// legacy mode, reachable only through
+    /// [`with_asset_cache_capacity`](Self::with_asset_cache_capacity).
     asset_cache_capacity: usize,
 }
 
@@ -169,6 +186,13 @@ impl Downloader {
     ///
     /// Pre-creates output directories once to avoid runtime contention.
     ///
+    /// The dedup cache is bounded to
+    /// `cache::DEFAULT_ASSET_CACHE_CAPACITY` entries (S17): an unbounded
+    /// default made every caller that skipped a composition root grow the
+    /// registry linearly with the crawl. Call
+    /// [`with_asset_cache_capacity`](Self::with_asset_cache_capacity) for an
+    /// explicit bound.
+    ///
     /// # Errors
     ///
     /// Returns `ScraperError::Io` if directory creation fails.
@@ -178,10 +202,9 @@ impl Downloader {
         // #606): when no assets are downloaded we must not litter the CWD with
         // empty `output/` + subdir trees.
         //
-        // Delegates to the bounded constructor with `usize::MAX` so both paths
-        // share ONE wreq client builder — the SSRF policy (#703) can never
-        // diverge between them.
-        Self::with_asset_cache_capacity(config, usize::MAX)
+        // Both constructors share ONE wreq client builder — the SSRF policy
+        // (#703) can never diverge between them.
+        Self::with_asset_cache_capacity(config, cache::DEFAULT_ASSET_CACHE_CAPACITY)
     }
 
     /// Bounded-cache constructor: the dedup cache evicts oldest entries past
