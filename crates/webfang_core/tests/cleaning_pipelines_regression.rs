@@ -21,7 +21,7 @@ use webfang_core::infrastructure::converter::html_cleaner::clean_html;
 
 // ─── Pipeline 3: html_cleaner.rs (MCP tools) ────────────────────────────────
 
-#[cfg(all(test, not(miri)))]
+#[cfg(all(test, not(miri)))] // clean_html -> lol_html rewrite_str: servo_arc Tree-Borrows UB (stylo#210); RED run aborted on every test in this module
 mod html_cleaner_regression {
     use super::*;
 
@@ -188,7 +188,7 @@ mod html_cleaner_regression {
 // (ASCII state machine) → strip_html_tags (block removal of script/style).
 // We test through the public CpuBridge::dispatch_resource API.
 
-#[cfg(all(test, not(miri)))]
+#[cfg(all(test, not(miri)))] // CpuBridge/rayon spawn + clean_html servo_arc Tree-Borrows UB (stylo#210); RED run aborted on the first test
 mod bridge_aggressive_regression {
     use std::sync::Arc;
     use webfang_core::infrastructure::bridge::CpuBridge;
@@ -293,7 +293,7 @@ mod bridge_aggressive_regression {
 // (naive char-by-char) → normalize_whitespace (split_whitespace).
 // We test through the public PipelineStage trait on CleanStage.
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod clean_semantic_regression {
     use webfang_core::application::pipeline::{
         CleanStage, PipelineStage, ScrapedItem, StageOutcome,
@@ -417,7 +417,7 @@ mod clean_semantic_regression {
 // These tests prove the trait adapters produce identical behavior to the
 // original pipeline functions. Same HTML inputs, same expected outputs.
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod content_processor_regression {
     use webfang_core::domain::content_processor::ContentProcessor;
     use webfang_core::infrastructure::content_processing::{
@@ -467,6 +467,7 @@ mod content_processor_regression {
     // ─── AggressiveProcessor vs bridge.rs ───────────────────────────────────
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn aggressive_removes_script_blocks() {
         let p = AggressiveProcessor;
         let result = p.process("<p>Hello</p><script>alert('xss')</script><p>World</p>");
@@ -478,6 +479,7 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn aggressive_removes_style_blocks() {
         let p = AggressiveProcessor;
         let result = p.process("<p>Content</p><style>.red{color:red}</style>");
@@ -489,6 +491,7 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn aggressive_removes_boilerplate() {
         let p = AggressiveProcessor;
         let result =
@@ -500,6 +503,7 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn aggressive_no_raw_tags() {
         let p = AggressiveProcessor;
         let result = p.process("<p>Hello <b>bold</b> world</p>");
@@ -507,6 +511,7 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn aggressive_empty_returns_empty() {
         let p = AggressiveProcessor;
         assert_eq!(p.process(""), "");
@@ -515,6 +520,7 @@ mod content_processor_regression {
     // ─── McpProcessor vs html_cleaner.rs ────────────────────────────────────
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn mcp_removes_scripts() {
         let p = McpProcessor;
         let result = p.process(r#"<p>Hello</p><script>evil()</script><p>World</p>"#);
@@ -526,6 +532,7 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn mcp_preserves_semantic_tags() {
         let p = McpProcessor;
         let result = p.process("<h1>Title</h1><p>Paragraph</p>");
@@ -540,6 +547,7 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn mcp_removes_boilerplate() {
         let p = McpProcessor;
         let result = p.process("<nav>Menu</nav><main>Content</main><footer>Footer</footer>");
@@ -549,12 +557,14 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn mcp_empty_returns_empty() {
         let p = McpProcessor;
         assert_eq!(p.process(""), "");
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn mcp_css_selectors_removed() {
         let p = McpProcessor;
         let result = p.process(
@@ -570,6 +580,7 @@ mod content_processor_regression {
     // different outputs for the same input — this is the whole point.
 
     #[test]
+    #[cfg_attr(miri, ignore = "servo_arc UB via clean_html (stylo#210)")]
     fn mcp_preserves_tags_while_aggressive_strips() {
         let html = "<p>Hello <b>world</b></p>";
         let mcp = McpProcessor;
@@ -589,6 +600,10 @@ mod content_processor_regression {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "aggressive path reaches clean_html servo_arc UB (stylo#210)"
+    )]
     fn semantic_uses_readability_while_aggressive_uses_lol_html() {
         // A complex page where Readability extraction differs from lol_html stripping
         let html = r#"<html><head><title>Page</title></head>
@@ -618,7 +633,7 @@ mod content_processor_regression {
 
 // ─── Issue #3009: embedding boundary must never receive raw block bodies ──
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod embedding_boundary_regression {
     use std::any::Any;
     use std::future::Future;
@@ -672,6 +687,7 @@ mod embedding_boundary_regression {
     /// stripper. That fallback must drop script/style/noscript bodies before
     /// any text reaches `embed_batch`.
     #[tokio::test]
+    #[cfg_attr(miri, ignore = "tokio runtime socketpair unsupported by Miri")]
     async fn degraded_stripper_drops_script_style_noscript_before_embed_batch() {
         // No readable article: `legible::parse` returns Err and the fallback runs.
         let html = r#"<html><head><title>x</title></head><body><script>LEAK_SCRIPT</script><style>LEAK_STYLE</style><noscript>LEAK_NOSCRIPT</noscript></body></html>"#;
