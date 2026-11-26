@@ -33,10 +33,10 @@ mod whole;
 /// Output of `grep '^#' "$0" | sed 's/^# \{0,1\}//'` on the Bash script.
 const USAGE: &str = r#"!/usr/bin/env bash
 
-analyze-trace.sh — query cookbook for WebFang FileTraceLayer JSONL output.
+analyze_trace — query cookbook for WebFang FileTraceLayer JSONL output.
 
 Usage:
-  scripts/analyze-trace.sh <trace.jsonl> <command> [args]
+  analyze_trace <trace.jsonl> <command> [args]
 
 Generate a trace first:
   webfang --url https://example.com --trace-file debug.jsonl -vvv
@@ -60,7 +60,7 @@ Requires: jq
 "#;
 
 /// Output of `grep '^#   ' "$0" | sed 's/^#   /  /'` on the Bash script.
-const USAGE_COMMANDS: &str = r#"  scripts/analyze-trace.sh <trace.jsonl> <command> [args]
+const USAGE_COMMANDS: &str = r#"  analyze_trace <trace.jsonl> <command> [args]
   webfang --url https://example.com --trace-file debug.jsonl -vvv
   errors                 All ERROR events with url/stage/error context
   slow [N]               Top N slowest spans (default 20)

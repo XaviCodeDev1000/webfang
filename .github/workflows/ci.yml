@@ -6,7 +6,7 @@
 #
 # Pipeline flow:
 #   change-scope (path-aware planner, <15s, no cargo) resolves the event's
-#   comparison SHAs and classifies the diff via scripts/ci_plan.sh: docs-only/
+#   comparison SHAs and classifies the diff via ci_plan.rs: docs-only/
 #   CI-only changes skip the expensive compile/test entry points (fmt, clippy,
 #   test-core, test-full) while toolchain, repo-guards, security, and
 #   doc-quality always run. PR, merge_group and push are path-aware; missing/
@@ -199,7 +199,9 @@ jobs:
         # block. The expression engine substitutes BEFORE the shell parses the
         # script, so a value carrying shell metacharacters is spliced in as
         # code, not data. Pass every event SHA through `env:` instead; the
-        # script treats a missing/zero value as FULL scope (fail-closed).
+        # binary treats a missing/zero value as FULL scope (fail-closed).
+        # `ci_plan.rs` is std-only: `rustc` compiles it in <1s, preserving
+        # this tier's no-cargo / <15s contract (no webfang_core graph).
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -208,7 +210,10 @@ jobs:
           MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_AFTER_SHA: ${{ github.event.after }}
-        run: bash scripts/ci_plan.sh
+        run: |
+          set -euo pipefail
+          rustc --edition 2021 -O crates/webfang_benchmark/src/bin/ci_plan.rs -o "$RUNNER_TEMP/ci_plan"
+          "$RUNNER_TEMP/ci_plan"
 
   # ============================================================================
   # TIER 0b: REPO GUARDS (parallel with the compile tiers)
@@ -658,7 +663,7 @@ jobs:
       - name: CI plan semantics harness
         run: bash scripts/test_ci_plan.sh
       # Structural CI Gate harness (#2286): gate.needs must equal
-      # {change-scope} ∪ required_producers as emitted by scripts/ci_plan.sh,
+      # {change-scope} ∪ required_producers as emitted by ci_plan.rs,
       # every non-advisory job must be gated or allowlisted, no gate producer
       # may carry continue-on-error, and the gate verify step must consume the
       # same partition. Text-parse harness, no cargo, <1s.
@@ -1609,7 +1614,7 @@ jobs:
     name: Tests (${{ matrix.os }})
     needs: [change-scope]
     # #2342: off the PR path — see the decision block above. `schedule` and
-    # `workflow_dispatch` resolve to full scope in scripts/ci_plan.sh, so
+    # `workflow_dispatch` resolve to full scope in ci_plan.rs, so
     # needs_crossplatform is true there; on push it stays path-gated.
     if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.change-scope.outputs.run_code_jobs == 'true' && needs.change-scope.outputs.needs_crossplatform == 'true' }}
     runs-on: ${{ matrix.os }}

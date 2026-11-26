@@ -24,7 +24,7 @@ FULL_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,fmt,c
 NARROW_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,security,doc-quality"
 "#;
 
-const USAGE: &str = "usage: ci_plan.sh\n\nReads EVENT_NAME plus the matching event SHA variables from the environment:\n  pull_request  PR_BASE_SHA, PR_HEAD_SHA\n  merge_group   MERGE_GROUP_BASE_SHA, MERGE_GROUP_HEAD_SHA\n  push          PUSH_BEFORE_SHA, PUSH_AFTER_SHA\nWrites the plan to $GITHUB_OUTPUT when set, otherwise stdout.\n";
+const USAGE: &str = "usage: ci_plan\n\nReads EVENT_NAME plus the matching event SHA variables from the environment:\n  pull_request  PR_BASE_SHA, PR_HEAD_SHA\n  merge_group   MERGE_GROUP_BASE_SHA, MERGE_GROUP_HEAD_SHA\n  push          PUSH_BEFORE_SHA, PUSH_AFTER_SHA\nWrites the plan to $GITHUB_OUTPUT when set, otherwise stdout.\n";
 
 /// Producer list from the literal block above (no duplicated constant).
 fn literal(name: &str) -> &'static str {
