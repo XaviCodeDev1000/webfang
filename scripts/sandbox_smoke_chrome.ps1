@@ -13,9 +13,20 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$arapuca = if ($env:WEBFANG_ARAPUCA_BINARY) { $env:WEBFANG_ARAPUCA_BINARY } else { Join-Path $root 'target/debug/arapuca.exe' }
+# vendor/arapuca is excluded from the workspace: without --target-dir its
+# binary lands in vendor/arapuca/target. Accept both layouts; CI pins the root.
+$arapuca = $env:WEBFANG_ARAPUCA_BINARY
+if (-not $arapuca) {
+  foreach ($candidate in @(
+    (Join-Path $root 'target/debug/arapuca.exe'),
+    (Join-Path $root 'vendor/arapuca/target/debug/arapuca.exe')
+  )) {
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $arapuca = $candidate; break }
+  }
+}
+if (-not $arapuca) { $arapuca = Join-Path $root 'target/debug/arapuca.exe' }
 if (-not (Test-Path -LiteralPath $arapuca -PathType Leaf)) {
-  throw "arapuca binary not found: $arapuca (build it with: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca)"
+  throw "arapuca binary not found: $arapuca (build it with: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target)"
 }
 
 $chrome = $env:WEBFANG_CHROME_BINARY

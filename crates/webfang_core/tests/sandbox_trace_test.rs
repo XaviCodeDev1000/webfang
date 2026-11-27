@@ -65,8 +65,15 @@ fn assert_sandbox_event<'a>(events: &'a [Value], name: &str, fields: &[&str]) ->
 fn sandbox_decisions_are_traced_with_non_empty_fields() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let trace_path = tmp.path().join("trace.jsonl");
-    let status: ExitStatus = Command::new("/bin/sh")
-        .args(["-c", "exit 7"])
+    // A deterministic nonzero exit is all the test needs; use the host shell
+    // so the same contract runs on Linux/macOS and Windows runners.
+    let (shell, shell_args): (&str, &[&str]) = if cfg!(windows) {
+        ("cmd", &["/C", "exit 7"])
+    } else {
+        ("/bin/sh", &["-c", "exit 7"])
+    };
+    let status: ExitStatus = Command::new(shell)
+        .args(shell_args)
         .status()
         .expect("shell exit status");
 

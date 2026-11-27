@@ -87,3 +87,9 @@ if grep -Fq -- '--deny-network' "$PS_SMOKE"; then
   fail "PowerShell smoke enables the network namespace via --deny-network"
 fi
 ok "windows smoke keeps run defaults: allow_exec=true, netns disabled"
+
+# T5: vendor/arapuca is excluded from the workspace, so an unpinned build puts
+# the binary in vendor/arapuca/target. The workflow must force the root target.
+grep -Fq -- '--target-dir target' "$WORKFLOW" || fail "arapuca build must pin --target-dir target"
+ok "arapuca build pins the workspace target dir"
+

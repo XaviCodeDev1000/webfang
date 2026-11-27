@@ -58,7 +58,7 @@ jobs:
       - name: cargo check (macOS cfgs compile)
         run: cargo check --workspace --all-targets
       - name: Build arapuca
-        run: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca
+        run: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target
       - name: Chrome launch through sandbox-exec
         run: bash scripts/sandbox_smoke_chrome.sh
 
@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: bash scripts/check_windows_platform.sh
       - name: Build arapuca
-        run: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca
+        run: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target
       - name: Chrome launch from the launcher context
         shell: pwsh
         run: ./scripts/sandbox_smoke_chrome.ps1

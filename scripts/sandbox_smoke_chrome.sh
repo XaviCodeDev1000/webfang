@@ -13,13 +13,22 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ARAPUCA="${WEBFANG_ARAPUCA_BINARY:-$ROOT/target/debug/arapuca}"
 MARKER="WEBFANG_SANDBOX_SMOKE_OK"
 TASK_ID="webfang-sandbox-smoke-$$"
 
 die() { echo "::error::$1" >&2; exit 1; }
 
-[[ -x "$ARAPUCA" ]] || die "arapuca binary not executable: $ARAPUCA (build it with: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca)"
+# vendor/arapuca is excluded from the workspace: without --target-dir its
+# binary lands in vendor/arapuca/target. Accept both layouts so a local build
+# and the CI build (which pins --target-dir target) both work.
+ARAPUCA="${WEBFANG_ARAPUCA_BINARY:-}"
+if [[ -z "$ARAPUCA" ]]; then
+  for candidate in "$ROOT/target/debug/arapuca" "$ROOT/vendor/arapuca/target/debug/arapuca"; do
+    if [[ -x "$candidate" ]]; then ARAPUCA="$candidate"; break; fi
+  done
+fi
+ARAPUCA="${ARAPUCA:-$ROOT/target/debug/arapuca}"
+[[ -x "$ARAPUCA" ]] || die "arapuca binary not executable: $ARAPUCA (build it with: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target)"
 
 CHROME="${WEBFANG_CHROME_BINARY:-}"
 if [[ -z "$CHROME" ]]; then
