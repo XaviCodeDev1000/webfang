@@ -400,7 +400,13 @@ pub fn compute(
 /// Nearest-rank percentile over ascending-sorted values (ADR-B3):
 /// 1-based `idx = ceil(p / 100 * n)`, no interpolation. Empty input yields 0.0
 /// (no samples ⇒ no percentile); callers gate meaningful runs via EmptyCrawl.
-fn nearest_rank(sorted: &[f64], pct: u32) -> f64 {
+///
+/// Public because it is the house convention: the permanent
+/// `RecordStore::update` benchmark ([`crate::record_store_update`]) reports
+/// its latency through this same function instead of defining a second
+/// percentile style.
+#[must_use]
+pub fn nearest_rank(sorted: &[f64], pct: u32) -> f64 {
     if sorted.is_empty() {
         return 0.0;
     }

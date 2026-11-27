@@ -1,8 +1,19 @@
 /// Wire request for OpenAI-compatible `POST /embeddings`.
+///
+/// `extra_body` is flattened at the BODY level, not nested: strict servers
+/// (vLLM, NVIDIA NIM) reject a nested `extra_body` object with HTTP 400.
+/// WebFang's own fields are declared LAST so they overwrite any same-named
+/// key from the operator map (#3074).
 #[derive(serde::Serialize)]
 pub(super) struct EmbeddingRequest<'a> {
+    #[serde(flatten)]
+    pub(super) extra_body: &'a crate::domain::providers::ExtraBody,
     pub(super) model: &'a str,
     pub(super) input: &'a [String],
+    /// `Some("float")` only when the provider opts in; omitted by default so
+    /// the body stays byte-identical for providers that reject the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) encoding_format: Option<&'static str>,
 }
 
 /// Wire response: only the fields this adapter consumes.

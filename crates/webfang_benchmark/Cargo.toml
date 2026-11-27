@@ -38,6 +38,10 @@ name = "bench_live"
 path = "src/bin/bench_live.rs"
 
 [[bin]]
+name = "bench_record_store_update"
+path = "src/bin/bench_record_store_update.rs"
+
+[[bin]]
 name = "analyze_trace"
 path = "src/bin/analyze_trace.rs"
 

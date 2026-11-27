@@ -101,6 +101,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_benchmark/tests/record_store_update_bench_test.rs",
+      "crate": "webfang_benchmark",
+      "area": "tests",
+      "test_count": 10,
+      "ignored_count": 0,
+      "snapshot_usage": false,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_benchmark/tests/report_test.rs",
       "crate": "webfang_benchmark",
       "area": "tests",
@@ -707,10 +716,10 @@
       "path": "crates/webfang_core/tests/config_default_contract_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 10,
+      "test_count": 12,
       "ignored_count": 0,
       "snapshot_usage": true,
-      "tier": "integration_mock"
+      "tier": "ai_model_semantic"
     },
     {
       "path": "crates/webfang_core/tests/connection_cause_taxonomy_test.rs",
@@ -1496,6 +1505,15 @@
       "tier": "mcp_contract"
     },
     {
+      "path": "crates/webfang_mcp/tests/common/mcp_contract.rs",
+      "crate": "webfang_mcp",
+      "area": "mcp",
+      "test_count": 0,
+      "ignored_count": 0,
+      "snapshot_usage": false,
+      "tier": "mcp_contract"
+    },
+    {
       "path": "crates/webfang_mcp/tests/common/mod.rs",
       "crate": "webfang_mcp",
       "area": "mcp",
@@ -1671,6 +1689,15 @@
       "crate": "webfang_mcp",
       "area": "mcp",
       "test_count": 4,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "mcp_contract"
+    },
+    {
+      "path": "crates/webfang_mcp/tests/mcp_tool_contract_test.rs",
+      "crate": "webfang_mcp",
+      "area": "mcp",
+      "test_count": 3,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "mcp_contract"

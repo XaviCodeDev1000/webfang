@@ -19,9 +19,8 @@ use url::Url;
 
 use common::cli_harness::cmd;
 use webfang_core::application::rate_limiter::{record_pacing_wait, PacingContext};
-use webfang_core::domain::auth_source::AuthSource;
 use webfang_core::domain::network_policy::NetworkPolicy;
-use webfang_core::domain::providers::{Capability, ProviderConfig, ProviderKind};
+use webfang_core::domain::providers::ProviderConfig;
 use webfang_core::domain::proxy_config::{ProxyConfigError, ProxyDefinition, ValidatedProxy};
 use webfang_core::infrastructure::observability::FileTraceLayer;
 
@@ -36,15 +35,8 @@ fn provider_config() -> ProviderConfig {
     ProviderConfig {
         id: "userinfo".to_owned(),
         display_name: "Userinfo".to_owned(),
-        kind: ProviderKind::OpenAiCompatible,
         base_url: Url::parse(CREDENTIAL_URL).expect("fixture url"),
-        auth: AuthSource::None,
-        capabilities: vec![Capability::Embedding],
-        model: Some("nomic-embed-text".to_owned()),
-        embedding_dim: None,
-        allow_loopback: false,
-        network_policy: NetworkPolicy::default(),
-        proxy: None,
+        ..webfang_test_utils::test_provider_config()
     }
 }
 
