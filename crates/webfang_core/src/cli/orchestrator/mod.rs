@@ -60,6 +60,15 @@ pub async fn run(
     vault_ports: crate::application::container::VaultAiPorts,
     llm_port: Option<std::sync::Arc<dyn crate::domain::llm_port::LlmPort>>,
 ) -> CliExit {
+    // T1A (#3080): the SSRF entry hatch announces its own scope once per run.
+    // First statement on purpose — every route below (dry-run, batch, scrape)
+    // is a run, and this is downstream of the subscriber `webfang_cli::main`
+    // installs, upstream of every fetch. Runs that exit before the scraper
+    // (usage errors, config preflight, subcommands) announce nothing by
+    // contract: they never consult the hatch and hold no subscriber. See
+    // `cli::ssrf_hatch_notice` for the full boundary.
+    crate::cli::ssrf_hatch_notice::emit_entry_hatch_notice();
+
     // Run-root correlation identity (#501, #1439): the whole operation owns
     // ONE root, minted HERE at the orchestration entry and propagated into
     // every route — dry-run preview, batch, prepare/scrape phases. Before

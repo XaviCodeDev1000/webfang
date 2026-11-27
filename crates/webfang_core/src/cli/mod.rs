@@ -25,6 +25,7 @@ pub mod retention;
 pub mod scrape_flow;
 pub mod shutdown;
 pub(crate) mod spec_command;
+pub mod ssrf_hatch_notice;
 pub mod summary;
 pub mod url_discovery;
 
