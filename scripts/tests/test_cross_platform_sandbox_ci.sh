@@ -9,7 +9,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SH_SMOKE="$ROOT/scripts/sandbox_smoke_chrome.sh"
-PS_SMOKE="$ROOT/scripts/sandbox_smoke_chrome.ps1"
+PS_SMOKE="$ROOT/scripts/sandbox_probe_appcontainer.ps1"
 WORKFLOW="$ROOT/.github/workflows/cross-platform-sandbox.yml"
 
 fail() { echo "::error::$1" >&2; exit 1; }
@@ -69,7 +69,7 @@ for needle in \
   'cargo check' \
   'scripts/check_windows_platform.sh' \
   'scripts/sandbox_smoke_chrome.sh' \
-  'scripts/sandbox_smoke_chrome.ps1' \
+  'scripts/sandbox_probe_appcontainer.ps1' \
   'scripts/tests/test_cross_platform_sandbox_ci.sh'
 do
   grep -Fq -- "$needle" "$WORKFLOW" || fail "workflow misses: $needle"
