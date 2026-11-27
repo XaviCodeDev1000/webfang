@@ -119,12 +119,13 @@ for needle in \
   'WEBFANG_ALLOW_READ_OK' \
   'WEBFANG_DENY_READ_OK' \
   'S-1-15-2-' \
-  'WEBFANG_PROBE_WHOAMI' \
-  'WEBFANG_PROBE_FINDSTR' \
+  'WindowsIdentity' \
+  '$probeExe' \
+  '-NoProfile' \
+  '-NonInteractive' \
   'AppContainer SID missing' \
   'granted path unreadable' \
-  'ungranted path readable' \
-  'cmd.exe'
+  'ungranted path readable'
 do
   grep -Fq -- "$needle" "$PS_SMOKE" || fail "windows probe misses: $needle"
 done
