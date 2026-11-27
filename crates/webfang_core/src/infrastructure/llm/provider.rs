@@ -191,7 +191,12 @@ impl OpenAiCompatibleProvider {
                 provider_id: config.id.clone(),
             });
         };
-        let client = OpenAiLlmClient::with_http(http, config.base_url.clone(), secret);
+        let client = OpenAiLlmClient::with_http_and_extra_body(
+            http,
+            config.base_url.clone(),
+            secret,
+            config.extra_body.clone(),
+        );
         Ok(Self {
             client,
             config,
@@ -272,17 +277,11 @@ mod tests {
 
     fn config_with(auth: AuthSource) -> ProviderConfig {
         ProviderConfig {
-            id: "test-provider".to_string(),
             display_name: "Test".to_string(),
-            kind: crate::domain::providers::ProviderKind::OpenAiCompatible,
-            base_url: url::Url::parse("https://api.example.com/v1").expect("url"),
             auth,
             capabilities: vec![crate::domain::providers::Capability::Completion],
             model: Some("gpt-test".to_string()),
-            embedding_dim: None,
-            allow_loopback: false,
-            network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-            proxy: None,
+            ..crate::domain::providers::test_provider_config()
         }
     }
 

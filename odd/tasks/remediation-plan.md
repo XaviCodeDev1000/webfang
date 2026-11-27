@@ -306,7 +306,6 @@ L27 was WRONG on one point and this slice corrected it: `src/client/layer/retry.
 Gate, both ways as L27 requires: default features 4981 passed / 8 skipped, `--all-features` 5096 passed / 8 skipped, plus check, clippy (all targets/features), fmt, rustdoc, static guards, file-size ratchet, test inventory and the real-tree golden (unchanged: it extracts `crates/webfang_core/src` only).
 
 Left alone deliberately, flagged for a later decision: `crates/webfang_core/tests/wreq_probe_test.rs` is an old committed one-off probe whose own header says "not committed"; S5 wants probes as permanent tests, but deleting it is ask-first and outside this slice.
-
 **L29** — Documentation consulted before T0 (owner rule, L27).
 
 Benchmark framework: there is none to import. `crates/webfang_benchmark` is a custom harness (no criterion, no divan) whose bins are `bench_tier_a`, `bench_live`, `analyze_trace`, `ci_plan`, and whose aggregation already defines the house statistics — "nearest-rank percentile over ascending-sorted values (ADR-B3)" in `src/aggregate.rs`. T0 REUSES that shape; adding a framework would be a new dependency, which is ask-first.

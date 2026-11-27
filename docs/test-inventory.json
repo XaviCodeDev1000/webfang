@@ -641,6 +641,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/common/wreq_invariants.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 0,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/compile_fail/batch_manager/zero_concurrency.rs",
       "crate": "webfang_core",
       "area": "core",
@@ -698,10 +707,10 @@
       "path": "crates/webfang_core/tests/config_default_contract_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 10,
+      "test_count": 12,
       "ignored_count": 0,
       "snapshot_usage": true,
-      "tier": "integration_mock"
+      "tier": "ai_model_semantic"
     },
     {
       "path": "crates/webfang_core/tests/connection_cause_taxonomy_test.rs",
@@ -1446,6 +1455,15 @@
       "crate": "webfang_core",
       "area": "downloader",
       "test_count": 6,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
+      "path": "crates/webfang_core/tests/wreq_invariants_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 5,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"

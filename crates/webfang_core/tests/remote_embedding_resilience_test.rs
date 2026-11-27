@@ -35,8 +35,7 @@
 
 use std::time::Duration;
 
-use webfang_core::domain::auth_source::AuthSource;
-use webfang_core::domain::providers::{Capability, ProviderConfig, ProviderKind};
+use webfang_core::domain::providers::ProviderConfig;
 use webfang_core::domain::EmbeddingPort;
 use webfang_core::error::SemanticError;
 use webfang_core::infrastructure::llm::remote_embedding::RemoteEmbeddingAdapter;
@@ -63,18 +62,13 @@ fn anonymous_config(base_url: String) -> ProviderConfig {
     ProviderConfig {
         id: "resilience-endpoint".to_string(),
         display_name: "Resilience Endpoint".to_string(),
-        kind: ProviderKind::OpenAiCompatible,
         base_url: url::Url::parse(&base_url).expect("base_url parses"),
-        auth: AuthSource::None,
-        capabilities: vec![Capability::Embedding],
-        model: Some("nomic-embed-text".to_string()),
         // T7: a cold adapter now fails closed before dialing. These cases
         // use the one-dimensional `one_d` fixture, so the contract width is 1.
         embedding_dim: Some(1),
         // Loopback is the wiremock; the config opt-in is what allows it.
         allow_loopback: true,
-        network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
-        proxy: None,
+        ..webfang_test_utils::test_provider_config()
     }
 }
 

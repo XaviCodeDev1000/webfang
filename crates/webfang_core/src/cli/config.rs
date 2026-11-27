@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::error::CliError;
 use crate::cli::error::CliExit;
 
-/// Default configuration values that can be overridden by a TOML file.
+/// TOML defaults. Root keys stay permissive for `connect`'s round-trip; provider entries are strict (#3074).
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct ConfigDefaults {
@@ -139,7 +139,7 @@ impl ConfigDefaults {
     /// [`ConfigLoadError::NotAbsolute`] for a relative path;
     /// [`ConfigLoadError::NotFound`] when nothing is there;
     /// [`ConfigLoadError::Io`] when it exists but cannot be read;
-    /// [`ConfigLoadError::Malformed`] when it is not valid TOML.
+    /// [`ConfigLoadError::Malformed`] when the TOML document cannot be deserialized.
     pub fn load_explicit(path: &Path) -> Result<Self, ConfigLoadError> {
         if !path.is_absolute() {
             return Err(ConfigLoadError::NotAbsolute {
@@ -704,6 +704,7 @@ max_pages = 20
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let path = tmp.path().join("config.toml");
         std::fs::write(&path, "this is [[[ not valid toml").expect("write malformed TOML");
+
         assert!(matches!(
             ConfigDefaults::load_explicit(&path),
             Err(ConfigLoadError::Malformed { .. })
@@ -831,7 +832,7 @@ max_pages = 20
         assert!(matches!(err, ConfigLoadError::Malformed { .. }));
         let msg = err.to_string();
         assert!(
-            msg.contains("is not valid TOML"),
+            msg.contains("could not be loaded"),
             "the error must name the file problem in English, got: {msg}"
         );
     }
