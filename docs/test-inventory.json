@@ -1154,6 +1154,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/resume_message_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 4,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/resume_mode_tests.rs",
       "crate": "webfang_core",
       "area": "core",
