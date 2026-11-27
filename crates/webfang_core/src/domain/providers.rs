@@ -78,9 +78,77 @@ pub enum RegistryError {
     },
 }
 
+/// A vendor-specific JSON object merged into the request body (#3074).
+pub type ExtraBody = serde_json::Map<String, serde_json::Value>;
+
+/// Body keys WebFang owns. An operator may not set them through `extra_body`:
+/// doing so could replace `model`, `messages` or credentials after WebFang
+/// classified them, bypassing auth and budget checks.
+pub const RESERVED_REQUEST_KEYS: &[&str] = &[
+    "model",
+    "input",
+    "messages",
+    "response_format",
+    "temperature",
+    "max_tokens",
+    "max_completion_tokens",
+    "auth",
+    // `send_encoding_format` owns this key: an explicit `extra_body` value
+    // would bypass the flag and could request base64 vectors (#3074).
+    "encoding_format",
+];
+
+/// Default for [`ProviderConfig::send_encoding_format`].
+///
+/// `false` keeps the request byte-identical to the pre-#3074 payload. Set it
+/// to `true` only for gateways that default `encoding_format` to base64.
+#[must_use]
+pub const fn default_send_encoding_format() -> bool {
+    false
+}
+
+/// Deserialize an `extra_body` map, rejecting WebFang-owned keys at load time.
+///
+/// The check is deliberately top level only: reserved keys are protocol
+/// critical at the body root, and a nested object (a tool schema, a vendor
+/// extension) may legitimately reuse one of those names.
+fn deserialize_extra_body<'de, D>(deserializer: D) -> Result<ExtraBody, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let map = <ExtraBody as serde::Deserialize>::deserialize(deserializer)?;
+    if let Some(key) = map
+        .keys()
+        .find(|key| RESERVED_REQUEST_KEYS.contains(&key.as_str()))
+    {
+        return Err(serde::de::Error::custom(format!(
+            "reserved request key '{key}' cannot be set in extra_body"
+        )));
+    }
+    Ok(map)
+}
+
+/// Overlay `query_extra_body` on `extra_body`: base keys stay, overlay keys
+/// win. Used by vault search so an asymmetric model indexes with `passage`
+/// and queries with `query` (#3074).
+#[must_use]
+pub fn merge_extra_body(base: &ExtraBody, overlay: &ExtraBody) -> ExtraBody {
+    let mut merged = base.clone();
+    for (key, value) in overlay {
+        merged.insert(key.clone(), value.clone());
+    }
+    merged
+}
+
 /// Declarative configuration of one provider (the wizard writes this into the
 /// config file).
+///
+/// Unknown keys are typos, not optional vendor extensions: a key that was
+/// silently dropped used to leave operators believing a field was configured
+/// (#3074). No field here is `#[serde(flatten)]`, so `deny_unknown_fields` is
+/// safe and needs no extra dependency.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     /// Unique provider identifier (e.g. `"openai"`, `"ollama-local"`).
     pub id: String,
@@ -137,6 +205,21 @@ pub struct ProviderConfig {
     /// proxy environment variables stay ignored in every case.
     #[serde(default, deserialize_with = "deserialize_proxy_spec_no_null")]
     pub proxy: Option<ProxySpec>,
+    /// Vendor-specific fields merged into `/embeddings` and
+    /// `/chat/completions` bodies. Empty means today's payload exactly.
+    #[serde(default, deserialize_with = "deserialize_extra_body")]
+    pub extra_body: ExtraBody,
+    /// Overlay applied by vault search to `extra_body`, so an asymmetric
+    /// embedding model can index with `passage` and query with `query`.
+    #[serde(default, deserialize_with = "deserialize_extra_body")]
+    pub query_extra_body: ExtraBody,
+    /// Send `encoding_format: "float"` explicitly on `/embeddings`.
+    ///
+    /// Absent means `false`: the body stays byte-identical to the pre-#3074
+    /// payload. Enable it only for a gateway that defaults to base64; NIM and
+    /// OpenAI already default to float, and Voyage/Gemini reject the field.
+    #[serde(default = "default_send_encoding_format")]
+    pub send_encoding_format: bool,
 }
 
 impl ProviderConfig {
@@ -144,6 +227,35 @@ impl ProviderConfig {
     #[must_use]
     pub fn has_capability(&self, capability: Capability) -> bool {
         self.capabilities.contains(&capability)
+    }
+}
+
+/// Minimal valid config for this crate's unit tests.
+///
+/// Unit tests compile this crate with a different feature set than the
+/// `webfang_test_utils` dev-dependency, so its helper is a distinct type here.
+/// Integration tests use the one in `webfang_test_utils` instead. Keep BOTH
+/// helpers in sync when a `ProviderConfig` field is added or changed.
+#[cfg(test)]
+pub(crate) fn test_provider_config() -> ProviderConfig {
+    ProviderConfig {
+        id: "test-provider".to_string(),
+        display_name: "Test Provider".to_string(),
+        kind: ProviderKind::OpenAiCompatible,
+        base_url: crate::domain::ValidUrl::parse("https://api.example.com/v1")
+            .expect("valid fixture URL")
+            .as_url()
+            .clone(),
+        auth: AuthSource::None,
+        capabilities: vec![Capability::Embedding],
+        model: Some("nomic-embed-text".to_string()),
+        embedding_dim: None,
+        allow_loopback: false,
+        network_policy: NetworkPolicy::default(),
+        proxy: None,
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
+        send_encoding_format: self::default_send_encoding_format(),
     }
 }
 

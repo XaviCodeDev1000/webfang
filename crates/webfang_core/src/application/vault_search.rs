@@ -117,9 +117,11 @@ impl VaultSearchService {
         }
 
         // Step 1: Embed the query.
+        // Vault lookup is the QUERY side of an asymmetric model: use the
+        // `query_extra_body` overlay instead of the indexing body (#3074).
         let query_embedding = self
             .embedding
-            .embed(query)
+            .embed_query(query)
             .await
             .map_err(ScraperError::Semantic)?;
 

@@ -5,7 +5,7 @@
 
 use super::{RemoteEmbeddingAdapter, Url};
 use crate::domain::auth_source::AuthSource;
-use crate::domain::providers::{Capability, ProviderConfig, ProviderKind};
+use crate::domain::providers::ProviderConfig;
 
 /// Base URLs for the entry-gate and dial cases, composed at runtime rather
 /// than written as one `IP:port` literal. That shape reads as `path:line`
@@ -30,15 +30,8 @@ pub(super) fn config_with(auth: AuthSource) -> ProviderConfig {
     ProviderConfig {
         id: "test-remote".to_string(),
         display_name: "Test Remote".to_string(),
-        kind: ProviderKind::OpenAiCompatible,
-        base_url: Url::parse("https://api.example.com/v1").expect("url"),
         auth,
-        capabilities: vec![Capability::Embedding],
-        model: Some("nomic-embed-text".to_string()),
-        embedding_dim: None,
-        allow_loopback: false,
-        network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-        proxy: None,
+        ..crate::domain::providers::test_provider_config()
     }
 }
 

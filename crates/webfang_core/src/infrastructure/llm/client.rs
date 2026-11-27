@@ -34,8 +34,14 @@ use std::time::Duration;
 use url::Url;
 
 /// Wire request for OpenAI-compatible `POST /chat/completions`.
+///
+/// `extra_body` is flattened at the body root and WebFang's fields are
+/// declared last, so a vendor key can never replace `model`, `messages` or
+/// the mapped completion parameters (#3074).
 #[derive(serde::Serialize)]
 struct CompletionRequest<'a> {
+    #[serde(flatten)]
+    extra_body: &'a crate::domain::providers::ExtraBody,
     model: &'a str,
     messages: &'a [ChatMessage],
     response_format: serde_json::Value,
@@ -128,6 +134,8 @@ pub struct OpenAiLlmClient {
     client: wreq::Client,
     base_url: Url,
     api_key: ApiKey,
+    /// Vendor-specific fields flattened into every completion body (#3074).
+    extra_body: crate::domain::providers::ExtraBody,
     retry: RetrySchedule,
 }
 
@@ -157,10 +165,24 @@ impl OpenAiLlmClient {
     /// que apuntan a wiremock loopback usan los hatches de `webfang_test_utils`.
     #[must_use]
     pub fn with_http(client: wreq::Client, base_url: Url, api_key: ApiKey) -> Self {
+        Self::with_http_and_extra_body(client, base_url, api_key, serde_json::Map::new())
+    }
+
+    /// Same adapter with vendor-specific request fields. The composition root
+    /// passes the provider's declared `extra_body`; tests that do not care
+    /// about it keep using [`Self::with_http`].
+    #[must_use]
+    pub fn with_http_and_extra_body(
+        client: wreq::Client,
+        base_url: Url,
+        api_key: ApiKey,
+        extra_body: crate::domain::providers::ExtraBody,
+    ) -> Self {
         Self {
             client,
             base_url,
             api_key,
+            extra_body,
             retry: RetrySchedule::default(),
         }
     }
@@ -296,6 +318,7 @@ impl LlmPort for OpenAiLlmClient {
             );
 
             let wire = CompletionRequest {
+                extra_body: &self.extra_body,
                 model: &request.model,
                 messages: &request.messages,
                 response_format: json!({ "type": "json_object" }),

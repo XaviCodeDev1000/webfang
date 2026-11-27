@@ -246,15 +246,9 @@ fn profile_pairing_sets_the_proxy_hop() {
     let destination = EndpointPolicy::from(&crate::domain::providers::ProviderConfig {
         id: "p".to_string(),
         display_name: "p".to_string(),
-        kind: crate::domain::providers::ProviderKind::OpenAiCompatible,
-        base_url: Url::parse("https://api.example.com/v1").expect("url"),
-        auth: crate::domain::auth_source::AuthSource::None,
         capabilities: vec![],
         model: None,
-        embedding_dim: None,
-        allow_loopback: false,
-        network_policy: NetworkPolicy::default(),
-        proxy: None,
+        ..crate::domain::providers::test_provider_config()
     });
     let direct = ClientSecurityProfile::direct(destination.clone());
     assert!(direct.via_proxy.is_none());

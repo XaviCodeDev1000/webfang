@@ -8,7 +8,7 @@
 use super::*;
 use crate::error::ErrorClass;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
 
@@ -32,6 +32,65 @@ fn client_for(server: &MockServer) -> OpenAiLlmClient {
         ApiKey::new("sk-test"),
     )
     .expect("client builds")
+}
+
+/// Captures one `/chat/completions` request body (#3074).
+#[derive(Clone)]
+struct JsonBodyCapture(Arc<Mutex<Option<serde_json::Value>>>);
+
+impl JsonBodyCapture {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+
+    fn body(&self) -> serde_json::Value {
+        self.0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .expect("el mock debió capturar el body")
+    }
+}
+
+impl Respond for JsonBodyCapture {
+    fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+        *self.0.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(serde_json::from_slice(&request.body).expect("body es JSON"));
+        ResponseTemplate::new(200).set_body_string(VALID_BODY)
+    }
+}
+
+async fn mount_capture(server: &MockServer) -> JsonBodyCapture {
+    let capture = JsonBodyCapture::new();
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(capture.clone())
+        .mount(server)
+        .await;
+    capture
+}
+
+/// Vendor fields are flattened at the body root (#3074). WebFang's own
+/// fields stay last so a map entry cannot replace `model` or `messages`.
+#[tokio::test]
+async fn extra_body_is_flattened_into_the_completion_body() {
+    let server = MockServer::start().await;
+    let captured = mount_capture(&server).await;
+
+    let mut client = client_for(&server);
+    client
+        .extra_body
+        .insert("reasoning_effort".to_string(), serde_json::json!("low"));
+    client
+        .send_completion(test_request())
+        .await
+        .expect("completion succeeds");
+
+    let body = captured.body();
+    assert_eq!(body["reasoning_effort"], serde_json::json!("low"));
+    assert_eq!(body["model"], serde_json::json!("stub-model"));
+    assert_eq!(body["temperature"], serde_json::json!(0.0));
+    assert!(body.get("extra_body").is_none());
 }
 
 /// Deterministic schedule: zero jitter, no sleeping, and a recorder for the
@@ -284,37 +343,15 @@ async fn length_finish_reason_maps_to_validation_error() {
 /// con OpenAI/Ollama/vLLM en producción.
 #[tokio::test]
 async fn wire_shape_matches_contract_golden() {
-    use std::sync::{Arc, Mutex};
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, Respond};
-
-    struct Capture(Arc<Mutex<Option<serde_json::Value>>>);
-    impl Respond for Capture {
-        fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
-            *self.0.lock().unwrap_or_else(|p| p.into_inner()) =
-                Some(serde_json::from_slice(&request.body).expect("body es JSON"));
-            ResponseTemplate::new(200).set_body_string(VALID_BODY)
-        }
-    }
-
     let server = MockServer::start().await;
-    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
-    Mock::given(method("POST"))
-        .and(path("/chat/completions"))
-        .respond_with(Capture(captured.clone()))
-        .mount(&server)
-        .await;
+    let captured = mount_capture(&server).await;
 
     client_for(&server)
         .send_completion(test_request())
         .await
         .expect("200 + valid JSON succeeds");
 
-    let body = captured
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone()
-        .expect("el mock debió capturar el body");
+    let body = captured.body();
     let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/llm/chat_request.golden.json");
     let golden: serde_json::Value =

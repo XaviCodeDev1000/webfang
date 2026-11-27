@@ -4,18 +4,66 @@ fn provider(id: &str, capabilities: Vec<Capability>) -> ProviderConfig {
     ProviderConfig {
         id: id.to_string(),
         display_name: id.to_string(),
-        kind: ProviderKind::OpenAiCompatible,
-        base_url: Url::parse("https://api.example.com/v1").expect("url"),
         auth: AuthSource::Env {
             var: "WEBFANG_TEST_KEY".to_string(),
         },
         capabilities,
         model: Some("gpt-test".to_string()),
-        embedding_dim: None,
-        allow_loopback: false,
-        network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-        proxy: None,
+        ..super::test_provider_config()
     }
+}
+
+#[test]
+fn extra_body_rejects_webfang_owned_keys_at_deserialize() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"extra_body":{"model":"attacker"}}"#;
+    let err = serde_json::from_str::<ProviderConfig>(raw)
+        .expect_err("a reserved body key must fail at config load, before any dial");
+    assert!(
+        err.to_string().contains("model"),
+        "the error must name the reserved key, got: {err}"
+    );
+}
+
+#[test]
+fn test_provider_config_is_a_valid_minimal_fixture() {
+    let cfg = super::test_provider_config();
+    assert_eq!(cfg.kind, ProviderKind::OpenAiCompatible);
+    assert_eq!(cfg.base_url.as_str(), "https://api.example.com/v1");
+    assert_eq!(cfg.embedding_dim, None);
+    assert!(!cfg.allow_loopback);
+    assert!(cfg.proxy.is_none());
+    assert!(cfg.extra_body.is_empty());
+    assert!(cfg.query_extra_body.is_empty());
+    assert!(!cfg.send_encoding_format);
+}
+
+#[test]
+fn encoding_format_is_reserved_even_when_the_flag_is_off() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"send_encoding_format":false,"extra_body":{"encoding_format":"base64"}}"#;
+    let err = serde_json::from_str::<ProviderConfig>(raw)
+        .expect_err("a reserved key must fail even when the flag disables the field");
+    assert!(
+        err.to_string().contains("encoding_format"),
+        "the error must name the reserved key, got: {err}"
+    );
+}
+
+#[test]
+fn send_encoding_format_defaults_to_false() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"]}"#;
+    let provider: ProviderConfig = serde_json::from_str(raw).expect("absent flag parses");
+    assert!(!provider.send_encoding_format);
+}
+
+#[test]
+fn extra_body_accepts_vendor_keys_and_defaults_to_empty() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"extra_body":{"input_type":"passage"}}"#;
+    let provider: ProviderConfig = serde_json::from_str(raw).expect("vendor key is accepted");
+    assert_eq!(
+        provider.extra_body["input_type"],
+        serde_json::json!("passage")
+    );
+    assert!(provider.query_extra_body.is_empty());
 }
 
 #[test]

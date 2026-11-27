@@ -83,6 +83,21 @@ pub trait EmbeddingPort: Send + Sync {
         })
     }
 
+    /// Embed a vault-search query. Defaulted to [`Self::embed`]: ports that do
+    /// not distinguish indexing from lookup keep today's behavior (#3074).
+    fn embed_query<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<Vec<f32>, SemanticError>> {
+        self.embed(text)
+    }
+
+    /// Batch counterpart of [`Self::embed_query`], defaulted to
+    /// [`Self::embed_batch`].
+    fn embed_query_batch<'a>(
+        &'a self,
+        texts: &'a [String],
+    ) -> BoxFuture<'a, Result<Vec<Vec<f32>>, SemanticError>> {
+        self.embed_batch(texts)
+    }
+
     /// The dimensionality of embedding vectors produced by this port, as
     /// declared by the concrete adapter.
     fn embedding_dim(&self) -> usize;
