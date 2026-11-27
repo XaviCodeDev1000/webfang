@@ -156,6 +156,8 @@ pub struct ProviderConfig {
     pub allow_loopback: bool,          // enables dials to loopback (127.0.0.1 / ::1)
     #[serde(default)]
     pub network_policy: NetworkPolicy, // allowlist by CIDR/host (mode: "allowlist")
+    #[serde(default, deserialize_with = "deserialize_proxy_spec_no_null")]
+    pub proxy: Option<ProxySpec>,
     #[serde(default, deserialize_with = "deserialize_extra_body")]
     pub extra_body: ExtraBody,
     #[serde(default, deserialize_with = "deserialize_extra_body")]
@@ -173,6 +175,27 @@ deserialization error, never a silent "adopt the default". `embedding_dim` also 
 `deserialize_with = "deserialize_dim_no_null"` for the same reason. `allow_loopback` **has**
 no CLI flag on purpose —flags are filtered into the process list and would relax an
 SSRF protection—: the decision travels per client, never as registry state.
+
+#### Vendor-specific request fields (#3074)
+
+`extra_body` is flattened into the root of `/embeddings` and `/chat/completions`
+requests; WebFang writes its own fields last, so an operator map can never replace
+`model`, `input`, `messages` or the mapped completion parameters. `query_extra_body`
+is an overlay applied by vault search: base keys stay, overlay keys win, so an
+asymmetric model indexes with `passage` and queries with `query`.
+
+`RESERVED_REQUEST_KEYS` (`crates/webfang_core/src/domain/providers.rs:98`) are
+rejected at deserialize time: `model`, `input`, `messages`, `temperature`, `auth`,
+`response_format`, `max_tokens`, `max_completion_tokens` and `encoding_format`.
+Reserved keys are protocol-critical at the body root; a nested object may reuse
+one legitimately, so the check is top level only.
+
+`send_encoding_format` defaults to `false` via `default_send_encoding_format()`.
+This resolves the AC4/AC6 conflict in #3074: the pre-issue `/embeddings` body never
+carried `encoding_format`, and Voyage/Gemini reject the field while NVIDIA NIM already
+defaults to float. Keeping the default byte-identical preserves every existing
+provider; opting in sends `encoding_format: "float"` only for gateways that default
+to base64.
 
 Where:
 
@@ -502,6 +525,7 @@ shape  | crates/webfang_core/src/domain/providers.rs | 43 | pub enum ProviderKin
 shape  | crates/webfang_core/src/domain/providers.rs | 55 | pub enum Capability { | Embedding,Completion
 claim  | crates/webfang_core/src/domain/providers.rs | 161 | pub base_url: Url,
 claim  | crates/webfang_core/src/domain/providers.rs | 165 | pub capabilities: Vec<Capability>,
+claim  | crates/webfang_core/src/domain/providers.rs | 98 | "encoding_format",
 # --- §5 ProviderRegistry ------------------------------------------------------
 shape  | crates/webfang_core/src/domain/providers.rs | 300 | pub struct ProviderRegistry { | config
 impl   | crates/webfang_core/src/domain/providers.rs | 300 | pub struct ProviderRegistry {
