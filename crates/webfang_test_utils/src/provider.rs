@@ -3,7 +3,9 @@
 //! Test fixtures use struct update syntax with this value so a new
 //! `ProviderConfig` field only needs to be added here, not in every test
 //! literal (#3074). This is harness-only: production code has no default
-//! provider config.
+//! provider config. Keep in sync with the `#[cfg(test)]` helper in
+//! `webfang_core::domain::providers` (unit tests cannot use this one: the
+//! feature split makes it a distinct type there).
 
 use webfang_core::domain::auth_source::AuthSource;
 use webfang_core::domain::network_policy::NetworkPolicy;
@@ -39,5 +41,23 @@ pub fn test_provider_config() -> ProviderConfig {
         extra_body: Default::default(),
         query_extra_body: Default::default(),
         send_encoding_format: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimal_fixture_stays_valid() {
+        let cfg = test_provider_config();
+        assert_eq!(cfg.kind, ProviderKind::OpenAiCompatible);
+        assert_eq!(cfg.base_url.as_str(), "https://api.example.com/v1");
+        assert_eq!(cfg.embedding_dim, None);
+        assert!(!cfg.allow_loopback);
+        assert!(cfg.proxy.is_none());
+        assert!(cfg.extra_body.is_empty());
+        assert!(cfg.query_extra_body.is_empty());
+        assert!(!cfg.send_encoding_format);
     }
 }

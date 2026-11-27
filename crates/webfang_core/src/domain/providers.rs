@@ -234,7 +234,8 @@ impl ProviderConfig {
 ///
 /// Unit tests compile this crate with a different feature set than the
 /// `webfang_test_utils` dev-dependency, so its helper is a distinct type here.
-/// Integration tests use the one in `webfang_test_utils` instead.
+/// Integration tests use the one in `webfang_test_utils` instead. Keep BOTH
+/// helpers in sync when a `ProviderConfig` field is added or changed.
 #[cfg(test)]
 pub(crate) fn test_provider_config() -> ProviderConfig {
     ProviderConfig {

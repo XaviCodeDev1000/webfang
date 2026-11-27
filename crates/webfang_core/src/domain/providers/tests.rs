@@ -25,6 +25,19 @@ fn extra_body_rejects_webfang_owned_keys_at_deserialize() {
 }
 
 #[test]
+fn test_provider_config_is_a_valid_minimal_fixture() {
+    let cfg = super::test_provider_config();
+    assert_eq!(cfg.kind, ProviderKind::OpenAiCompatible);
+    assert_eq!(cfg.base_url.as_str(), "https://api.example.com/v1");
+    assert_eq!(cfg.embedding_dim, None);
+    assert!(!cfg.allow_loopback);
+    assert!(cfg.proxy.is_none());
+    assert!(cfg.extra_body.is_empty());
+    assert!(cfg.query_extra_body.is_empty());
+    assert!(!cfg.send_encoding_format);
+}
+
+#[test]
 fn encoding_format_is_reserved_even_when_the_flag_is_off() {
     let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"send_encoding_format":false,"extra_body":{"encoding_format":"base64"}}"#;
     let err = serde_json::from_str::<ProviderConfig>(raw)
