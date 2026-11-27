@@ -55,30 +55,32 @@ New-Item -ItemType Directory -Force -Path $deniedDir | Out-Null
 $deniedFile = Join-Path $deniedDir 'denied.txt'
 Set-Content -LiteralPath $deniedFile -Value 'WEBFANG_MUST_NOT_BE_READABLE'
 
-# Reuse the host pwsh as the sandboxed target: its install directory is
-# grantable, unlike System32 whose protected DACL arapuca cannot modify.
-$probeExe = (Get-Process -Id $PID).Path
-$probeHome = Split-Path -Parent $probeExe
-if (-not $probeExe -or -not (Test-Path -LiteralPath $probeExe -PathType Leaf)) {
-  throw "cannot resolve the host pwsh executable: $probeExe"
-}
+# Copy cmd.exe into the granted profile: arapuca cannot modify the protected
+# DACL of System32, but it can grant the profile it already mounts read-write.
+$system32 = Join-Path $env:SystemRoot 'System32'
+$systemCmd = Join-Path $system32 'cmd.exe'
+$whoami = Join-Path $system32 'whoami.exe'
+$findstr = Join-Path $system32 'findstr.exe'
+$probeCmdExe = Join-Path $profile 'cmd.exe'
+Copy-Item -LiteralPath $systemCmd -Destination $probeCmdExe -Force
 
 # Exit codes: 11 = AppContainer SID missing, 12 = granted path unreadable,
 # 13 = ungranted path readable. Any other non-zero code is a harness failure.
-$probeScript = Join-Path $profile 'probe.ps1'
-$probe = @(
-  '$ErrorActionPreference = "Stop"'
-  'Write-Output "WEBFANG_SANDBOX_OK"'
-  '$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()'
-  '$sid = $identity.Groups | Where-Object { $_.Value -like "S-1-15-2-*" } | Select-Object -First 1'
-  'if (-not $sid) { exit 11 }'
-  'Write-Output "WEBFANG_APP_CONTAINER_OK"'
-  'try { [IO.File]::OpenRead($env:WEBFANG_PROBE_ALLOWED).Dispose() } catch { exit 12 }'
-  'Write-Output "WEBFANG_ALLOW_READ_OK"'
-  'try { [IO.File]::OpenRead($env:WEBFANG_PROBE_DENIED).Dispose(); exit 13 } catch { }'
-  'Write-Output "WEBFANG_DENY_READ_OK"'
+$probeBatch = Join-Path $profile 'probe.cmd'
+$batch = @(
+  '@echo off'
+  'echo WEBFANG_SANDBOX_OK'
+  ('"{0}" /groups | "{1}" /C:"S-1-15-2-" >nul' -f $whoami, $findstr)
+  'if errorlevel 1 exit /b 11'
+  'echo WEBFANG_APP_CONTAINER_OK'
+  'type "%WEBFANG_PROBE_ALLOWED%" >nul'
+  'if errorlevel 1 exit /b 12'
+  'echo WEBFANG_ALLOW_READ_OK'
+  'type "%WEBFANG_PROBE_DENIED%" >nul 2>nul'
+  'if not errorlevel 1 exit /b 13'
+  'echo WEBFANG_DENY_READ_OK'
 ) -join "`r`n"
-Set-Content -LiteralPath $probeScript -Value $probe -Encoding Ascii
+Set-Content -LiteralPath $probeBatch -Value $batch -Encoding Ascii
 
 $env:ARAPUCA_ALLOW_EXEC = '1'
 $taskId = 'webfang-sandbox-probe-windows'
@@ -86,9 +88,8 @@ $smokeArgs = @(
   'run', '--task-id', $taskId, '--timeout', '90',
   '--env', "WEBFANG_PROBE_ALLOWED=$allowedFile",
   '--env', "WEBFANG_PROBE_DENIED=$deniedFile",
-  '-v', "${probeHome}:ro",
   '-v', "${profile}:rw",
-  '--', $probeExe, '-NoProfile', '-NonInteractive', '-File', $probeScript
+  '--', $probeCmdExe, '/d', '/c', $probeBatch
 )
 
 # Native stderr redirected into the pipeline becomes ErrorRecord objects; with

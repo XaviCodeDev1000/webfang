@@ -119,10 +119,9 @@ for needle in \
   'WEBFANG_ALLOW_READ_OK' \
   'WEBFANG_DENY_READ_OK' \
   'S-1-15-2-' \
-  'WindowsIdentity' \
-  '$probeExe' \
-  '-NoProfile' \
-  '-NonInteractive' \
+  'whoami.exe' \
+  'findstr.exe' \
+  'cmd.exe' \
   'AppContainer SID missing' \
   'granted path unreadable' \
   'ungranted path readable'
