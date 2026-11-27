@@ -57,6 +57,8 @@ Set-Content -LiteralPath $deniedFile -Value 'WEBFANG_MUST_NOT_BE_READABLE'
 
 $system32 = Join-Path $env:SystemRoot 'System32'
 $probeBatch = Join-Path $profile 'probe.cmd'
+# Batch exit codes: 11 = AppContainer SID missing, 12 = granted path unreadable,
+# 13 = ungranted path readable. Any other non-zero code is a harness failure.
 $batch = @(
   '@echo off'
   'echo WEBFANG_SANDBOX_OK'
@@ -97,7 +99,15 @@ try {
   Remove-Item -LiteralPath $deniedDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($exitCode -ne 0) { throw "arapuca run exited $exitCode for the AppContainer probe`n$output" }
+if ($exitCode -ne 0) {
+  $reasons = @{
+    11 = 'AppContainer SID missing'
+    12 = 'granted path unreadable'
+    13 = 'ungranted path readable'
+  }
+  $reason = if ($reasons.ContainsKey($exitCode)) { $reasons[$exitCode] } else { 'unexpected probe failure' }
+  throw "arapuca run exited $exitCode ($reason) for the AppContainer probe`n$output"
+}
 foreach ($marker in @(
   'WEBFANG_SANDBOX_OK',
   'WEBFANG_APP_CONTAINER_OK',
