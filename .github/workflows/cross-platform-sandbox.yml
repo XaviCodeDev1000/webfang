@@ -1,0 +1,84 @@
+# Cross-platform sandbox proof (ODD S8/T8).
+#
+# The WebFang wrapper binary is Linux-only by design; the native sandbox
+# backends of the vendored arapuca crate are not. This workflow proves the two
+# non-Linux paths on hosted runners, where Seatbelt and the Windows service
+# context actually exist. It is deliberately NOT in ci.yml's `gate` needs:
+# this is an evidence run, and a runner-image failure must not block merges.
+# macOS verifies Chrome under Seatbelt. Windows verifies only that the native
+# Windows backend compiles and its arapuca binary runs on the host; no
+# AppContainer runtime enforcement is claimed. Win32 console processes cannot
+# start under the AppContainer profile on this runner, and Chromium's Crashpad
+# pipe is denied, so a green Windows job is build evidence, not a platform claim.
+
+name: Cross-platform sandbox proof
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # cancel-in-progress is false: these are evidence runs, never destructive
+  # cancellations. See the concurrency-hygiene gate in ci.yml.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_DEV_INCREMENTAL: "false"
+
+jobs:
+  contract:
+    name: Smoke contract (Linux host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Smoke contract harness
+        run: bash scripts/tests/test_cross_platform_sandbox_ci.sh
+
+  sandbox-smoke-macos:
+    name: Sandbox smoke (macOS / Seatbelt)
+    needs: [contract]
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: cargo check (macOS cfgs compile)
+        run: cargo check --workspace --all-targets
+      - name: Build arapuca
+        run: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target
+      - name: Chrome launch through sandbox-exec
+        run: bash scripts/sandbox_smoke_chrome.sh
+
+  sandbox-smoke-windows:
+    name: Windows sandbox build checks (runtime not claimed)
+    needs: [contract]
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - name: cfg(windows) type-check
+        shell: bash
+        run: bash scripts/check_windows_platform.sh
+      - name: Build arapuca
+        run: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target
+      - name: Verify arapuca build
+        shell: pwsh
+        run: ./scripts/windows_sandbox_build_check.ps1

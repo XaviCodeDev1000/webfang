@@ -190,6 +190,26 @@ pub use ip_helpers::{
     is_ipv6_nat64_non_canonical, is_ipv6_teredo, parse_ip_literal,
 };
 
+/// Is the [`DISABLE_ENTRY_GUARD_ENV`] hatch armed right now?
+///
+/// THE single reader of that variable: only the exact value `"1"` arms it —
+/// an absent value, an empty value and every other truthy spelling leave the
+/// literal-IP entry guard active (the same rule [`disables_ssrf`] applies to
+/// the MCP variable). Read on every call rather than cached, because a test
+/// harness arms and clears it between cases (#1126, #1308).
+///
+/// Unlike its two siblings (`redirect_guard_disabled_by_env` /
+/// `validating_resolver_disabled_by_env`, both `cfg(test)`-confined), this one
+/// IS reachable from a shipped binary — by design: wiremock-bound smoke runs
+/// and self-hosted operators both need it. What it disarms is narrow: the
+/// literal-IP rejection at the ENTRY boundary, nothing else. The CLI announces
+/// that scope once per run through
+/// [`cli::ssrf_hatch_notice`](crate::cli::ssrf_hatch_notice).
+#[must_use]
+pub fn entry_guard_disabled_by_env() -> bool {
+    std::env::var(DISABLE_ENTRY_GUARD_ENV).as_deref() == Ok("1")
+}
+
 /// Pure, non-logging verdict of the literal entry guard (layer 2 of
 /// `docs/ssrf-layers.md`).
 ///
@@ -205,7 +225,7 @@ pub use ip_helpers::{
 /// connect-time validating resolver, not this one.
 #[must_use]
 pub fn seed_guard_refusal(url: &url::Url) -> Option<ForbiddenLiteral> {
-    if std::env::var(DISABLE_ENTRY_GUARD_ENV).as_deref() == Ok("1") {
+    if entry_guard_disabled_by_env() {
         return None;
     }
     let host = url.host_str().unwrap_or("");

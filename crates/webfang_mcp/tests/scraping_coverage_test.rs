@@ -1289,8 +1289,15 @@ async fn mcp_crawl_full_network_hydration_settles_before_capture() {
 
 /// #1343: an MCP crawl writes a checkpoint that a subsequent run resumes.
 /// Run 1 is truncated by `max_pages` (Write branch — the file must exist);
-/// run 2 with the same directory resumes past the processed page (fewer pages
-/// than a fresh full crawl) and a fully-completed run deletes the file.
+/// run 2 with the same directory resumes and a fully-completed run deletes
+/// the file.
+///
+/// #3079: the resumed run RE-DRIVES the seed instead of skipping it. An MCP
+/// crawl hands its pages back in the tool response and commits no record, so
+/// nothing about them is durable: a checkpoint marks a URL at DISPATCH, and
+/// treating that as "processed" was E13 — the run silently lost every page
+/// still in memory when it died. The accepted cost of the fix is that a
+/// resume may re-fetch a page it already returned; it never drops one.
 #[tokio::test]
 async fn mcp_crawl_checkpoint_resume_roundtrip() {
     // #1355: static crawls now run through the guarded FetchRouter, so the
@@ -1336,7 +1343,8 @@ async fn mcp_crawl_checkpoint_resume_roundtrip() {
         "truncated MCP crawl must write exactly one checkpoint file"
     );
 
-    // Run 2: same directory → resumes past the processed page, then completes
+    // Run 2: same directory → resumes, and because the seed was never durably
+    // settled it is dispatched again (#3079), then the run completes
     // (Delete branch — the directory is empty again).
     let second = crawl_tool_parsed(
         "crawl_site",
@@ -1347,9 +1355,10 @@ async fn mcp_crawl_checkpoint_resume_roundtrip() {
         .get("total_pages")
         .and_then(Value::as_u64)
         .expect("total_pages present");
-    assert!(
-        total < 3,
-        "resumed MCP crawl must skip the already-processed page (fresh crawl visits 3), got: {second}"
+    assert_eq!(
+        total, 3,
+        "a visited-but-unsettled page must be re-driven on resume (#3079): the \
+         MCP crawl commits no record, so nothing it returned is durable; got: {second}"
     );
     assert_eq!(
         count_files(),
