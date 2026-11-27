@@ -12,5 +12,4 @@ note: there's an earlier shadowed binding `s` of type `Stateful<Rec, webfang_cor
 50 |     let s = s.queue().start_fetch().fetched().extracted().processed();
 51 |     let s = s.export_flushed(PathBuf::from("out/back.jsonl"));
    |         - earlier `s` shadowed here with type `Stateful<Rec, webfang_core::domain::page_state::Exported>`
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Discovered>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Discovered>`

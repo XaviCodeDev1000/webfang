@@ -12,8 +12,7 @@ error[E0599]: no method named `queue` found for struct `Stateful<Rec, webfang_co
 51 |         let _ = q.queue();
    |                   ^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Queued>`
    |
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Discovered>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Discovered>`
 
 error[E0599]: no method named `start_fetch` found for struct `Stateful<Rec, webfang_core::domain::page_state::Fetching>` in the current scope
   --> tests/compile_fail/page_state/self_transitions.rs:57:19
@@ -21,8 +20,7 @@ error[E0599]: no method named `start_fetch` found for struct `Stateful<Rec, webf
 57 |         let _ = f.start_fetch();
    |                   ^^^^^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Fetching>`
    |
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Queued>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Queued>`
 
 error[E0599]: no method named `fetched` found for struct `Stateful<Rec, webfang_core::domain::page_state::Fetched>` in the current scope
   --> tests/compile_fail/page_state/self_transitions.rs:64:19
@@ -30,8 +28,7 @@ error[E0599]: no method named `fetched` found for struct `Stateful<Rec, webfang_
 64 |         let _ = f.fetched();
    |                   ^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Fetched>`
    |
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Fetching>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Fetching>`
 
 error[E0599]: no method named `extracted` found for struct `Stateful<Rec, webfang_core::domain::page_state::Extracted>` in the current scope
   --> tests/compile_fail/page_state/self_transitions.rs:74:19
@@ -39,8 +36,7 @@ error[E0599]: no method named `extracted` found for struct `Stateful<Rec, webfan
 74 |         let _ = e.extracted();
    |                   ^^^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Extracted>`
    |
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Fetched>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Fetched>`
 
 error[E0599]: no method named `processed` found for struct `Stateful<Rec, webfang_core::domain::page_state::Processed>` in the current scope
   --> tests/compile_fail/page_state/self_transitions.rs:85:19
@@ -48,8 +44,7 @@ error[E0599]: no method named `processed` found for struct `Stateful<Rec, webfan
 85 |         let _ = p.processed();
    |                   ^^^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Processed>`
    |
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Extracted>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Extracted>`
 
 error[E0599]: no method named `export_flushed` found for struct `Stateful<Rec, webfang_core::domain::page_state::Exported>` in the current scope
   --> tests/compile_fail/page_state/self_transitions.rs:98:19
@@ -57,5 +52,4 @@ error[E0599]: no method named `export_flushed` found for struct `Stateful<Rec, w
 98 |         let _ = e.export_flushed(PathBuf::from("out/self.jsonl"));
    |                   ^^^^^^^^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Exported>`
    |
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Processed>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Processed>`

@@ -5,7 +5,7 @@
 //! [`download_assets_if_enabled`] is application-layer orchestration, not
 //! adapter logic: it reads [`ScraperConfig`], extracts
 //! asset URLs from the HTML via [`crate::extractor`], deduplicates them, and
-//! delegates the actual transfer to the [`AssetDownloaderPort`](crate::domain::ports::AssetDownloaderPort) adapter.
+//! delegates the actual transfer to the [`crate::domain::ports::AssetDownloaderPort`] adapter.
 //! Pushing this into
 //! the adapter would invert the Clean Architecture dependency direction
 //! (adapters implement domain ports; they do not orchestrate application
@@ -94,7 +94,7 @@ pub fn extract_asset_urls(
 }
 
 /// Download previously extracted asset URLs through the
-/// [`AssetDownloaderPort`](crate::domain::ports::AssetDownloaderPort).
+/// [`crate::domain::ports::AssetDownloaderPort`].
 ///
 /// Uses the shared downloader when provided; builds a fallback one through
 /// the domain [`AssetDownloaderFactory`](crate::domain::asset_downloader_factory::AssetDownloaderFactory)

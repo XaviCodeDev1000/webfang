@@ -249,12 +249,12 @@ jobs:
         # E0463 "can't find crate for `core`". The pinned action rev must match
         # the toolchain cargo resolves via the toolchain file.
         #
-        # DRIFT TRAP: this action rev does not take a `toolchain:` input. The
-        # version is hardcoded inside the action's own action.yml, so it is
-        # invisible to `grep @1.100.0` in this repo — repointing the SHA is the
-        # ONLY way to change it, and every toolchain bump must update it here
-        # AND in the attest job below. v7.0.0 shipped nothing because a bump to
-        # 1.91.1 (#2310) left this SHA on the 1.88.0 branch.
+        # DRIFT TRAP: this pinned action rev does not take a `toolchain:` input.
+        # The version it installs is hardcoded in that rev's own action.yml,
+        # not in this repo: grepping the version here cannot reveal it, so
+        # repointing the SHA is the ONLY way to change it, and every toolchain
+        # bump must update it here AND in the attest job below. v7.0.0 shipped
+        # nothing because a bump to 1.91.1 (#2310) left this SHA on the 1.88.0 branch.
         # webfang#2428: ONE invocation builds the CLI and both MCP binaries, and
         # that is load-bearing rather than tidy. `webfang_cli`'s `mcp` feature is
         # an EXPLICIT EMPTY MARKER with no edge to `webfang_mcp`, so on its own
