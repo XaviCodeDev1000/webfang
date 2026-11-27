@@ -1478,6 +1478,15 @@
       "tier": "mcp_contract"
     },
     {
+      "path": "crates/webfang_mcp/tests/common/mcp_contract.rs",
+      "crate": "webfang_mcp",
+      "area": "mcp",
+      "test_count": 0,
+      "ignored_count": 0,
+      "snapshot_usage": false,
+      "tier": "mcp_contract"
+    },
+    {
       "path": "crates/webfang_mcp/tests/common/mod.rs",
       "crate": "webfang_mcp",
       "area": "mcp",
@@ -1653,6 +1662,15 @@
       "crate": "webfang_mcp",
       "area": "mcp",
       "test_count": 4,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "mcp_contract"
+    },
+    {
+      "path": "crates/webfang_mcp/tests/mcp_tool_contract_test.rs",
+      "crate": "webfang_mcp",
+      "area": "mcp",
+      "test_count": 3,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "mcp_contract"
