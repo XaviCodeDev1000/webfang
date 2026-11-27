@@ -1,6 +1,5 @@
 ---
 source: crates/webfang_core/tests/behavioral/main.rs
-assertion_line: 65
 expression: value.into()
 ---
 CLI Arguments for the webfang binary.
@@ -330,6 +329,17 @@ Cleanup:
           [env: WEBFANG_DOM_PREPRUNE=]
           [default: true]
           [possible values: true, false]
+
+Cookies:
+      --cookie-jar-scope <COOKIE_JAR_SCOPE>
+          Cookie jar scope: shared (one jar for the process, current behavior) or operation (one fresh jar per operation)
+
+          Possible values:
+          - shared:    One jar for the whole process: cookies survive across operations
+          - operation: One fresh jar per operation: cookies never survive past the operation
+          
+          [env: WEBFANG_COOKIE_JAR_SCOPE=]
+          [default: shared]
 
 Output:
   -o, --output <OUTPUT>

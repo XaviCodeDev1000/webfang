@@ -852,6 +852,7 @@ fn prop_crawler_args() -> CrawlerArgs {
         autoscale: false,
         h2_profile: "Chrome145".into(),
         js_strategy: webfang_core::domain::JsStrategy::Static,
+        cookie_jar_scope: webfang_core::domain::JarScope::Shared,
         obscura_binary: "obscura".into(),
         post_load_wait: webfang_core::domain::PostLoadWait::Idle,
         asset_naming: "hash".into(),

@@ -7,6 +7,7 @@
 
 use crate::domain::config::ConcurrencyConfig;
 use crate::domain::post_load_wait::PostLoadWait;
+use crate::domain::JarScope;
 use crate::domain::JsStrategy;
 use crate::domain::ValidUrl;
 
@@ -211,6 +212,10 @@ pub struct CrawlerArgs {
     /// JavaScript rendering strategy: static (wreq only), hybrid (3-layer), full (Chromiumoxide only)
     pub js_strategy: JsStrategy,
 
+    /// Cookie jar scope: shared (one jar for the process, current behavior) or
+    /// operation (one fresh jar per operation)
+    pub cookie_jar_scope: JarScope,
+
     /// Post-load settlement wait for the chromium render path (F-52-b):
     /// idle (default), fixed ms, or none.
     pub post_load_wait: PostLoadWait,
@@ -274,6 +279,7 @@ impl clap::FromArgMatches for CrawlerArgs {
             no_session_health: m.get_flag("no_session_health"),
             h2_profile: extract::value(m, "h2_profile")?,
             js_strategy: extract::value(m, "js_strategy")?,
+            cookie_jar_scope: extract::value(m, "cookie_jar_scope")?,
             post_load_wait: extract::value(m, "js_wait")?,
             obscura_binary: extract::value(m, "obscura_binary")?,
             dom_preprune: m.get_flag("dom_preprune"),
