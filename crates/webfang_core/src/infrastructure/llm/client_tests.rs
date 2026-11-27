@@ -15,7 +15,7 @@ use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
 const VALID_BODY: &str = r#"{"choices":[{"message":{"content":"{\"items\":[]}"}}],
     "usage":{"prompt_tokens":11,"completion_tokens":7}}"#;
 
-fn test_request() -> LlmRequest {
+pub(super) fn test_request() -> LlmRequest {
     LlmRequest {
         messages: vec![ChatMessage {
             role: "user".into(),
@@ -26,7 +26,7 @@ fn test_request() -> LlmRequest {
     }
 }
 
-fn client_for(server: &MockServer) -> OpenAiLlmClient {
+pub(super) fn client_for(server: &MockServer) -> OpenAiLlmClient {
     OpenAiLlmClient::new(
         Url::parse(&server.uri()).expect("mock uri parses"),
         ApiKey::new("sk-test"),
@@ -35,32 +35,39 @@ fn client_for(server: &MockServer) -> OpenAiLlmClient {
 }
 
 /// Captures one `/chat/completions` request body (#3074).
+///
+/// Stores the bytes as they went on the wire: `body()` gives the parsed view,
+/// `raw()` the exact bytes, because a parsed comparison cannot see a
+/// field-order change (#3092).
 #[derive(Clone)]
-struct JsonBodyCapture(Arc<Mutex<Option<serde_json::Value>>>);
+pub(super) struct JsonBodyCapture(Arc<Mutex<Option<Vec<u8>>>>);
 
 impl JsonBodyCapture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self(Arc::new(Mutex::new(None)))
     }
 
-    fn body(&self) -> serde_json::Value {
+    pub(super) fn raw(&self) -> Vec<u8> {
         self.0
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone()
             .expect("el mock debió capturar el body")
     }
+
+    pub(super) fn body(&self) -> serde_json::Value {
+        serde_json::from_slice(&self.raw()).expect("body es JSON")
+    }
 }
 
 impl Respond for JsonBodyCapture {
     fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
-        *self.0.lock().unwrap_or_else(|p| p.into_inner()) =
-            Some(serde_json::from_slice(&request.body).expect("body es JSON"));
+        *self.0.lock().unwrap_or_else(|p| p.into_inner()) = Some(request.body.clone());
         ResponseTemplate::new(200).set_body_string(VALID_BODY)
     }
 }
 
-async fn mount_capture(server: &MockServer) -> JsonBodyCapture {
+pub(super) async fn mount_capture(server: &MockServer) -> JsonBodyCapture {
     let capture = JsonBodyCapture::new();
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
