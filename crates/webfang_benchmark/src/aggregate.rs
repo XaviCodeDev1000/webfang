@@ -13,6 +13,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BenchmarkError, Result};
+use crate::measurements::from_spans;
 use webfang_core::domain::JsStrategy;
 
 /// Lenient stage-1 model: every FileTraceLayer line deserializes into this.
@@ -317,6 +318,15 @@ pub struct StrategyMetrics {
     /// declared estimate this is a measurement, so it is volatile and never
     /// rendered in the byte-compared Block A.
     pub measured_rss_bytes: Option<u64>,
+    /// Challenge events divided by attempted pages. The challenge forms are
+    /// `WafTier::Challenge`, `DownloadError::WafChallenge` and
+    /// `ScraperError::WafBlocked`, counted in the engine's WAF bucket; a
+    /// presence flag such as `errors_waf > 0` is deliberately NOT a rate.
+    pub challenge_rate: f64,
+    /// Nearest-rank 50th percentile of open-loop latency, ms (volatile).
+    pub open_loop_p50_ms: f64,
+    /// Nearest-rank 95th percentile of open-loop latency, ms (volatile).
+    pub open_loop_p95_ms: f64,
 }
 
 /// Compute metrics from classified records for one strategy run.
@@ -346,8 +356,6 @@ pub fn compute(
             _ => None,
         })
         .collect();
-    durations.sort_by(f64::total_cmp);
-
     // Review M2: a crawled-pages summary without span samples means the
     // trace lost its per-page spans (e.g. off-thread emission). Silent
     // p50/p95 = 0.0 would corrupt the report; fail loudly instead.
@@ -357,6 +365,12 @@ pub fn compute(
             path: "<records>".to_string(),
         });
     }
+
+    // Open-loop percentiles use the unsorted samples and the fixed-rate
+    // timeline derived from the engine's throughput, never the wall clock.
+    // Computed AFTER the MissingSpans tripwire so that contract stays intact.
+    let open_loop = from_spans(summary.pages_per_sec, &durations)?;
+    durations.sort_by(f64::total_cmp);
 
     Ok(StrategyMetrics {
         strategy,
@@ -377,6 +391,9 @@ pub fn compute(
         },
         ram_cost_bytes: declared_ram_cost_bytes,
         measured_rss_bytes: webfang_core::infrastructure::observability::memory_probe::rss_bytes(),
+        challenge_rate: summary.errors_waf as f64 / summary.total_pages as f64,
+        open_loop_p50_ms: open_loop.p50_ms,
+        open_loop_p95_ms: open_loop.p95_ms,
     })
 }
 

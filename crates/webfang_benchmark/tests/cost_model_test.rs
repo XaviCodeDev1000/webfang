@@ -41,6 +41,9 @@ fn metrics(pages_per_sec: f64, ram_cost_bytes: usize) -> StrategyMetrics {
         },
         ram_cost_bytes,
         measured_rss_bytes: None,
+        challenge_rate: 0.0,
+        open_loop_p50_ms: 0.0,
+        open_loop_p95_ms: 0.0,
     }
 }
 

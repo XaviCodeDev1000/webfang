@@ -83,6 +83,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_benchmark/tests/measurements_test.rs",
+      "crate": "webfang_benchmark",
+      "area": "tests",
+      "test_count": 10,
+      "ignored_count": 0,
+      "snapshot_usage": false,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_benchmark/tests/metrics_test.rs",
       "crate": "webfang_benchmark",
       "area": "tests",

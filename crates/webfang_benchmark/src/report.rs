@@ -128,6 +128,11 @@ fn write_methodology(out: &mut String) -> Result<()> {
         "- RAM bytes in the results table are a declared per-downloader `Downloader::memory_cost()` cost constant, not a measured RSS value. The cost model prefers the measured RSS sample when available and falls back to this declared constant; the sample is rendered in the volatile block."
     )
     .map_err(|e| crate::error::BenchmarkError::Render(e.to_string()))?;
+    writeln!(
+        out,
+        "- Tier B competitor adapters are excluded from published numbers."
+    )
+    .map_err(|e| crate::error::BenchmarkError::Render(e.to_string()))?;
     writeln!(out).map_err(|e| crate::error::BenchmarkError::Render(e.to_string()))?;
     Ok(())
 }
@@ -149,6 +154,9 @@ fn write_timing_table(out: &mut String, metrics: &[StrategyMetrics]) -> Result<(
             "pages/sec",
             "wall-clock secs",
             "Measured RSS bytes",
+            "Challenge rate",
+            "Open-loop p50 ms",
+            "Open-loop p95 ms",
         ],
     )?;
     for m in metrics {
@@ -157,14 +165,16 @@ fn write_timing_table(out: &mut String, metrics: &[StrategyMetrics]) -> Result<(
             .map_or_else(|| "n/a".to_string(), |bytes| bytes.to_string());
         writeln!(
             out,
-            "| {:?} | {} | {:.2} | {:.2} | {:.2} | {:.4} | {} |",
+            "| {:?} | {} | {:.2} | {:.2} | {:.2} | {:.4} | {measured} | {:.4} | {:.2} | {:.2} |",
             m.strategy,
             tier_label(m.strategy),
             m.p50_ms,
             m.p95_ms,
             m.pages_per_sec,
             m.wall_clock_secs,
-            measured
+            m.challenge_rate,
+            m.open_loop_p50_ms,
+            m.open_loop_p95_ms
         )
         .map_err(|e| crate::error::BenchmarkError::Render(e.to_string()))?;
     }

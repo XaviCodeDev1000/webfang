@@ -31,6 +31,9 @@ fn sample(strategy: JsStrategy, ram_bytes: usize) -> StrategyMetrics {
         },
         ram_cost_bytes: ram_bytes,
         measured_rss_bytes: None,
+        challenge_rate: 0.25,
+        open_loop_p50_ms: 12.5,
+        open_loop_p95_ms: 48.0,
     }
 }
 

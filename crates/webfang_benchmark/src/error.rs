@@ -69,6 +69,10 @@ pub enum BenchmarkError {
     #[error("cost config invalid: {0}")]
     CostConfig(String),
 
+    /// The deterministic open-loop timeline could not be built.
+    #[error("invalid open-loop schedule: {0}")]
+    Schedule(String),
+
     /// The final Markdown/HTML report could not be rendered.
     #[error("report render failed: {0}")]
     Render(String),
