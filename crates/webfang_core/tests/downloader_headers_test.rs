@@ -16,6 +16,25 @@ use webfang_core::HttpClientConfig;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+fn default_test_downloader() -> Box<dyn Downloader> {
+    Box::new(
+        WreqDownloader::new(
+            10,
+            5,
+            HttpClientConfig::default().tls_emulation,
+            None,
+            Vec::new(),
+            None,
+            None,
+            3,
+            1000,
+            10000,
+            50_000_000,
+        )
+        .expect("downloader builds"),
+    )
+}
+
 #[tokio::test]
 #[cfg(not(miri))]
 async fn wreq_downloader_populates_response_headers() {
@@ -31,22 +50,7 @@ async fn wreq_downloader_populates_response_headers() {
         .mount(&server)
         .await;
 
-    let downloader: Box<dyn Downloader> = Box::new(
-        WreqDownloader::new(
-            10,
-            5,
-            HttpClientConfig::default().tls_emulation,
-            None,
-            Vec::new(),
-            None,
-            None,
-            3,
-            1000,
-            10000,
-            50_000_000,
-        )
-        .expect("downloader builds"),
-    );
+    let downloader = default_test_downloader();
     let url = Url::parse(&server.uri()).expect("wiremock URI is valid");
 
     let page = downloader
@@ -87,22 +91,7 @@ async fn wreq_downloader_headers_keys_are_lowercased() {
         .mount(&server)
         .await;
 
-    let downloader: Box<dyn Downloader> = Box::new(
-        WreqDownloader::new(
-            10,
-            5,
-            HttpClientConfig::default().tls_emulation,
-            None,
-            Vec::new(),
-            None,
-            None,
-            3,
-            1000,
-            10000,
-            50_000_000,
-        )
-        .expect("downloader builds"),
-    );
+    let downloader = default_test_downloader();
     let url = Url::parse(&server.uri()).expect("wiremock URI is valid");
 
     let page = downloader.fetch(&url).await.expect("fetch should succeed");
@@ -115,5 +104,55 @@ async fn wreq_downloader_headers_keys_are_lowercased() {
     assert!(
         !page.headers.contains_key("X-Mixed-Case"),
         "original mixed-case key must not appear"
+    );
+}
+
+/// The Chrome145 emulation profile controls both TLS/H2 and the built-in
+/// header preset. A change in `wreq-util` that reorders these headers changes
+/// the browser fingerprint without touching any WebFang code, so the exact
+/// wire order is pinned here against the supported release line.
+#[tokio::test]
+#[cfg(not(miri))]
+async fn chrome145_header_order_on_the_wire() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html></html>"))
+        .mount(&server)
+        .await;
+
+    let downloader = default_test_downloader();
+    let url = Url::parse(&server.uri()).expect("wiremock URI is valid");
+    downloader.fetch(&url).await.expect("fetch succeeds");
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("server records requests");
+    let names: Vec<&str> = requests[0]
+        .headers
+        .keys()
+        .map(|name| name.as_str())
+        .collect();
+    let expected = [
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "upgrade-insecure-requests",
+        "user-agent",
+        "accept",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-user",
+        "sec-fetch-dest",
+        "accept-language",
+        "priority",
+        "accept-encoding",
+        "host",
+    ];
+    assert_eq!(
+        names,
+        expected.to_vec(),
+        "Chrome145 wire header order changed; check the wreq-util pin"
     );
 }
