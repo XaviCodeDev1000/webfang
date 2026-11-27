@@ -130,3 +130,23 @@ L13 — T5 record: upstream request filed at
   https://github.com/puddlers/rustdoc-markdown/issues/1 (nightly refresh or a
   `--toolchain`/`--ignore-rust-version` knob). Repository issue with the maintainer's
   `status:approved`: #3107.
+
+L14 — Delivery: PR #3112 (base `main`, `type:chore`, PR Validation green). Remote ref verified
+  through the HTTPS API, not `ls-remote`, because the SSH transport flapped: `git push` failed
+  twice on the default host and landed only with the documented per-invocation override
+  (`GIT_SSH_COMMAND="ssh -p 443 -o Hostname=ssh.github.com" git push origin …`, remote name kept
+  so `refs/remotes/origin/*` stays real). That gap is #3111.
+
+L15 — Workstation defect found by the gate, not by the diff: `/tmp` was EDQUOT-exhausted
+  (per-user limit; 16G tmpfs, ~13G held). It denied the document-close commit through
+  `scripts/check_file_size.sh` (`OSError: [Errno 122] Disk quota exceeded`) and broke the gate's
+  `nextest (workspace, all features)` step. Re-running that identical step with
+  `TMPDIR=<this tree's target>/tmp` gave **5977/5977 tests passed, 0 failed** — so the local
+  `PASS=87 FAIL=1` was the quota, not this branch. Workaround recorded, not a repo change.
+
+L16 — Slice decision (review-workload rule): 724 authored changed lines across 4 commits, above
+  the ~400-line slice. Published as ONE PR by explicit choice: two causes are single-line fixes,
+  the third is one script plus its harness, the native review already covered the aggregate, and
+  splitting would need sequential PRs (no stacked PRs here) that leave `main` red until the last
+  merge. Follow-ups split out as #3109 (local gate coverage), #3110 (R3-002) and #3111 (push
+  verification).
