@@ -9,7 +9,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SH_SMOKE="$ROOT/scripts/sandbox_smoke_chrome.sh"
-PS_SMOKE="$ROOT/scripts/sandbox_probe_appcontainer.ps1"
+PS_SMOKE="$ROOT/scripts/windows_sandbox_build_check.ps1"
 WORKFLOW="$ROOT/.github/workflows/cross-platform-sandbox.yml"
 
 fail() { echo "::error::$1" >&2; exit 1; }
@@ -69,24 +69,23 @@ for needle in \
   'cargo check' \
   'scripts/check_windows_platform.sh' \
   'scripts/sandbox_smoke_chrome.sh' \
-  'scripts/sandbox_probe_appcontainer.ps1' \
+  'scripts/windows_sandbox_build_check.ps1' \
   'scripts/tests/test_cross_platform_sandbox_ci.sh'
 do
   grep -Fq -- "$needle" "$WORKFLOW" || fail "workflow misses: $needle"
 done
 ok "workflow wires macOS, Windows and the contract job"
 
-# T4: the Windows smoke states allow_exec and never disables the native sandbox
-# through --deny-network (which would turn the network namespace on).
+# T4: the Windows check verifies the built binary on the host and explicitly
+# refuses to claim AppContainer runtime enforcement.
 if [ ! -f "$PS_SMOKE" ]; then
-  fail "scripts/sandbox_smoke_chrome.ps1 does not exist yet (RED)"
+  fail "scripts/windows_sandbox_build_check.ps1 does not exist yet (RED)"
 fi
-grep -Fq 'ARAPUCA_ALLOW_EXEC' "$PS_SMOKE" || fail "PowerShell smoke misses allow_exec intent"
-grep -Fq -- 'run' "$PS_SMOKE" || fail "PowerShell smoke does not use arapuca run"
-if grep -Fq -- '--deny-network' "$PS_SMOKE"; then
-  fail "PowerShell smoke enables the network namespace via --deny-network"
+grep -Fq -- 'arapuca --version' "$PS_SMOKE" || fail "Windows check does not verify the built binary"
+if grep -Fq -- 'arapuca run' "$PS_SMOKE"; then
+  fail "Windows check must not claim to launch a sandboxed process"
 fi
-ok "windows smoke keeps run defaults: allow_exec=true, netns disabled"
+ok "windows check verifies the build without a runtime claim"
 
 # T5: vendor/arapuca is excluded from the workspace, so an unpinned build puts
 # the binary in vendor/arapuca/target. The workflow must force the root target.
@@ -98,40 +97,26 @@ ok "arapuca build pins the workspace target dir"
 grep -Fq -- "READ_PATH=\"\${CHROME%%/Contents/MacOS/*}\"" "$SH_SMOKE" || fail "app bundle derivation appends .app twice"
 ok "macOS app bundle derivation is single-suffix"
 
-# T7: macOS keeps the Chrome version probe. Windows MUST NOT claim a Chrome
-# launch: Chromium initializes Crashpad before flags, AppContainer denies its
-# named pipe, and --disable-crashpad-for-testing is POSIX-only.
+# T7: macOS keeps the real Chrome-under-Seatbelt version probe. Windows must
+# not carry the POSIX-only Crashpad switch or claim a Chrome launch.
 grep -Fq -- '--version' "$SH_SMOKE" || fail "posix smoke must use the Chrome version probe"
-if grep -Fq -- '--version' "$PS_SMOKE"; then
-  fail "windows probe must not launch Chrome under AppContainer"
-fi
 if grep -Fq -- '--disable-crashpad-for-testing' "$PS_SMOKE"; then
-  fail "windows probe must not carry the POSIX-only Crashpad switch"
+  fail "Windows check must not carry the POSIX-only Crashpad switch"
 fi
-ok "macOS probes Chrome; Windows probes enforcement without Chrome"
+ok "macOS probes Chrome; Windows carries no browser claim"
 
-# T8: the Windows probe asserts three observable effects from inside the
-# AppContainer: the package SID is present, a granted path is readable, and an
-# ungranted path is not readable.
+# T8: the Windows check states exactly what is and is not verified.
 for needle in \
-  'WEBFANG_SANDBOX_OK' \
-  'WEBFANG_APP_CONTAINER_OK' \
-  'WEBFANG_ALLOW_READ_OK' \
-  'WEBFANG_DENY_READ_OK' \
-  'S-1-15-2-' \
-  'whoami.exe' \
-  'findstr.exe' \
-  'cmd.exe' \
-  'AppContainer SID missing' \
-  'granted path unreadable' \
-  'ungranted path readable'
+  'arapuca build OK' \
+  'AppContainer runtime enforcement NOT verified' \
+  'build and host-level checks only'
 do
-  grep -Fq -- "$needle" "$PS_SMOKE" || fail "windows probe misses: $needle"
+  grep -Fq -- "$needle" "$PS_SMOKE" || fail "Windows check misses: $needle"
 done
-ok "windows probe checks AppContainer identity and the file allowlist"
+ok "Windows check names its honest scope"
 
-# T9: the workflow must describe the Windows job as an enforcement probe, not
-# as a browser launch, so the green check is not read as a Chrome claim.
-grep -Fq 'AppContainer enforcement probe' "$WORKFLOW" || fail "workflow still claims a Windows Chrome launch"
-ok "workflow names the Windows job as an enforcement probe"
+# T9: the workflow must name the Windows job as build checks, not as a runtime
+# enforcement proof, so a green check is not read as a cross-platform claim.
+grep -Fq 'Windows sandbox build checks' "$WORKFLOW" || fail "workflow still claims Windows runtime enforcement"
+ok "workflow names the Windows job as build checks"
 
