@@ -689,7 +689,17 @@ async fn test_scrape_batch_partial_results_on_failure() {
     // Shape pin (XC-2, slice-2 contract): canonicalized success record —
     // timestamp, content, checksum and the wiremock port are the only
     // non-deterministic parts; the FIELD SET is the contract.
-    let mut canonical: Value = success_records[0].clone();
+    // Results arrive in completion order, so pin the /a record explicitly:
+    // taking [0] made the snapshot flaky whenever /b finished first.
+    let mut canonical: Value = success_records
+        .iter()
+        .find(|record| {
+            record["url"]
+                .as_str()
+                .is_some_and(|url| url.ends_with("/a"))
+        })
+        .expect("the /a success record must be present")
+        .clone();
     if let Some(obj) = canonical.as_object_mut() {
         for key in ["timestamp_utc", "content", "checksum_sha256"] {
             obj.insert(key.to_string(), json!("[REDACTED]"));
