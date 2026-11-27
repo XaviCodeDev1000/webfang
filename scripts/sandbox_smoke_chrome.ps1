@@ -1,15 +1,23 @@
-# Launch Chrome through arapuca's native Windows sandbox (AppContainer/Job
-# Objects) from the launcher/service context required by S8/T8.
+# Windows AppContainer enforcement probe (S8/T8 follow-up).
 #
-# `arapuca run` always sets allow_exec=true; ARAPUCA_ALLOW_EXEC is set here as
-# well so the proof states the condition explicitly. The network-denial flag
-# is not passed, so use_netns stays false and the native sandbox owns the process.
+# This script intentionally does NOT launch Chrome. Chromium initializes Crashpad
+# before command-line handling, and Crashpad creates a global named pipe that an
+# AppContainer token cannot create (CreateNamedPipe: Access is denied, 0x5).
+# Chromium checks the POSIX-only Crashpad testing switch on POSIX, so it cannot
+# fix a Win32 Chrome under AppContainer. The honest Windows proof is to
+# assert the sandbox itself from inside the sandboxed process:
+#   1. the token carries an AppContainer package SID (S-1-15-2-*),
+#   2. a granted path is readable,
+#   3. an ungranted path is NOT readable.
+# Chrome under Seatbelt stays verified on macOS; Windows claims enforcement only.
 #
-# Overrides (used by the contract harness and non-standard installs):
-#   WEBFANG_ARAPUCA_BINARY          path to the built arapuca.exe
-#   WEBFANG_CHROME_BINARY           path to chrome.exe
-#   WEBFANG_SANDBOX_SMOKE_PROFILE   writable profile directory
-#   WEBFANG_SANDBOX_SMOKE_READ_PATH read-only mount containing chrome.exe
+# `arapuca run` defaults to allow_exec=true; ARAPUCA_ALLOW_EXEC is set here as
+# well so the proof states the condition explicitly. No network-namespace flag
+# is passed, so the native Windows backend keeps its own configuration.
+#
+# Override (used by the contract harness and non-standard installs):
+#   WEBFANG_ARAPUCA_BINARY            path to the built arapuca.exe
+#   WEBFANG_SANDBOX_SMOKE_PROFILE     writable profile directory
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
@@ -29,44 +37,51 @@ if (-not (Test-Path -LiteralPath $arapuca -PathType Leaf)) {
   throw "arapuca binary not found: $arapuca (build it with: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target)"
 }
 
-$chrome = $env:WEBFANG_CHROME_BINARY
-if (-not $chrome) {
-  $candidates = @(
-    (Join-Path ${env:ProgramFiles} 'Google/Chrome/Application/chrome.exe'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Google/Chrome/Application/chrome.exe'),
-    (Join-Path $env:LOCALAPPDATA 'Google/Chrome/Application/chrome.exe')
-  )
-  foreach ($candidate in $candidates) {
-    if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) { $chrome = $candidate; break }
-  }
-}
-if (-not $chrome -or -not (Test-Path -LiteralPath $chrome -PathType Leaf)) {
-  throw 'no chrome.exe found; set WEBFANG_CHROME_BINARY'
-}
-
-$readPath = if ($env:WEBFANG_SANDBOX_SMOKE_READ_PATH) { $env:WEBFANG_SANDBOX_SMOKE_READ_PATH } else { Split-Path -Parent $chrome }
-if (-not (Test-Path -LiteralPath $readPath -PathType Container)) {
-  throw "browser read path is not a directory: $readPath"
-}
-
 $createdProfile = $false
 $profile = $env:WEBFANG_SANDBOX_SMOKE_PROFILE
 if (-not $profile) {
-  $profile = Join-Path $env:TEMP ("webfang-sandbox-smoke-" + [guid]::NewGuid().ToString('N'))
+  $profile = Join-Path $env:TEMP ("webfang-sandbox-probe-" + [guid]::NewGuid().ToString('N'))
   $createdProfile = $true
 }
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
 
+$allowedFile = Join-Path $profile 'allowed.txt'
+Set-Content -LiteralPath $allowedFile -Value 'WEBFANG_ALLOW_READ_OK'
+
+# The denied sentinel lives outside every -v mount. It is created by the host,
+# never granted to the AppContainer, and removed in the finally block below.
+$deniedDir = Join-Path ([IO.Path]::GetTempPath()) ("webfang-sandbox-denied-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $deniedDir | Out-Null
+$deniedFile = Join-Path $deniedDir 'denied.txt'
+Set-Content -LiteralPath $deniedFile -Value 'WEBFANG_MUST_NOT_BE_READABLE'
+
+$system32 = Join-Path $env:SystemRoot 'System32'
+$probeBatch = Join-Path $profile 'probe.cmd'
+$batch = @(
+  '@echo off'
+  'echo WEBFANG_SANDBOX_OK'
+  '"%WEBFANG_PROBE_WHOAMI%" /groups | "%WEBFANG_PROBE_FINDSTR%" /C:"S-1-15-2-" >nul'
+  'if errorlevel 1 exit /b 11'
+  'echo WEBFANG_APP_CONTAINER_OK'
+  'type "%WEBFANG_PROBE_ALLOWED%" >nul'
+  'if errorlevel 1 exit /b 12'
+  'echo WEBFANG_ALLOW_READ_OK'
+  'type "%WEBFANG_PROBE_DENIED%" >nul 2>nul'
+  'if not errorlevel 1 exit /b 13'
+  'echo WEBFANG_DENY_READ_OK'
+) -join "`r`n"
+Set-Content -LiteralPath $probeBatch -Value $batch -Encoding Ascii
+
 $env:ARAPUCA_ALLOW_EXEC = '1'
-$marker = 'Google Chrome'
-$taskId = 'webfang-sandbox-smoke-windows'
-# `--version` is a real Chrome launch through the AppContainer. A headless
-# --dump-dom is not portable here: Chrome's named-pipe singleton is denied
-# under the profile (CreateNamedPipe: Access is denied, 0x5).
+$taskId = 'webfang-sandbox-probe-windows'
 $smokeArgs = @(
   'run', '--task-id', $taskId, '--timeout', '90',
-  '-v', "${readPath}:ro", '-v', "${profile}:rw",
-  '--', $chrome, "--user-data-dir=$profile", '--version', '--disable-crashpad-for-testing'
+  '--env', "WEBFANG_PROBE_ALLOWED=$allowedFile",
+  '--env', "WEBFANG_PROBE_DENIED=$deniedFile",
+  '--env', "WEBFANG_PROBE_WHOAMI=$(Join-Path $system32 'whoami.exe')",
+  '--env', "WEBFANG_PROBE_FINDSTR=$(Join-Path $system32 'findstr.exe')",
+  '-v', "${profile}:rw",
+  '--', (Join-Path $system32 'cmd.exe'), '/d', '/c', $probeBatch
 )
 
 # Native stderr redirected into the pipeline becomes ErrorRecord objects; with
@@ -79,9 +94,17 @@ try {
 } finally {
   $ErrorActionPreference = $previous
   if ($createdProfile) { Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue }
+  Remove-Item -LiteralPath $deniedDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-if ($exitCode -ne 0) { throw "arapuca run exited $exitCode for $chrome`n$output" }
-if ($output -notlike "*$marker*") { throw "browser marker '$marker' missing from sandboxed output`n$output" }
+if ($exitCode -ne 0) { throw "arapuca run exited $exitCode for the AppContainer probe`n$output" }
+foreach ($marker in @(
+  'WEBFANG_SANDBOX_OK',
+  'WEBFANG_APP_CONTAINER_OK',
+  'WEBFANG_ALLOW_READ_OK',
+  'WEBFANG_DENY_READ_OK'
+)) {
+  if ($output -notlike "*$marker*") { throw "probe marker '$marker' missing from output`n$output" }
+}
 
-Write-Host "sandbox smoke: OK (Windows AppContainer, task=$taskId)"
+Write-Host "sandbox probe: OK (AppContainer identity + allowlist enforced, task=$taskId)"

@@ -98,15 +98,37 @@ ok "arapuca build pins the workspace target dir"
 grep -Fq -- "READ_PATH=\"\${CHROME%%/Contents/MacOS/*}\"" "$SH_SMOKE" || fail "app bundle derivation appends .app twice"
 ok "macOS app bundle derivation is single-suffix"
 
-# T7: a version probe is the Chrome launch contract here: --dump-dom makes
-# Chrome create a named pipe that AppContainer denies on Windows runners.
+# T7: macOS keeps the Chrome version probe. Windows MUST NOT claim a Chrome
+# launch: Chromium initializes Crashpad before flags, AppContainer denies its
+# named pipe, and --disable-crashpad-for-testing is POSIX-only.
 grep -Fq -- '--version' "$SH_SMOKE" || fail "posix smoke must use the Chrome version probe"
-grep -Fq -- '--version' "$PS_SMOKE" || fail "windows smoke must use the Chrome version probe"
-ok "both smokes use the version probe through arapuca"
+if grep -Fq -- '--version' "$PS_SMOKE"; then
+  fail "windows probe must not launch Chrome under AppContainer"
+fi
+if grep -Fq -- '--disable-crashpad-for-testing' "$PS_SMOKE"; then
+  fail "windows probe must not carry the POSIX-only Crashpad switch"
+fi
+ok "macOS probes Chrome; Windows probes enforcement without Chrome"
 
-# T8: Chromium's official switch --disable-crashpad-for-testing prevents the
-# crash handler from creating the named pipe that AppContainer denies.
-grep -Fq -- '--disable-crashpad-for-testing' "$SH_SMOKE" || fail "posix smoke must disable crashpad under the sandbox"
-grep -Fq -- '--disable-crashpad-for-testing' "$PS_SMOKE" || fail "windows smoke must disable crashpad under the sandbox"
-ok "both smokes disable crashpad under the sandbox"
+# T8: the Windows probe asserts three observable effects from inside the
+# AppContainer: the package SID is present, a granted path is readable, and an
+# ungranted path is not readable.
+for needle in \
+  'WEBFANG_SANDBOX_OK' \
+  'WEBFANG_APP_CONTAINER_OK' \
+  'WEBFANG_ALLOW_READ_OK' \
+  'WEBFANG_DENY_READ_OK' \
+  'S-1-15-2-' \
+  'WEBFANG_PROBE_WHOAMI' \
+  'WEBFANG_PROBE_FINDSTR' \
+  'cmd.exe'
+do
+  grep -Fq -- "$needle" "$PS_SMOKE" || fail "windows probe misses: $needle"
+done
+ok "windows probe checks AppContainer identity and the file allowlist"
+
+# T9: the workflow must describe the Windows job as an enforcement probe, not
+# as a browser launch, so the green check is not read as a Chrome claim.
+grep -Fq 'AppContainer enforcement probe' "$WORKFLOW" || fail "workflow still claims a Windows Chrome launch"
+ok "workflow names the Windows job as an enforcement probe"
 

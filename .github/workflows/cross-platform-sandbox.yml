@@ -4,10 +4,11 @@
 # backends of the vendored arapuca crate are not. This workflow proves the two
 # non-Linux paths on hosted runners, where Seatbelt and the Windows service
 # context actually exist. It is deliberately NOT in ci.yml's `gate` needs:
-# this is the first proof, and a runner-image failure must not block merges.
-# Both jobs must be green before any cross-platform claim is made; if macOS
-# sandbox-exec cannot launch Chrome, the job log is the recorded failure and
-# Linux remains the only verified platform.
+# this is an evidence run, and a runner-image failure must not block merges.
+# macOS verifies Chrome under Seatbelt. Windows verifies AppContainer enforcement
+# (package SID, granted read, denied read) from inside the sandbox; it does NOT
+# claim a Chrome launch, because Chromium's Crashpad named pipe is denied by
+# AppContainer and its `--disable-crashpad-for-testing` switch is POSIX-only.
 
 name: Cross-platform sandbox proof
 
@@ -63,7 +64,7 @@ jobs:
         run: bash scripts/sandbox_smoke_chrome.sh
 
   sandbox-smoke-windows:
-    name: Sandbox smoke (Windows / service context)
+    name: AppContainer enforcement probe (Windows / service context)
     needs: [contract]
     runs-on: windows-latest
     timeout-minutes: 45
@@ -77,6 +78,6 @@ jobs:
         run: bash scripts/check_windows_platform.sh
       - name: Build arapuca
         run: cargo build --manifest-path vendor/arapuca/Cargo.toml --bin arapuca --target-dir target
-      - name: Chrome launch from the launcher context
+      - name: AppContainer enforcement probe
         shell: pwsh
         run: ./scripts/sandbox_smoke_chrome.ps1
