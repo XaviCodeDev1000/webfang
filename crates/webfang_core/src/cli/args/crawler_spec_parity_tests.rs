@@ -49,7 +49,7 @@ pub(super) fn arg_by_id<'a>(args: &'a [clap::Arg], id: &str) -> &'a clap::Arg {
 
 #[test]
 fn deferred_list_is_honest_about_its_reasons() {
-    assert_eq!(spec::crawler::GROUP.len() + DEFERRED_FROM_SPEC.len(), 49);
+    assert_eq!(spec::crawler::GROUP.len() + DEFERRED_FROM_SPEC.len(), 50);
     let args = command_args();
     for (id, _) in DEFERRED_FROM_SPEC {
         assert!(

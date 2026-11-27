@@ -97,6 +97,12 @@ pub struct Container {
     // --- Port-trait objects (domain abstractions) ---
     /// HTTP client behind port trait — application code depends on the trait, not wreq
     http_client: Arc<dyn HttpClientPort>,
+    /// The hardened client the port facade wraps.
+    ///
+    /// Held so [`Container::with_cookie_jar_scope`] can rebuild the facade
+    /// over the SAME client — connection pool, session health and pacing stay
+    /// exactly as constructed — instead of building a second client.
+    http_client_concrete: Arc<HttpClient>,
 
     // --- Application services (concrete, Arc-shared) ---
     /// Rate limiter for crawl operations
@@ -432,54 +438,6 @@ impl Container {
         }
     }
 
-    /// Fresh cookie bridge + pre-seeded wreq jar for one CLI scrape run.
-    ///
-    /// Seeds operator `--cookie` values (#890) into BOTH layers: the shared
-    /// [`CookieBridge`](crate::domain::cookie_bridge::CookieBridge) (consumed by
-    /// the Chromiumoxide L3 layer) and the wreq [`Jar`](wreq::cookie::Jar)
-    /// (shared by the Static and Hybrid-L1 layers). Returns `(bridge, None)`
-    /// when no cookies were requested or no target URL exists. A new bridge
-    /// per run — never the server's long-lived bridge.
-    ///
-    /// Cookie names/values are credentials: the debug event reports the count
-    /// and host scope only, never the secrets.
-    #[must_use]
-    pub fn fresh_scrape_cookie_set(
-        opts: &CrawlOptions,
-        urls: &[url::Url],
-    ) -> (
-        Arc<tokio::sync::RwLock<crate::domain::cookie_bridge::CookieBridge>>,
-        Option<Arc<wreq::cookie::Jar>>,
-    ) {
-        let mut bridge = crate::domain::cookie_bridge::CookieBridge::new();
-        if let Some(first_url) = urls.first() {
-            let domain = first_url.host_str().unwrap_or("").to_string();
-            if !domain.is_empty() {
-                for (name, value) in &opts.network.initial_cookies {
-                    bridge.seed(name, value, &domain);
-                }
-            }
-        }
-        let bridge = Arc::new(tokio::sync::RwLock::new(bridge));
-        let jar = if opts.network.initial_cookies.is_empty() {
-            None
-        } else {
-            urls.first().map(|first_url| {
-                let jar = wreq::cookie::Jar::default();
-                for (name, value) in &opts.network.initial_cookies {
-                    jar.add(format!("{name}={value}").as_str(), first_url.as_str());
-                }
-                tracing::debug!(
-                seeded_cookie_count = opts.network.initial_cookies.len(),
-                host = %first_url.host_str().unwrap_or(""),
-                "seeding operator cookies into the scrape client jar"
-                );
-                Arc::new(jar)
-            })
-        };
-        (bridge, jar)
-    }
-
     /// Build the scrape fetch downloader through the single factory.
     ///
     /// `cookie_bridge` is the run's FRESH bridge from
@@ -628,9 +586,18 @@ impl Container {
         // `HttpClient` impl is stored as the trait object. No concrete
         // `wreq::Client` is exposed — raw HTTP stays behind the port.
         let session_pool = Arc::new(DomainSessionPool::default_pool());
-        let http_client_inner = HttpClient::new(HttpClientConfig::default())?
-            .with_session_pool(session_pool as Arc<dyn crate::domain::session_port::SessionPort>);
-        let http_client: Arc<dyn HttpClientPort> = Arc::new(http_client_inner);
+        let http_client_concrete = Arc::new(
+            HttpClient::new(HttpClientConfig::default())?.with_session_pool(
+                session_pool as Arc<dyn crate::domain::session_port::SessionPort>,
+            ),
+        );
+        // Default jar scope is `shared`: the facade forwards "no request-level
+        // jar", so the client's own jar applies exactly as before.
+        let http_client = cookies::scoped_facade(
+            &http_client_concrete,
+            crate::domain::JarScope::default(),
+            None,
+        );
 
         // 2. Rate limiter (optional — failure is non-fatal)
         let rate_limiter = match SharedRateLimiter::new(&RateLimiterConfig::default()) {
@@ -687,6 +654,7 @@ impl Container {
         Ok(Self {
             scraper_config,
             http_client,
+            http_client_concrete,
             rate_limiter,
             deduplicator,
             credential_store,
@@ -1066,6 +1034,8 @@ impl Container {
 
 #[cfg(test)]
 use crate::infrastructure::autotuning::ElasticOverrides;
+
+mod cookies;
 
 #[cfg(test)]
 mod tests;
