@@ -1,3 +1,4 @@
+use super::crawl_loop::CrawlTaskOutcome;
 use super::tests_common::{
     entry_off, loop_harness, nz, pool_session, session_engine, TEST_WATCHDOG,
 };
@@ -22,7 +23,7 @@ fn session_engine_with_pipeline(config: CrawlerConfig, pipeline: Arc<PipelineExe
 fn stalled_shape() -> (
     Engine,
     Arc<CrawlTaskCtx>,
-    tokio::task::JoinSet<Result<(), CrawlError>>,
+    tokio::task::JoinSet<CrawlTaskOutcome>,
 ) {
     let seed = Url::parse("http://127.0.0.1:9/").expect("valid seed URL");
     let config = CrawlerConfig::builder(seed)
@@ -50,7 +51,7 @@ async fn wedged_worker_ends_the_run_instead_of_spinning() {
     let (mut engine, task_ctx, mut tasks) = stalled_shape();
 
     // A worker that never completes and never observes cancellation.
-    tasks.spawn(async { std::future::pending::<Result<(), CrawlError>>().await });
+    tasks.spawn(async { std::future::pending::<(String, Result<(), CrawlError>)>().await });
 
     let bound = Duration::from_millis(100);
     let result = tokio::time::timeout(
@@ -186,7 +187,7 @@ async fn empty_frontier_with_worker_in_flight_is_not_a_stall() {
     tasks.spawn(async move {
         tokio::time::sleep(Duration::from_millis(20)).await;
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
+        ("http://127.0.0.1:9/".to_string(), Ok(()))
     });
     assert!(
         !engine.scheduler.has_pending_work(),

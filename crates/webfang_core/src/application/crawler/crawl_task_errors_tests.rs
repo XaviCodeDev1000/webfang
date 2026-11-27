@@ -183,6 +183,125 @@ async fn aborted_join_result_is_not_counted_as_panic() {
     assert!(breakdown.iter().all(|c| c.load(Ordering::SeqCst) == 0));
 }
 
+// --- is_terminal_settled (#3079) ---
+
+/// Every failure the resume MUST skip: no retry can change it.
+#[test]
+fn permanent_failures_are_terminal_settled() {
+    let settled = [
+        CrawlError::Http {
+            status: 404,
+            url: "https://example.com/gone".into(),
+        },
+        CrawlError::Network {
+            message: "HTTP error: 404 Not Found".into(),
+            status_code: Some(404),
+            source: None,
+        },
+        CrawlError::InvalidUrl("not-a-url".into()),
+        CrawlError::UrlExcluded("https://example.com/private".into()),
+        CrawlError::InvalidContentType("application/zip".into()),
+    ];
+
+    for error in &settled {
+        assert!(
+            is_terminal_settled(error),
+            "{error} must be a terminal verdict: a resume may not re-drive it"
+        );
+    }
+}
+
+/// Everything a later run could still turn into a page stays re-drivable.
+#[test]
+fn transient_and_unknown_failures_are_not_settled() {
+    let re_drivable = [
+        // Paced retries, not verdicts: 408 and 429 are the two 4xx exceptions.
+        CrawlError::Http {
+            status: 408,
+            url: "https://example.com/slow".into(),
+        },
+        CrawlError::Http {
+            status: 429,
+            url: "https://example.com/limited".into(),
+        },
+        CrawlError::Network {
+            message: "HTTP error: 429 Too Many Requests".into(),
+            status_code: Some(429),
+            source: None,
+        },
+        CrawlError::Network {
+            message: "HTTP error: 500 Internal Server Error".into(),
+            status_code: Some(500),
+            source: None,
+        },
+        CrawlError::Network {
+            message: "connection reset".into(),
+            status_code: None,
+            source: None,
+        },
+        CrawlError::timeout(),
+        CrawlError::RetryExhausted {
+            url: "https://example.com/flaky".into(),
+            attempts: 3,
+        },
+        CrawlError::WafChallenge {
+            provider: "Cloudflare".into(),
+            kind: crate::domain::error::WafDetectionKind::BodySignature,
+            url: "https://example.com/".into(),
+        },
+        CrawlError::Parse("bad html".into()),
+        CrawlError::MaxDepthExceeded { current: 3, max: 2 },
+        CrawlError::MaxPagesExceeded { max: 10 },
+        CrawlError::Cancelled,
+        CrawlError::Internal("bug".into()),
+    ];
+
+    for error in &re_drivable {
+        assert!(
+            !is_terminal_settled(error),
+            "{error} must stay re-drivable: a resume is a fresh chance"
+        );
+    }
+}
+
+/// The 4xx boundaries of the rule, on both carriers of a status code.
+#[test]
+fn http_status_boundaries_decode_the_terminal_rule() {
+    let cases = [
+        (399, false),
+        (400, true),
+        (403, true),
+        (408, false),
+        (410, true),
+        (429, false),
+        (499, true),
+        (500, false),
+        (503, false),
+    ];
+
+    for (status, expected) in cases {
+        let http = CrawlError::Http {
+            status,
+            url: "https://example.com/page".into(),
+        };
+        assert_eq!(
+            is_terminal_settled(&http),
+            expected,
+            "Http {{ status: {status} }} settled verdict"
+        );
+        let network = CrawlError::Network {
+            message: format!("HTTP error: {status}"),
+            status_code: Some(status),
+            source: None,
+        };
+        assert_eq!(
+            is_terminal_settled(&network),
+            expected,
+            "Network {{ status_code: Some({status}) }} settled verdict"
+        );
+    }
+}
+
 #[tokio::test]
 async fn run_crawl_task_cancelled_during_rate_limit_wait() {
     // 60s refill with burst 1: consuming the burst forces the task into

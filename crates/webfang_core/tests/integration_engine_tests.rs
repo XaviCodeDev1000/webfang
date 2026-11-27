@@ -71,6 +71,9 @@ fn seed_resume_checkpoint(
     visited.insert(seed_url.to_string());
     let state = CrawlCheckpoint {
         visited,
+        // No terminal verdicts: the seed is re-driven by the resume under
+        // test, which is the truthful reading of `visited` (#3079).
+        settled: std::collections::HashSet::new(),
         queued,
         pages_crawled: 1,
         banned_domains: Vec::new(),
@@ -129,7 +132,9 @@ async fn test_engine_with_checkpoint_enabled() {
 ///
 /// Pre-creates a checkpoint whose seed is already visited and whose queue
 /// still holds `/page2.html`, then verifies the engine actually crawls the
-/// pending URL instead of finishing with zero work.
+/// pending URL instead of finishing with zero work. Since #3079 the visited
+/// seed is ALSO driven again: `visited` is marked at dispatch, so a resume may
+/// only skip URLs with a terminal verdict (`visited ∩ settled`).
 #[tokio::test]
 async fn test_engine_resume_from_checkpoint() {
     let _guard = entry_guard();
@@ -190,8 +195,10 @@ async fn test_engine_resume_from_checkpoint() {
         "pending /page2.html must be fetched on resume, got: {requested_paths:?}"
     );
     assert!(
-        requested_paths.iter().all(|p| *p != "/index.html"),
-        "visited seed must not be re-crawled on resume, got: {requested_paths:?}"
+        requested_paths.iter().any(|p| *p == "/index.html"),
+        "a visited-but-unsettled seed must be driven again on resume (#3079): \
+         `visited` is marked at dispatch, so it is not evidence the page was \
+         exported; got: {requested_paths:?}"
     );
     // F-01 (b): the resumed crawl drains its queue and completes, so the
     // scoped checkpoint is cleaned up afterwards.
@@ -216,7 +223,8 @@ async fn issue_1843_resume_continues_persisted_pages_crawled() {
     let _guard = entry_guard();
     let server = MockServer::start().await;
 
-    // Both queued pages are plain 200s; the seed is never fetched (visited).
+    // Both queued pages are plain 200s. The restored frontier comes first, so
+    // the one-page budget is spent before the (now re-driven, #3079) seed.
     for p in ["/p1.html", "/p2.html"] {
         Mock::given(method("GET"))
             .and(path(p))
