@@ -28,7 +28,7 @@ exec "$@"
 SH
 cat >"$WORK/chrome" <<'SH'
 #!/bin/sh
-printf '%s\n' WEBFANG_SANDBOX_SMOKE_OK
+printf '%s\n' 'Google Chrome 1.2.3'
 SH
 chmod +x "$WORK/arapuca" "$WORK/chrome"
 
@@ -42,7 +42,7 @@ out="$(WEBFANG_ARAPUCA_BINARY="$WORK/arapuca" \
        WEBFANG_SANDBOX_SMOKE_READ_PATH="$WORK" \
        bash "$SH_SMOKE" 2>&1)" || fail "smoke failed with a valid fake browser: $out"
 case "$out" in
-  *WEBFANG_SANDBOX_SMOKE_OK*) ok "posix smoke sees the browser marker" ;;
+  *Google\ Chrome*) ok "posix smoke sees the browser marker" ;;
   *) fail "marker missing from smoke output: $out" ;;
 esac
 
@@ -92,4 +92,15 @@ ok "windows smoke keeps run defaults: allow_exec=true, netns disabled"
 # the binary in vendor/arapuca/target. The workflow must force the root target.
 grep -Fq -- '--target-dir target' "$WORKFLOW" || fail "arapuca build must pin --target-dir target"
 ok "arapuca build pins the workspace target dir"
+
+# T6: the macOS app-bundle prefix already ends in `.app`; appending it again
+# produced /Applications/Google Chrome.app.app on the hosted runner.
+grep -Fq -- "READ_PATH=\"\${CHROME%%/Contents/MacOS/*}\"" "$SH_SMOKE" || fail "app bundle derivation appends .app twice"
+ok "macOS app bundle derivation is single-suffix"
+
+# T7: a version probe is the Chrome launch contract here: --dump-dom makes
+# Chrome create a named pipe that AppContainer denies on Windows runners.
+grep -Fq -- '--version' "$SH_SMOKE" || fail "posix smoke must use the Chrome version probe"
+grep -Fq -- '--version' "$PS_SMOKE" || fail "windows smoke must use the Chrome version probe"
+ok "both smokes use the version probe through arapuca"
 

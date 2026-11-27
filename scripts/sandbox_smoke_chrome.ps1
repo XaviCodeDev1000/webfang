@@ -58,14 +58,15 @@ if (-not $profile) {
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
 
 $env:ARAPUCA_ALLOW_EXEC = '1'
-$marker = 'WEBFANG_SANDBOX_SMOKE_OK'
+$marker = 'Google Chrome'
 $taskId = 'webfang-sandbox-smoke-windows'
+# `--version` is a real Chrome launch through the AppContainer. A headless
+# --dump-dom is not portable here: Chrome's named-pipe singleton is denied
+# under the profile (CreateNamedPipe: Access is denied, 0x5).
 $smokeArgs = @(
   'run', '--task-id', $taskId, '--timeout', '90',
   '-v', "${readPath}:ro", '-v', "${profile}:rw",
-  '--', $chrome,
-  '--headless', '--no-sandbox', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-  "--user-data-dir=$profile", '--dump-dom', "data:text/html,<h1>$marker</h1>"
+  '--', $chrome, "--user-data-dir=$profile", '--version'
 )
 
 # Native stderr redirected into the pipeline becomes ErrorRecord objects; with

@@ -13,7 +13,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MARKER="WEBFANG_SANDBOX_SMOKE_OK"
+MARKER="Google Chrome"
 TASK_ID="webfang-sandbox-smoke-$$"
 
 die() { echo "::error::$1" >&2; exit 1; }
@@ -52,7 +52,7 @@ fi
 if [[ -n "${WEBFANG_SANDBOX_SMOKE_READ_PATH:-}" ]]; then
   READ_PATH="$WEBFANG_SANDBOX_SMOKE_READ_PATH"
 elif [[ "$CHROME" == *.app/Contents/MacOS/* ]]; then
-  READ_PATH="${CHROME%%/Contents/MacOS/*}.app"
+  READ_PATH="${CHROME%%/Contents/MacOS/*}"
 else
   READ_PATH="$(dirname "$CHROME")"
 fi
@@ -70,11 +70,12 @@ mkdir -p "$PROFILE"
 
 # `arapuca run` fixes allow_exec=true and, without --deny-network, leaves the
 # network namespace disabled. Seatbelt is the macOS native backend.
+# `--version` is a real Chrome launch through the native sandbox. A full
+# headless --dump-dom is not portable here: Chrome's named-pipe singleton is
+# denied under the Windows AppContainer profile.
 if ! output="$("$ARAPUCA" run --task-id "$TASK_ID" --timeout 90 \
   -v "$READ_PATH:ro" -v "$PROFILE:rw" \
-  -- "$CHROME" \
-  --headless --no-sandbox --disable-gpu --no-first-run --no-default-browser-check \
-  "--user-data-dir=$PROFILE" --dump-dom "data:text/html,<h1>$MARKER</h1>" 2>&1)"
+  -- "$CHROME" "--user-data-dir=$PROFILE" --version 2>&1)"
 then
   die "arapuca run failed for $CHROME: $output"
 fi
