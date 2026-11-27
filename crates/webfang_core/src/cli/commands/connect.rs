@@ -81,6 +81,7 @@ pub async fn run(base_url: &url::Url, id: &str, model: &str, path: &Path) -> Cli
         // leaves the operator to add them after connecting (#3074).
         extra_body: serde_json::Map::new(),
         query_extra_body: serde_json::Map::new(),
+        send_encoding_format: false,
     };
 
     register(&provider, path).await

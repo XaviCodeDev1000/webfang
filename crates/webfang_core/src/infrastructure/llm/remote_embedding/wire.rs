@@ -10,9 +10,10 @@ pub(super) struct EmbeddingRequest<'a> {
     pub(super) extra_body: &'a crate::domain::providers::ExtraBody,
     pub(super) model: &'a str,
     pub(super) input: &'a [String],
-    /// Sent explicitly so a gateway defaulting to base64 cannot break the
-    /// `Vec<f32>` wire parser.
-    pub(super) encoding_format: &'static str,
+    /// `Some("float")` only when the provider opts in; omitted by default so
+    /// the body stays byte-identical for providers that reject the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) encoding_format: Option<&'static str>,
 }
 
 /// Wire response: only the fields this adapter consumes.

@@ -50,7 +50,10 @@ async fn extra_body_is_flattened_into_the_embeddings_body() {
         .expect("the mock must have captured the body");
     assert_eq!(body["input_type"], serde_json::json!("passage"));
     assert_eq!(body["truncate"], serde_json::json!("END"));
-    assert_eq!(body["encoding_format"], serde_json::json!("float"));
+    assert!(
+        body.get("encoding_format").is_none(),
+        "the field is opt-in, not sent by default"
+    );
     assert_eq!(body["model"], serde_json::json!("nomic-embed-text"));
     assert_eq!(body["input"], serde_json::json!(["hello world"]));
     assert!(
@@ -156,4 +159,46 @@ async fn webfang_body_fields_win_over_extra_body_values() {
         .clone()
         .expect("the mock must have captured the body");
     assert_eq!(body["model"], serde_json::json!("nomic-embed-text"));
+}
+
+/// Opting in sends `encoding_format=float` for gateways that default to
+/// base64. This is the only way the field reaches the wire (#3074).
+#[tokio::test]
+async fn opting_in_sends_encoding_format_float() {
+    use std::sync::{Arc, Mutex};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, Respond, ResponseTemplate};
+
+    struct Capture(Arc<Mutex<Option<serde_json::Value>>>);
+    impl Respond for Capture {
+        fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+            *self.0.lock().unwrap_or_else(|p| p.into_inner()) =
+                Some(serde_json::from_slice(&request.body).expect("body is JSON"));
+            ResponseTemplate::new(200).set_body_string(load_fixture("embeddings_tolerant.json"))
+        }
+    }
+
+    let server = MockServer::start().await;
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    Mock::given(method("POST"))
+        .and(path("/embeddings"))
+        .respond_with(Capture(captured.clone()))
+        .mount(&server)
+        .await;
+
+    let adapter = adapter_for(&server, |cfg| {
+        cfg.embedding_dim = Some(8);
+        cfg.send_encoding_format = true;
+    });
+    adapter
+        .embed_batch(&["hello world".to_string()])
+        .await
+        .expect("200 + valid JSON succeeds");
+
+    let body = captured
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
+        .expect("the mock must have captured the body");
+    assert_eq!(body["encoding_format"], serde_json::json!("float"));
 }

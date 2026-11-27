@@ -1,1 +1,1 @@
-{"input": ["hello world"], "model": "nomic-embed-text", "encoding_format": "float"}
+{"input": ["hello world"], "model": "nomic-embed-text"}

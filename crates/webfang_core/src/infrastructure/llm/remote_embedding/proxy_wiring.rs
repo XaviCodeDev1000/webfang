@@ -77,6 +77,7 @@ impl RemoteEmbeddingAdapter {
             provider_id: config.id.clone(),
             extra_body: config.extra_body.clone(),
             query_extra_body: config.query_extra_body.clone(),
+            send_encoding_format: config.send_encoding_format,
             pinned_dim: config.embedding_dim,
             dim: OnceLock::new(),
             usage_prompt_tokens: std::sync::atomic::AtomicU64::new(0),

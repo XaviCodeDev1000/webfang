@@ -25,6 +25,24 @@ fn extra_body_rejects_webfang_owned_keys_at_deserialize() {
 }
 
 #[test]
+fn encoding_format_is_reserved_even_when_the_flag_is_off() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"send_encoding_format":false,"extra_body":{"encoding_format":"base64"}}"#;
+    let err = serde_json::from_str::<ProviderConfig>(raw)
+        .expect_err("a reserved key must fail even when the flag disables the field");
+    assert!(
+        err.to_string().contains("encoding_format"),
+        "the error must name the reserved key, got: {err}"
+    );
+}
+
+#[test]
+fn send_encoding_format_defaults_to_false() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"]}"#;
+    let provider: ProviderConfig = serde_json::from_str(raw).expect("absent flag parses");
+    assert!(!provider.send_encoding_format);
+}
+
+#[test]
 fn extra_body_accepts_vendor_keys_and_defaults_to_empty() {
     let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"extra_body":{"input_type":"passage"}}"#;
     let provider: ProviderConfig = serde_json::from_str(raw).expect("vendor key is accepted");

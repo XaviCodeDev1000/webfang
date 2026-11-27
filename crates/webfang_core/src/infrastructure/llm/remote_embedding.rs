@@ -120,6 +120,8 @@ pub struct RemoteEmbeddingAdapter {
     extra_body: crate::domain::providers::ExtraBody,
     /// Overlay used by `embed_query*` for asymmetric embedding models.
     query_extra_body: crate::domain::providers::ExtraBody,
+    /// Whether to send `encoding_format=float` explicitly (#3074).
+    send_encoding_format: bool,
     pinned_dim: Option<usize>,
     dim: OnceLock<usize>,
     /// Per-run usage accumulators (thread-safe).

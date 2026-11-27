@@ -91,8 +91,21 @@ pub const RESERVED_REQUEST_KEYS: &[&str] = &[
     "response_format",
     "temperature",
     "max_tokens",
+    "max_completion_tokens",
     "auth",
+    // `send_encoding_format` owns this key: an explicit `extra_body` value
+    // would bypass the flag and could request base64 vectors (#3074).
+    "encoding_format",
 ];
+
+/// Default for [`ProviderConfig::send_encoding_format`].
+///
+/// `false` keeps the request byte-identical to the pre-#3074 payload. Set it
+/// to `true` only for gateways that default `encoding_format` to base64.
+#[must_use]
+pub const fn default_send_encoding_format() -> bool {
+    false
+}
 
 /// Deserialize an `extra_body` map, rejecting WebFang-owned keys at load time.
 ///
@@ -200,6 +213,13 @@ pub struct ProviderConfig {
     /// embedding model can index with `passage` and query with `query`.
     #[serde(default, deserialize_with = "deserialize_extra_body")]
     pub query_extra_body: ExtraBody,
+    /// Send `encoding_format: "float"` explicitly on `/embeddings`.
+    ///
+    /// Absent means `false`: the body stays byte-identical to the pre-#3074
+    /// payload. Enable it only for a gateway that defaults to base64; NIM and
+    /// OpenAI already default to float, and Voyage/Gemini reject the field.
+    #[serde(default = "default_send_encoding_format")]
+    pub send_encoding_format: bool,
 }
 
 impl ProviderConfig {
@@ -234,6 +254,7 @@ pub(crate) fn test_provider_config() -> ProviderConfig {
         proxy: None,
         extra_body: serde_json::Map::new(),
         query_extra_body: serde_json::Map::new(),
+        send_encoding_format: self::default_send_encoding_format(),
     }
 }
 

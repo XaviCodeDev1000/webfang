@@ -39,7 +39,7 @@ impl RemoteEmbeddingAdapter {
             extra_body,
             model: &self.model,
             input: texts,
-            encoding_format: "float",
+            encoding_format: self.send_encoding_format.then_some("float"),
         };
         let mut attempt: u32 = 0;
         loop {

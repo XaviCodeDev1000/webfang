@@ -38,5 +38,6 @@ pub fn test_provider_config() -> ProviderConfig {
         proxy: None,
         extra_body: Default::default(),
         query_extra_body: Default::default(),
+        send_encoding_format: false,
     }
 }

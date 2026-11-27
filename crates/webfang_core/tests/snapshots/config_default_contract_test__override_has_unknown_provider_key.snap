@@ -6,4 +6,4 @@ Error: the configuration file <OUT_DIR>/config.toml could not be loaded: TOML pa
   |
 8 | input_type = "passage"
   | ^^^^^^^^^^
-unknown field `input_type`, expected one of `id`, `display_name`, `kind`, `base_url`, `auth`, `capabilities`, `model`, `embedding_dim`, `allow_loopback`, `network_policy`, `proxy`, `extra_body`, `query_extra_body`
+unknown field `input_type`, expected one of `id`, `display_name`, `kind`, `base_url`, `auth`, `capabilities`, `model`, `embedding_dim`, `allow_loopback`, `network_policy`, `proxy`, `extra_body`, `query_extra_body`, `send_encoding_format`
