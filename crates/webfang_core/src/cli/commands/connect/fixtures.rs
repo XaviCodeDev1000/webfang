@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use super::{display_for_id, AuthSource, Capability, NetworkPolicy, ProviderConfig, ProviderKind};
+use super::{display_for_id, ProviderConfig};
 // `write_provider` is only consumed by the `#[cfg(unix)]` file-mode fixtures
 // below; importing it on Windows fails the cross-lint under -D unused-imports.
 #[cfg(unix)]
@@ -35,19 +35,10 @@ pub(super) async fn serve_embeddings() -> MockServer {
 /// value — the arrange stays one line either way.
 pub(super) fn test_provider(id: &str) -> ProviderConfig {
     ProviderConfig {
-        extra_body: serde_json::Map::new(),
-        query_extra_body: serde_json::Map::new(),
         id: id.into(),
         display_name: display_for_id(id),
-        kind: ProviderKind::OpenAiCompatible,
         base_url: url::Url::parse("https://api.example.test/v1").expect("url"),
-        auth: AuthSource::None,
-        capabilities: vec![Capability::Embedding],
-        model: Some("nomic-embed-text".into()),
-        embedding_dim: None,
-        allow_loopback: false,
-        network_policy: NetworkPolicy::default(),
-        proxy: None,
+        ..crate::domain::providers::test_provider_config()
     }
 }
 

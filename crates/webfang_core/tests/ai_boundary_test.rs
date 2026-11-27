@@ -29,7 +29,7 @@ use webfang_core::domain::auth_source::AuthSource;
 use webfang_core::domain::credentials::ApiKey;
 use webfang_core::domain::http_error::HttpResult;
 use webfang_core::domain::http_port::{HttpClientPort, HttpResponse};
-use webfang_core::domain::providers::{Capability, ProviderConfig, ProviderKind};
+use webfang_core::domain::providers::ProviderConfig;
 use webfang_core::domain::text_chunker::{ByteSpan, TextChunk, TextChunker};
 use webfang_core::error::SemanticError;
 use webfang_core::infrastructure::llm::client::OpenAiLlmClient;
@@ -104,21 +104,16 @@ async fn mount_provider_mocks(server: &MockServer) {
 
 fn build_service(base: &str) -> (LlmExtractionService, LlmConfig) {
     let embed_cfg = ProviderConfig {
-        extra_body: serde_json::Map::new(),
-        query_extra_body: serde_json::Map::new(),
         id: "t11-embed".to_string(),
         display_name: "T11 embed".to_string(),
-        kind: ProviderKind::OpenAiCompatible,
         base_url: Url::parse(base).expect("base parses"),
         auth: AuthSource::Env {
             var: "WEBFANG_T11_KEY".to_string(),
         },
-        capabilities: vec![Capability::Embedding],
         model: Some("t11-embed-model".to_string()),
         embedding_dim: Some(2),
         allow_loopback: true,
-        network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
-        proxy: None,
+        ..webfang_test_utils::test_provider_config()
     };
     let embedder = RemoteEmbeddingAdapter::with_http(
         embed_cfg,

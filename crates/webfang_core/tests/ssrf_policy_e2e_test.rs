@@ -38,7 +38,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use webfang_core::domain::network_policy::{CidrBlock, NetworkPolicy, NetworkPolicyMode};
-use webfang_core::domain::providers::{Capability, ProviderConfig, ProviderKind};
+use webfang_core::domain::providers::ProviderConfig;
 use webfang_core::domain::ssrf_guard::{
     is_forbidden_literal_host, is_forbidden_literal_host_with_policy, is_forbidden_resolved_address,
 };
@@ -91,19 +91,12 @@ fn policy_json(cidrs: &[&str], hosts: &[&str]) -> NetworkPolicy {
 
 fn provider(base_url: &str, network_policy: NetworkPolicy) -> ProviderConfig {
     ProviderConfig {
-        extra_body: serde_json::Map::new(),
-        query_extra_body: serde_json::Map::new(),
         id: "vllm-lan".to_string(),
         display_name: "vLLM LAN".to_string(),
-        kind: ProviderKind::OpenAiCompatible,
         base_url: url::Url::parse(base_url).expect("test base_url parses"),
-        auth: webfang_core::domain::auth_source::AuthSource::None,
-        capabilities: vec![Capability::Embedding],
         model: Some("granite-embedding".to_string()),
-        embedding_dim: None,
-        allow_loopback: false,
         network_policy,
-        proxy: None,
+        ..webfang_test_utils::test_provider_config()
     }
 }
 

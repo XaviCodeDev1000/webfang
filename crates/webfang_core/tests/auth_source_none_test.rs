@@ -29,7 +29,7 @@
 use webfang_core::application::crawl_options::CrawlOptions;
 use webfang_core::cli::llm_wire::build_llm_provider;
 use webfang_core::domain::auth_source::{AuthError, AuthSource};
-use webfang_core::domain::providers::{Capability, ProviderConfig, ProviderKind, ProvidersConfig};
+use webfang_core::domain::providers::{Capability, ProviderConfig, ProvidersConfig};
 use webfang_core::domain::EmbeddingPort;
 use webfang_core::error::SemanticError;
 use webfang_core::infrastructure::llm::provider::{OpenAiCompatibleProvider, ProviderInitError};
@@ -83,21 +83,15 @@ fn config_without_server(auth: AuthSource) -> ProviderConfig {
 /// only in base URL and in the wiremock's loopback opt-in.
 fn provider_with(base_url: url::Url, allow_loopback: bool, auth: AuthSource) -> ProviderConfig {
     ProviderConfig {
-        extra_body: serde_json::Map::new(),
-        query_extra_body: serde_json::Map::new(),
         id: "anon-endpoint".to_string(),
         display_name: "Anonymous Endpoint".to_string(),
-        kind: ProviderKind::OpenAiCompatible,
         base_url,
         auth,
-        capabilities: vec![Capability::Embedding],
-        model: Some("nomic-embed-text".to_string()),
         // T7: declare the contract width so the dimension guard does not cut
         // these auth/header cases before the request reaches the mock.
         embedding_dim: Some(8),
         allow_loopback,
-        network_policy: webfang_core::domain::network_policy::NetworkPolicy::default(),
-        proxy: None,
+        ..webfang_test_utils::test_provider_config()
     }
 }
 

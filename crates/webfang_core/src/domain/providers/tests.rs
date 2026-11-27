@@ -2,21 +2,14 @@ use super::*;
 
 fn provider(id: &str, capabilities: Vec<Capability>) -> ProviderConfig {
     ProviderConfig {
-        extra_body: serde_json::Map::new(),
-        query_extra_body: serde_json::Map::new(),
         id: id.to_string(),
         display_name: id.to_string(),
-        kind: ProviderKind::OpenAiCompatible,
-        base_url: Url::parse("https://api.example.com/v1").expect("url"),
         auth: AuthSource::Env {
             var: "WEBFANG_TEST_KEY".to_string(),
         },
         capabilities,
         model: Some("gpt-test".to_string()),
-        embedding_dim: None,
-        allow_loopback: false,
-        network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-        proxy: None,
+        ..super::test_provider_config()
     }
 }
 

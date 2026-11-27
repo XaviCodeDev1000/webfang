@@ -15,18 +15,12 @@ pub(super) fn opts_with_llm(extract: bool, provider_id: Option<&str>) -> CrawlOp
 
 pub(super) fn provider(id: &str, kind: ProviderKind, auth: AuthSource) -> ProviderConfig {
     ProviderConfig {
-        extra_body: serde_json::Map::new(),
-        query_extra_body: serde_json::Map::new(),
         id: id.to_string(),
         display_name: id.to_string(),
         kind,
-        base_url: url::Url::parse("https://api.example.com/v1").expect("url"),
         auth,
         capabilities: vec![Capability::Completion],
         model: Some("gpt-test".to_string()),
-        embedding_dim: None,
-        allow_loopback: false,
-        network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-        proxy: None,
+        ..crate::domain::providers::test_provider_config()
     }
 }

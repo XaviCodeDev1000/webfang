@@ -236,24 +236,16 @@ mod tests {
     use super::*;
     use crate::domain::auth_source::AuthSource;
     use crate::domain::network_policy::NetworkPolicy;
-    use crate::domain::providers::{Capability, ProviderKind};
     use crate::domain::proxy_config::{ProxyAuth, ProxyDefinition, ProxyRegistry, ProxySpec};
 
     fn provider(proxy: Option<ProxySpec>) -> crate::domain::providers::ProviderConfig {
         crate::domain::providers::ProviderConfig {
-            extra_body: serde_json::Map::new(),
-            query_extra_body: serde_json::Map::new(),
             id: "diag".to_string(),
             display_name: "Diag".to_string(),
-            kind: ProviderKind::OpenAiCompatible,
             base_url: url::Url::parse("https://api.example.test/v1").expect("url"),
-            auth: AuthSource::None,
-            capabilities: vec![Capability::Embedding],
             model: Some("m".to_string()),
-            embedding_dim: None,
-            allow_loopback: false,
-            network_policy: NetworkPolicy::default(),
             proxy,
+            ..crate::domain::providers::test_provider_config()
         }
     }
 

@@ -277,19 +277,11 @@ mod tests {
 
     fn config_with(auth: AuthSource) -> ProviderConfig {
         ProviderConfig {
-            extra_body: serde_json::Map::new(),
-            query_extra_body: serde_json::Map::new(),
-            id: "test-provider".to_string(),
             display_name: "Test".to_string(),
-            kind: crate::domain::providers::ProviderKind::OpenAiCompatible,
-            base_url: url::Url::parse("https://api.example.com/v1").expect("url"),
             auth,
             capabilities: vec![crate::domain::providers::Capability::Completion],
             model: Some("gpt-test".to_string()),
-            embedding_dim: None,
-            allow_loopback: false,
-            network_policy: crate::domain::network_policy::NetworkPolicy::default(),
-            proxy: None,
+            ..crate::domain::providers::test_provider_config()
         }
     }
 

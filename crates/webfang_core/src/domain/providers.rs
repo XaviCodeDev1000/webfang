@@ -210,6 +210,33 @@ impl ProviderConfig {
     }
 }
 
+/// Minimal valid config for this crate's unit tests.
+///
+/// Unit tests compile this crate with a different feature set than the
+/// `webfang_test_utils` dev-dependency, so its helper is a distinct type here.
+/// Integration tests use the one in `webfang_test_utils` instead.
+#[cfg(test)]
+pub(crate) fn test_provider_config() -> ProviderConfig {
+    ProviderConfig {
+        id: "test-provider".to_string(),
+        display_name: "Test Provider".to_string(),
+        kind: ProviderKind::OpenAiCompatible,
+        base_url: crate::domain::ValidUrl::parse("https://api.example.com/v1")
+            .expect("valid fixture URL")
+            .as_url()
+            .clone(),
+        auth: AuthSource::None,
+        capabilities: vec![Capability::Embedding],
+        model: Some("nomic-embed-text".to_string()),
+        embedding_dim: None,
+        allow_loopback: false,
+        network_policy: NetworkPolicy::default(),
+        proxy: None,
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
+    }
+}
+
 /// Top-level provider configuration — the `[[providers]]` array of the config
 /// file.
 ///
