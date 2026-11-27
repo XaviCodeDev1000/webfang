@@ -4,5 +4,4 @@ error[E0599]: no method named `fetched` found for struct `Stateful<Rec, webfang_
 50 |     let _ = s.fetched();
    |               ^^^^^^^ method not found in `Stateful<Rec, webfang_core::domain::page_state::Discovered>`
    |
-   = note: the method was found for
-           - `Stateful<R, webfang_core::domain::page_state::Fetching>`
+   = note: the method was found for `Stateful<R, webfang_core::domain::page_state::Fetching>`

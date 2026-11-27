@@ -40,7 +40,7 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument, warn, Instrument};
+use tracing::{info, instrument, warn, Instrument};
 
 mod aggregate;
 mod options;

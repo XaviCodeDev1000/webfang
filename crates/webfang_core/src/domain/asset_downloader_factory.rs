@@ -4,7 +4,7 @@
 //! # Why this port exists
 //!
 //! `application::asset_download::download_asset_urls` accepts an *optional*
-//! shared [`AssetDownloaderPort`](crate::domain::ports::AssetDownloaderPort).
+//! shared [`AssetDownloaderPort`].
 //! When the caller has one (the crawl path, the MCP server when a downloader
 //! was injected), it is used directly. When it has none — `McpState::default()`
 //! ships `downloader: None`, so this is a live production path, not only a test
@@ -14,7 +14,7 @@
 //! for a long time by an allowlist entry.
 //!
 //! This port inverts it: `application` describes what it needs in terms of
-//! [`ScraperConfig`](crate::domain::config::ScraperConfig) and asks an injected
+//! [`ScraperConfig`] and asks an injected
 //! factory for a ready-to-use trait object, while the concrete client stack
 //! stays in `adapters::downloader`.
 //!
@@ -25,7 +25,7 @@
 //! interchangeable:
 //!
 //! - [`DownloaderFactory`](crate::domain::downloader_factory::DownloaderFactory) builds the **page-fetch** downloader
-//!   ([`downloader_port::Downloader`](crate::domain::downloader_port::Downloader):
+//!   ([`crate::domain::downloader_port::Downloader`]:
 //!   `fetch`, `supports_interactions`, `memory_cost`). The asset path needs
 //!   [`AssetDownloaderPort::download_batch`], which the fetch router does not
 //!   implement.
@@ -45,7 +45,7 @@
 //! the only fallible step is `wreq` client construction, which is sync. The
 //! trait is object-safe (no generics, no `Self` in return) so `application` can
 //! hold `Arc<dyn AssetDownloaderFactory>`. It is deliberately **not** sealed,
-//! matching [`AssetDownloaderPort`](crate::domain::ports::AssetDownloaderPort)
+//! matching [`AssetDownloaderPort`]
 //! itself, which is also unsealed so tests can implement it.
 //!
 //! No third-party type crosses into `domain` here: the signature speaks only

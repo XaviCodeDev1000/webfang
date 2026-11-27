@@ -16,10 +16,9 @@ pub(super) fn f32_slice_to_bytes(v: &[f32]) -> Vec<u8> {
     bytes
 }
 
-/// Deserialize little-endian bytes back to `Vec<f32>`.
-///
-/// Validates the BLOB length is a multiple of 4; returns a
 /// Decode a stored embedding BLOB back into `f32`s.
+///
+/// Validates the BLOB length is a multiple of 4; returns an error otherwise.
 ///
 /// The length check is the LAST line of defence, not the schema's version
 /// detection. A BLOB whose length is not a multiple of four proves corruption
@@ -41,17 +40,42 @@ pub(super) fn bytes_to_f32_vec(b: &[u8]) -> Result<Vec<f32>, ScraperError> {
             b.len()
         )));
     }
-    b.chunks_exact(4)
-        .map(|chunk| {
-            // `chunks_exact(4)` yields exactly 4-byte slices, so `try_into` is
-            // infallible here. A failure would indicate a stdlib bug — hence
-            // `expect` for a true invariant (rust-skills `err-expect-bugs-only`).
-            #[allow(clippy::expect_used)]
-            let arr: [u8; 4] = chunk
-                .try_into()
-                // LCOV_EXCL_LINE defensive: chunks-exact-invariant — try_into on a 4-byte slice cannot fail
-                .expect("chunks_exact(4) garantiza 4 bytes por fragmento");
-            Ok(f32::from_le_bytes(arr))
-        })
+    b.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| Ok(f32::from_le_bytes(*chunk)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn f32_blob_roundtrip_preserves_values() {
+        let values = [0.0_f32, 1.5, -2.25, f32::MAX];
+        let bytes = f32_slice_to_bytes(&values);
+        assert_eq!(bytes.len(), values.len() * 4);
+        let decoded = bytes_to_f32_vec(&bytes).expect("valid BLOB must decode");
+        assert_eq!(decoded, values);
+    }
+
+    #[test]
+    fn f32_blob_rejects_lengths_that_are_not_multiples_of_four() {
+        for len in [1, 2, 3, 5, 7] {
+            let bytes = vec![0_u8; len];
+            assert!(
+                bytes_to_f32_vec(&bytes).is_err(),
+                "BLOB of {len} bytes must be rejected, not silently truncated"
+            );
+        }
+    }
+
+    #[test]
+    fn f32_blob_decodes_empty_slice() {
+        assert!(f32_slice_to_bytes(&[]).is_empty());
+        assert!(bytes_to_f32_vec(&[])
+            .expect("empty BLOB must decode")
+            .is_empty());
+    }
 }

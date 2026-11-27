@@ -54,7 +54,7 @@ pub struct HttpFetchResult {
 /// Implemented in `infrastructure::crawler::http_client` over the wreq
 /// client stack (rate-limited, TLS-fingerprinted); consumed by
 /// `application::crawler::ports::ProductionPageFetcher` as the fallback when
-/// no dynamic [`Downloader`](crate::domain::downloader_port::Downloader) is
+/// no dynamic [`crate::domain::downloader_port::Downloader`] is
 /// injected.
 pub trait StaticFetchPort: Send + Sync {
     /// Fetch `url` with a rate-limited wreq client under `config` policy.
