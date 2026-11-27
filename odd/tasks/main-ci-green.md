@@ -37,12 +37,12 @@ S5. Every fix must be doc-backed or reference-backed, never a guess: `release = 
 
 ## Tasks
 
-- T1 — S1 — route inline — bootstrap worktree + identity manifest — status: done (`.envrc` pending human action: Pi safety guard blocks `.env*` writes)
-- T2 — S2 — route inline — `release-plz.toml`: `[[package]] webfang_sandbox_wrapper` + `release = false` — commit: <pending>
-- T3 — S2, S5 — route inline — platform-aware expectations in `skip_reason_names_each_missing_prerequisite` — commit: <pending>
-- T4 — S2, S4, S5 — route inline — honest degraded LLM artifact (API chapters optional, explicit note) — commit: <pending>
-- T5 — S3, S4 — route inline — upstream issue on Dooyo-Labs/rustdoc-markdown — commit: n/a (external record)
-- T6 — S1-S5 — route inline — verification (focused test + four cargo gates + fast gate lane), ODD close, Engram mirror — commit: <pending>
+- T1 — S1 — route inline — bootstrap worktree + identity manifest — status: done (owner wrote the 5-line `.envrc`; `reason=own-registered-target`)
+- T2 — S2 — route inline — `release-plz.toml`: `[[package]] webfang_sandbox_wrapper` + `release = false` — status: done — commit: 8b59f084
+- T3 — S2, S5 — route inline — platform-aware expectations in `skip_reason_names_each_missing_prerequisite` — status: done — commit: f130e919
+- T4 — S2, S4, S5 — delegated (context backstop) — honest degraded LLM artifact + stub-renderer harness + docs.yml comments — status: done — commit: 036e15ed
+- T5 — S3, S4 — route inline — upstream issue on Dooyo-Labs/rustdoc-markdown — status: done — puddlers/rustdoc-markdown#1
+- T6 — S1-S5 — route inline — verification, native review, ODD close, Engram mirror — status: done — commit: <this doc-close commit>
 
 ## Log
 
@@ -86,3 +86,47 @@ L7 — Blocker: the Pi safety guard denies any read/write of `.env*` paths, so t
   `DENY — no CARGO_TARGET_DIR declaration in this tree's .envrc` and the ambient shell
   inherits main's target (`CARGO_TARGET_DIR=~/.cache/cargo-target/main`). Requires the
   human to write the 5-line `.envrc` exactly as obs #2307 §1 prescribes.
+
+L8 — Bootstrap unblocked (owner ran the `.envrc` step): `direnv export bash` yields
+  `CARGO_TARGET_DIR=~/.cache/cargo-target/fix-main-ci-green` and
+  `scripts/check_target_isolation.sh` reports `target: registered (own)` /
+  `reason=own-registered-target`. Seed outcome: `seed: cold  reason=no-seed` (no published
+  seed matched this tree's key); `cargo check --all-features` still finished in 1m05s on the
+  mbx cache. Non-interactive shells must `eval "$(direnv export bash)"` before anything the
+  identity gate reads (the gate DENIES with main's ambient target otherwise — observed).
+
+L9 — T2/T3 evidence: `cargo nextest run -p webfang_core -E
+  'test(skip_reason_names_each_missing_prerequisite)'` → 1 passed; `cargo fmt --all --
+  --check` clean; `release-plz.toml` parses with the six packages and the wrapper at
+  `release: false`. Full gates: `cargo check --all-features`, `cargo clippy --all-targets
+  --all-features -- -D warnings -W clippy::cognitive_complexity -W clippy::too_many_lines`,
+  `RUSTDOCFLAGS=-D warnings cargo doc --workspace --all-features --no-deps` — all green.
+
+L10 — T4 (delegated to a bounded writer) evidence, re-verified by the parent: the harness
+  reports `llm artifact degrade: 17 passed, 0 failed` (RED on the pre-change script: 7
+  passed, 6 failed, reproducing the exact CI MSRV failure) and the pre-existing
+  `scripts/test_artifact_llm_bundle.sh` stays `19 passed, 0 failed`, so the B21 abort
+  contract survives. The writer narrowed the degrade to two causes only — an absent
+  renderer and cargo's MSRV rejection — because degrading on any failure would have broken
+  B21; the parent accepted that narrowing. Parent hardening on review: the skip branch now
+  also removes the renderer's `$out.raw`/`$out.tmp` scratch files, since the publish step
+  moves the whole staging tree.
+
+L11 — Commits (work units): `8b59f084` release-plz registration + this document,
+  `f130e919` cross-platform test expectations, `036e15ed` LLM artifact degrade + harness +
+  docs.yml comments. Static guards and the identity gate passed on every commit.
+
+L12 — Native review (RDD on, assess `nativeRisk: high`, `reviewDue: true`): lineage
+  `review-8b5fd7c86b9633df`, lenses risk/resilience/reliability (a four-lens START was
+  rejected with `lenses-invalid`; three was accepted), 6 files / 680 lines, correction
+  budget 200. Outcome **approved**; the exact acknowledgement burned the authority
+  (`authority: burned`, `delivery: ordinary-repository-policy`). Two advisory,
+  non-blocking findings stand as follow-ups, not corrections: **R3-001** the MSRV
+  classification matches cargo's own wording (a future reword turns Docs red rather than
+  producing a misleading artifact); **R3-002** the new harness does not exercise the `rc=2`
+  abort path through the new classifier.
+
+L13 — T5 record: upstream request filed at
+  https://github.com/puddlers/rustdoc-markdown/issues/1 (nightly refresh or a
+  `--toolchain`/`--ignore-rust-version` knob). Repository issue with the maintainer's
+  `status:approved`: #3107.
