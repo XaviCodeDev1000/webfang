@@ -160,11 +160,12 @@ impl Engine {
             .filter(|url| !settled.contains(*url))
             .cloned()
             .collect();
-        let has_state = !cp.visited.is_empty()
-            || !queued.is_empty()
-            || !cp.banned_domains.is_empty()
-            || cp.pages_crawled > 0;
-
+        // The log is unconditional: a checkpoint that was LOADED is by
+        // definition a resume, so there is nothing to gate. The earlier
+        // `has_state` guard existed only to hide the event for an empty
+        // checkpoint, and a branch that shapes nothing but a log line is a
+        // branch no test can distinguish — the mutation gate found four
+        // survivors in it (#3086 review). One event, one shape, no guard.
         Self::restore_visited(&mut self.scheduler, &done);
         Self::restore_queued(&mut self.scheduler, &queued);
         let settled_count = settled.len();
@@ -172,15 +173,13 @@ impl Engine {
         Self::restore_banned(&self.banned_domains, &cp.banned_domains);
         Self::restore_pages_crawled(&self.pages_crawled, cp.pages_crawled);
 
-        if has_state {
-            info!(
-                visited = done.len(),
-                settled = settled_count,
-                re_driving = re_driving_count,
-                queued = queued.len(),
-                "resume decision: skip only terminal URLs, re-drive the rest"
-            );
-        }
+        info!(
+            visited = done.len(),
+            settled = settled_count,
+            re_driving = re_driving_count,
+            queued = queued.len(),
+            "resume decision: skip only terminal URLs, re-drive the rest"
+        );
     }
 
     /// Restore the visited set from a checkpoint.
