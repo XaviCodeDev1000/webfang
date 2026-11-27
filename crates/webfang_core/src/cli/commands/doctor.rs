@@ -288,22 +288,15 @@ mod tests {
     use super::*;
 
     use crate::domain::auth_source::AuthSource;
-    use crate::domain::network_policy::NetworkPolicy;
-    use crate::domain::providers::ProviderKind;
 
     fn provider(id: &str, auth: AuthSource, caps: Vec<Capability>) -> ProviderConfig {
         ProviderConfig {
             id: id.to_string(),
             display_name: id.to_string(),
-            kind: ProviderKind::OpenAiCompatible,
             base_url: url::Url::parse("https://api.example.test/v1").expect("url"),
             auth,
             capabilities: caps,
-            model: Some("nomic-embed-text".to_string()),
-            embedding_dim: None,
-            allow_loopback: false,
-            network_policy: NetworkPolicy::default(),
-            proxy: None,
+            ..crate::domain::providers::test_provider_config()
         }
     }
 

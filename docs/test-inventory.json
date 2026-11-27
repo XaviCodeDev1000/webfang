@@ -101,6 +101,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_benchmark/tests/record_store_update_bench_test.rs",
+      "crate": "webfang_benchmark",
+      "area": "tests",
+      "test_count": 10,
+      "ignored_count": 0,
+      "snapshot_usage": false,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_benchmark/tests/report_test.rs",
       "crate": "webfang_benchmark",
       "area": "tests",
@@ -698,10 +707,10 @@
       "path": "crates/webfang_core/tests/config_default_contract_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 10,
+      "test_count": 12,
       "ignored_count": 0,
       "snapshot_usage": true,
-      "tier": "integration_mock"
+      "tier": "ai_model_semantic"
     },
     {
       "path": "crates/webfang_core/tests/connection_cause_taxonomy_test.rs",

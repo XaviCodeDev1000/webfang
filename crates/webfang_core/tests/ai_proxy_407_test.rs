@@ -11,8 +11,7 @@ use std::sync::Arc;
 use webfang_core::domain::auth_source::AuthSource;
 use webfang_core::domain::embedding_port::EmbeddingPort;
 use webfang_core::domain::llm_port::{ChatMessage, LlmPort, LlmRequest};
-use webfang_core::domain::network_policy::NetworkPolicy;
-use webfang_core::domain::providers::{Capability, ProviderConfig, ProviderKind};
+use webfang_core::domain::providers::{Capability, ProviderConfig};
 use webfang_core::infrastructure::llm::provider::OpenAiCompatibleProvider;
 use webfang_core::infrastructure::llm::remote_embedding::RemoteEmbeddingAdapter;
 use wiremock::matchers::{method, path};
@@ -22,16 +21,11 @@ fn config(base_url: &str) -> ProviderConfig {
     ProviderConfig {
         id: "proxy-407".to_string(),
         display_name: "Proxy 407".to_string(),
-        kind: ProviderKind::OpenAiCompatible,
         base_url: url::Url::parse(base_url).expect("valid base url"),
-        auth: AuthSource::None,
-        capabilities: vec![Capability::Embedding],
-        model: Some("nomic-embed-text".to_string()),
         // T7: 407 cases must reach the mock; a cold adapter would cut first.
         embedding_dim: Some(8),
         allow_loopback: true,
-        network_policy: NetworkPolicy::default(),
-        proxy: None,
+        ..webfang_test_utils::test_provider_config()
     }
 }
 

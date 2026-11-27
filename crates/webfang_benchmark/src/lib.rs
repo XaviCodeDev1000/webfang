@@ -17,6 +17,7 @@ pub mod corpus;
 pub mod cost;
 pub mod error;
 pub mod measurements;
+pub mod record_store_update;
 pub mod report;
 pub mod runner;
 

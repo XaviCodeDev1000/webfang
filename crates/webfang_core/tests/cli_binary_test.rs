@@ -62,7 +62,7 @@ fn assert_malformed_config_refused(output: &std::process::Output, stdout: &str, 
         "a malformed config is a configuration error (exit 78), got:\n{stdout}\n{stderr}"
     );
     assert!(
-        stderr.contains("is not valid TOML"),
+        stderr.contains("could not be loaded"),
         "the error must name the file's own problem, got:\n{stderr}"
     );
     assert!(

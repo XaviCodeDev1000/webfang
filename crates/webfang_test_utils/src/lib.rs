@@ -164,7 +164,10 @@ mod redaction;
 // paths by the unit tests that pin them.
 pub use bin_path::{webfang_path, PREBUILT_BIN_ENV};
 pub use env::{env_lock, env_remove, env_set, EnvGuard};
+pub use provider::test_provider_config;
 pub use redaction::{redact_nondeterministic, redact_temp_path};
+
+pub mod provider;
 
 #[cfg(test)]
 #[path = "bin_path_tests.rs"]
