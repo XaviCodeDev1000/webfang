@@ -82,6 +82,10 @@ $smokeArgs = @(
   '--env', "WEBFANG_PROBE_DENIED=$deniedFile",
   '--env', "WEBFANG_PROBE_WHOAMI=$(Join-Path $system32 'whoami.exe')",
   '--env', "WEBFANG_PROBE_FINDSTR=$(Join-Path $system32 'findstr.exe')",
+  # The target and its system helpers must be explicitly executable under the
+  # AppContainer profile; the previous Chrome smoke granted its binary directory
+  # for the same reason.
+  '-v', "${system32}:ro",
   '-v', "${profile}:rw",
   '--', (Join-Path $system32 'cmd.exe'), '/d', '/c', $probeBatch
 )
