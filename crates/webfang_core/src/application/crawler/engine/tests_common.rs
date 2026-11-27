@@ -1,10 +1,10 @@
+use super::crawl_loop::CrawlTaskOutcome;
 use super::*;
 use crate::application::crawler::crawl_task_ctx::CrawlTaskCtx;
 use crate::application::crawler::session::CrawlExec;
 use crate::domain::downloader_factory::DEFAULT_OBSCURA_BINARY;
 use crate::domain::persistence::PersistenceMode;
 use crate::domain::session_port::SessionPort;
-use crate::domain::CrawlError;
 
 /// #1615 (F11 / G-3 / G-4 / G-5): these tests drive real fetches against
 /// wiremock's 127.0.0.1, which the literal-IP entry guard now refuses.
@@ -125,10 +125,7 @@ pub(super) fn pool_session(
 /// workers — so these tests drive the loop without a real fetch.
 pub(super) fn loop_harness(
     engine: &mut Engine,
-) -> (
-    Arc<CrawlTaskCtx>,
-    tokio::task::JoinSet<Result<(), CrawlError>>,
-) {
+) -> (Arc<CrawlTaskCtx>, tokio::task::JoinSet<CrawlTaskOutcome>) {
     let session = engine.session.take().expect("session present");
     let task_ctx = session.task_ctx(CrawlExec {
         queue: engine.scheduler.queue(),

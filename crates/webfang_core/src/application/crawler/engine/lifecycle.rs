@@ -5,24 +5,22 @@
 //! fields, and the module stays private — no re-export is needed because
 //! nothing here is part of the crate's public surface.
 
-use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn, Instrument};
 
+use super::crawl_loop::CrawlTaskOutcome;
 use super::Engine;
 use super::{
     PauseWatchdog, ShutdownSignal, TerminationOutcome, FAILED_RUN_DRAIN_GRACE,
     FETCH_TIMEOUT_PHASES, SHUTDOWN_GRACE_SECS, TERMINATION_REGISTRATION_REJECTED,
 };
-use crate::application::crawler::crawl_task::handle_crawl_result;
 use crate::application::crawler::ports::TerminationSource;
 use crate::application::crawler::session::{CheckpointAction, CrawlExec};
 use crate::application::rate_limiter::SharedRateLimiter;
 use crate::domain::crawler_port::UrlSource;
-use crate::domain::error::cause::NetworkCause;
 use crate::domain::{CrawlError, CrawlResult, CrawlerConfig};
 
 impl Engine {
@@ -216,15 +214,7 @@ impl Engine {
         } else {
             worker_wait_bound
         };
-        Self::drain_tasks(
-            &mut tasks,
-            &self.error_count,
-            &self.error_breakdown,
-            &self.transport_cause,
-            &self.resolution_failures,
-            drain_bound,
-        )
-        .await;
+        self.drain_tasks(&mut tasks, drain_bound).await;
 
         // Drop task_ctx so all cloned Senders inside CrawlTaskCtx are released.
         // Without this, collect() hangs forever — the mpsc channel stays open
@@ -366,22 +356,13 @@ impl Engine {
     /// and the drain finishes well within `bound`. `bound` only bites when a
     /// worker is genuinely wedged (e.g. a fetch ignoring its own timeout).
     async fn drain_tasks(
-        tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
-        error_count: &Arc<AtomicUsize>,
-        error_breakdown: &Arc<[AtomicUsize; 8]>,
-        transport_cause: &Arc<OnceLock<NetworkCause>>,
-        resolution_failures: &Arc<AtomicUsize>,
+        &mut self,
+        tasks: &mut tokio::task::JoinSet<CrawlTaskOutcome>,
         bound: Duration,
     ) {
         let drained = tokio::time::timeout(bound, async {
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(
-                    result,
-                    error_count,
-                    error_breakdown,
-                    resolution_failures,
-                    transport_cause,
-                );
+                self.record_completion(result);
             }
         })
         .await
@@ -396,13 +377,7 @@ impl Engine {
             );
             tasks.abort_all();
             while let Some(result) = tasks.join_next().await {
-                handle_crawl_result(
-                    result,
-                    error_count,
-                    error_breakdown,
-                    resolution_failures,
-                    transport_cause,
-                );
+                self.record_completion(result);
             }
         }
     }

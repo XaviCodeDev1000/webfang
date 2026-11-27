@@ -75,7 +75,7 @@ async fn with_persistence_resume_only_leaves_checkpoint_disabled() {
 
 /// Scoped checkpoint file for `seed` under `dir` — the exact derivation
 /// `with_checkpoint` and `CrawlSession::finish` share (F-01).
-fn checkpoint_file_for(dir: &std::path::Path, seed: &Url) -> std::path::PathBuf {
+pub(super) fn checkpoint_file_for(dir: &std::path::Path, seed: &Url) -> std::path::PathBuf {
     crate::application::crawler::checkpoint::CheckpointPath::new(dir).file_for_seed(seed.as_str())
 }
 
@@ -84,7 +84,7 @@ fn checkpoint_file_for(dir: &std::path::Path, seed: &Url) -> std::path::PathBuf 
 /// reads the session's mode, and `from_session` mirrors it into the
 /// engine's `checkpoint_path`. `session_engine` + `with_persistence`
 /// would leave the session Disabled, so `finish` would Skip.
-fn checkpoint_session_engine(
+pub(super) fn checkpoint_session_engine(
     config: CrawlerConfig,
     dir: &std::path::Path,
     interval: u64,

@@ -97,6 +97,7 @@ impl Engine {
     /// Snapshot the current engine state into a checkpoint.
     pub(crate) async fn build_checkpoint_state(&self) -> CrawlCheckpoint {
         let visited_set: HashSet<String> = self.scheduler.snapshot_visited();
+        let settled_set: HashSet<String> = self.scheduler.snapshot_settled();
         let pages = self
             .pages_crawled
             .load(std::sync::atomic::Ordering::Relaxed);
@@ -107,6 +108,9 @@ impl Engine {
             .unwrap_or_default();
         CrawlCheckpoint {
             visited: visited_set,
+            // The terminal verdicts of this run: a resume must not retry them,
+            // while every other visited URL has to be driven again (#3079).
+            settled: settled_set,
             // Bounded by the run's own budget (#1234 / F-39). The frontier is an
             // execution artefact, not a site map: a crawl never visits more than
             // max_pages, so anything past that is dead weight by definition, and an
@@ -131,31 +135,72 @@ impl Engine {
 
     /// Load checkpoint state if resuming (visited, queued, banned domains and
     /// the durable page counter — #1843).
+    ///
+    /// Truthful resume (#3079): [`CrawlCheckpoint::visited`] is marked at
+    /// DISPATCH by `CrawlScheduler::next_url`, so it is not evidence that a
+    /// page was processed — a page still in memory when the process died was
+    /// never exported. Only the URLs that are ALSO in
+    /// [`CrawlCheckpoint::settled`] have a terminal verdict and may be
+    /// restored as visited (skipped); every other visited URL is re-driven,
+    /// because its page has to be produced again. The restored frontier is
+    /// filtered the same way, and the verdicts go back into the scheduler so
+    /// later saves of this run never lose them.
     pub(crate) fn restore_checkpoint_state(&mut self) {
-        if let Some(cp) = &self.checkpoint_state {
-            Self::restore_visited(&mut self.scheduler, &cp.visited);
-            Self::restore_queued(&mut self.scheduler, &cp.queued);
-            Self::restore_banned(&self.banned_domains, &cp.banned_domains);
-            Self::restore_pages_crawled(&self.pages_crawled, cp.pages_crawled);
-        }
+        let Some(cp) = &self.checkpoint_state else {
+            return;
+        };
+
+        // `visited ∩ settled`: the only URLs a resume may skip.
+        let settled = cp.settled.clone();
+        let done: HashSet<String> = cp.visited.intersection(&settled).cloned().collect();
+        let re_driving_count = cp.visited.len().saturating_sub(done.len());
+        let queued: Vec<String> = cp
+            .queued
+            .iter()
+            .filter(|url| !settled.contains(*url))
+            .cloned()
+            .collect();
+        // The log is unconditional: a checkpoint that was LOADED is by
+        // definition a resume, so there is nothing to gate. The earlier
+        // `has_state` guard existed only to hide the event for an empty
+        // checkpoint, and a branch that shapes nothing but a log line is a
+        // branch no test can distinguish — the mutation gate found four
+        // survivors in it (#3086 review). One event, one shape, no guard.
+        Self::restore_visited(&mut self.scheduler, &done);
+        Self::restore_queued(&mut self.scheduler, &queued);
+        let settled_count = settled.len();
+        self.scheduler.restore_settled(settled);
+        Self::restore_banned(&self.banned_domains, &cp.banned_domains);
+        Self::restore_pages_crawled(&self.pages_crawled, cp.pages_crawled);
+
+        info!(
+            visited = done.len(),
+            settled = settled_count,
+            re_driving = re_driving_count,
+            queued = queued.len(),
+            "resume decision: skip only terminal URLs, re-drive the rest"
+        );
     }
 
     /// Restore the visited set from a checkpoint.
+    ///
+    /// Only the terminal (`visited ∩ settled`) subset is ever passed here; the
+    /// caller owns the decision so this helper cannot drift from it.
     fn restore_visited(scheduler: &mut CrawlScheduler, visited: &HashSet<String>) {
         if !visited.is_empty() {
             scheduler.restore_visited(visited);
-            info!("Restored {} visited URLs from checkpoint", visited.len());
         }
     }
 
     /// Restore the pending frontier from a checkpoint.
     ///
     /// The list was truncated to the run's `max_pages` when it was written
-    /// (#1234), so this can never re-inject an unbounded frontier.
+    /// (#1234), so this can never re-inject an unbounded frontier. Settled
+    /// URLs are filtered out by the caller: dispatching one would retry a
+    /// verdict no retry can change.
     fn restore_queued(scheduler: &mut CrawlScheduler, queued: &[String]) {
         if !queued.is_empty() {
             scheduler.restore_pending(queued);
-            info!("Restored {} queued URLs from checkpoint", queued.len());
         }
     }
 

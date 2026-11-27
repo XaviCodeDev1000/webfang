@@ -2,6 +2,9 @@
 source: crates/webfang_core/tests/cli_binary_test.rs
 expression: "redact_nondeterministic(output_dir.path(), &stderr)"
 ---
+  <TIMESTAMP>  WARN webfang: WEBFANG_DISABLE_SSRF_ENTRY_GUARD = 1: only the literal-IP entry rejection is disabled; the validating DNS resolver and the redirect policy stay enforced on every hop. The hatch remains available in release builds — unset it to restore the full guard., notice: "ssrf_entry_hatch_armed", disabled_layer: "literal-IP entry rejection", still_enforced: "validating DNS resolver + redirect policy"
+    at <FILE>.rs:<LINE>
+
   <TIMESTAMP>  WARN <MODULE>: transport failure fetching URL — retrying, url: http://127.0.0.1:<PORT>/slow, attempt: 0, max_retries: 3, error: <NET_ERR>
     at <FILE>.rs:<LINE>
 
