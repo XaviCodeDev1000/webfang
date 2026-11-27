@@ -52,6 +52,7 @@ fn bounded_asset_cache_plateaus_at_capacity() {
 /// S17: the default constructor must be finite. `usize::MAX` is now an
 /// explicit opt-in, never what a caller gets by default.
 #[test]
+#[cfg_attr(miri, ignore = "btls TLS_method FFI via Downloader::new")]
 fn default_downloader_cache_capacity_is_finite() {
     let downloader = Downloader::new(DownloadConfig::default()).expect("downloader builds");
     assert_ne!(

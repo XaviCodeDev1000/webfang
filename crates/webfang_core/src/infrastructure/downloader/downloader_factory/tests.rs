@@ -112,6 +112,7 @@ fn arapuca_args_follow_the_exact_spec_order() {
 }
 
 #[tokio::test]
+#[cfg_attr(miri, ignore = "posix_spawnattr_init unsupported by Miri")]
 async fn sandbox_passes_exact_arapuca_argv_and_preserves_the_fetch() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let obscura = script(tmp.path(), "obscura", OBSCURA_BODY);
@@ -174,6 +175,7 @@ async fn sandbox_passes_exact_arapuca_argv_and_preserves_the_fetch() {
 }
 
 #[tokio::test]
+#[cfg_attr(miri, ignore = "posix_spawnattr_init unsupported by Miri")]
 async fn missing_cgroup_delegation_skips_the_wrapper() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let obscura = script(tmp.path(), "obscura", OBSCURA_BODY);
@@ -208,6 +210,7 @@ fn wrapper_path_resolves_explicit_override() {
 /// The default configuration names a bare binary (`obscura`); the sandbox
 /// mount must be the directory that actually holds it.
 #[tokio::test]
+#[cfg_attr(miri, ignore = "posix_spawnattr_init unsupported by Miri")]
 async fn bare_binary_name_mounts_the_directory_that_actually_holds_it() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let obscura = script(tmp.path(), "obscura", OBSCURA_BODY);
