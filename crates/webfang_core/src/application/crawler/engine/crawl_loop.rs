@@ -13,9 +13,18 @@ use tracing::{info, warn, Instrument};
 use super::Engine;
 use super::{PauseTracker, PauseVerdict, PauseWatchdog, WaitOutcome};
 use crate::application::crawler::crawl_scheduler::CrawlScheduler;
-use crate::application::crawler::crawl_task::{handle_crawl_result, run_crawl_task};
+use crate::application::crawler::crawl_task::{
+    handle_crawl_result, is_terminal_settled, run_crawl_task,
+};
 use crate::application::crawler::crawl_task_ctx::CrawlTaskCtx;
 use crate::domain::CrawlError;
+
+/// One completed crawl worker: the URL it was dispatched for plus its outcome.
+///
+/// The URL travels WITH the result so the completion path can record a
+/// terminal failure as settled without a second lookup: `visited` is marked at
+/// dispatch (#3079), so only the outcome knows whether the page is done.
+pub(super) type CrawlTaskOutcome = (String, Result<(), CrawlError>);
 
 /// Poll interval while the engine has work it cannot dispatch and no worker in
 /// flight to wait on — an autoscale `Critical` pause (#2313).
@@ -47,7 +56,7 @@ impl Engine {
     /// failures with different time constants.
     pub(super) async fn crawl_loop(
         &mut self,
-        tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
+        tasks: &mut tokio::task::JoinSet<CrawlTaskOutcome>,
         task_ctx: &Arc<CrawlTaskCtx>,
         start: std::time::Instant,
         worker_wait_bound: Duration,
@@ -107,6 +116,10 @@ impl Engine {
             // Periodic checkpoint save
             self.maybe_save_periodic_checkpoint(start).await;
 
+            // Crash-injection: the periodic checkpoint is on disk and the next
+            // dispatch has not happened yet.
+            crate::cli::crash_points::hit(crate::cli::crash_points::AFTER_PERIODIC_CHECKPOINT);
+
             // Spawn new tasks capped by the remaining budget (issue #1599):
             // at most `remaining` spawns, so collected + in-flight never
             // exceeds max_pages at any dispatch decision. The tier bound
@@ -133,7 +146,7 @@ impl Engine {
     /// The `tasks.is_empty()` half is what makes this safe to ask after the
     /// reap and the drain: a worker pushes its discoveries before returning, so
     /// an empty set means every enqueue already happened (#2313).
-    fn is_drained(&self, tasks: &tokio::task::JoinSet<Result<(), CrawlError>>) -> bool {
+    fn is_drained(&self, tasks: &tokio::task::JoinSet<CrawlTaskOutcome>) -> bool {
         !self.scheduler.has_pending_work() && tasks.is_empty()
     }
 
@@ -146,7 +159,7 @@ impl Engine {
     /// work left can no longer make progress.
     async fn wait_or_stop(
         &mut self,
-        tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
+        tasks: &mut tokio::task::JoinSet<CrawlTaskOutcome>,
         worker_wait_bound: Duration,
         pause: PauseWatchdog,
         tracker: &mut PauseTracker,
@@ -226,16 +239,35 @@ impl Engine {
     }
 
     /// Process completed tasks (non-blocking) and update error counters.
-    fn process_completed_tasks(&self, tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>) {
+    fn process_completed_tasks(&mut self, tasks: &mut tokio::task::JoinSet<CrawlTaskOutcome>) {
         while let Some(result) = tasks.try_join_next() {
-            handle_crawl_result(
-                result,
-                &self.error_count,
-                &self.error_breakdown,
-                &self.resolution_failures,
-                &self.transport_cause,
-            );
+            self.record_completion(result);
         }
+    }
+
+    /// Record one joined worker — the ONE completion path (#3079).
+    ///
+    /// A worker's failure is settled (no resume may re-drive it) only when
+    /// [`is_terminal_settled`] says no retry can change it; everything else
+    /// leaves the URL re-drivable. The bookkeeping itself is unchanged and
+    /// still owned by [`handle_crawl_result`], so a settled verdict changes
+    /// WHO skips the URL later, never how the failure is counted now.
+    pub(super) fn record_completion(
+        &mut self,
+        result: std::result::Result<CrawlTaskOutcome, tokio::task::JoinError>,
+    ) {
+        if let Ok((url, Err(error))) = &result {
+            if is_terminal_settled(error) {
+                self.scheduler.record_settled(url);
+            }
+        }
+        handle_crawl_result(
+            result.map(|(_, outcome)| outcome),
+            &self.error_count,
+            &self.error_breakdown,
+            &self.resolution_failures,
+            &self.transport_cause,
+        );
     }
 
     /// Remaining dispatch budget for one `crawl_loop` iteration (issue #1599).
@@ -256,17 +288,21 @@ impl Engine {
     /// frontier-empty) stops early, so both bounds hold simultaneously.
     fn spawn_available_tasks(
         scheduler: &mut CrawlScheduler,
-        tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
+        tasks: &mut tokio::task::JoinSet<CrawlTaskOutcome>,
         task_ctx: &Arc<CrawlTaskCtx>,
         mut remaining: usize,
     ) {
         while remaining > 0 {
             match scheduler.next_url(tasks.len()) {
                 Some(discovered_url) => {
+                    // The URL travels with the outcome: a dispatch-marked
+                    // `visited` entry cannot tell a finished page from one
+                    // still in memory, the completion can (#3079).
+                    let url = discovered_url.url.as_str().to_owned();
                     // Spawn task — single Arc clone instead of 18 individual clones
                     let task_ctx = Arc::clone(task_ctx);
                     tasks.spawn(
-                        async move { run_crawl_task(task_ctx, discovered_url).await }
+                        async move { (url, run_crawl_task(task_ctx, discovered_url).await) }
                             .in_current_span(),
                     );
                     remaining -= 1;
@@ -289,8 +325,8 @@ impl Engine {
     /// fetch, one core per run. Waiting unconditionally on the in-flight set is
     /// what turns that spin into a park.
     async fn wait_for_task(
-        &self,
-        tasks: &mut tokio::task::JoinSet<Result<(), CrawlError>>,
+        &mut self,
+        tasks: &mut tokio::task::JoinSet<CrawlTaskOutcome>,
         worker_wait_bound: Duration,
     ) -> WaitOutcome {
         if tasks.is_empty() {
@@ -301,13 +337,7 @@ impl Engine {
 
         match tokio::time::timeout(worker_wait_bound, tasks.join_next()).await {
             Ok(Some(result)) => {
-                handle_crawl_result(
-                    result,
-                    &self.error_count,
-                    &self.error_breakdown,
-                    &self.resolution_failures,
-                    &self.transport_cause,
-                );
+                self.record_completion(result);
                 WaitOutcome::Progress
             },
             Ok(None) => WaitOutcome::Progress,

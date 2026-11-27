@@ -506,10 +506,19 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/checkpoint_resume_crash_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 1,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/checkpoint_store_integration.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 11,
+      "test_count": 13,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"
