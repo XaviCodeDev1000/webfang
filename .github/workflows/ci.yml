@@ -2425,7 +2425,7 @@ jobs:
         group: [core, domain]
         include:
           - group: core
-            filter: "-- adapters:: application:: cli:: config:: di:: error:: mcp_server::"
+            filter: "-- adapters:: application:: cli:: config:: di:: error:: mcp_server::handlers::scraping::"
           - group: domain
             filter: "-- domain::"
     steps:
