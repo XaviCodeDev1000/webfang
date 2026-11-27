@@ -48,20 +48,24 @@ use super::HttpClient;
 /// client's own cookie jar. Scoped fetching goes through
 /// `HttpClient::get_with_jar`, which is crate-internal on purpose — the jar
 /// type never reaches the domain port.
+/// The boxed future the domain port hands back.
+///
+/// Named once: the port, its wrapper and every implementor would otherwise
+/// spell the same twelve-line type, and the duplication ratchet counts each
+/// copy of it.
+type HttpFuture<'a> = std::pin::Pin<
+    Box<
+        dyn std::future::Future<
+                Output = crate::domain::http_error::HttpResult<
+                    crate::domain::http_port::HttpResponse,
+                >,
+            > + Send
+            + 'a,
+    >,
+>;
+
 impl crate::domain::http_port::HttpClientPort for HttpClient {
-    fn get(
-        &self,
-        url: &str,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = crate::domain::http_error::HttpResult<
-                        crate::domain::http_port::HttpResponse,
-                    >,
-                > + Send
-                + '_,
-        >,
-    > {
+    fn get(&self, url: &str) -> HttpFuture<'_> {
         self.get_with_jar(url, None)
     }
 }
@@ -78,16 +82,7 @@ impl HttpClient {
         &self,
         url: &str,
         jar: Option<Arc<wreq::cookie::Jar>>,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = crate::domain::http_error::HttpResult<
-                        crate::domain::http_port::HttpResponse,
-                    >,
-                > + Send
-                + '_,
-        >,
-    > {
+    ) -> HttpFuture<'_> {
         let url = url.to_owned();
         Box::pin(async move {
             // Use the inner wreq client for the raw request, then build

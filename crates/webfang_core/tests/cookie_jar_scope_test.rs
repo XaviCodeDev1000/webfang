@@ -71,6 +71,49 @@ fn seeded_jar(url: &str) -> Arc<Jar> {
 }
 
 /// The cookie pairs of the `Cookie` header an arrival carried, order-independent.
+/// A counting client that follows redirects.
+///
+/// The redirect policy is explicit because `wreq 0.16.0` starts at
+/// `redirect::Policy::none()`; production gets its ten hops from
+/// `ssrf_guard().secure_client`.
+fn redirecting_client(server: &TestServer) -> wreq::Client {
+    let (client, _) = counting_client(vec![server.addr()], |builder| {
+        builder.redirect(wreq::redirect::Policy::default())
+    });
+    client
+}
+
+/// One request carrying its own cookie jar, resolved to a response.
+async fn fetch_with_jar(client: &wreq::Client, url: String, jar: Arc<Jar>) -> wreq::Response {
+    client
+        .get(url)
+        .cookie_provider(jar)
+        .send()
+        .await
+        .expect("a request carrying its own cookie jar resolves to a response")
+}
+
+/// A retry policy that treats 503 as retryable, so the layer re-sends once.
+fn retry_on_service_unavailable() -> wreq::retry::Policy {
+    wreq::retry::Policy::default().classify_fn(|req_rep| match req_rep.status() {
+        Some(wreq::StatusCode::SERVICE_UNAVAILABLE) => req_rep.retryable(),
+        _ => req_rep.success(),
+    })
+}
+
+/// Every arrival was the GET this test issued, over one keep-alive connection.
+fn assert_single_connection_of_gets(server: &TestServer) {
+    let observed = server.requests();
+    assert!(
+        observed.iter().all(|entry| entry.method == "GET"),
+        "every arrival is the GET the test issued"
+    );
+    assert!(
+        observed.iter().all(|entry| entry.peer == observed[0].peer),
+        "both arrivals share one peer address, so one TCP connection"
+    );
+}
+
 fn cookie_pairs(server: &TestServer, arrival: usize) -> BTreeSet<String> {
     server.requests()[arrival]
         .header("cookie")
@@ -122,15 +165,7 @@ async fn shared_scope_offers_a_cookie_set_by_a_previous_response() {
         1,
         "one keep-alive connection served both requests"
     );
-    let observed = server.requests();
-    assert!(
-        observed.iter().all(|entry| entry.method == "GET"),
-        "every arrival is the GET the test issued"
-    );
-    assert!(
-        observed.iter().all(|entry| entry.peer == observed[0].peer),
-        "both arrivals share one peer address, so one TCP connection"
-    );
+    assert_single_connection_of_gets(&server);
 }
 
 /// `operation` buys isolation: the jar lives for one call, so two operations
@@ -203,16 +238,14 @@ async fn operation_scope_sends_the_operator_seed_with_the_site_cookie() {
 #[tokio::test]
 async fn a_set_cookie_on_a_302_hop_reaches_the_next_hop_with_the_per_request_provider() {
     let server = TestServer::start().await;
-    let (client, _) = counting_client(vec![server.addr()], |builder| {
-        builder.redirect(wreq::redirect::Policy::default())
-    });
+    let client = redirecting_client(&server);
 
-    let response = client
-        .get(server.url("/redirect-cookie"))
-        .cookie_provider(Jar::default())
-        .send()
-        .await
-        .expect("the redirect is followed");
+    let response = fetch_with_jar(
+        &client,
+        server.url("/redirect-cookie"),
+        Arc::new(Jar::default()),
+    )
+    .await;
 
     assert_eq!(response.status(), wreq::StatusCode::OK);
     assert_eq!(
@@ -238,16 +271,10 @@ async fn a_set_cookie_on_a_302_hop_reaches_the_next_hop_with_the_per_request_pro
 #[tokio::test]
 async fn the_operator_seed_and_a_site_cookie_coexist_across_a_302_hop() {
     let server = TestServer::start().await;
-    let (client, _) = counting_client(vec![server.addr()], |builder| {
-        builder.redirect(wreq::redirect::Policy::default())
-    });
+    let client = redirecting_client(&server);
+    let seed = seeded_jar(&server.url("/"));
 
-    let response = client
-        .get(server.url("/redirect-cookie"))
-        .cookie_provider(seeded_jar(&server.url("/")))
-        .send()
-        .await
-        .expect("the seeded redirect is followed");
+    let response = fetch_with_jar(&client, server.url("/redirect-cookie"), seed).await;
 
     assert_eq!(response.status(), wreq::StatusCode::OK);
     assert_eq!(
@@ -270,18 +297,15 @@ async fn the_operator_seed_and_a_site_cookie_coexist_across_a_302_hop() {
 #[tokio::test]
 async fn a_retry_resends_with_the_same_per_request_provider() {
     let server = TestServer::start().await;
-    let policy = wreq::retry::Policy::default().classify_fn(|req_rep| match req_rep.status() {
-        Some(wreq::StatusCode::SERVICE_UNAVAILABLE) => req_rep.retryable(),
-        _ => req_rep.success(),
-    });
+    let policy = retry_on_service_unavailable();
     let (client, _) = counting_client(vec![server.addr()], |builder| builder.retry(policy));
 
-    let response = client
-        .get(server.url("/flaky-cookie"))
-        .cookie_provider(Jar::default())
-        .send()
-        .await
-        .expect("the retried request still resolves to a response");
+    let response = fetch_with_jar(
+        &client,
+        server.url("/flaky-cookie"),
+        Arc::new(Jar::default()),
+    )
+    .await;
 
     assert_eq!(response.status(), wreq::StatusCode::OK);
     assert_eq!(
