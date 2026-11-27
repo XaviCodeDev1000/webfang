@@ -64,21 +64,21 @@ mod safety;
 mod serialization;
 mod session_budget;
 mod session_capture;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_batch_metrics;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_budget;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_common;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_crawl_sitemap;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_discovered_urls;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_discovery;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_robots;
-#[cfg(all(test, not(miri)))] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
+#[cfg(test)] // wiremock + wreq use btls-sys FFI (unsupported by Miri)
 mod tests_ssrf;
 mod tools_crawl;
 mod tools_discovery;

@@ -2425,7 +2425,7 @@ jobs:
         group: [core, domain]
         include:
           - group: core
-            filter: "-- adapters:: application:: cli:: config:: di:: error::"
+            filter: "-- adapters:: application:: cli:: config:: di:: error:: mcp_server::"
           - group: domain
             filter: "-- domain::"
     steps:
@@ -2645,6 +2645,15 @@ jobs:
           # written reason, and the rest run under Miri.
           cargo miri test --lib -- \
             ${{ matrix.filter }}
+      # Integration targets are excluded by --lib above; the cleaning-pipeline
+      # regression target is run explicitly so its ungated tests are covered by
+      # the UB detector. Its interpreter-limited tests carry per-test reasons.
+      - name: "Miri (integration: cleaning pipelines)"
+        if: matrix.group == 'content'
+        env:
+          MIRIFLAGS: -Zmiri-tree-borrows -Zmiri-disable-isolation -Zmiri-ignore-leaks -Zmiri-seed=42 -Zmiri-permissive-provenance
+        run: |
+          cargo miri test -p webfang_core --test cleaning_pipelines_regression -- --test-threads=1
 
   # ============================================================================
   # COVERAGE: PR gate + push-to-main + manual trigger
