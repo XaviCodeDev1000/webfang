@@ -41,17 +41,19 @@
 //! every other spawn here runs with the switch off, which is what keeps the
 //! registry-size assertion honest.
 
+// The EXTERNAL count pin on the tool registry (#1817, #S14, #3098) is the
+// contract's own count, imported from `tests/common/mcp_contract.rs` rather
+// than re-spelled: a second literal could disagree with the reviewable list of
+// tool names, which is what E14 reported. The probe is not part of the pinned
+// surface — it is development-only and gated by its own variable.
+#[path = "common/mcp_contract.rs"]
+mod mcp_contract;
+
+use mcp_contract::PINNED_TOOL_COUNT;
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdout};
-/// The EXTERNAL pin on the tool registry (#1817, #S14).
-///
-/// The library derives its count from the router itself, so this test is the
-/// one place a human audits the figure: a tool added or dropped without a
-/// deliberate bump here fails. The probe is not part of the pinned surface —
-/// it is development-only and gated by its own variable.
-const EXPECTED_TOOL_COUNT: usize = 36;
 
 /// Per-read timeout: generous enough for cold starts + BoringSSL init.
 const READ_TIMEOUT: Duration = Duration::from_secs(15);
@@ -278,8 +280,8 @@ async fn stdio_tools_list_reports_the_pinned_tool_registry() {
         .expect("tools/list result must carry a tools array");
     assert_eq!(
         tools.len(),
-        EXPECTED_TOOL_COUNT,
-        "the registry exposes exactly {EXPECTED_TOOL_COUNT} tools"
+        PINNED_TOOL_COUNT,
+        "the registry exposes exactly {PINNED_TOOL_COUNT} tools"
     );
     assert!(
         tools.iter().any(|t| t["name"] == "extract_domain"),
