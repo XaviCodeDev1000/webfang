@@ -16,6 +16,7 @@ pub mod competitor;
 pub mod corpus;
 pub mod cost;
 pub mod error;
+pub mod measurements;
 pub mod report;
 pub mod runner;
 
