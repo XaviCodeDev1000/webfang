@@ -376,6 +376,30 @@ async fn valid_explicit_override_is_accepted() {
 // Unknown keys are typos, not optional extensions (#3074)
 // ---------------------------------------------------------------------------
 
+/// Write one explicit config, run a dry-run, and report exit code, stderr
+/// and the number of outbound requests the mock saw (#3074).
+async fn run_with_config(
+    t: &BehavioralTest,
+    body: &str,
+    snapshot: Option<&str>,
+) -> (Option<i32>, String, usize) {
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(&config_path, body).expect("write config");
+    let out = t
+        .scraper_cmd()
+        .arg("--dry-run")
+        .env("WEBFANG_CONFIG", &config_path)
+        .output()
+        .expect("spawn webfang");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    if let Some(name) = snapshot {
+        assert_stderr_snapshot(name, tmp.path(), &stderr);
+    }
+    let requests = t.server.received_requests().await.unwrap_or_default().len();
+    (out.status.code(), stderr, requests)
+}
+
 /// An unrecognized key under `[[providers]]` is a typo that used to be dropped
 /// silently: the operator believed `input_type` was configured while the wire
 /// payload never carried it. The config gate is step 5 of startup, so a refusal
@@ -385,27 +409,18 @@ async fn explicit_override_with_unknown_provider_key_exits_78_before_any_dial() 
     let t = BehavioralTest::new().await;
     mount_discovery(&t).await;
 
-    let tmp = tempfile::TempDir::new().expect("create temp dir");
-    let config_path = tmp.path().join("config.toml");
-    std::fs::write(
-        &config_path,
+    let (code, stderr, requests) = run_with_config(
+        &t,
         "[[providers]]\nid = \"p\"\ndisplay_name = \"P\"\n\
          kind = \"open_ai_compatible\"\nbase_url = \"https://api.example.test/v1\"\n\
          auth = { source = \"none\" }\ncapabilities = [\"embedding\"]\n\
          input_type = \"passage\"\n",
+        Some("override_has_unknown_provider_key"),
     )
-    .expect("write config with an unknown provider key");
+    .await;
 
-    let out = t
-        .scraper_cmd()
-        .arg("--dry-run")
-        .env("WEBFANG_CONFIG", &config_path)
-        .output()
-        .expect("spawn webfang");
-
-    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     assert_eq!(
-        out.status.code(),
+        code,
         Some(i32::from(EXIT_CONFIG)),
         "an unknown provider key must exit {EXIT_CONFIG}.\nstderr:\n{stderr}"
     );
@@ -413,13 +428,9 @@ async fn explicit_override_with_unknown_provider_key_exits_78_before_any_dial() 
         stderr.contains("input_type"),
         "the error must name the rejected key, got:\n{stderr}"
     );
-    assert_stderr_snapshot("override_has_unknown_provider_key", tmp.path(), &stderr);
-
-    let requests = t.server.received_requests().await.unwrap_or_default();
-    assert!(
-        requests.is_empty(),
-        "the config gate must reject before any dial, got {} requests",
-        requests.len()
+    assert_eq!(
+        requests, 0,
+        "the config gate must reject before any dial, got {requests} requests"
     );
 }
 
@@ -431,27 +442,18 @@ async fn reserved_extra_body_key_exits_78_before_any_dial() {
     let t = BehavioralTest::new().await;
     mount_discovery(&t).await;
 
-    let tmp = tempfile::TempDir::new().expect("create temp dir");
-    let config_path = tmp.path().join("config.toml");
-    std::fs::write(
-        &config_path,
+    let (code, stderr, requests) = run_with_config(
+        &t,
         "[[providers]]\nid = \"p\"\ndisplay_name = \"P\"\n\
          kind = \"open_ai_compatible\"\nbase_url = \"https://api.example.test/v1\"\n\
          auth = { source = \"none\" }\ncapabilities = [\"embedding\"]\n\
          [providers.extra_body]\nmodel = \"attacker\"\n",
+        None,
     )
-    .expect("write config with a reserved extra_body key");
+    .await;
 
-    let out = t
-        .scraper_cmd()
-        .arg("--dry-run")
-        .env("WEBFANG_CONFIG", &config_path)
-        .output()
-        .expect("spawn webfang");
-
-    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     assert_eq!(
-        out.status.code(),
+        code,
         Some(i32::from(EXIT_CONFIG)),
         "a reserved body key must exit {EXIT_CONFIG}.\nstderr:\n{stderr}"
     );
@@ -459,11 +461,8 @@ async fn reserved_extra_body_key_exits_78_before_any_dial() {
         stderr.contains("reserved request key 'model'"),
         "the error must name the reserved key, got:\n{stderr}"
     );
-
-    let requests = t.server.received_requests().await.unwrap_or_default();
-    assert!(
-        requests.is_empty(),
-        "the config gate must reject before any dial, got {} requests",
-        requests.len()
+    assert_eq!(
+        requests, 0,
+        "the config gate must reject before any dial, got {requests} requests"
     );
 }
