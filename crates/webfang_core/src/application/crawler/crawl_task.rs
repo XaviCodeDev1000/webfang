@@ -26,6 +26,7 @@ mod fetch;
 mod sessions;
 
 pub(crate) use errors::handle_crawl_result;
+pub(crate) use errors::is_terminal_settled;
 use fetch::{fetch_page, ingest_cookies};
 use sessions::{acquire_session, report_session_success};
 

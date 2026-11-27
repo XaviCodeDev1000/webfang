@@ -38,6 +38,72 @@ pub(crate) fn handle_crawl_result(
     }
 }
 
+/// Whether a task failure is a PERMANENT verdict for its URL (#3079).
+///
+/// `CrawlCheckpoint.visited` is marked at DISPATCH, not at completion, so a
+/// resume cannot treat it as "done": a page still in memory when the process
+/// died was never exported. This predicate is the narrower set that a resume
+/// may safely skip — the failures no retry can change:
+///
+/// - an HTTP 4xx other than 408/429 (408 request timeout and 429 rate limit
+///   are paced retries, not verdicts),
+/// - the same 4xx carried by a transport `Network` failure,
+/// - an invalid URL, a URL refused by the crawl filters, an unsupported
+///   content type.
+///
+/// Everything else (timeouts, 5xx, exhausted retries, WAF challenges, parse
+/// and budget stops, cancellation, internal failures) stays re-drivable: a
+/// resumed run is a fresh chance, and settling on it would drop pages
+/// silently (E13).
+pub(crate) fn is_terminal_settled(error: &CrawlError) -> bool {
+    fn is_permanent_4xx(status: u16) -> bool {
+        (400..500).contains(&status) && status != 408 && status != 429
+    }
+
+    match error {
+        CrawlError::Http { status, .. } => is_permanent_4xx(*status),
+        CrawlError::Network {
+            status_code: Some(status),
+            ..
+        } => is_permanent_4xx(*status),
+        // A `Network` failure with no status never reached an answer.
+        CrawlError::Network {
+            status_code: None, ..
+        } => false,
+        CrawlError::InvalidUrl(_)
+        | CrawlError::UrlExcluded(_)
+        | CrawlError::InvalidContentType(_) => true,
+        // Exhaustive on purpose: a new `CrawlError` variant has to decide
+        // whether a resume may skip it, instead of defaulting to either.
+        CrawlError::Parse(_)
+        | CrawlError::Io(_)
+        | CrawlError::Internal(_)
+        | CrawlError::InvalidSession(_)
+        | CrawlError::SitemapNotFound(_)
+        | CrawlError::Storage(_)
+        | CrawlError::Checkpoint(_)
+        | CrawlError::SessionPool(_)
+        | CrawlError::Discovery(_)
+        | CrawlError::Download(_)
+        | CrawlError::WafChallenge { .. }
+        | CrawlError::RetryExhausted { .. }
+        | CrawlError::TransientHttp { .. }
+        | CrawlError::RateLimited(_)
+        | CrawlError::Timeout { .. }
+        | CrawlError::Connection { .. }
+        | CrawlError::RequestFailed(_)
+        | CrawlError::Transport { .. }
+        | CrawlError::ResourceExhausted { .. }
+        | CrawlError::SitemapEmpty
+        | CrawlError::SitemapDepthExceeded
+        | CrawlError::SemaphoreInanition
+        | CrawlError::Cancelled
+        | CrawlError::PartialRun { .. }
+        | CrawlError::MaxDepthExceeded { .. }
+        | CrawlError::MaxPagesExceeded { .. } => false,
+    }
+}
+
 /// Bookkeeping for a task that returned an operational error.
 ///
 /// Shutdown cancellation is a control signal, not a failure (#509), so it

@@ -41,10 +41,14 @@ fn skip_reason_names_each_missing_prerequisite() {
         task_id: "webfang-1".into(),
         cgroup_delegated: true,
     };
-    assert_eq!(
-        missing_arapuca.skip_reason(),
+    // S3 rule 5: the wrapper is Linux-only, so non-Linux runners skip before
+    // resolving prerequisites and report the platform reason instead.
+    let expected_missing_arapuca = if cfg!(target_os = "linux") {
         Some("arapuca binary not found")
-    );
+    } else {
+        Some("non-linux platform")
+    };
+    assert_eq!(missing_arapuca.skip_reason(), expected_missing_arapuca);
 
     let missing_cgroup = SandboxConfig {
         arapuca: Some(PathBuf::from("/usr/bin/arapuca")),
@@ -111,6 +115,9 @@ fn arapuca_args_follow_the_exact_spec_order() {
     );
 }
 
+// S3 rule 5 makes the wrapper Linux-only: the argv/spawn contracts below only
+// exist where `SandboxConfig::skip_reason` can return None.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[cfg_attr(miri, ignore = "posix_spawnattr_init unsupported by Miri")]
 async fn sandbox_passes_exact_arapuca_argv_and_preserves_the_fetch() {
@@ -174,6 +181,7 @@ async fn sandbox_passes_exact_arapuca_argv_and_preserves_the_fetch() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[cfg_attr(miri, ignore = "posix_spawnattr_init unsupported by Miri")]
 async fn missing_cgroup_delegation_skips_the_wrapper() {
@@ -209,6 +217,7 @@ fn wrapper_path_resolves_explicit_override() {
 
 /// The default configuration names a bare binary (`obscura`); the sandbox
 /// mount must be the directory that actually holds it.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 #[cfg_attr(miri, ignore = "posix_spawnattr_init unsupported by Miri")]
 async fn bare_binary_name_mounts_the_directory_that_actually_holds_it() {

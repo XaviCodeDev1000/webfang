@@ -35,6 +35,11 @@ pub const MID_EXTRACTION: &str = "mid_extraction";
 pub const POST_EXTRACTION_PRE_PIPELINE: &str = "post_extraction_pre_pipeline";
 /// Inside the JSONL writer loop: half of one append payload hits disk first.
 pub const MID_JSONL_LINE: &str = "mid_jsonl_line";
+/// The crawl loop just wrote a PERIODIC checkpoint and has not dispatched the
+/// next URL yet: the periodic checkpoint is on disk, the frontier it carries is
+/// the run's state, and nothing has been exported from memory. Kills the
+/// dispatch-marked `visited` set against the export (#3079).
+pub const AFTER_PERIODIC_CHECKPOINT: &str = "after_periodic_checkpoint";
 /// In `CommitSession::commit_item`: flush ack received, EXPORTED not saved.
 pub const POST_FLUSH_PRE_COMMIT: &str = "post_flush_pre_commit";
 /// Inside a record-store save transaction while the store lock is held.
