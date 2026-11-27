@@ -290,7 +290,7 @@
       "commit": "0e94a9e517cb2539bfd30694f5d785f610c27374",
       "sourceType": "github",
       "skillPath": "SKILL.md",
-      "computedHash": "eb4cf75480d31d48bd1ff4f4ac7d9eabe19b50e294d3166fc558b9d8adf526c4"
+      "computedHash": "5eea5c28d038a60e8a94f5f6a05ada1008975ec67172869f8a63233e7d919b24"
     },
     "rust-symbol-analyzer": {
       "source": "actionbook/rust-skills",
