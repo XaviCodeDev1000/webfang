@@ -2,8 +2,10 @@
 //! pre-flight gate, the dry-run preview, the prepare/resume and scrape
 //! routes, the scrape phase and the asset H2/TLS profile resolver.
 
-use super::export_phase::{resume_nothing_pending, truncated_discovery_exit};
-use super::persistence::resolve_persistence_mode;
+use super::export_phase::{
+    emit_resume_notice, resume_nothing_pending, truncated_discovery_exit, ResumeNotice,
+};
+use super::persistence::{resolve_export_dir, resolve_persistence_mode, resolve_persistence_root};
 use crate::application::adaptive_engine::AdaptiveSelectorEngine;
 use crate::application::crawl_options::CrawlOptions;
 use crate::application::crawler::CapturedPage;
@@ -197,6 +199,12 @@ pub(super) async fn prepare_resume_route(
     // site that knows about user flags.
     let persistence_mode = resolve_persistence_mode(opts);
 
+    // The two directories this run would write into: the mismatch gate needs
+    // both BEFORE any export, and the same resolution feeds `prepare_phase` and
+    // `export_phase`, so the compared paths are the ones actually used.
+    let persistence_root = resolve_persistence_root(opts);
+    let export_dir = resolve_export_dir(opts);
+
     let prepare = match prepare_phase(opts, &persistence_mode, root_correlation).await {
         Err(e) => return Err(e),
         Ok(p) => p,
@@ -209,6 +217,7 @@ pub(super) async fn prepare_resume_route(
         shared_downloader,
         captured_pages,
         truncated_by: discovery_truncated_by,
+        resume: discovery_resume,
     } = prepare;
     // #2338: the reason only turns into an exit code AFTER the partial output
     // is written — it rides along on the returned struct.
@@ -218,12 +227,34 @@ pub(super) async fn prepare_resume_route(
         &persistence_mode,
         opts.url.as_str(),
         root_correlation,
+        &persistence_root,
+        &export_dir,
     )
     .await
     {
         Ok(v) => v,
         Err(e) => return Err(e),
     };
+
+    // #3097 / T4: the run states truthfully what it resumed from and what it
+    // decided to skip. Printed AFTER the filter (so the breakdown is the one
+    // this run acted on) and BEFORE the "nothing pending" short-circuit (so an
+    // all-committed resume still explains itself). The state path only exists
+    // on a resume: without one there is nothing to name and the run is fresh.
+    let state_path = state_store
+        .as_ref()
+        .map(|store| store.get_state_path())
+        .filter(|_| persistence_mode.is_resume());
+    emit_resume_notice(
+        opts.export.quiet,
+        &ResumeNotice {
+            state_path: state_path.as_deref(),
+            discovered: discovered_count,
+            already_committed: discovered_count.saturating_sub(urls_to_scrape.len()),
+            pending: urls_to_scrape.len(),
+            checkpoint: discovery_resume,
+        },
+    );
 
     // #705 Step 2: a --resume run where every discovered URL was already
     // processed by a prior run is a technical success ("nothing pending").
@@ -250,6 +281,7 @@ pub(super) async fn prepare_resume_route(
             shared_downloader,
             captured_pages,
             truncated_by: discovery_truncated_by,
+            resume: discovery_resume,
         },
         state_store,
     ))

@@ -202,6 +202,16 @@ fn ignore_robots_flag_defaults_to_false() {
 
 // ===== apply_resume_mode tests (via PersistenceMode) =====
 
+/// The two output directories a resume compares its records against. The
+/// tests below exercise the FILTER, not the output-mismatch gate, so they use
+/// a pair of tempdirs that no committed record points at — and every one of
+/// them either has no committed record or does not reach the gate.
+fn output_roots() -> (std::path::PathBuf, std::path::PathBuf) {
+    let doc = TempDir::new().expect("persistence root tempdir");
+    let rag = TempDir::new().expect("export dir tempdir");
+    (doc.path().to_path_buf(), rag.path().to_path_buf())
+}
+
 #[tokio::test]
 async fn apply_resume_mode_disabled_returns_all_urls() {
     let root = crate::domain::CorrelationId::new();
@@ -211,10 +221,17 @@ async fn apply_resume_mode_disabled_returns_all_urls() {
     ];
     let mode = crate::domain::persistence::PersistenceMode::Disabled;
 
-    let (filtered, state_store) =
-        apply_resume_mode(urls.clone(), &mode, "https://example.com", &root)
-            .await
-            .expect("resume disabled should not fail");
+    let roots = output_roots();
+    let (filtered, state_store) = apply_resume_mode(
+        urls.clone(),
+        &mode,
+        "https://example.com",
+        &root,
+        &roots.0,
+        &roots.1,
+    )
+    .await
+    .expect("resume disabled should not fail");
 
     assert_eq!(filtered.len(), 2);
     assert!(state_store.is_none());
@@ -234,10 +251,17 @@ async fn apply_resume_mode_checkpoint_returns_all_urls() {
         },
     };
 
-    let (filtered, state_store) =
-        apply_resume_mode(urls.clone(), &mode, "https://example.com", &root)
-            .await
-            .expect("checkpoint only should not fail");
+    let roots = output_roots();
+    let (filtered, state_store) = apply_resume_mode(
+        urls.clone(),
+        &mode,
+        "https://example.com",
+        &root,
+        &roots.0,
+        &roots.1,
+    )
+    .await
+    .expect("checkpoint only should not fail");
 
     assert_eq!(filtered.len(), 2);
     assert!(state_store.is_none());
@@ -263,9 +287,17 @@ async fn apply_resume_mode_skips_previously_scraped_urls() {
         dir: state_dir.clone(),
     };
 
-    let (filtered, state_store) = apply_resume_mode(urls, &mode, "https://example.com", &root)
-        .await
-        .expect("valid state dir should not fail");
+    let roots = output_roots();
+    let (filtered, state_store) = apply_resume_mode(
+        urls,
+        &mode,
+        "https://example.com",
+        &root,
+        &roots.0,
+        &roots.1,
+    )
+    .await
+    .expect("valid state dir should not fail");
 
     // URL "a" was already processed, should be skipped
     assert_eq!(filtered.len(), 2, "should skip 1 already-processed URL");
@@ -303,9 +335,17 @@ async fn apply_resume_mode_full_skips_previously_scraped_urls() {
         },
     };
 
-    let (filtered, state_store) = apply_resume_mode(urls, &mode, "https://example.com", &root)
-        .await
-        .expect("Full mode should not fail");
+    let roots = output_roots();
+    let (filtered, state_store) = apply_resume_mode(
+        urls,
+        &mode,
+        "https://example.com",
+        &root,
+        &roots.0,
+        &roots.1,
+    )
+    .await
+    .expect("Full mode should not fail");
 
     assert_eq!(filtered.len(), 1);
     assert!(state_store.is_some());
@@ -329,7 +369,17 @@ async fn apply_resume_mode_with_corrupted_state_fails_closed() {
         dir: state_dir.clone(),
     };
 
-    let err = match apply_resume_mode(urls.clone(), &mode, "https://example.com", &root).await {
+    let roots = output_roots();
+    let err = match apply_resume_mode(
+        urls.clone(),
+        &mode,
+        "https://example.com",
+        &root,
+        &roots.0,
+        &roots.1,
+    )
+    .await
+    {
         Ok(_) => panic!("unreadable resume state must be an operator-visible error"),
         Err(err) => err,
     };
@@ -357,9 +407,17 @@ async fn apply_resume_mode_with_custom_state_dir() {
         dir: state_dir.clone(),
     };
 
-    let (filtered, state_store) = apply_resume_mode(urls, &mode, "https://example.com", &root)
-        .await
-        .expect("custom state dir should not fail");
+    let roots = output_roots();
+    let (filtered, state_store) = apply_resume_mode(
+        urls,
+        &mode,
+        "https://example.com",
+        &root,
+        &roots.0,
+        &roots.1,
+    )
+    .await
+    .expect("custom state dir should not fail");
 
     assert_eq!(filtered.len(), 1);
     assert!(

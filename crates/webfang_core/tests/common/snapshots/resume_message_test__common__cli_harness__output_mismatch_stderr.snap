@@ -1,0 +1,8 @@
+---
+source: crates/webfang_core/tests/common/cli_harness.rs
+expression: redacted
+---
+  <TIMESTAMP>  WARN webfang: WEBFANG_DISABLE_SSRF_ENTRY_GUARD = 1: only the literal-IP entry rejection is disabled; the validating DNS resolver and the redirect policy stay enforced on every hop. The hatch remains available in release builds — unset it to restore the full guard., notice: "ssrf_entry_hatch_armed", disabled_layer: "literal-IP entry rejection", still_enforced: "validating DNS resolver + redirect policy"
+    at <FILE>.rs:<LINE>
+
+Error: resuming into a different output directory: the previous run committed its pages to '<OUT_DIR>/out1', but this run would write to '<OUT_DIR>/out2' (persistence root) and '<OUT_DIR>/out2' (export directory). Resume into the recorded output, or start a fresh state (a new --state-dir, or remove the state file).
