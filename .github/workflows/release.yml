@@ -111,6 +111,12 @@ jobs:
       # optionally via RULESET_READER_TOKEN secret (fine-grained PAT,
       # Metadata:read) — optional, no secret wiring added here.
       contents: read
+      # The L1.6 check-runs step below reads the commit's check runs from the
+      # API. Without `checks: read` that read answers 403 and the step blocks
+      # the release as cannot-tell (exit 2): fail-closed, but the gate could
+      # never pass. This permission is what makes the answer readable at all;
+      # the script's 403 branch names this exact declaration as its remedy.
+      checks: read
     runs-on: ubuntu-latest
     outputs:
       validated_commit: ${{ steps.prov.outputs.validated_commit }}
@@ -159,6 +165,29 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/check_release_provenance.sh ruleset
+      # L1.6 Check Runs AFTER L1.5 and BEFORE build: a tag can resolve to a
+      # perfect descendant of main and still carry a red `CI Gate`, and no step
+      # before this one ever asked the API what that commit's check runs were.
+      # Exit 0 = the aggregate gate is green on the validated commit; 1 = it is
+      # not; 2 = cannot tell (token, permission, network, unparsable answer).
+      # Both non-zero exits block the release — exit 2 MUST stay blocking, or a
+      # token that can never read check runs would certify a release it never
+      # checked. Required set and its reasoning: scripts/check_release_checks.sh
+      # (PR-scoped contexts cannot appear on a squash-merge commit, so they are
+      # named as informational warnings instead of being required).
+      - name: L1.6 Check Runs Gate
+        env:
+          # The check-runs API needs an explicit token (runners have no ambient
+          # gh auth), and `checks: read` above is what lets it answer.
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # The commit preflight VALIDATED, not the tag ref: a tag can resolve to
+          # an ancestor of main, and the question is about the bytes being
+          # published.
+          PROV_VALIDATED_COMMIT: ${{ steps.prov.outputs.validated_commit }}
+        run: |
+          set -euo pipefail
+          bash scripts/check_release_checks.sh checks
 
   # ============================================================================
   # BUILD: Cross-compile for all platforms at the VALIDATED commit

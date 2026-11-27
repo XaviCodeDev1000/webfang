@@ -128,6 +128,14 @@ jobs:
 
           persist-credentials: false
 
+      # The SSRF surface must stay INSIDE the mutation scope (#3105, Guard 2).
+      # Cheap on purpose: it parses .cargo/mutants.toml and compiles nothing —
+      # no toolchain install, no cargo — but it reds the PR lane the moment
+      # either SSRF module falls out of `examine_globs`, instead of letting a
+      # green mutation run report over code that was never examined at all.
+      - name: SSRF mutation scope harness
+        run: bash scripts/tests/test_mutation_ssrf_scope.sh
+
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
 
