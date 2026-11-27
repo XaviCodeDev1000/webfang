@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Contract tests for the cross-platform sandbox CI proof (S8/T8).
+#
+# The two real launches can only happen on macOS and Windows hosted runners.
+# This harness proves the LOCAL contract of those jobs without a runner:
+# the POSIX smoke fails closed with no browser, succeeds through a fake
+# arapuca+chrome pair, and the workflow wires every required step.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SH_SMOKE="$ROOT/scripts/sandbox_smoke_chrome.sh"
+PS_SMOKE="$ROOT/scripts/sandbox_smoke_chrome.ps1"
+WORKFLOW="$ROOT/.github/workflows/cross-platform-sandbox.yml"
+
+fail() { echo "::error::$1" >&2; exit 1; }
+ok() { echo "ok: $1"; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# A fake arapuca that consumes run flags up to `--` and execs the real command.
+cat >"$WORK/arapuca" <<'SH'
+#!/bin/sh
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done
+[ "$1" = "--" ] || exit 125
+shift
+exec "$@"
+SH
+cat >"$WORK/chrome" <<'SH'
+#!/bin/sh
+printf '%s\n' WEBFANG_SANDBOX_SMOKE_OK
+SH
+chmod +x "$WORK/arapuca" "$WORK/chrome"
+
+# T1: the POSIX smoke launches through the injected adapter and sees the marker.
+if [ ! -f "$SH_SMOKE" ]; then
+  fail "scripts/sandbox_smoke_chrome.sh does not exist yet (RED)"
+fi
+out="$(WEBFANG_ARAPUCA_BINARY="$WORK/arapuca" \
+       WEBFANG_CHROME_BINARY="$WORK/chrome" \
+       WEBFANG_SANDBOX_SMOKE_PROFILE="$WORK/profile" \
+       WEBFANG_SANDBOX_SMOKE_READ_PATH="$WORK" \
+       bash "$SH_SMOKE" 2>&1)" || fail "smoke failed with a valid fake browser: $out"
+case "$out" in
+  *WEBFANG_SANDBOX_SMOKE_OK*) ok "posix smoke sees the browser marker" ;;
+  *) fail "marker missing from smoke output: $out" ;;
+esac
+
+# T2: fail closed when the browser cannot be resolved.
+if out="$(WEBFANG_ARAPUCA_BINARY="$WORK/arapuca" \
+          WEBFANG_CHROME_BINARY="$WORK/missing-browser" \
+          WEBFANG_SANDBOX_SMOKE_PROFILE="$WORK/profile2" \
+          WEBFANG_SANDBOX_SMOKE_READ_PATH="$WORK" \
+          bash "$SH_SMOKE" 2>&1)"; then
+  fail "smoke must fail when the browser is missing"
+fi
+case "$out" in
+  *"::error::"*) ok "posix smoke fails closed on a missing browser" ;;
+  *) fail "missing browser produced no typed error: $out" ;;
+esac
+
+# T3: the workflow wires both runners and every required check.
+if [ ! -f "$WORKFLOW" ]; then
+  fail ".github/workflows/cross-platform-sandbox.yml does not exist yet (RED)"
+fi
+for needle in \
+  'runs-on: macos-latest' \
+  'runs-on: windows-latest' \
+  'cargo check' \
+  'scripts/check_windows_platform.sh' \
+  'scripts/sandbox_smoke_chrome.sh' \
+  'scripts/sandbox_smoke_chrome.ps1' \
+  'scripts/tests/test_cross_platform_sandbox_ci.sh'
+do
+  grep -Fq -- "$needle" "$WORKFLOW" || fail "workflow misses: $needle"
+done
+ok "workflow wires macOS, Windows and the contract job"
+
+# T4: the Windows smoke states allow_exec and never disables the native sandbox
+# through --deny-network (which would turn the network namespace on).
+if [ ! -f "$PS_SMOKE" ]; then
+  fail "scripts/sandbox_smoke_chrome.ps1 does not exist yet (RED)"
+fi
+grep -Fq 'ARAPUCA_ALLOW_EXEC' "$PS_SMOKE" || fail "PowerShell smoke misses allow_exec intent"
+grep -Fq -- 'run' "$PS_SMOKE" || fail "PowerShell smoke does not use arapuca run"
+if grep -Fq -- '--deny-network' "$PS_SMOKE"; then
+  fail "PowerShell smoke enables the network namespace via --deny-network"
+fi
+ok "windows smoke keeps run defaults: allow_exec=true, netns disabled"
