@@ -770,7 +770,7 @@
       "path": "crates/webfang_core/tests/downloader_headers_test.rs",
       "crate": "webfang_core",
       "area": "downloader",
-      "test_count": 2,
+      "test_count": 3,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"

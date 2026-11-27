@@ -38,8 +38,8 @@ tokio-util = "0.7"
 arapuca = { path = "vendor/arapuca", default-features = false }
 
 # HTTP & Networking
-wreq = { version = "6.0.0-rc.29", features = ["gzip", "brotli", "stream", "json", "cookies"] }
-wreq-util = { version = "3.0.0-rc.14", features = ["emulation"] }
+wreq = { version = "=0.16.0", features = ["gzip", "brotli", "stream", "json", "cookies"] }
+wreq-util = { version = "=0.2.0", features = ["emulation"] }
 bytes = "1"
 
 # Content Extraction
