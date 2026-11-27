@@ -11,6 +11,7 @@ use crate::domain::config::{
     ConcurrencyConfig, ElasticOverrides, ExportFormat, OutputFormat, PipelineOutputFormat,
 };
 use crate::domain::post_load_wait::PostLoadWait;
+use crate::domain::JarScope;
 use crate::domain::JsStrategy;
 
 // ============================================================================
@@ -255,6 +256,9 @@ pub struct NetworkOptions {
     /// Populated from `--cookie`/`WEBFANG_COOKIE`. The domain is derived from
     /// the seed URL at request time (the CLI provides bare `name=value` pairs).
     pub initial_cookies: Vec<(String, String)>,
+    /// How long a cookie jar lives: one per process (the historical behavior)
+    /// or one per operation.
+    pub cookie_jar_scope: JarScope,
 }
 
 /// Output format, export format, and Obsidian integration settings.
@@ -406,6 +410,7 @@ impl Default for NetworkOptions {
             chrome_binary: None,
             custom_headers: Vec::new(),
             initial_cookies: Vec::new(),
+            cookie_jar_scope: JarScope::default(),
         }
     }
 }

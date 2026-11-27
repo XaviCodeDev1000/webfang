@@ -1,0 +1,10 @@
+---
+source: crates/webfang_core/tests/common/cli_harness.rs
+expression: redacted
+---
+  <TIMESTAMP>  WARN webfang: WEBFANG_DISABLE_SSRF_ENTRY_GUARD = 1: only the literal-IP entry rejection is disabled; the validating DNS resolver and the redirect policy stay enforced on every hop. The hatch remains available in release builds — unset it to restore the full guard., notice: "ssrf_entry_hatch_armed", disabled_layer: "literal-IP entry rejection", still_enforced: "validating DNS resolver + redirect policy"
+    at <FILE>.rs:<LINE>
+
+webfang: resumed from <OUT_DIR>/state/127.0.0.1.json
+webfang: breakdown: 7 discovered, 7 already committed, 0 pending
+webfang: discovery runs again on every resume and does not detect content changes

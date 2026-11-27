@@ -8,6 +8,29 @@ use crate::domain::crawl_job::DiscoveredUrl;
 use crate::domain::error::cause::NetworkCause;
 use crate::domain::CrawlErrorCategory;
 
+/// What a resumed crawl decided to skip and what it decided to re-drive.
+///
+/// Path-free by contract: the counts are domain knowledge, the state-file path
+/// is the CLI's to name (#3097 / T4). Produced from the loaded checkpoint by
+/// the same `visited ∩ settled` rule the scheduler applies, so the number the
+/// user reads is the number the run acted on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResumeStats {
+    /// URLs the resume skipped: `visited ∩ settled`.
+    ///
+    /// Named for what it is, not for the set it came from: the checkpoint's
+    /// `visited` holds every dispatched URL, and only its terminal subset is
+    /// skipped here (#3079).
+    pub skipped: usize,
+    /// Terminal verdicts the checkpoint carried.
+    pub settled: usize,
+    /// Visited URLs that are NOT terminal — dispatched by a previous run and
+    /// re-driven now because their page was never produced (#3079).
+    pub re_driving: usize,
+    /// The restored frontier, with settled URLs filtered out.
+    pub queued: usize,
+}
+
 /// Crawl result containing discovered URLs
 ///
 /// Following **api-must-use** and **api-non-exhaustive**.
@@ -39,6 +62,13 @@ pub struct CrawlResult {
     /// dispatching. A separate count is what lets it do that without moving a
     /// category.
     pub resolution_failures: usize,
+    /// The resume decision this run took, when it resumed from a checkpoint
+    /// (#3097 / T4).
+    ///
+    /// `None` on a fresh run and on a run whose checkpoint carried no
+    /// dispatched URL: there is nothing to report, and reporting zeroes would
+    /// claim a resume that never happened.
+    pub resume: Option<ResumeStats>,
 }
 
 impl CrawlResult {
@@ -56,7 +86,14 @@ impl CrawlResult {
             error_breakdown,
             transport_cause: None,
             resolution_failures: 0,
+            resume: None,
         }
+    }
+
+    /// Attach the resume decision this run took (#3097 / T4).
+    pub fn with_resume(mut self, stats: ResumeStats) -> Self {
+        self.resume = Some(stats);
+        self
     }
 
     /// Attach the classified transport cause of the run (#2824).

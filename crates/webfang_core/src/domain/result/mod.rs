@@ -2,4 +2,4 @@
 
 mod crawl_result;
 
-pub use crawl_result::CrawlResult;
+pub use crawl_result::{CrawlResult, ResumeStats};
