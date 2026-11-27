@@ -6,6 +6,7 @@ use super::persistence::{resolve_export_dir, resolve_persistence_root};
 use crate::application::crawl_options::CrawlOptions;
 use crate::cli::error::CliExit;
 use crate::cli::export_flow::{run_export, save_files, ExportConfig};
+use crate::domain::result::ResumeStats;
 
 use crate::domain;
 use crate::domain::persistence::StateStorePort;
@@ -146,6 +147,11 @@ pub(super) fn truncated_discovery_exit(detail: &str, reason: &str) -> CliExit {
 /// an empty filtered list never reaches `report_phase`'s false exit-69 path.
 /// The `discovered_count > 0` guard keeps a genuinely empty discovery on its
 /// existing route instead of masking it as resume success.
+///
+/// #3097 / T4: this function no longer prints the “nothing pending” sentence.
+/// The unified [`emit_resume_notice`] owns the user-facing resume text, and it
+/// runs BEFORE this short-circuit, so an all-committed resume still explains
+/// itself; a second message here would be a second source of truth.
 pub(super) fn resume_nothing_pending(
     opts: &CrawlOptions,
     urls_to_scrape: &[url::Url],
@@ -158,12 +164,170 @@ pub(super) fn resume_nothing_pending(
         trace_id = %root_correlation.trace_id(),
         "resume: all discovered URLs already processed, nothing pending"
         );
-        if !opts.export.quiet {
-            println!(
-"Resume: nada pendiente — {discovered_count} URL(s) ya procesadas en ejecuciones anteriores."
-);
-        }
         return Some(CliExit::Success);
     }
     None
+}
+
+/// The resume/discovery notice a run owes the operator (#3097 / T4).
+///
+/// One notice per run, on STDERR, `--quiet`-gated: a fresh run and a resumed
+/// run must be distinguishable from the output alone, and a resumed run must
+/// say what it read and what it decided to skip. The checkpoint counts ride
+/// along only when the crawl actually consulted a checkpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ResumeNotice<'a> {
+    /// The state file the run read, or `None` on a fresh run.
+    pub(super) state_path: Option<&'a std::path::Path>,
+    /// URLs discovery produced on THIS run (discovery re-runs on resume).
+    pub(super) discovered: usize,
+    /// Of those, the ones a previous run already committed.
+    pub(super) already_committed: usize,
+    /// Of those, the ones this run will drive.
+    pub(super) pending: usize,
+    /// The crawl-side checkpoint decision, when a checkpoint was consulted.
+    pub(super) checkpoint: Option<ResumeStats>,
+}
+
+/// Render the notice, one line per fact.
+///
+/// Pure and separate from the printing so the contract text is unit-testable:
+/// these strings are read by operators and asserted by
+/// `tests/resume_message_test.rs`, which makes them a surface, not a log line.
+pub(super) fn resume_notice_lines(notice: &ResumeNotice<'_>) -> Vec<String> {
+    let Some(state_path) = notice.state_path else {
+        return vec!["webfang: fresh run - no previous state consulted".to_string()];
+    };
+    let mut lines = vec![
+        format!("webfang: resumed from {}", state_path.display()),
+        format!(
+            "webfang: breakdown: {} discovered, {} already committed, {} pending",
+            notice.discovered, notice.already_committed, notice.pending
+        ),
+    ];
+    if let Some(cp) = notice.checkpoint {
+        lines.push(format!(
+            "webfang: checkpoint: {} settled, {} re-driving, {} queued",
+            cp.settled, cp.re_driving, cp.queued
+        ));
+    }
+    lines.push(
+        "webfang: discovery runs again on every resume and does not detect content changes"
+            .to_string(),
+    );
+    lines
+}
+
+/// The lines a run actually emits: the whole notice, or nothing under
+/// `--quiet`.
+///
+/// The gate is separated from the printing so it is testable without capturing
+/// stderr, and so `--quiet` silences EVERY line instead of the first one.
+pub(super) fn printed_notice_lines(quiet: bool, notice: &ResumeNotice<'_>) -> Vec<String> {
+    if quiet {
+        return Vec::new();
+    }
+    resume_notice_lines(notice)
+}
+
+/// Print the notice to STDERR, one `eprintln!` per line, unless `--quiet`.
+pub(super) fn emit_resume_notice(quiet: bool, notice: &ResumeNotice<'_>) {
+    for line in printed_notice_lines(quiet, notice) {
+        eprintln!("{line}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// A fresh run says exactly one thing, and says nothing about resuming.
+    #[test]
+    fn fresh_notice_is_one_line_and_claims_nothing_else() {
+        let lines = resume_notice_lines(&ResumeNotice {
+            state_path: None,
+            discovered: 7,
+            already_committed: 0,
+            pending: 7,
+            checkpoint: None,
+        });
+        assert_eq!(
+            lines,
+            vec!["webfang: fresh run - no previous state consulted".to_string()]
+        );
+    }
+
+    /// A resumed run names the state file, the breakdown and the staleness
+    /// note, in that order — the literal contract text operators read.
+    #[test]
+    fn resumed_notice_names_the_state_file_breakdown_and_staleness() {
+        let state = Path::new("state/site.test.json");
+        let lines = resume_notice_lines(&ResumeNotice {
+            state_path: Some(state),
+            discovered: 7,
+            already_committed: 7,
+            pending: 0,
+            checkpoint: None,
+        });
+        assert_eq!(
+            lines,
+            vec![
+                "webfang: resumed from state/site.test.json".to_string(),
+                "webfang: breakdown: 7 discovered, 7 already committed, 0 pending".to_string(),
+                "webfang: discovery runs again on every resume and does not detect content changes"
+                    .to_string(),
+            ]
+        );
+    }
+
+    /// The checkpoint line exists only when the crawl consulted one, and it
+    /// carries the numbers the scheduler acted on.
+    #[test]
+    fn checkpoint_line_appears_only_with_a_consulted_checkpoint() {
+        let state = Path::new("state/site.test.json");
+        let lines = resume_notice_lines(&ResumeNotice {
+            state_path: Some(state),
+            discovered: 7,
+            already_committed: 3,
+            pending: 4,
+            checkpoint: Some(ResumeStats {
+                skipped: 3,
+                settled: 2,
+                re_driving: 4,
+                queued: 1,
+            }),
+        });
+        assert_eq!(
+            lines[2],
+            "webfang: checkpoint: 2 settled, 4 re-driving, 1 queued"
+        );
+        assert_eq!(
+            lines.len(),
+            4,
+            "one line per fact, no duplicates: {lines:?}"
+        );
+    }
+
+    /// `--quiet` silences the WHOLE notice, not just its first line.
+    #[test]
+    fn quiet_suppresses_every_line() {
+        let notice = ResumeNotice {
+            state_path: Some(Path::new("state/site.test.json")),
+            discovered: 1,
+            already_committed: 0,
+            pending: 1,
+            checkpoint: None,
+        };
+        assert!(
+            !printed_notice_lines(false, &notice).is_empty(),
+            "the notice must exist to be suppressed"
+        );
+        assert_eq!(printed_notice_lines(true, &notice), Vec::<String>::new());
+        assert_eq!(
+            printed_notice_lines(false, &notice),
+            resume_notice_lines(&notice),
+            "the gate changes the COUNT of lines, never their text"
+        );
+    }
 }

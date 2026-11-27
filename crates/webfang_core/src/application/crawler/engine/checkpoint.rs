@@ -18,6 +18,36 @@ use crate::application::crawler::checkpoint::{
 };
 use crate::application::crawler::crawl_scheduler::CrawlScheduler;
 use crate::application::crawler::progress::CrawlProgress;
+use crate::domain::result::ResumeStats;
+
+/// The resume decision a LOADED checkpoint implies, as the counts the user
+/// reads (#3097 / T4).
+///
+/// One rule, stated once: only `visited ∩ settled` may be skipped, every other
+/// dispatched URL is re-driven, and the restored frontier drops the settled
+/// URLs. [`Engine::restore_checkpoint_state`] applies that same rule to the
+/// scheduler; this function expresses it as numbers so the resume notice and
+/// the "resume decision" event cannot describe different decisions.
+///
+/// `None` when the checkpoint carries no dispatched URL: a fresh run (or a run
+/// that created an empty checkpoint) resumed from nothing, and reporting zeroes
+/// would claim a resume that never happened.
+pub(crate) fn resume_stats(cp: &CrawlCheckpoint) -> Option<ResumeStats> {
+    if cp.visited.is_empty() {
+        return None;
+    }
+    let skipped = cp.visited.intersection(&cp.settled).count();
+    Some(ResumeStats {
+        skipped,
+        settled: cp.settled.len(),
+        re_driving: cp.visited.len() - skipped,
+        queued: cp
+            .queued
+            .iter()
+            .filter(|url| !cp.settled.contains(*url))
+            .count(),
+    })
+}
 
 impl Engine {
     /// Unified persistence — wraps `with_checkpoint` when `PersistenceMode` enables checkpointing.

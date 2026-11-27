@@ -76,10 +76,9 @@ pub async fn discover_urls(
 }
 
 /// Unified discovery output (F-14, #1232 slice 1; capture in slice 2, #1229).
-///
-/// `urls` is the ordered discovery set consumed by dry-run previews and
-/// the `plan_urls` boundary. `pages` carries the bodies captured during
-/// discovery when a sink is wired (slice 2); with `sink=None` it stays empty.
+/// `urls` is the ordered discovery set consumed by dry-run previews and the
+/// `plan_urls` boundary. `pages` carries the bodies captured during discovery
+/// when a sink is wired (slice 2); with `sink=None` it stays empty.
 #[derive(Debug, Clone, Default)]
 pub struct DiscoveryOutput {
     /// Ordered discovered URLs (seed handling stays in `plan_urls`).
@@ -87,19 +86,19 @@ pub struct DiscoveryOutput {
     /// Captured page bodies (empty while no sink is wired).
     pub pages: Vec<CapturedPage>,
     /// Per-page fetch failures counted by the Engine (`CrawlResult.errors`).
-    ///
     /// The Engine never returns `Err` for a dead page: it counts the failure
-    /// and completes `Ok` with fewer URLs. Without this count an empty `urls`
-    /// is ambiguous — a seed the SSRF guard refused, a genuinely linkless
-    /// site, and a dead seed all look identical (#1381, #1443).
+    /// and completes `Ok` with fewer URLs, so an empty `urls` is ambiguous
+    /// without it — a seed the SSRF guard refused, a genuinely linkless site,
+    /// and a dead seed all look identical (#1381, #1443).
     pub errors: usize,
     /// The crawl ended early but had already collected pages (#2338).
-    ///
     /// `Some(reason)` when the Engine returned `CrawlError::PartialRun`: the
     /// URLs and pages above are PARTIAL and the reason must still be reported
-    /// as a failure by the caller after the output is written. `None` on a
-    /// complete or outright-failed run.
+    /// as a failure by the caller after the output is written.
     pub truncated_by: Option<String>,
+    /// The crawl-side resume decision the Engine took (#3097 / T4), or `None`
+    /// when no checkpoint was consulted — discovery is where it is decided.
+    pub resume: Option<crate::domain::result::ResumeStats>,
 }
 
 /// Retry-knob override for discovery (dry-run-fail-fast).
@@ -220,6 +219,7 @@ pub async fn discover_urls_unified(
         pages,
         errors,
         truncated_by,
+        resume: result.resume,
     })
 }
 
