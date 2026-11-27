@@ -96,15 +96,19 @@ struct ServerState {
     requests: Mutex<Vec<ObservedRequest>>,
     connections: Mutex<Vec<SocketAddr>>,
     flaky_hits: AtomicUsize,
+    flaky_cookie_hits: AtomicUsize,
 }
 
 /// An ephemeral loopback HTTP/1.1 listener that journals every arrival.
 ///
-/// It serves the three routes the invariants need and keeps the connection
-/// open, so keep-alive reuse is decided by the CLIENT under test:
+/// It serves the routes the invariants and the cookie-scope tests need and keeps
+/// the connection open, so keep-alive reuse is decided by the CLIENT under test:
 ///
 /// - `/set-cookie` → `200` with `Set-Cookie: probe=1; Path=/`
 /// - `/flaky` → `503` on the first arrival, `200` afterwards
+/// - `/flaky-cookie` → `503` with `Set-Cookie: probe=1; Path=/` on the first
+///   arrival, `200` afterwards (retry + per-request jar)
+/// - `/redirect-cookie` → `302` to `/landing` with `Set-Cookie: hop=1; Path=/`
 /// - anything else → `200 ok`
 #[derive(Clone)]
 pub struct TestServer {
@@ -250,6 +254,25 @@ fn response_for(state: &ServerState, request: ObservedRequest) -> Vec<u8> {
             }
         },
         "/set-cookie" => response(200, "OK", &["set-cookie: probe=1; Path=/"], "ok"),
+        "/flaky-cookie" => {
+            let hit = state.flaky_cookie_hits.fetch_add(1, Ordering::SeqCst);
+            if hit == 0 {
+                response(
+                    503,
+                    "Service Unavailable",
+                    &["set-cookie: probe=1; Path=/"],
+                    "retry me",
+                )
+            } else {
+                response(200, "OK", &[], "ok")
+            }
+        },
+        "/redirect-cookie" => response(
+            302,
+            "Found",
+            &["location: /landing", "set-cookie: hop=1; Path=/"],
+            "",
+        ),
         _ => response(200, "OK", &[], "ok"),
     }
 }

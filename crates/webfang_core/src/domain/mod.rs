@@ -36,6 +36,7 @@ pub mod html_extraction;
 pub mod http_config;
 pub mod http_error;
 pub mod http_port;
+pub mod jar_scope;
 pub mod js_strategy;
 /// Credential store selection — the ONLY place that decides which
 /// credential store backs the keyring on this platform and with which key
@@ -160,6 +161,7 @@ pub use html_cleaner::clean_html;
 pub use http_config::{HttpClientConfig, UnknownProfileError};
 pub use http_error::{HttpError, HttpResult};
 pub use http_port::{HttpClientPort, HttpResponse};
+pub use jar_scope::JarScope;
 pub use js_strategy::JsStrategy;
 pub use link_extractor::{LinkExtractor, LinkProcessor};
 pub use llm::validation::{validate_record, validate_schema, SchemaError};
