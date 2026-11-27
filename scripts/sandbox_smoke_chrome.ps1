@@ -66,7 +66,7 @@ $taskId = 'webfang-sandbox-smoke-windows'
 $smokeArgs = @(
   'run', '--task-id', $taskId, '--timeout', '90',
   '-v', "${readPath}:ro", '-v', "${profile}:rw",
-  '--', $chrome, "--user-data-dir=$profile", '--version'
+  '--', $chrome, "--user-data-dir=$profile", '--version', '--disable-crashpad-for-testing'
 )
 
 # Native stderr redirected into the pipeline becomes ErrorRecord objects; with

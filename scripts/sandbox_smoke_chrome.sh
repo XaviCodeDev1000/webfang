@@ -75,7 +75,7 @@ mkdir -p "$PROFILE"
 # denied under the Windows AppContainer profile.
 if ! output="$("$ARAPUCA" run --task-id "$TASK_ID" --timeout 90 \
   -v "$READ_PATH:ro" -v "$PROFILE:rw" \
-  -- "$CHROME" "--user-data-dir=$PROFILE" --version 2>&1)"
+  -- "$CHROME" "--user-data-dir=$PROFILE" --version --disable-crashpad-for-testing 2>&1)"
 then
   die "arapuca run failed for $CHROME: $output"
 fi

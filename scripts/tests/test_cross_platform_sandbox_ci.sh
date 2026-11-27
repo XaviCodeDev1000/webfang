@@ -104,3 +104,9 @@ grep -Fq -- '--version' "$SH_SMOKE" || fail "posix smoke must use the Chrome ver
 grep -Fq -- '--version' "$PS_SMOKE" || fail "windows smoke must use the Chrome version probe"
 ok "both smokes use the version probe through arapuca"
 
+# T8: Chromium's official switch --disable-crashpad-for-testing prevents the
+# crash handler from creating the named pipe that AppContainer denies.
+grep -Fq -- '--disable-crashpad-for-testing' "$SH_SMOKE" || fail "posix smoke must disable crashpad under the sandbox"
+grep -Fq -- '--disable-crashpad-for-testing' "$PS_SMOKE" || fail "windows smoke must disable crashpad under the sandbox"
+ok "both smokes disable crashpad under the sandbox"
+
