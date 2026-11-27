@@ -41,14 +41,10 @@ use common::cli_harness::{
     assert_snapshot_redacted, assert_spawn_within_output_blocking, spawn_webfang,
     spawn_webfang_with, std_scraper_cmd, wait_exit, BehavioralTest, SPAWN_LATENCY_BUDGET,
 };
+use common::hub_site::{mount_hub_site, LEAVES};
 use tempfile::TempDir;
 use webfang_core::cli::crash_points::{AFTER_PERIODIC_CHECKPOINT, ENV_VAR};
 use webfang_core::cli::error::EXIT_USAGE_ERROR;
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
-
-/// Leaf pages the seed links to; the seed itself makes `LEAVES + 1` pages.
-const LEAVES: usize = 6;
 
 /// Every page of the fixture, as the export writes its `url`.
 const PAGES: usize = LEAVES + 1;
@@ -60,44 +56,6 @@ const BREAKDOWN_PREFIX: &str = "webfang: breakdown: ";
 const CHECKPOINT_PREFIX: &str = "webfang: checkpoint: ";
 const STALENESS_LINE: &str =
     "webfang: discovery runs again on every resume and does not detect content changes";
-
-/// Per-page body with enough text to clear the minimum-content guard and a
-/// distinct title so every exported line is unique.
-fn article(title: &str) -> String {
-    format!(
-        "<html><body><article><h1>{title}</h1>\
-         <p>{title} carries enough substantive text to clear the minimum content guard comfortably.</p>\
-         </article></body></html>"
-    )
-}
-
-/// Mount `/` (hub linking every leaf), the leaves, and robots.txt.
-async fn mount_hub_site(server: &MockServer) {
-    let links: String = (0..LEAVES)
-        .map(|i| format!(r#"<a href="/page-{i}">Page {i}</a>"#))
-        .collect();
-    Mock::given(method("GET"))
-        .and(path("/"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
-            "<html><body><article><h1>Hub</h1>\
-             <p>The hub page carries enough substantive text to clear the minimum content guard.</p>\
-             {links}</article></body></html>"
-        )))
-        .mount(server)
-        .await;
-    for i in 0..LEAVES {
-        Mock::given(method("GET"))
-            .and(path(format!("/page-{i}")))
-            .respond_with(ResponseTemplate::new(200).set_body_string(article(&format!("Page {i}"))))
-            .mount(server)
-            .await;
-    }
-    Mock::given(method("GET"))
-        .and(path("/robots.txt"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("User-agent: *\nAllow: /"))
-        .mount(server)
-        .await;
-}
 
 /// The one temp root every path of a test lives under, so the snapshots carry
 /// a single redacted prefix instead of three separate machine paths.

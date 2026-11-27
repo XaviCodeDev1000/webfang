@@ -587,6 +587,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/common/hub_site.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 0,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/common/mock_http.rs",
       "crate": "webfang_core",
       "area": "core",
