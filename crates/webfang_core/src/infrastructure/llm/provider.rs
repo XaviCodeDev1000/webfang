@@ -191,7 +191,12 @@ impl OpenAiCompatibleProvider {
                 provider_id: config.id.clone(),
             });
         };
-        let client = OpenAiLlmClient::with_http(http, config.base_url.clone(), secret);
+        let client = OpenAiLlmClient::with_http_and_extra_body(
+            http,
+            config.base_url.clone(),
+            secret,
+            config.extra_body.clone(),
+        );
         Ok(Self {
             client,
             config,
@@ -272,6 +277,8 @@ mod tests {
 
     fn config_with(auth: AuthSource) -> ProviderConfig {
         ProviderConfig {
+            extra_body: serde_json::Map::new(),
+            query_extra_body: serde_json::Map::new(),
             id: "test-provider".to_string(),
             display_name: "Test".to_string(),
             kind: crate::domain::providers::ProviderKind::OpenAiCompatible,

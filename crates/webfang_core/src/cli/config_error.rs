@@ -42,8 +42,9 @@ pub enum ConfigLoadError {
         #[source]
         source: std::io::Error,
     },
-    /// The file was read but is not valid TOML.
-    #[error("the configuration file {path} is not valid TOML: {source}")]
+    /// The file was read but the TOML document could not be deserialized —
+    /// a syntax error or an unknown key. The source carries the exact line.
+    #[error("the configuration file {path} could not be loaded: {source}")]
     Malformed {
         /// The path that was parsed.
         path: String,

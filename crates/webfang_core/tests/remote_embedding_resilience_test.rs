@@ -61,6 +61,8 @@ const UNRESOLVABLE_HOST: &str = "http://nonexistent.invalid/v1";
 /// avoids mutating the environment and keeps a one-line Arrange.
 fn anonymous_config(base_url: String) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "resilience-endpoint".to_string(),
         display_name: "Resilience Endpoint".to_string(),
         kind: ProviderKind::OpenAiCompatible,

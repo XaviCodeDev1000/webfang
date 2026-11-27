@@ -78,9 +78,64 @@ pub enum RegistryError {
     },
 }
 
+/// A vendor-specific JSON object merged into the request body (#3074).
+pub type ExtraBody = serde_json::Map<String, serde_json::Value>;
+
+/// Body keys WebFang owns. An operator may not set them through `extra_body`:
+/// doing so could replace `model`, `messages` or credentials after WebFang
+/// classified them, bypassing auth and budget checks.
+pub const RESERVED_REQUEST_KEYS: &[&str] = &[
+    "model",
+    "input",
+    "messages",
+    "response_format",
+    "temperature",
+    "max_tokens",
+    "auth",
+];
+
+/// Deserialize an `extra_body` map, rejecting WebFang-owned keys at load time.
+///
+/// The check is deliberately top level only: reserved keys are protocol
+/// critical at the body root, and a nested object (a tool schema, a vendor
+/// extension) may legitimately reuse one of those names.
+fn deserialize_extra_body<'de, D>(deserializer: D) -> Result<ExtraBody, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let map = <ExtraBody as serde::Deserialize>::deserialize(deserializer)?;
+    if let Some(key) = map
+        .keys()
+        .find(|key| RESERVED_REQUEST_KEYS.contains(&key.as_str()))
+    {
+        return Err(serde::de::Error::custom(format!(
+            "reserved request key '{key}' cannot be set in extra_body"
+        )));
+    }
+    Ok(map)
+}
+
+/// Overlay `query_extra_body` on `extra_body`: base keys stay, overlay keys
+/// win. Used by vault search so an asymmetric model indexes with `passage`
+/// and queries with `query` (#3074).
+#[must_use]
+pub fn merge_extra_body(base: &ExtraBody, overlay: &ExtraBody) -> ExtraBody {
+    let mut merged = base.clone();
+    for (key, value) in overlay {
+        merged.insert(key.clone(), value.clone());
+    }
+    merged
+}
+
 /// Declarative configuration of one provider (the wizard writes this into the
 /// config file).
+///
+/// Unknown keys are typos, not optional vendor extensions: a key that was
+/// silently dropped used to leave operators believing a field was configured
+/// (#3074). No field here is `#[serde(flatten)]`, so `deny_unknown_fields` is
+/// safe and needs no extra dependency.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     /// Unique provider identifier (e.g. `"openai"`, `"ollama-local"`).
     pub id: String,
@@ -137,6 +192,14 @@ pub struct ProviderConfig {
     /// proxy environment variables stay ignored in every case.
     #[serde(default, deserialize_with = "deserialize_proxy_spec_no_null")]
     pub proxy: Option<ProxySpec>,
+    /// Vendor-specific fields merged into `/embeddings` and
+    /// `/chat/completions` bodies. Empty means today's payload exactly.
+    #[serde(default, deserialize_with = "deserialize_extra_body")]
+    pub extra_body: ExtraBody,
+    /// Overlay applied by vault search to `extra_body`, so an asymmetric
+    /// embedding model can index with `passage` and query with `query`.
+    #[serde(default, deserialize_with = "deserialize_extra_body")]
+    pub query_extra_body: ExtraBody,
 }
 
 impl ProviderConfig {

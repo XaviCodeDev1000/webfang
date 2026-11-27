@@ -77,6 +77,10 @@ pub async fn run(base_url: &url::Url, id: &str, model: &str, path: &Path) -> Cli
         // `connect` writes a direct-egress record: proxy support is opt-in
         // per provider in config (ADR-0021), never synthesized here.
         proxy: None,
+        // The wizard cannot know vendor-specific fields; it writes none and
+        // leaves the operator to add them after connecting (#3074).
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
     };
 
     register(&provider, path).await

@@ -371,3 +371,99 @@ async fn valid_explicit_override_is_accepted() {
         "a valid override must be accepted.\nstderr:\n{stderr}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Unknown keys are typos, not optional extensions (#3074)
+// ---------------------------------------------------------------------------
+
+/// An unrecognized key under `[[providers]]` is a typo that used to be dropped
+/// silently: the operator believed `input_type` was configured while the wire
+/// payload never carried it. The config gate is step 5 of startup, so a refusal
+/// must happen before the mock server sees a single request.
+#[tokio::test]
+async fn explicit_override_with_unknown_provider_key_exits_78_before_any_dial() {
+    let t = BehavioralTest::new().await;
+    mount_discovery(&t).await;
+
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        "[[providers]]\nid = \"p\"\ndisplay_name = \"P\"\n\
+         kind = \"open_ai_compatible\"\nbase_url = \"https://api.example.test/v1\"\n\
+         auth = { source = \"none\" }\ncapabilities = [\"embedding\"]\n\
+         input_type = \"passage\"\n",
+    )
+    .expect("write config with an unknown provider key");
+
+    let out = t
+        .scraper_cmd()
+        .arg("--dry-run")
+        .env("WEBFANG_CONFIG", &config_path)
+        .output()
+        .expect("spawn webfang");
+
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(
+        out.status.code(),
+        Some(i32::from(EXIT_CONFIG)),
+        "an unknown provider key must exit {EXIT_CONFIG}.\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("input_type"),
+        "the error must name the rejected key, got:\n{stderr}"
+    );
+    assert_stderr_snapshot("override_has_unknown_provider_key", tmp.path(), &stderr);
+
+    let requests = t.server.received_requests().await.unwrap_or_default();
+    assert!(
+        requests.is_empty(),
+        "the config gate must reject before any dial, got {} requests",
+        requests.len()
+    );
+}
+
+/// A vendor map may not overwrite WebFang-owned body fields. This is refused
+/// at config load (#3074), so no request can ever carry a replaced `model`,
+/// `messages` or credential.
+#[tokio::test]
+async fn reserved_extra_body_key_exits_78_before_any_dial() {
+    let t = BehavioralTest::new().await;
+    mount_discovery(&t).await;
+
+    let tmp = tempfile::TempDir::new().expect("create temp dir");
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        "[[providers]]\nid = \"p\"\ndisplay_name = \"P\"\n\
+         kind = \"open_ai_compatible\"\nbase_url = \"https://api.example.test/v1\"\n\
+         auth = { source = \"none\" }\ncapabilities = [\"embedding\"]\n\
+         [providers.extra_body]\nmodel = \"attacker\"\n",
+    )
+    .expect("write config with a reserved extra_body key");
+
+    let out = t
+        .scraper_cmd()
+        .arg("--dry-run")
+        .env("WEBFANG_CONFIG", &config_path)
+        .output()
+        .expect("spawn webfang");
+
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(
+        out.status.code(),
+        Some(i32::from(EXIT_CONFIG)),
+        "a reserved body key must exit {EXIT_CONFIG}.\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("reserved request key 'model'"),
+        "the error must name the reserved key, got:\n{stderr}"
+    );
+
+    let requests = t.server.received_requests().await.unwrap_or_default();
+    assert!(
+        requests.is_empty(),
+        "the config gate must reject before any dial, got {} requests",
+        requests.len()
+    );
+}

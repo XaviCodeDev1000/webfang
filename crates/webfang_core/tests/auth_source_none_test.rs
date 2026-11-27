@@ -83,6 +83,8 @@ fn config_without_server(auth: AuthSource) -> ProviderConfig {
 /// only in base URL and in the wiremock's loopback opt-in.
 fn provider_with(base_url: url::Url, allow_loopback: bool, auth: AuthSource) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "anon-endpoint".to_string(),
         display_name: "Anonymous Endpoint".to_string(),
         kind: ProviderKind::OpenAiCompatible,

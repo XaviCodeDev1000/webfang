@@ -293,6 +293,8 @@ mod tests {
 
     fn provider(id: &str, auth: AuthSource, caps: Vec<Capability>) -> ProviderConfig {
         ProviderConfig {
+            extra_body: serde_json::Map::new(),
+            query_extra_body: serde_json::Map::new(),
             id: id.to_string(),
             display_name: id.to_string(),
             kind: ProviderKind::OpenAiCompatible,

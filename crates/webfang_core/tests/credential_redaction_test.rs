@@ -34,6 +34,8 @@ const PROVIDER_TOML: &str = "[[providers]]\nid = \"userinfo\"\ndisplay_name = \"
 
 fn provider_config() -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "userinfo".to_owned(),
         display_name: "Userinfo".to_owned(),
         kind: ProviderKind::OpenAiCompatible,

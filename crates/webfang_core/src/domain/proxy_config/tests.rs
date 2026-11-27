@@ -244,6 +244,8 @@ fn endpoint_policy_mirrors_the_definition_and_the_provider() {
 #[test]
 fn profile_pairing_sets_the_proxy_hop() {
     let destination = EndpointPolicy::from(&crate::domain::providers::ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "p".to_string(),
         display_name: "p".to_string(),
         kind: crate::domain::providers::ProviderKind::OpenAiCompatible,

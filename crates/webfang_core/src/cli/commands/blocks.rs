@@ -241,6 +241,8 @@ mod tests {
 
     fn provider(proxy: Option<ProxySpec>) -> crate::domain::providers::ProviderConfig {
         crate::domain::providers::ProviderConfig {
+            extra_body: serde_json::Map::new(),
+            query_extra_body: serde_json::Map::new(),
             id: "diag".to_string(),
             display_name: "Diag".to_string(),
             kind: ProviderKind::OpenAiCompatible,

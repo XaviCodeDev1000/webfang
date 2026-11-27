@@ -115,6 +115,11 @@ pub struct RemoteEmbeddingAdapter {
     /// ADR-0021 proxy-auth provenance for the 407 diagnostic; never a secret.
     proxy_auth_configured: bool,
     provider_id: String,
+    /// Vendor-specific request fields, flattened into every `/embeddings`
+    /// body (#3074). Owned by the adapter so no global registry state is used.
+    extra_body: crate::domain::providers::ExtraBody,
+    /// Overlay used by `embed_query*` for asymmetric embedding models.
+    query_extra_body: crate::domain::providers::ExtraBody,
     pinned_dim: Option<usize>,
     dim: OnceLock<usize>,
     /// Per-run usage accumulators (thread-safe).
@@ -325,6 +330,17 @@ impl EmbeddingPort for RemoteEmbeddingAdapter {
         Box::pin(self.embed_batch_impl(texts, request_id))
     }
 
+    fn embed_query<'a>(&'a self, text: &'a str) -> BoxFuture<'a, Result<Vec<f32>, SemanticError>> {
+        self.embed_query_impl(text)
+    }
+
+    fn embed_query_batch<'a>(
+        &'a self,
+        texts: &'a [String],
+    ) -> BoxFuture<'a, Result<Vec<Vec<f32>>, SemanticError>> {
+        self.embed_query_batch_impl(texts)
+    }
+
     fn embedding_dim(&self) -> usize {
         self.embedding_dim()
     }
@@ -356,6 +372,16 @@ impl RemoteEmbeddingAdapter {
         texts: &[String],
         request_id: uuid::Uuid,
     ) -> Result<Vec<Vec<f32>>, SemanticError> {
+        self.embed_batch_impl_with(texts, request_id, &self.extra_body)
+            .await
+    }
+
+    async fn embed_batch_impl_with(
+        &self,
+        texts: &[String],
+        request_id: uuid::Uuid,
+        extra_body: &crate::domain::providers::ExtraBody,
+    ) -> Result<Vec<Vec<f32>>, SemanticError> {
         let span = tracing::debug_span!(
             "embed_batch",
             provider_id = %self.provider_id,
@@ -374,7 +400,7 @@ impl RemoteEmbeddingAdapter {
                 // a response: cut before any provider request is sent.
                 return Err(dimension::rejection_error(&self.provider_id, 0));
             }
-            let vectors = self.post_embeddings(texts).await?;
+            let vectors = self.post_embeddings_with(texts, extra_body).await?;
             let rejected = dimension::rejected_count(&vectors, declared);
             if rejected > dimension::MAX_TOLERATED_REJECTIONS {
                 self.dimension_rejections
@@ -423,6 +449,7 @@ mod gate;
 mod http;
 mod proxy_auth;
 mod proxy_wiring;
+mod query;
 mod retry;
 mod wire;
 
@@ -430,6 +457,8 @@ mod wire;
 mod adapter_tests;
 #[cfg(test)]
 mod e2e_tests;
+#[cfg(test)]
+mod extra_body_tests;
 
 #[cfg(test)]
 mod tests {

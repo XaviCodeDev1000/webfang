@@ -35,6 +35,8 @@ pub(super) async fn serve_embeddings() -> MockServer {
 /// value — the arrange stays one line either way.
 pub(super) fn test_provider(id: &str) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: id.into(),
         display_name: display_for_id(id),
         kind: ProviderKind::OpenAiCompatible,

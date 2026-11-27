@@ -20,6 +20,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn config(base_url: &str) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "proxy-407".to_string(),
         display_name: "Proxy 407".to_string(),
         kind: ProviderKind::OpenAiCompatible,

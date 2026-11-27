@@ -34,6 +34,49 @@ fn client_for(server: &MockServer) -> OpenAiLlmClient {
     .expect("client builds")
 }
 
+/// Vendor fields are flattened at the body root (#3074). WebFang's own
+/// fields stay last so a map entry cannot replace `model` or `messages`.
+#[tokio::test]
+async fn extra_body_is_flattened_into_the_completion_body() {
+    use std::sync::Mutex;
+
+    struct Capture(Arc<Mutex<Option<serde_json::Value>>>);
+    impl Respond for Capture {
+        fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+            *self.0.lock().unwrap_or_else(|p| p.into_inner()) =
+                Some(serde_json::from_slice(&request.body).expect("body is JSON"));
+            ResponseTemplate::new(200).set_body_string(VALID_BODY)
+        }
+    }
+
+    let server = MockServer::start().await;
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(Capture(captured.clone()))
+        .mount(&server)
+        .await;
+
+    let mut client = client_for(&server);
+    client
+        .extra_body
+        .insert("reasoning_effort".to_string(), serde_json::json!("low"));
+    client
+        .send_completion(test_request())
+        .await
+        .expect("completion succeeds");
+
+    let body = captured
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
+        .expect("the mock must have captured the body");
+    assert_eq!(body["reasoning_effort"], serde_json::json!("low"));
+    assert_eq!(body["model"], serde_json::json!("stub-model"));
+    assert_eq!(body["temperature"], serde_json::json!(0.0));
+    assert!(body.get("extra_body").is_none());
+}
+
 /// Deterministic schedule: zero jitter, no sleeping, and a recorder for the
 /// computed delay so `Retry-After` is observable without wall-clock waits.
 static LAST_DELAY_MS: AtomicU64 = AtomicU64::new(0);

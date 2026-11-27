@@ -15,6 +15,8 @@ pub(super) fn opts_with_llm(extract: bool, provider_id: Option<&str>) -> CrawlOp
 
 pub(super) fn provider(id: &str, kind: ProviderKind, auth: AuthSource) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: id.to_string(),
         display_name: id.to_string(),
         kind,

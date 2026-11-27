@@ -91,6 +91,8 @@ fn policy_json(cidrs: &[&str], hosts: &[&str]) -> NetworkPolicy {
 
 fn provider(base_url: &str, network_policy: NetworkPolicy) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "vllm-lan".to_string(),
         display_name: "vLLM LAN".to_string(),
         kind: ProviderKind::OpenAiCompatible,

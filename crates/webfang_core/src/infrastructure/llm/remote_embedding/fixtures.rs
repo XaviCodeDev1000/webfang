@@ -28,6 +28,8 @@ pub(super) fn load_fixture(name: &str) -> String {
 
 pub(super) fn config_with(auth: AuthSource) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "test-remote".to_string(),
         display_name: "Test Remote".to_string(),
         kind: ProviderKind::OpenAiCompatible,

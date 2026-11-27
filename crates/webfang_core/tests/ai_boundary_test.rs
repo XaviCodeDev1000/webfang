@@ -104,6 +104,8 @@ async fn mount_provider_mocks(server: &MockServer) {
 
 fn build_service(base: &str) -> (LlmExtractionService, LlmConfig) {
     let embed_cfg = ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: "t11-embed".to_string(),
         display_name: "T11 embed".to_string(),
         kind: ProviderKind::OpenAiCompatible,

@@ -20,13 +20,26 @@ impl RemoteEmbeddingAdapter {
         &self,
         texts: &[String],
     ) -> Result<Vec<Vec<f32>>, SemanticError> {
+        self.post_embeddings_with(texts, &self.extra_body).await
+    }
+
+    /// Same guard chain with an explicit body map. Vault search passes the
+    /// `query_extra_body` overlay here; indexing and the startup probe use
+    /// `post_embeddings` with the base map.
+    pub(super) async fn post_embeddings_with(
+        &self,
+        texts: &[String],
+        extra_body: &crate::domain::providers::ExtraBody,
+    ) -> Result<Vec<Vec<f32>>, SemanticError> {
         let endpoint = format!(
             "{}/embeddings",
             self.base_url.as_str().trim_end_matches('/')
         );
         let request = EmbeddingRequest {
+            extra_body,
             model: &self.model,
             input: texts,
+            encoding_format: "float",
         };
         let mut attempt: u32 = 0;
         loop {

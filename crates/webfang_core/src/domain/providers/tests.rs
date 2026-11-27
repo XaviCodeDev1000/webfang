@@ -2,6 +2,8 @@ use super::*;
 
 fn provider(id: &str, capabilities: Vec<Capability>) -> ProviderConfig {
     ProviderConfig {
+        extra_body: serde_json::Map::new(),
+        query_extra_body: serde_json::Map::new(),
         id: id.to_string(),
         display_name: id.to_string(),
         kind: ProviderKind::OpenAiCompatible,
@@ -16,6 +18,28 @@ fn provider(id: &str, capabilities: Vec<Capability>) -> ProviderConfig {
         network_policy: crate::domain::network_policy::NetworkPolicy::default(),
         proxy: None,
     }
+}
+
+#[test]
+fn extra_body_rejects_webfang_owned_keys_at_deserialize() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"extra_body":{"model":"attacker"}}"#;
+    let err = serde_json::from_str::<ProviderConfig>(raw)
+        .expect_err("a reserved body key must fail at config load, before any dial");
+    assert!(
+        err.to_string().contains("model"),
+        "the error must name the reserved key, got: {err}"
+    );
+}
+
+#[test]
+fn extra_body_accepts_vendor_keys_and_defaults_to_empty() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"],"extra_body":{"input_type":"passage"}}"#;
+    let provider: ProviderConfig = serde_json::from_str(raw).expect("vendor key is accepted");
+    assert_eq!(
+        provider.extra_body["input_type"],
+        serde_json::json!("passage")
+    );
+    assert!(provider.query_extra_body.is_empty());
 }
 
 #[test]

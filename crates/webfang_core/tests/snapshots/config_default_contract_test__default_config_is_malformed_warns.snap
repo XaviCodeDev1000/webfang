@@ -2,7 +2,7 @@
 source: crates/webfang_core/tests/config_default_contract_test.rs
 expression: redacted
 ---
-Warning: the configuration file <OUT_DIR>/webfang/config.toml is not valid TOML: TOML parse error at line 1, column 6
+Warning: the configuration file <OUT_DIR>/webfang/config.toml could not be loaded: TOML parse error at line 1, column 6
   |
 1 | this is [[[ not valid toml
   |      ^
