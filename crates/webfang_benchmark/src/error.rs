@@ -77,6 +77,11 @@ pub enum BenchmarkError {
     #[error("report render failed: {0}")]
     Render(String),
 
+    /// A `RecordStore` operation failed (or a measurement input was invalid)
+    /// during the permanent `RecordStore::update` benchmark (T0, #3081).
+    #[error("record store measurement failed: {0}")]
+    RecordStore(String),
+
     /// Tier B live-run gate refusal (NFR-4, fail-closed): a live competitor
     /// run requires BOTH a non-empty provider API key in the environment
     /// AND an explicit CLI opt-in flag. Nothing was executed.

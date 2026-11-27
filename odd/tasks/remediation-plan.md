@@ -306,3 +306,25 @@ L27 was WRONG on one point and this slice corrected it: `src/client/layer/retry.
 Gate, both ways as L27 requires: default features 4981 passed / 8 skipped, `--all-features` 5096 passed / 8 skipped, plus check, clippy (all targets/features), fmt, rustdoc, static guards, file-size ratchet, test inventory and the real-tree golden (unchanged: it extracts `crates/webfang_core/src` only).
 
 Left alone deliberately, flagged for a later decision: `crates/webfang_core/tests/wreq_probe_test.rs` is an old committed one-off probe whose own header says "not committed"; S5 wants probes as permanent tests, but deleting it is ask-first and outside this slice.
+**L29** — Documentation consulted before T0 (owner rule, L27).
+
+Benchmark framework: there is none to import. `crates/webfang_benchmark` is a custom harness (no criterion, no divan) whose bins are `bench_tier_a`, `bench_live`, `analyze_trace`, `ci_plan`, and whose aggregation already defines the house statistics — "nearest-rank percentile over ascending-sorted values (ADR-B3)" in `src/aggregate.rs`. T0 REUSES that shape; adding a framework would be a new dependency, which is ask-first.
+
+Measurement integrity, from the standard library docs for `std::hint::black_box` (stable since Rust 1.66.0, and this workspace is on 1.100.0): it is an identity function that "hints to the compiler to be maximally pessimistic" and "should be used" for benchmarking; it blocks optimizations across its calls and forces the passed value to be computed even when the result is unused. Two documented limits matter here: it is best-effort ("cannot rely on `black_box` for correctness"), and "`black_box` has no effect on how its input is treated, only its output", so expressions may still be optimized before the call — wrap the RESULT and the inputs that the measured code must actually consume.
+
+Reads-per-update, which is the quantity T8 changes: measure it in-process from `/proc/self/io` (`rchar` and `read_bytes` deltas around a measured window) rather than by shelling out to `strace`. It is a documented kernel interface, it attributes to the process instead of to a traced child, and it needs no privilege or external tool. Platform caveat: `/proc/self/io` is Linux-only, so the metric must degrade to "unavailable" off Linux rather than fail the run.
+
+**L30** — T0 delivered: the numbers exist, and the read metric is the stable one.
+
+Benchmark: `cargo run --release -p webfang_benchmark --bin bench_record_store_update` — zero-arg, `tempfile` scratch, ONE greppable summary line per size, contract pinned by `crates/webfang_benchmark/tests/record_store_update_bench_test.rs`. It reuses the house statistic (ADR-B3 nearest-rank, `aggregate::nearest_rank` widened to `pub` instead of a second percentile style) and adds no dependency.
+
+Measured here, release + fat LTO, back to back:
+- 1 000 records: p50 **4.475–4.589 ms/update**, p95 4.642–5.136 ms, **2.000 reads/update**, rchar 679 642 B/update.
+- 10 000 records: p50 **52.855–53.666 ms/update**, p95 56.255–59.188 ms, **2.000 reads/update**, rchar 6 853 643 B/update.
+- Variance between the two runs: p50 1.5–2.5 %, p95 5–10 %; `reads_per_update`, `rchar_per_update` and `state_bytes` were BYTE-IDENTICAL. Not comparable to S14's 17.7/163.8 ms: different build, machine and load.
+
+Consequences for T8, decided here: the numeric threshold is fixed against `ms_per_update_p50` with margin, and the structural assertion is `reads_per_update` (2 today — the `load_under_lock` + `save_locked` pair S14 measured with strace — and 1 after the change). p95 is reported beside p50 and must never carry a threshold.
+
+`reads/update` is measured from `/proc/self/io` `rchar` deltas (L29), not strace; `read_bytes` reads 0 on a warm page cache and must never be read as "no reads happened".
+
+Delegation fix: the skill path I injected, `/home/xavi/.agents/skills/rust-best-practices/SKILL.md`, does not exist. The repo copy at `.agents/skills/rust-best-practices/SKILL.md` is the one to inject from now on.
