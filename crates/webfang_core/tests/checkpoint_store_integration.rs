@@ -21,6 +21,9 @@ fn checkpoint_from(
 ) -> CrawlCheckpoint {
     CrawlCheckpoint {
         visited,
+        // No terminal verdicts in this fixture: a resume re-drives every
+        // visited URL, which is the safe direction (#3079).
+        settled: HashSet::new(),
         queued: Vec::new(),
         pages_crawled,
         banned_domains,
@@ -317,5 +320,75 @@ async fn stale_checkpoint_version_is_discarded_not_resumed() {
     assert!(
         store.load(&path).is_some(),
         "the current checkpoint version must load",
+    );
+}
+
+// ===========================================================================
+// #3079 — the settled verdict set is additive: same version, serde default
+// ===========================================================================
+
+/// Adding the terminal-verdict set did NOT bump the schema: it is
+/// `#[serde(default)]`, so an older v2 payload simply loads with an empty set
+/// and re-drives more, never less. The saved payload carries the field.
+#[tokio::test]
+async fn settled_set_is_additive_and_keeps_version_2() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("checkpoint.json");
+    let store = BincodeCheckpoint::new();
+
+    let mut cp = CrawlCheckpoint::new();
+    cp.visited.insert("https://a.com/gone".to_string());
+    cp.settled.insert("https://a.com/gone".to_string());
+    cp.pages_crawled = 4;
+    store.save(&cp, &path).expect("save should succeed");
+
+    let raw = fs::read(&path).expect("read checkpoint");
+    let doc: serde_json::Value =
+        serde_json::from_slice(&raw[4..]).expect("payload is JSON after the CRC32 header");
+    assert_eq!(
+        doc.get("version").and_then(serde_json::Value::as_u64),
+        Some(2),
+        "the settled set is additive: the schema version stays 2",
+    );
+    assert_eq!(
+        doc.get("settled")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1),
+        "the payload must carry the terminal verdicts so a resume can skip them",
+    );
+
+    let loaded = store.load(&path).expect("a current checkpoint must load");
+    assert!(
+        loaded.settled.contains("https://a.com/gone"),
+        "the verdicts must round-trip",
+    );
+}
+
+/// A v2 file written BEFORE the field existed still loads: `settled` defaults
+/// to empty, which is the safe direction (everything not settled re-drives).
+#[tokio::test]
+async fn v2_payload_without_settled_loads_with_an_empty_set() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("checkpoint.json");
+
+    let legacy_v2 = serde_json::json!({
+        "visited": ["https://a.com", "https://a.com/gone"],
+        "queued": ["https://a.com/pending"],
+        "pages_crawled": 9u64,
+        "banned_domains": [],
+        "version": 2u32,
+    });
+    fs::write(&path, frame(legacy_v2.to_string().as_bytes())).expect("write v2 checkpoint");
+
+    let store = BincodeCheckpoint::new();
+    let loaded = store
+        .load(&path)
+        .expect("a v2 payload without `settled` must still load");
+    assert_eq!(loaded.visited.len(), 2, "the visited set survives");
+    assert_eq!(loaded.pages_crawled, 9, "the durable counter survives");
+    assert!(
+        loaded.settled.is_empty(),
+        "a missing `settled` defaults to empty — re-driving more is safe",
     );
 }

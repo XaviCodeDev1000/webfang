@@ -72,6 +72,8 @@ mod tests_budget;
 #[cfg(test)]
 mod tests_checkpoint;
 #[cfg(test)]
+mod tests_checkpoint_settled;
+#[cfg(test)]
 mod tests_common;
 #[cfg(test)]
 mod tests_pause;
