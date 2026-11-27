@@ -2,6 +2,9 @@
 source: crates/webfang_core/tests/behavioral/main.rs
 expression: redacted
 ---
+  <TIMESTAMP>  WARN webfang: WEBFANG_DISABLE_SSRF_ENTRY_GUARD = 1: only the literal-IP entry rejection is disabled; the validating DNS resolver and the redirect policy stay enforced on every hop. The hatch remains available in release builds — unset it to restore the full guard., notice: "ssrf_entry_hatch_armed", disabled_layer: "literal-IP entry rejection", still_enforced: "validating DNS resolver + redirect policy"
+    at <FILE>.rs:<LINE>
+
   <TIMESTAMP>  WARN <MODULE>: --output-vectors refused without --clean-ai; no vectors to export
     at <FILE>.rs:<LINE>
 
