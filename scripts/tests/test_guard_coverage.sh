@@ -36,8 +36,11 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL $1"; }
 # so ROOT resolves inside the fixture, never to the real tree.
 new_fixture() { # name
   local dir="$SCRATCH/$1"
-  mkdir -p "$dir/scripts/tests" "$dir/.github/workflows"
+  mkdir -p "$dir/scripts/tests" "$dir/scripts/lib" "$dir/.github/workflows"
   cp "$GUARD" "$dir/scripts/test_guard_coverage.sh"
+  # The guard sources the shared vocabulary; a fixture without it would red for
+  # the wrong reason and hide the behaviour under test.
+  cp "$ROOT/scripts/lib/guard_prerequisites.sh" "$dir/scripts/lib/guard_prerequisites.sh"
   printf '%s\n' "$dir"
 }
 

@@ -31,6 +31,14 @@
 # Everything runs offline against mktemp fixtures. No network, no real workflow.
 set -euo pipefail
 
+# NEGATION: every fixture below pairs an `expect_accept` with an `expect_reject`
+# (a release dispatch that must be refused), and the mutation step fails the case
+# when its sed did not apply — so a harness that stopped asserting anything
+# would go red instead of green. This marker was missing because the meta-guard
+# could not SEE this file: its name follows neither discovery convention, so the
+# `no-harness` baseline entry for `check_release_dispatch.sh` kept reproducing
+# while this harness ran the guard on every CI run (T20, #3010).
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GUARD="${RELEASE_DISPATCH_GUARD:-$REPO/scripts/check_release_dispatch.sh}"
 WORK="$(mktemp -d)"
