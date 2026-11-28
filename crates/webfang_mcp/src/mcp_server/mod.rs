@@ -216,7 +216,7 @@ impl McpHandler {
     /// The HTTP client every fetch of this tool call must go through.
     ///
     /// A bound session's own port when the scope keeps per-session jars (see
-    /// [`session_cookies`]); the container's shared facade otherwise, which is
+    /// `session_cookies`); the container's shared facade otherwise, which is
     /// the documented fallback for a request that carries no
     /// `Mcp-Session-Id` — the `initialize` call, a stateless transport and every
     /// stdio run.
