@@ -20,7 +20,7 @@ use std::process::{Command, ExitCode};
 
 // Single source of truth: read literally by test_ci_gate_structure.sh.
 const PLAN_LITERALS: &str = r#"
-FULL_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,fmt,clippy,code-quality,test-core,test-full,test-release-provenance,obscura-hybrid,security,doc-quality"
+FULL_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,fmt,clippy,code-quality,test-core,test-full,test-release-provenance,obscura-hybrid,security,doc-quality,coverage"
 NARROW_PRODUCERS="toolchain,repo-guards,artifact-guards,merge-metrics-guards,security,doc-quality"
 "#;
 

@@ -37,3 +37,4 @@ test-release-provenance	code,full	-	scripts/test_release_provenance.sh	-
 obscura-hybrid	-	-	-	the real-binary hybrid E2E runs only in CI; no local lane downloads Obscura
 security	-	ci,full	-	the cached zizmor audit runs; cargo deny and cargo audit never do
 doc-quality	-	code,full	-	cargo doc only; cargo test --doc never runs locally
+coverage	-	-	-	coverage is excluded from the local gate BY DESIGN (no coverage, no release build by default): only CI produces the lcov the floor is measured from, so no lane has a local equivalent and the floor can never be proven locally — the coverage job is the only place it runs

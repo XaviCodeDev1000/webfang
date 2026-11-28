@@ -73,9 +73,12 @@ jobs:
           install: false
       - run: mise install aqua:rust-lang/mdBook
 
-      # Version pinned for reproducibility. The tool auto-installs its own
-      # pinned nightly (nightly-2025-11-27) on first run — requires rustup +
-      # network, both present on ubuntu-latest.
+      # Version pinned for reproducibility. The tool brings and auto-installs its
+      # own pinned nightly (nightly-2025-11-27 = rustc 1.93.0-nightly), which is
+      # BELOW this workspace's `rust-version` (1.100): `cargo rustdoc` rejects the
+      # invocation before rustdoc runs, so build-llm-artifact.sh publishes the
+      # artifact with an explicit API-unavailable note instead of the API chapters.
+      # Upstream issue: https://github.com/puddlers/rustdoc-markdown/issues/1
       - name: Install rustdoc-markdown (LLM artifact renderer)
         run: cargo install rustdoc-markdown --version 0.91.0 --locked
 
@@ -156,9 +159,12 @@ jobs:
           install: false
       - run: mise install aqua:rust-lang/mdBook
 
-      # Version pinned for reproducibility. The tool auto-installs its own
-      # pinned nightly (nightly-2025-11-27) on first run — requires rustup +
-      # network, both present on ubuntu-latest.
+      # Version pinned for reproducibility. The tool brings and auto-installs its
+      # own pinned nightly (nightly-2025-11-27 = rustc 1.93.0-nightly), which is
+      # BELOW this workspace's `rust-version` (1.100): `cargo rustdoc` rejects the
+      # invocation before rustdoc runs, so build-llm-artifact.sh publishes the
+      # artifact with an explicit API-unavailable note instead of the API chapters.
+      # Upstream issue: https://github.com/puddlers/rustdoc-markdown/issues/1
       - name: Install rustdoc-markdown (LLM artifact renderer)
         run: cargo install rustdoc-markdown --version 0.91.0 --locked
 
@@ -184,10 +190,13 @@ jobs:
       #   llms.txt             small index (H1 + blockquote + word-counted file
       #                        lists) pointing at the Pages-hosted sources.
       #   00-narrative.md      mdBook chapters (single H1, chapters as H2).
-      #   01..05-<crate>.md    per-crate API rendered by rustdoc-markdown
+      #   01..04-<crate>.md    per-crate API rendered by rustdoc-markdown
       #                        v0.91.0 (rustdoc JSON backend; single H1 each,
-      #                        headings demoted one level uniformly). The tool
-      #                        auto-installs its pinned nightly on first run.
+      #                        headings demoted one level uniformly). OPTIONAL:
+      #                        the tool's pinned nightly is below this workspace's
+      #                        rust-version, so today the section degrades whole
+      #                        and llms.txt + the monolith carry an explicit
+      #                        unavailability note (never a partial API set).
       #   06-cli-reference.md  CLI flag reference chapter (#733; its help block
       #                        is CI drift-checked by the validate job).
       #   webfang-docs-full.md back-compat monolith with the pre-#734
