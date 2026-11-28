@@ -1,6 +1,7 @@
 //! OpenAI-compatible wreq adapter for `POST {base_url}/chat/completions` (#789).
 //!
-//! Wire shape: `response_format = {"type": "json_object"}`, `temperature = 0.0`.
+//! Wire shape: `response_format = {"type": "json_object"}` (unless the
+//! provider sets `response_format_mode = "none"`, #3092), `temperature = 0.0`.
 //! Error mapping reuses the existing [`ScraperError`] chain (zero new
 //! variants): 429 → `Http{429}` (TransientBackoff), ≥500 → `Http{status}`
 //! (TransientRetriable), transport → `Network`, malformed body / missing
@@ -8,6 +9,7 @@
 
 use crate::domain::credentials::ApiKey;
 use crate::domain::llm_port::{ChatMessage, LlmPort, LlmRequest, LlmResponse};
+use crate::domain::providers::{MaxTokensParameter, ResponseFormatMode};
 use crate::error::{Result, ScraperError};
 use crate::infrastructure::llm::http_client::build_guarded_http_client;
 
@@ -44,9 +46,27 @@ struct CompletionRequest<'a> {
     extra_body: &'a crate::domain::providers::ExtraBody,
     model: &'a str,
     messages: &'a [ChatMessage],
-    response_format: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
     temperature: f32,
-    max_tokens: usize,
+    /// Exactly one budget field is `Some`: [`CompletionWireOptions`] picks
+    /// which one, so the two keys can never travel together (#3092).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<usize>,
+}
+
+/// The fields this client writes itself, unless the provider opts out (#3092).
+///
+/// Defaults reproduce the pre-#3092 body byte for byte: `response_format` is
+/// sent as `{"type": "json_object"}` and the budget travels as `max_tokens`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CompletionWireOptions {
+    /// Wire-level `response_format` policy.
+    pub response_format_mode: ResponseFormatMode,
+    /// Which wire key carries the budget; the numeric value is never rewritten.
+    pub max_tokens_parameter: MaxTokensParameter,
 }
 
 /// Wire response: only the fields this client consumes.
@@ -136,6 +156,7 @@ pub struct OpenAiLlmClient {
     api_key: ApiKey,
     /// Vendor-specific fields flattened into every completion body (#3074).
     extra_body: crate::domain::providers::ExtraBody,
+    wire: CompletionWireOptions,
     retry: RetrySchedule,
 }
 
@@ -183,8 +204,26 @@ impl OpenAiLlmClient {
             base_url,
             api_key,
             extra_body,
+            wire: CompletionWireOptions::default(),
             retry: RetrySchedule::default(),
         }
+    }
+
+    /// Select which fields the client writes itself (#3092).
+    ///
+    /// Defaults are today's payload; the caller passes the provider's declared
+    /// policy so a config option is never dead configuration.
+    #[must_use]
+    pub fn with_wire_options(mut self, wire: CompletionWireOptions) -> Self {
+        self.wire = wire;
+        self
+    }
+
+    /// The wire policy in force, so the composition layer can be pinned in a
+    /// test.
+    #[must_use]
+    pub fn wire_options(&self) -> CompletionWireOptions {
+        self.wire
     }
 
     /// One attempt: classify the status before reading any body. Terminal
@@ -317,13 +356,21 @@ impl LlmPort for OpenAiLlmClient {
                 self.base_url.as_str().trim_end_matches('/')
             );
 
+            let (max_tokens, max_completion_tokens) = match self.wire.max_tokens_parameter {
+                MaxTokensParameter::MaxTokens => (Some(request.max_tokens), None),
+                MaxTokensParameter::MaxCompletionTokens => (None, Some(request.max_tokens)),
+            };
             let wire = CompletionRequest {
                 extra_body: &self.extra_body,
                 model: &request.model,
                 messages: &request.messages,
-                response_format: json!({ "type": "json_object" }),
+                response_format: match self.wire.response_format_mode {
+                    ResponseFormatMode::JsonObject => Some(json!({ "type": "json_object" })),
+                    ResponseFormatMode::None => None,
+                },
                 temperature: 0.0,
-                max_tokens: request.max_tokens,
+                max_tokens,
+                max_completion_tokens,
             };
 
             let mut attempt = 0_u32;
@@ -375,3 +422,7 @@ impl LlmPort for OpenAiLlmClient {
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "client_wire_tests.rs"]
+mod wire_tests;

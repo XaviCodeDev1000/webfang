@@ -51,7 +51,12 @@ pub struct LlmResponse {
 /// [`ScraperError::Extraction`] malformed body, [`ScraperError::Validation`]
 /// truncated output (`finish_reason == "length"`).
 pub trait LlmPort: Send + Sync {
-    /// Send one completion request (`response_format=json_object`).
+    /// Send one completion request.
+    ///
+    /// `response_format` is an adapter wire detail, never a port guarantee: the
+    /// extraction pipeline parses and schema-validates the content in every
+    /// case, including a provider that declares `response_format_mode = "none"`
+    /// (#3092), where the field is omitted from the request body only.
     fn send_completion<'a>(
         &'a self,
         request: LlmRequest,
