@@ -1210,6 +1210,16 @@ jobs:
       # defect one level up. Offline, pure bash, never touches this tree.
       - name: Guard coverage meta-guard semantics harness
         run: bash scripts/tests/test_guard_coverage.sh
+      # Semantics harnesses for the two #3105 guards, wired in the SAME commit
+      # that wires the guards themselves: the meta-guard above refuses a wired
+      # guard whose harness no workflow runs (#1707 shape), so step and wiring
+      # cannot arrive apart. Both are hermetic — no cargo, no network, no token:
+      # the release harness drives the guard's documented fixture mode plus a
+      # `gh` stub on PATH, and the coverage harness feeds canned lcov reports.
+      - name: Release check-runs gate semantics harness
+        run: bash scripts/tests/test_check_release_checks.sh
+      - name: Coverage floor semantics harness
+        run: bash scripts/tests/test_check_coverage_floor.sh
       # PRD-MIG-2026-01 F0: the migration document may not describe a tree that
       # no longer exists. This gate re-derives the versioning/backport/Miri/
       # edition DECISIONS from the live policy files and fails on drift while
@@ -2043,7 +2053,7 @@ jobs:
   # ============================================================================
   gate:
     name: CI Gate
-    needs: [change-scope, toolchain, repo-guards, artifact-guards, merge-metrics-guards, fmt, clippy, code-quality, test-core, test-full, test-release-provenance, obscura-hybrid, security, doc-quality]
+    needs: [change-scope, toolchain, repo-guards, artifact-guards, merge-metrics-guards, fmt, clippy, code-quality, test-core, test-full, test-release-provenance, obscura-hybrid, security, doc-quality, coverage]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2061,8 +2071,8 @@ jobs:
           # succeed while the skipped
           # code producers
           # (fmt, clippy, code-quality, test-core, test-full,
-          # test-release-provenance, obscura-hybrid) must be `skipped` — skipped
-          # non-applicable producers are explicitly allowed only from
+          # test-release-provenance, obscura-hybrid, coverage) must be `skipped`
+          # — skipped non-applicable producers are explicitly allowed only from
           # change-scope, and any failure/cancelled result still fails.
           echo "$RESULTS"
           SCOPE_RESULT="$(echo "$RESULTS" | jq -r '."change-scope".result')"
@@ -2084,7 +2094,7 @@ jobs:
                 exit 1
               fi
             done
-            for job in fmt clippy code-quality test-core test-full test-release-provenance obscura-hybrid; do
+            for job in fmt clippy code-quality test-core test-full test-release-provenance obscura-hybrid coverage; do
               r="$(echo "$RESULTS" | jq -r --arg j "$job" '.[$j].result')"
               if [ "$r" != "skipped" ]; then
                 echo "::error::Non-applicable code producer '$job' must be skipped in narrow scope (result=$r)."
@@ -2666,7 +2676,18 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # Coverage IS a gate producer now (`gate.needs`): a floor miss must red CI
+    # Gate. The gate fails on an UNEXPECTED `skipped`, so a producer listed in
+    # `needs:` that does not run for an event reddens that event — `merge_group`
+    # would red every queue entry and `schedule` the nightly. Both events are
+    # therefore included deliberately, and the nightly pays one instrumented
+    # workspace run as the price of a floor that actually blocks (#3105).
+    # INVARIANT: a gate producer must run for EVERY event this workflow
+    # triggers. `on.push.branches` lists main AND develop, so a ref-filtered
+    # push branch would leave `coverage` skipped on the other one — and the
+    # gate fails on an unexpected `skipped`, which would turn that branch's CI
+    # Gate permanently red. The push condition is therefore unfiltered.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'push'
     needs: [test-full]
     env:
       # Same rationale as mutants.yml:53-54 (which already sets this): coverage is a
@@ -2698,6 +2719,13 @@ jobs:
       # fail on flaky.
       - name: Generate coverage
         run: cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info --profile coverage -E 'not test(test_mcp)'
+      # The floor is a NUMBER, not a comparison to the previous upload (#3105,
+      # Guard 3). Codecov keeps reporting; this step makes a drop a RED job by
+      # re-deriving the figure from the lcov just produced and printing the
+      # measured value with its provenance. Exit 2 (floor uncalibrated, lcov
+      # unparsable) is blocking as well: "I did not measure" is never a pass.
+      - name: Coverage floor gate
+        run: bash scripts/check_coverage_floor.sh lcov.info
       - name: Report coverage
         run: |
           cargo llvm-cov report --lcov | tail -5

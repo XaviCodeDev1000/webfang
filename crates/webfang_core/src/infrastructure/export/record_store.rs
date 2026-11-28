@@ -25,7 +25,7 @@ use crate::domain::record_transition;
 
 #[path = "record_store_file.rs"]
 mod record_store_file;
-use record_store_file::{RealFs, StoreFile, StoreFs, StoreLock};
+use record_store_file::{LoadedStore, RealFs, StoreFile, StoreFs, StoreLock};
 
 // Backwards-compat shim (ADR-0012-B 3.H): the record DTOs and their error
 // moved to `domain::exporter`; re-export them so `infrastructure::export::*`
@@ -179,20 +179,24 @@ impl RecordStore {
         }
         let _lock = StoreLock::acquire(&path)?;
         crate::cli::crash_points::hit(crate::cli::crash_points::WHILE_HOLDING_LOCK);
-        self.save_locked(records, now_millis())
+        // `save` carries no loaded records, so this is the one write path that
+        // still reads the envelope back for `created_at`.
+        self.save_locked(records, Self::existing_created_at(&path), now_millis())
     }
 
-    /// Save while a lock is already held (shared by [`Self::update`]).
+    /// Save while a lock is already held (shared by [`Self::update`], which
+    /// passes the `created_at` its own load already read).
     fn save_locked(
         &self,
         records: &DomainRecords,
+        created_at: Option<i64>,
         updated_at: i64,
     ) -> Result<(), RecordStoreError> {
         let path = self.state_path();
         let envelope = StoreFile {
             version: CURRENT_VERSION,
             domain_key: self.domain_key.clone(),
-            created_at: Self::existing_created_at(&path).unwrap_or_else(now_millis),
+            created_at: created_at.unwrap_or_else(now_millis),
             updated_at,
             records: records.clone(),
         };
@@ -220,10 +224,25 @@ impl RecordStore {
         Ok(())
     }
 
+    /// The `created_at` field of an already-parsed envelope.
+    ///
+    /// Extracted from the JSON `Value` rather than from a typed envelope so the
+    /// same rule serves both versions: a v1 file has no typed `created_at` and
+    /// a v2 file always does. [`Self::existing_created_at`] adds the read for
+    /// callers that only have a path.
+    fn created_at_of(envelope: &serde_json::Value) -> Option<i64> {
+        envelope.get("created_at")?.as_i64()
+    }
+
+    /// Read `created_at` back from the file at `path`.
+    ///
+    /// Only [`Self::save`] needs this: a plain save arrives without a load, so
+    /// the envelope metadata it must preserve is not in memory yet. [`Self::update`]
+    /// gets the same value from its own load and never calls this.
     fn existing_created_at(path: &std::path::Path) -> Option<i64> {
         let bytes = fs::read(path).ok()?;
         let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-        value.get("created_at")?.as_i64()
+        Self::created_at_of(&value)
     }
 
     /// Load records for this domain.
@@ -250,7 +269,7 @@ impl RecordStore {
         // A lock-free `load` paired with a locked `save` is precisely the
         // read-modify-write window that lost records between processes.
         let _lock = StoreLock::acquire(&path)?;
-        self.load_under_lock(&path)
+        self.load_under_lock(&path).map(|loaded| loaded.records)
     }
 
     /// Load with the store lock already held.
@@ -258,7 +277,11 @@ impl RecordStore {
     /// Callers: [`Self::load`] and [`Self::update`]. Never acquires the lock
     /// itself — `StoreLock` is `flock(2)` on a fresh file descriptor, so
     /// re-entering it from the same process would self-deadlock.
-    fn load_under_lock(&self, path: &std::path::Path) -> Result<DomainRecords, RecordStoreError> {
+    ///
+    /// This is the ONE read of the store's critical section: the envelope's
+    /// `created_at` leaves here inside the returned [`LoadedStore`], so a
+    /// following write never re-reads the file (T8).
+    fn load_under_lock(&self, path: &std::path::Path) -> Result<LoadedStore, RecordStoreError> {
         self.gc_tmp_files(path);
         let bytes = fs::read(path).map_err(|source| RecordStoreError::Io {
             path: path.to_path_buf(),
@@ -296,9 +319,17 @@ impl RecordStore {
                         });
                     },
                 };
-                Ok(Self::validate_and_quarantine(file.records, path))
+                Ok(LoadedStore {
+                    records: Self::validate_and_quarantine(file.records, path),
+                    created_at: Some(file.created_at),
+                })
             },
-            1 => self.migrate_v1(path, &bytes),
+            1 => {
+                // A v1 envelope has no typed `created_at`; the field the writer
+                // used to read back is taken from the bytes already in hand.
+                let created_at = Self::created_at_of(&envelope);
+                self.migrate_v1(path, &bytes, created_at)
+            },
             found => {
                 // M3 (#1617): the DOWNGRADE rewrite. `load_or_init` turns this
                 // error into a fresh store, and the next `update()` renames a
@@ -356,13 +387,20 @@ impl RecordStore {
         crate::cli::crash_points::hit(crate::cli::crash_points::WHILE_HOLDING_LOCK);
         // Re-checked INSIDE the lock: another writer may have created the
         // file between the caller's decision and our acquisition.
-        let mut records = if path.exists() {
+        let loaded = if path.exists() {
             self.load_under_lock(&path)?
         } else {
-            DomainRecords::new()
+            LoadedStore {
+                records: DomainRecords::new(),
+                created_at: None,
+            }
         };
+        // The load above is the ONLY read of the critical section: it carries
+        // the envelope's `created_at` forward, so the write below does not read
+        // the file it would have to re-parse just for that field (T8).
+        let mut records = loaded.records;
         mutate(&mut records)?;
-        self.save_locked(&records, now_millis())
+        self.save_locked(&records, loaded.created_at, now_millis())
     }
 
     /// Load the persisted records, refusing to substitute an empty store.

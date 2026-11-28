@@ -1166,7 +1166,7 @@
       "path": "crates/webfang_core/tests/record_store_transaction_test.rs",
       "crate": "webfang_core",
       "area": "core",
-      "test_count": 5,
+      "test_count": 6,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "integration_mock"

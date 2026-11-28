@@ -26,6 +26,20 @@ pub(super) struct StoreFile {
     pub(super) records: DomainRecords,
 }
 
+/// What a locked load hands back: the records plus the envelope metadata a
+/// following write must carry forward.
+///
+/// `created_at` travels WITH the records it was parsed from, so the writer
+/// never has to re-read the file the load just read (T8: one read per
+/// [`super::RecordStore::update`]). `None` means the envelope on disk carried
+/// no `created_at` (a fresh store, or a v1 file), which is exactly the case
+/// where the old read-back fell through to `now_millis`.
+#[derive(Debug)]
+pub(super) struct LoadedStore {
+    pub(super) records: DomainRecords,
+    pub(super) created_at: Option<i64>,
+}
+
 /// Injectable filesystem surface so unit tests can fault-inject typed-error
 /// plumbing without real disk state (D6: integration fidelity comes from the
 /// SIGKILL harness, mocks only cover error plumbing).
@@ -164,11 +178,16 @@ impl RecordStore {
     /// Called only from [`super::RecordStore::load_under_lock`], which already
     /// holds the store lock; it deliberately does not re-acquire it (`flock(2)`
     /// on a second descriptor would self-deadlock).
+    ///
+    /// `created_at` is the legacy envelope's own field, read from the bytes
+    /// `load_under_lock` already has: the migration carries it into the v2
+    /// envelope instead of reading the file a second time for it.
     pub(super) fn migrate_v1(
         &self,
         path: &std::path::Path,
         original_bytes: &[u8],
-    ) -> Result<DomainRecords, RecordStoreError> {
+        created_at: Option<i64>,
+    ) -> Result<LoadedStore, RecordStoreError> {
         let legacy: serde_json::Value =
             serde_json::from_slice(original_bytes).map_err(|_| RecordStoreError::Corrupt {
                 path: path.to_path_buf(),
@@ -185,7 +204,7 @@ impl RecordStore {
                 path: path.to_path_buf(),
             })?;
 
-        let updated_at = Self::existing_created_at(path).unwrap_or_else(now_millis);
+        let updated_at = created_at.unwrap_or_else(now_millis);
         let mut migrated_mtime = None;
         // File mtime is the design-preferred updated_at when readable.
         if let Ok(modified) = fs::metadata(path).and_then(|meta| meta.modified()) {
@@ -246,14 +265,17 @@ impl RecordStore {
                 source,
             })?;
         }
-        self.save_locked(&records, updated_at)?;
+        self.save_locked(&records, created_at, updated_at)?;
         tracing::info!(
             domain = %self.domain_key,
             migrated = records.len(),
             backup = %backup_path.display(),
             "v1 state file migrated to v2 record store"
         );
-        Ok(Self::validate_and_quarantine(records, path))
+        Ok(LoadedStore {
+            records: Self::validate_and_quarantine(records, path),
+            created_at,
+        })
     }
 }
 
@@ -303,7 +325,7 @@ mod backup_name_tests {
         let store = RecordStore::with_fs("test", dir.path().to_path_buf(), Arc::new(RealFs));
 
         for _ in 0..20 {
-            store.migrate_v1(&path, legacy).expect("migration");
+            store.migrate_v1(&path, legacy, None).expect("migration");
         }
 
         let backups: Vec<_> = std::fs::read_dir(dir.path())

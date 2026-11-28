@@ -7,6 +7,10 @@
 //! (L29), and the fact that the measured loop really persists records instead
 //! of being optimized into nothing.
 //!
+//! Since T8 `update` reads the state file exactly ONCE per call: the load that
+//! feeds `mutate` is also the read that carries the envelope's `created_at`
+//! forward, so the writer never has to re-read the file it just parsed.
+//!
 //! The timing itself is NOT asserted: wall-clock numbers are machine state,
 //! not behavior. The tests exercise the arithmetic, the line format and the
 //! persistence side effect.
@@ -22,6 +26,22 @@ use webfang_core::infrastructure::export::RecordStore;
 
 /// The two sizes the benchmark reports (requirement 1).
 const REPORTED_SIZES: [usize; 2] = [1_000, 10_000];
+
+/// Updates one exported page costs: a commit marks the page in flight and then
+/// marks it committed (S14). The per-commit read count is therefore the
+/// per-update count doubled — 2 after T8, 4 before it.
+const UPDATES_PER_COMMIT: u32 = 2;
+
+/// The precision `reads_per_update` is reported with, and therefore the
+/// precision the structural assertion is stated at.
+///
+/// A window cannot be bit-exact: besides the state file, the process reads a
+/// fixed ~20 bytes per update of unrelated bytes (measured 19.8 in debug and
+/// 6.0 in release), so the raw ratio is always `1 + ~20 / state_bytes`. That
+/// term does NOT scale with the file size or with the number of reads, and the
+/// fixture below is large enough to keep it under the third decimal — a second
+/// read of the state file would add a whole `1.000`, not a thousandth.
+const REPORTED_READS_SCALE: f64 = 1_000.0;
 
 /// A `/proc/self/io` snapshot with all six documented counters, in kernel
 /// order, so parsing depends on the field names, never on line position.
@@ -78,9 +98,9 @@ fn parse_proc_io_rejects_a_missing_counter() {
     assert_eq!(parse_proc_io(""), None);
 }
 
-/// `reads/update` is the rchar delta expressed in whole state files: today
-/// `update` reads the file twice (load + `existing_created_at`), so two state
-/// files per sample means 2 reads.
+/// `reads/update` is the rchar delta expressed in whole state files: since T8
+/// `update` reads the file once (the load doubles as the `created_at` source),
+/// so one state file per sample means 1 read.
 #[test]
 fn reads_per_update_normalizes_the_delta_by_state_file_size() {
     // 10 samples, each reading a 1000-byte file twice.
@@ -96,10 +116,10 @@ fn reads_per_update_normalizes_the_delta_by_state_file_size() {
 #[test]
 fn summary_line_is_stable_and_greppable() {
     assert_eq!(
-        summary_line(&report(Some(2.0), Some(819_200), Some(0))),
+        summary_line(&report(Some(1.0), Some(409_600), Some(0))),
         "record_store_update records=1000 samples=21 state_bytes=409600 \
-         ms_per_update_p50=0.125 ms_per_update_p95=0.500 reads_per_update=2.000 \
-         rchar_per_update=819200 read_bytes_per_update=0"
+         ms_per_update_p50=0.125 ms_per_update_p95=0.500 reads_per_update=1.000 \
+         rchar_per_update=409600 read_bytes_per_update=0"
     );
 }
 
@@ -139,26 +159,34 @@ fn measure_persists_every_sample_and_reports_percentiles() {
     );
 }
 
-/// The derived `reads/update` matches the audited shape of `update`: two full
-/// reads per update (L29, S14). Asserted with a generous band because the
-/// window also counts this harness's own `/proc/self/io` reads.
+/// The structural invariant T8 delivers, measured by the kernel: `update`
+/// reads the state file exactly ONCE per call, so `rchar` advances by one state
+/// file per sample plus the fixed harness residual — reported as exactly
+/// `1.000`. A second read (the `save_locked` → `existing_created_at` one T8
+/// removes) lands here as a `2.000`.
 #[cfg(target_os = "linux")]
 #[test]
-fn measure_reports_two_full_file_reads_per_update_on_linux() {
+fn measure_reports_one_full_file_read_per_update_on_linux() {
+    // 256 records, ~87 KiB of state: large enough that the fixed per-update
+    // residual stays below the reported precision (see REPORTED_READS_SCALE).
     let dir = TempDir::new().unwrap();
-    let result = measure(dir.path(), 64, 5).expect("measurement succeeds");
+    let result = measure(dir.path(), 256, 5).expect("measurement succeeds");
 
     let reads = result
         .reads_per_update
         .expect("/proc/self/io is available on Linux");
-    assert!(
-        (1.5..=2.5).contains(&reads),
-        "update is expected to read the state file twice per call, got {reads} reads/update \
-         ({result:?})"
+    assert!(reads >= 1.0, "rchar must explain a full read: {result:?}");
+    assert_eq!(
+        (reads * REPORTED_READS_SCALE).round() / REPORTED_READS_SCALE,
+        1.0,
+        "update must read the state file exactly once per call (reported as 1.000), \
+         got {reads} reads/update ({result:?})"
     );
-    assert!(
-        result.rchar_per_update.expect("rchar delta") >= result.state_bytes,
-        "rchar must explain at least one full read per update: {result:?}"
+    assert_eq!(
+        (reads * f64::from(UPDATES_PER_COMMIT) * REPORTED_READS_SCALE).round()
+            / REPORTED_READS_SCALE,
+        2.0,
+        "a commit is two updates, so it must read the file twice (S14): {result:?}"
     );
 }
 

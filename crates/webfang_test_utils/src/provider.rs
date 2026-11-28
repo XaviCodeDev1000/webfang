@@ -41,6 +41,8 @@ pub fn test_provider_config() -> ProviderConfig {
         extra_body: Default::default(),
         query_extra_body: Default::default(),
         send_encoding_format: false,
+        response_format_mode: Default::default(),
+        max_tokens_parameter: Default::default(),
     }
 }
 

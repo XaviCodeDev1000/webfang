@@ -92,6 +92,17 @@ release = false
 name = "webfang_test_utils"
 release = false
 
+# Linux-only browser wrapper (#3051): ships the `webfang-sandbox-wrapper` binary next
+# to the CLI, so it must follow the workspace version, but it is never a release
+# subject. `publish = false` in its Cargo.toml is NOT enough — release-plz releases
+# those anyway when `git_only` is on (Configuration docs: "Packages with publish =
+# false in their Cargo.toml are also released (tagged)"), and it then fails with
+# `cannot find package "webfang_sandbox_wrapper" in workspace` while resolving next
+# versions inside its partial copy. `release = false` is the documented exclusion.
+[[package]]
+name = "webfang_sandbox_wrapper"
+release = false
+
 # Lockstep group: every processed package gets the same next version
 # (the highest among the group's next versions), tagged once as `v{{ version }}`.
 [[package]]
