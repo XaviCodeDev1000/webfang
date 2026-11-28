@@ -2682,7 +2682,12 @@ jobs:
     # would red every queue entry and `schedule` the nightly. Both events are
     # therefore included deliberately, and the nightly pays one instrumented
     # workspace run as the price of a floor that actually blocks (#3105).
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # INVARIANT: a gate producer must run for EVERY event this workflow
+    # triggers. `on.push.branches` lists main AND develop, so a ref-filtered
+    # push branch would leave `coverage` skipped on the other one — and the
+    # gate fails on an unexpected `skipped`, which would turn that branch's CI
+    # Gate permanently red. The push condition is therefore unfiltered.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'schedule' || github.event_name == 'push'
     needs: [test-full]
     env:
       # Same rationale as mutants.yml:53-54 (which already sets this): coverage is a
