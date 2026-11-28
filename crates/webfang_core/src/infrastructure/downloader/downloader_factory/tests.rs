@@ -42,11 +42,16 @@ fn skip_reason_names_each_missing_prerequisite() {
         cgroup_delegated: true,
     };
     // S3 rule 5: the wrapper is Linux-only, so non-Linux runners skip before
-    // resolving prerequisites and report the platform reason instead.
-    let expected_missing_arapuca = if cfg!(target_os = "linux") {
-        Some("arapuca binary not found")
-    } else {
+    // resolving prerequisites and report the platform reason instead. That short
+    // circuit runs FIRST, so every expectation below (not just the first one)
+    // branches on the target OS: a Linux-only expectation here failed every macOS
+    // and Windows CI leg. `cfg!` is a runtime boolean present on all targets, so
+    // the Linux gate still type-checks both arms.
+    let non_linux = !cfg!(target_os = "linux");
+    let expected_missing_arapuca = if non_linux {
         Some("non-linux platform")
+    } else {
+        Some("arapuca binary not found")
     };
     assert_eq!(missing_arapuca.skip_reason(), expected_missing_arapuca);
 
@@ -55,17 +60,24 @@ fn skip_reason_names_each_missing_prerequisite() {
         task_id: "webfang-1".into(),
         cgroup_delegated: false,
     };
-    assert_eq!(
-        missing_cgroup.skip_reason(),
+    let expected_missing_cgroup = if non_linux {
+        Some("non-linux platform")
+    } else {
         Some("cgroup controllers not delegated")
-    );
+    };
+    assert_eq!(missing_cgroup.skip_reason(), expected_missing_cgroup);
 
     let available = SandboxConfig {
         arapuca: Some(PathBuf::from("/usr/bin/arapuca")),
         task_id: "webfang-1".into(),
         cgroup_delegated: true,
     };
-    assert_eq!(available.skip_reason(), None);
+    let expected_available = if non_linux {
+        Some("non-linux platform")
+    } else {
+        None
+    };
+    assert_eq!(available.skip_reason(), expected_available);
 }
 
 #[test]
