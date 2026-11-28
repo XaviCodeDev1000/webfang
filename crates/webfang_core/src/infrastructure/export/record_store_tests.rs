@@ -28,10 +28,11 @@ pub(super) fn full_record(url: &str) -> RawRecord {
         }),
         output_location: Some("out/example.md".to_string()),
         updated_at: 1_760_000_000_000,
+        degraded_reason: None,
     }
 }
 
-// --- SC5: record roundtrip preserves all nine fields -------------------
+// --- SC5: record roundtrip preserves every field -----------------------
 
 #[test]
 fn roundtrip_preserves_all_nine_fields() {
@@ -57,6 +58,7 @@ fn roundtrip_preserves_all_nine_fields() {
     assert_eq!(original.last_error, restored.last_error);
     assert_eq!(original.output_location, restored.output_location);
     assert_eq!(original.updated_at, restored.updated_at);
+    assert_eq!(original.degraded_reason, restored.degraded_reason);
 }
 
 #[test]

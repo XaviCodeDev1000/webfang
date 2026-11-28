@@ -171,6 +171,7 @@ mod tests {
             last_error: None,
             output_location: Some("out/example.md".to_string()),
             updated_at: 1_760_000_000_000,
+            degraded_reason: None,
         }
     }
 
@@ -461,19 +462,17 @@ mod tests {
 // exactly-once, and the derived counter must observe exactly one COMMITTED
 // record across every loom interleaving.
 //
-// Run with:
-//   cargo nextest run -p webfang_core --features loom-model --lib record_transition
-// (build.rs emits cfg(loom) crate-scoped under the `loom-model` feature —
-// NOT RUSTFLAGS, whose global cfg breaks tokio/wiremock/concurrent-queue;
-// production code stays loom-free.)
+// Run with: cargo nextest run -p webfang_core --features loom-model --lib record_transition
+// (build.rs emits cfg(loom) crate-scoped under `loom-model`, NOT RUSTFLAGS —
+// whose global cfg breaks tokio/wiremock/concurrent-queue; production stays loom-free.)
 #[cfg(all(test, loom))]
 mod loom_tests {
     use super::*;
     use crate::domain::error::ErrorClass;
     use crate::domain::persistence::LastError;
 
-    /// An EXPORTED record that satisfies the invariant table, ready to
-    /// commit: attempts >= 1, output_location + content_hash set.
+    /// An EXPORTED record satisfying the invariant table (attempts >= 1,
+    /// output_location + content_hash set), ready to commit.
     fn exportable(url: &str) -> RawRecord {
         RawRecord {
             url: url.to_string(),
@@ -485,14 +484,14 @@ mod loom_tests {
             last_error: None,
             output_location: Some("out/example.md".to_string()),
             updated_at: 1_760_000_000_000,
+            degraded_reason: None,
         }
     }
 
-    /// The commit point one worker performs: production's own
-    /// [`swap_to_committed`] over the map, inside the locked window.
-    /// Returns whether THIS worker performed the transition; the slot
-    /// status re-check the helper runs under the lock is what makes it
-    /// exactly-once.
+    /// The commit point one worker performs: production's [`swap_to_committed`]
+    /// over the map, inside the locked window. Returns whether THIS worker
+    /// performed the transition; the slot status re-check the helper runs under
+    /// the lock is what makes it exactly-once.
     fn attempt_commit(slot: &loom::sync::Mutex<DomainRecords>, key: &str) -> bool {
         let mut guard = slot.lock().unwrap();
         swap_to_committed(&mut guard, key)

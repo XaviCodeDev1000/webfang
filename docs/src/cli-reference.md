@@ -622,6 +622,11 @@ AI Settings:
           
           [env: WEBFANG_OFFLINE=]
 
+      --strict-clean-ai
+          Fail with exit 78 when --clean-ai degrades ANY page to the raw fallback (default: export it with a degraded_reason marker and exit 0)
+          
+          [env: WEBFANG_STRICT_CLEAN_AI=]
+
 LLM Extraction:
       --extract-with-llm
           Run structured extraction through the configured LLM provider (requires a provider with the `completion` capability; fails at startup otherwise)

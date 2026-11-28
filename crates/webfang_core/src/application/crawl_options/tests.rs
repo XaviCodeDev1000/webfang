@@ -109,6 +109,10 @@ fn test_ai_config_defaults() {
     assert_eq!(config.threshold, 0.3);
     assert_eq!(config.max_chars, 98_304);
     assert!(!config.offline);
+    assert!(
+        !config.strict_clean_ai,
+        "the compatibility default must NOT fail a partially degraded run"
+    );
 }
 
 #[test]
@@ -117,10 +121,12 @@ fn test_ai_config_custom_values() {
         threshold: 0.7,
         max_chars: 2048,
         offline: true,
+        strict_clean_ai: true,
     };
     assert_eq!(config.threshold, 0.7);
     assert_eq!(config.max_chars, 2048);
     assert!(config.offline);
+    assert!(config.strict_clean_ai);
 }
 
 #[test]
@@ -138,6 +144,7 @@ fn test_ai_config_is_clone() {
         threshold: 0.5,
         max_chars: 1024,
         offline: true,
+        strict_clean_ai: false,
     };
     let cloned = config.clone();
     assert_eq!(config, cloned);

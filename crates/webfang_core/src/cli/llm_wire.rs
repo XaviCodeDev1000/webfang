@@ -150,6 +150,18 @@ pub async fn build_embedding_provider_with_registry(
                 .to_string(),
         ));
     }
+    // T6 / D1 (#3117): one line telling the operator that semantic cleaning
+    // sends PAGE TEXT to this endpoint. Emitted AFTER the `--offline` guard
+    // above (a run that refuses to dial announces nothing) and BEFORE the
+    // credential is resolved and the endpoint probed, so the disclosure
+    // precedes the first byte of page text that could leave the machine. Gated
+    // on `--clean-ai`: resolving the provider for vault search embeds the
+    // operator's own notes, not scraped pages, and owes no egress notice.
+    if opts.ai {
+        crate::cli::clean_ai_egress_notice::emit_clean_ai_egress_notice(
+            config.base_url.host_str().unwrap_or("unknown"),
+        );
+    }
     // Issue #1814 (slice B, AC3): `new` resolves the credential synchronously —
     // `std::fs::metadata` + file reads + `age::Decryptor` work in
     // `auth_source::resolve` — and must not occupy a Tokio worker while it

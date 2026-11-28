@@ -12,6 +12,7 @@
 
 #![allow(dead_code, unused_imports)]
 
+pub mod cleaning_site;
 pub mod cli_harness;
 pub mod fixture_server;
 pub mod fixtures;
@@ -135,6 +136,7 @@ pub fn committed_record(url: &str) -> webfang_core::infrastructure::export::RawR
         last_error: None,
         output_location: Some("out/export.jsonl".to_string()),
         updated_at: 1_760_000_000_000,
+        degraded_reason: None,
     }
 }
 

@@ -298,15 +298,15 @@ enum AiSlot {
 /// `threshold` is NOT here: it is hand-built (`AiSlot::Manual`) and pushed
 /// first by [`ai_args`], mirroring its field position.
 ///
-/// There is deliberately no "gated" counterpart any more (ADR-0004, slice C).
-/// Both `cfg` arms used to render a subset behind a cargo-feature gate
-/// and let the rest render ungated, so a build without the feature advertised
-/// a DIFFERENT CLI than one with it and answered `--threshold` / `--offline`
-/// with clap's "unexpected argument" (exit 64) instead of naming the
-/// missing capability. One list, one build path, no drift.
+/// There is deliberately no "gated" counterpart any more (ADR-0004, slice C):
+/// two `cfg` arms rendered a subset behind the cargo feature, so a build
+/// without it advertised a DIFFERENT CLI and answered `--threshold` /
+/// `--offline` with clap's "unexpected argument" (exit 64) instead of naming
+/// the missing capability. One list, one build path, no drift.
 const AI_SPEC_LAYOUT: &[AiSlot] = &[
     AiSlot::Spec(&options_spec::ai::MAX_CHARS),
     AiSlot::Spec(&options_spec::ai::OFFLINE),
+    AiSlot::Spec(&options_spec::ai::STRICT_CLEAN_AI),
 ];
 
 /// Total AI args: the hand-built `threshold`, then every spec slot. Shared by

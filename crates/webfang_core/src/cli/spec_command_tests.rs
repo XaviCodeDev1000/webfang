@@ -45,7 +45,7 @@ fn ai_arg_ids(headings: Headings) -> Vec<String> {
 
 /// The AI group's EXACT id list, shared by every assertion below so the
 /// two cargo configurations cannot drift apart by restating it.
-const EXPECTED_AI_IDS: [&str; 3] = ["threshold", "max_chars", "offline"];
+const EXPECTED_AI_IDS: [&str; 4] = ["threshold", "max_chars", "offline", "strict_clean_ai"];
 
 /// The AI surface is IDENTICAL in every cargo configuration and for both
 /// heading shapes (ADR-0004 slice C, terminal state after paso 6: the
@@ -73,12 +73,12 @@ fn assert_ai_layout_in_every_shape(label: &str) {
 
 /// The AI group renders exactly three entries in every configuration.
 #[test]
-fn ai_args_has_three_entries() {
+fn ai_args_has_four_entries() {
     assert_ai_layout_in_every_shape("always");
     assert_eq!(
         expected_ai_arg_count(),
         EXPECTED_AI_IDS.len(),
-        "one hand-built `threshold` + two spec-built slots, ungated in \
+        "one hand-built `threshold` + three spec-built slots, ungated in \
          every configuration (ADR-0004 slice C)"
     );
 }

@@ -8,6 +8,7 @@ use tracing::warn;
 
 use crate::cli::error::CliExit;
 use crate::cli::scrape_flow::{record_store_bridge, warn_unreadable_state};
+use crate::domain::cleaning_status::{DegradationCause, DegradationTally};
 use crate::domain::persistence::StateStorePort;
 use crate::domain::ScrapedContent;
 use crate::infrastructure::output::file_saver::ObsidianOptions;
@@ -64,6 +65,11 @@ pub struct ExportConfig<'a> {
     pub(crate) ai_threshold: f32,
     pub(crate) ai_max_chars: usize,
     pub(crate) ai_offline: bool,
+    /// `--strict-clean-ai` (T6, issue #3117): turn ANY degraded page into exit
+    /// 78 instead of exporting the raw fallback. The default stays `false`,
+    /// which keeps today's all-or-nothing behaviour (`#543`) as the
+    /// compatibility contract.
+    pub(crate) ai_strict: bool,
 }
 
 /// Run the export flow: AI-cleaned or standard export.
@@ -176,7 +182,13 @@ async fn run_ai_export(
     // during it stops at the next page instead of running to the end (and
     // paying for embeddings the user already asked to stop paying for). The
     // token is borrowed here and moved into the blocking closure below.
-    let cleaned_chunks = clean_all_pages(&config.results, &cleaner, config.cancel.as_ref()).await?;
+    let cleaned_chunks = clean_all_pages(
+        &config.results,
+        &cleaner,
+        config.cancel.as_ref(),
+        config.ai_strict,
+    )
+    .await?;
 
     info!(
         "AI cleaning complete: {} chunks from {} pages",
@@ -299,12 +311,15 @@ struct CleaningTally {
     failed: usize,
     fallback: usize,
     first_error: Option<SemanticError>,
+    /// Per-variant breakdown of the degraded pages (T6, issue #3117).
+    degradation: DegradationTally,
 }
 
 impl CleaningTally {
     fn with_capacity(pages: usize) -> Self {
         Self {
             chunks: Vec::with_capacity(pages * 2),
+            degradation: DegradationTally::new(pages),
             ..Self::default()
         }
     }
@@ -350,13 +365,24 @@ impl CleaningTally {
                 "Falló la infraestructura de IA (error fatal, no reintentable): {e}"
             ))),
             ErrorClass::DomainRecoverable => {
+                // One cause, one message (T6, issue #3117). The warning names
+                // the variant THIS page actually failed with, as a structured
+                // field — the structured fields carry the values, the message
+                // carries the prose, so a log query never has to parse it.
+                let cause = degradation_cause(&e);
                 warn!(
                     url = %url,
+                    degraded_reason = cause.map_or("unknown", DegradationCause::as_str),
                     error = %e,
-                    "chunk exceeds character limit; using raw content fallback"
+                    "semantic cleaning degraded this page to the raw content fallback"
                 );
-                self.chunks
-                    .push(DocumentChunk::from_scraped_content(result));
+                self.chunks.push(fallback_chunk(result, cause));
+                if let Some(cause) = cause {
+                    // The tally and the marker speak the same vocabulary: one
+                    // entry per degraded page, in the same variant name the
+                    // JSONL line and the record store carry.
+                    self.degradation.record(cause);
+                }
                 self.fallback += 1;
                 if self.first_error.is_none() {
                     self.first_error = Some(e);
@@ -404,6 +430,52 @@ impl CleaningTally {
     }
 }
 
+/// The degradation cause a page failure carries, when it has one (T6).
+///
+/// Only the `DomainRecoverable` variants are causes: an infrastructure-fatal
+/// failure aborts the run instead of degrading a page, so it never reaches
+/// here.
+fn degradation_cause(e: &SemanticError) -> Option<DegradationCause> {
+    match e {
+        SemanticError::ChunkTooLarge { .. } => Some(DegradationCause::ChunkTooLarge),
+        SemanticError::Tokenize(_) => Some(DegradationCause::Tokenize),
+        SemanticError::InvalidSpan { .. } => Some(DegradationCause::InvalidSpan),
+        SemanticError::Inference(_) => None,
+    }
+}
+
+/// Build the raw-fallback chunk for a page the cleaner could not clean, and
+/// stamp the degradation marker onto it when the cause is known (T6).
+///
+/// The marker rides in the chunk metadata because that is the ONE structure
+/// reaching both artefacts: the JSONL exporter promotes it to a top-level
+/// field ([`crate::infrastructure::export::WebfangMetadata`]) and the export
+/// factory reads it when it commits the durable record.
+fn fallback_chunk(result: &ScrapedContent, cause: Option<DegradationCause>) -> DocumentChunk {
+    let mut chunk = DocumentChunk::from_scraped_content(result);
+    if let Some(cause) = cause {
+        chunk.metadata.insert(
+            crate::domain::cleaning_status::DEGRADED_REASON_KEY.to_string(),
+            cause.as_str().to_string(),
+        );
+    }
+    chunk
+}
+
+/// The typed exit `--strict-clean-ai` raises on a degraded run.
+///
+/// Deliberately does NOT re-print the rendered tally: the summary line is
+/// emitted once, above this, and an error that repeated it would make the
+/// operator read the same numbers twice and a log query count two summaries.
+fn strict_clean_ai_exit(tally: &DegradationTally) -> CliExit {
+    CliExit::ConfigError(format!(
+        "--strict-clean-ai: semantic cleaning degraded {} of {} pages; the run refuses to \
+         export the raw fallback text (drop the flag to export it with its marker instead)",
+        tally.degraded(),
+        tally.total()
+    ))
+}
+
 /// Run the cleaner over every scraped page concurrently and fold the results
 /// into a single chunk list.
 ///
@@ -418,10 +490,15 @@ impl CleaningTally {
 /// returned (the caller exports them as the drain); pages still in flight are
 /// dropped, and a cancelled run never escalates the `#543` total-failure
 /// guard into a config error.
+///
+/// T6 (issue #3117) adds two more outcomes for a COMPLETED phase: one tally
+/// line when any page degraded, and — only under `strict` — a configuration
+/// error that refuses to hand back degraded text.
 async fn clean_all_pages(
     results: &[ScrapedContent],
     cleaner: &std::sync::Arc<dyn SemanticCleaner>,
     cancel: Option<&tokio_util::sync::CancellationToken>,
+    strict: bool,
 ) -> Result<Vec<DocumentChunk>, CliExit> {
     let mut pending: futures::stream::FuturesUnordered<_> = results
         .iter()
@@ -468,6 +545,20 @@ async fn clean_all_pages(
         return Ok(tally.chunks);
     }
 
+    // T6 (#3117): ONE line stating what the phase cost, emitted only when a
+    // page actually degraded — a clean run owes the operator no new line, and
+    // a line that always printed "0 degraded" would be noise nobody reads.
+    if tally.degradation.is_degraded() {
+        warn!("{}", tally.degradation);
+    }
+
+    // `--strict-clean-ai` is the ONLY way a PARTIAL degradation becomes a
+    // configuration error. The default keeps today's behaviour: export the raw
+    // fallback with its marker and exit 0 (compatibility, item 5).
+    if strict && tally.degradation.is_degraded() {
+        return Err(strict_clean_ai_exit(&tally.degradation));
+    }
+
     if let Some(exit) = tally.systemic_failure(results.len()) {
         return Err(exit);
     }
@@ -495,259 +586,41 @@ pub fn save_files(
     }
 }
 
+/// A `ScrapedContent` fixture the sibling test modules share.
+///
+/// One definition, not one per test file: the two modules below build the same
+/// nine-field literal, and a second copy is exactly what the duplication
+/// ratchet refuses (the same reason `common::hub_site` exists for the binary
+/// tests).
+#[cfg(test)]
+pub(crate) fn test_scraped(url: &str, title: &str, body: &str) -> crate::domain::ScrapedContent {
+    crate::domain::ScrapedContent {
+        title: title.to_string(),
+        content: body.to_string(),
+        url: crate::domain::value_objects::ValidUrl::parse(url).expect("valid test url"),
+        excerpt: None,
+        author: None,
+        date: None,
+        html: None,
+        assets: Vec::new(),
+        correlation_id: None,
+        quality_hint: None,
+    }
+}
+
 // The AI export path is ungated (ADR-0004 paso 6): the cleaner runs over
 // whatever `EmbeddingPort` the run wired, and the mock cleaner below only
 // needs the core `SemanticCleaner` trait, which no longer depends on ONNX.
+//
+// The test modules live in sibling files so this one stays inside the
+// 500-line ratchet it is grandfathered under: blocking-pool dispatch pins,
+// degradation-variant coverage, and the systemic/cancellation guards.
 #[cfg(test)]
-mod tests {
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::sync::Arc;
-
-    use crate::cli::error::CliExit;
-    use crate::domain::semantic_cleaner::{private::Sealed, SemanticCleaner};
-    use crate::domain::value_objects::ValidUrl;
-    use crate::domain::DocumentChunk;
-    use crate::domain::ScrapedContent;
-    use crate::error::SemanticError;
-
-    use super::clean_all_pages;
-
-    /// Mock cleaner that always fails — used to assert total-failure propagation.
-    struct FailingCleaner;
-
-    impl Sealed for FailingCleaner {}
-
-    impl SemanticCleaner for FailingCleaner {
-        fn clean<'a>(
-            &'a self,
-            _url: &'a str,
-            _html: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<DocumentChunk>, SemanticError>> + Send + 'a>>
-        {
-            Box::pin(async move {
-                Err(SemanticError::Inference(
-                    "mock cleaner always fails (#543 regression)".into(),
-                ))
-            })
-        }
-
-        fn max_chars(&self) -> usize {
-            512
-        }
-
-        fn is_ready(&self) -> bool {
-            true
-        }
-    }
-
-    fn sample_result(url: &str, html: &str) -> ScrapedContent {
-        ScrapedContent {
-            title: String::new(),
-            content: String::new(),
-            url: ValidUrl::parse(url).expect("valid test url"),
-            excerpt: None,
-            author: None,
-            date: None,
-            html: Some(html.to_string()),
-            assets: Vec::new(),
-            correlation_id: None,
-            quality_hint: None,
-        }
-    }
-
-    /// #543 regression: when EVERY page fails to clean, the pipeline must return
-    /// an error (non-zero exit) instead of silently exiting 0 with raw fallback.
-    ///
-    /// With the ErrorClass fail-fast design (#581 follow-up), an infrastructure-
-    /// fatal error (Inference/ModelLoad) aborts the whole crawl on the FIRST
-    /// page instead of processing all pages just to discover they all fail.
-    #[tokio::test]
-    async fn test_clean_all_pages_total_failure_propagates_error() {
-        let cleaner: Arc<dyn SemanticCleaner> = Arc::new(FailingCleaner);
-        let results = vec![
-            sample_result("https://example.com/a", "<p>a</p>"),
-            sample_result("https://example.com/b", "<p>b</p>"),
-        ];
-
-        let outcome = clean_all_pages(&results, &cleaner, None).await;
-
-        // Inference error is InternalFatal → fail-fast: abort immediately with
-        // a config error instead of waiting for all pages to fail.
-        match outcome {
-            Err(CliExit::ConfigError(msg)) => {
-                assert!(
-                    msg.contains("fatal") || msg.contains("infraestructura"),
-                    "error should indicate infrastructure failure: {msg}"
-                );
-            },
-            other => panic!(
-                "expected Err(CliExit::ConfigError) for infrastructure failure, got {:?}",
-                std::mem::discriminant(&other)
-            ),
-        }
-    }
-
-    /// Build the chunk a healthy page would produce, with a non-empty body.
-    fn cleaned_chunk(url: &str, html: &str) -> DocumentChunk {
-        let mut page = sample_result(url, html);
-        page.content = html.to_string();
-        DocumentChunk::from_scraped_content(&page)
-    }
-
-    /// Cleaner whose per-page behavior is scripted by the test: URLs carrying
-    /// `slow` never resolve (a remote embedding call still in flight when the
-    /// signal arrives), every other page returns one chunk immediately.
-    struct ScriptedCleaner {
-        hang_slow: bool,
-    }
-
-    impl Sealed for ScriptedCleaner {}
-
-    impl SemanticCleaner for ScriptedCleaner {
-        fn clean<'a>(
-            &'a self,
-            url: &'a str,
-            html: &'a str,
-        ) -> Pin<Box<dyn Future<Output = Result<Vec<DocumentChunk>, SemanticError>> + Send + 'a>>
-        {
-            let hang = self.hang_slow && url.contains("slow");
-            Box::pin(async move {
-                if hang {
-                    std::future::pending::<()>().await;
-                }
-                Ok(vec![cleaned_chunk(url, html)])
-            })
-        }
-
-        fn max_chars(&self) -> usize {
-            512
-        }
-
-        fn is_ready(&self) -> bool {
-            true
-        }
-    }
-
-    /// #2270: a cancelled token stops the cleaning at the NEXT page and keeps
-    /// the work that already finished. The page still in flight is dropped
-    /// instead of awaited, so the run cannot keep paying for embeddings the
-    /// user already asked it to stop requesting.
-    #[tokio::test]
-    async fn test_clean_all_pages_stops_at_the_next_page_when_cancelled() {
-        let cleaner: Arc<dyn SemanticCleaner> = Arc::new(ScriptedCleaner { hang_slow: true });
-        let results = vec![
-            sample_result("https://example.com/fast", "<p>fast</p>"),
-            sample_result("https://example.com/slow", "<p>slow</p>"),
-        ];
-        let token = tokio_util::sync::CancellationToken::new();
-        token.cancel();
-
-        let outcome = clean_all_pages(&results, &cleaner, Some(&token))
-            .await
-            .expect("a cancelled cleaning is not an error");
-
-        assert_eq!(
-            outcome.len(),
-            1,
-            "only the page that already finished may survive the drain"
-        );
-        assert!(
-            outcome[0].url.ends_with("/fast"),
-            "the surviving chunk must be the completed page, got {}",
-            outcome[0].url
-        );
-    }
-
-    /// Regression guard for the stream rewrite: WITHOUT a token every page is
-    /// still cleaned and folded — cancellation must not swallow work.
-    #[tokio::test]
-    async fn test_clean_all_pages_without_token_cleans_every_page() {
-        let cleaner: Arc<dyn SemanticCleaner> = Arc::new(ScriptedCleaner { hang_slow: false });
-        let results = vec![
-            sample_result("https://example.com/one", "<p>one</p>"),
-            sample_result("https://example.com/two", "<p>two</p>"),
-        ];
-
-        let outcome = clean_all_pages(&results, &cleaner, None)
-            .await
-            .expect("an uncancelled cleaning succeeds");
-
-        assert_eq!(outcome.len(), 2, "every page must be folded exactly once");
-    }
-}
-
+#[path = "export_flow_clean_tests.rs"]
+mod cleaning_guards;
 #[cfg(test)]
-mod standard_export_dispatch {
-    //! Behavior-preservation pins for the blocking-pool dispatch
-    //! (issue #1814, slice B AC4): moving `process_results` onto the blocking
-    //! pool must not change what the export writes or reports. The off-runtime
-    //! scheduling property itself is proven by the starvation tests in
-    //! `llm_wire.rs` and the MCP export handler suite.
-
-    use std::sync::Arc;
-
-    use super::{run_standard_export, ExportConfig};
-    use crate::domain::value_objects::ValidUrl;
-    use crate::domain::ScrapedContent;
-
-    fn scraped(url: &str, title: &str, body: &str) -> ScrapedContent {
-        ScrapedContent {
-            title: title.to_string(),
-            content: body.to_string(),
-            url: ValidUrl::parse(url).expect("valid test url"),
-            excerpt: None,
-            author: None,
-            date: None,
-            html: None,
-            assets: Vec::new(),
-            correlation_id: None,
-            quality_hint: None,
-        }
-    }
-
-    fn config_for(
-        results: Vec<ScrapedContent>,
-        output_dir: std::path::PathBuf,
-    ) -> ExportConfig<'static> {
-        ExportConfig {
-            results: Arc::from(results),
-            output_dir,
-            format: crate::OutputFormat::default(),
-            export_format: crate::ExportFormat::Jsonl,
-            clean_ai: false,
-            quick_save: false,
-            vault_path: None,
-            obsidian_options: Default::default(),
-            state_store: None,
-            resume: false,
-            cancel: None,
-            ai_threshold: 0.5,
-            ai_max_chars: 512,
-            ai_offline: false,
-        }
-    }
-
-    #[tokio::test]
-    async fn run_standard_export_writes_jsonl_and_reports_urls() {
-        let tmp = tempfile::TempDir::new().expect("tmpdir");
-        let config = config_for(
-            vec![
-                scraped("https://example.com/a", "A", "body a"),
-                scraped("https://example.com/b", "B", "body b"),
-            ],
-            tmp.path().to_path_buf(),
-        );
-
-        let urls = run_standard_export(config).await.expect("export succeeds");
-
-        assert_eq!(urls.len(), 2, "both items must be reported as processed");
-        let body =
-            std::fs::read_to_string(tmp.path().join("export.jsonl")).expect("jsonl is written");
-        assert_eq!(
-            body.lines().filter(|l| !l.trim().is_empty()).count(),
-            2,
-            "both items must reach the export file"
-        );
-    }
-}
+#[path = "export_flow_tests.rs"]
+mod degradation_tests;
+#[cfg(test)]
+#[path = "export_flow_dispatch_tests.rs"]
+mod standard_export_dispatch;

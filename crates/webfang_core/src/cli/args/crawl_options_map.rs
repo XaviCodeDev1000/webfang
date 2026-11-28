@@ -224,5 +224,6 @@ fn build_ai_config(args: &Args) -> crate::application::crawl_options::AiConfig {
         threshold: args.ai.threshold,
         max_chars: args.ai.max_chars,
         offline: args.ai.offline,
+        strict_clean_ai: args.ai.strict_clean_ai,
     }
 }

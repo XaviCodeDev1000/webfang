@@ -269,6 +269,7 @@ mod tests {
             last_error: None,
             output_location: Some(output_location.to_string()),
             updated_at: 1,
+            degraded_reason: None,
         }
     }
 

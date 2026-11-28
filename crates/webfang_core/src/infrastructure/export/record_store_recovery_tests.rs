@@ -28,6 +28,7 @@ pub(super) fn full_record(url: &str) -> RawRecord {
         }),
         output_location: Some("out/example.md".to_string()),
         updated_at: 1_760_000_000_000,
+        degraded_reason: None,
     }
 }
 
