@@ -365,8 +365,21 @@ mod tests {
         .expect_err("a resume into a different output must be refused");
         match err {
             CliExit::UsageError(message) => {
+                // The message renders `normalize(parent).display()`, and
+                // `std::path::absolute` normalizes separators to the platform's.
+                // A `'/'` literal therefore only matches on Unix. Build the
+                // expected directory through the SAME helper so the rendering
+                // is identical on every target instead of merely likely.
+                let recorded_dir = normalize(&std::path::Path::new("run-a").join("site.test"));
+                // A degraded expected value would make the `contains` below
+                // vacuously true (`message.contains("")` always passes), so the
+                // test would stop being able to fail at all.
                 assert!(
-                    message.contains("run-a/site.test"),
+                    !recorded_dir.as_os_str().is_empty(),
+                    "the expected directory must not be empty, or the contains() below is vacuous"
+                );
+                assert!(
+                    message.contains(&recorded_dir.display().to_string()),
                     "the error must name the recorded directory: {message}"
                 );
                 assert!(
