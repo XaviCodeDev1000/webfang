@@ -433,6 +433,11 @@ impl RecordStorePort for RecordStore {
 #[cfg(test)]
 #[path = "record_store_tests.rs"]
 mod tests;
+// The T6 degradation-marker coverage lives in its own file: both modules sit
+// near the 500-line ratchet and neither may grow into the other's budget.
+#[cfg(test)]
+#[path = "record_store_marker_tests.rs"]
+mod marker_tests;
 
 #[cfg(test)]
 #[path = "record_store_recovery_tests.rs"]

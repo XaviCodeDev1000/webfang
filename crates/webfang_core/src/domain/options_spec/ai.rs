@@ -180,6 +180,39 @@ pub const OFFLINE: OptionSpec = OptionSpec {
     value_delimiter: None,
 };
 
+/// `--strict-clean-ai` (env `WEBFANG_STRICT_CLEAN_AI`, bool SetTrue).
+///
+/// T6 (issue #3117) / plan decision D1. Without it a partial degradation is
+/// invisible: 9 of 10 pages can fall back to raw text and the run still exits
+/// 0. The flag is the ONLY way to turn that into exit 78, and its default is
+/// `false` — the compatibility contract is today's all-or-nothing behaviour
+/// (`#543`: a run where EVERY page degrades already fails).
+///
+/// Ungated like the rest of the group: the behaviour it configures is the
+/// export flow's, which every build carries.
+///
+/// It lives in the AI group rather than next to `--clean-ai` (crawler group)
+/// only because the crawler group is a full-size SSOT surface; the help text
+/// names the flag it qualifies, and the `AI Settings` heading is where an
+/// operator reading about semantic cleaning looks.
+pub const STRICT_CLEAN_AI: OptionSpec = OptionSpec {
+    id: "strict_clean_ai",
+    value_name: "STRICT_CLEAN_AI",
+    long: "strict-clean-ai",
+    short: None,
+    aliases: &[],
+    visible_aliases: &[],
+    env: Some("WEBFANG_STRICT_CLEAN_AI"),
+    default: Some(DefaultValue::Bool(false)),
+    nullable: false,
+    description_override: None,
+    help: "Fail with exit 78 when --clean-ai degrades ANY page to the raw fallback (default: export it with a degraded_reason marker and exit 0)",
+    heading: Some("AI Settings"),
+    kind: ValueKind::Bool,
+    feature_gate: None,
+    value_delimiter: None,
+};
+
 /// All AI-group options, in `AiArgs` field-declaration order. The
 /// spec entry for `threshold` is included for parity-table completeness
 /// (so the equivalence test can iterate `GROUP`); the runtime builder
@@ -190,7 +223,7 @@ pub const OFFLINE: OptionSpec = OptionSpec {
 /// the module docs. `webfang_mcp`'s parity test pins that by asserting the
 /// ungated set equals the WHOLE group, so a future re-gating of any entry
 /// fails there rather than shipping a flag that vanishes on one build.
-pub const GROUP: &[OptionSpec] = &[THRESHOLD, MAX_CHARS, OFFLINE];
+pub const GROUP: &[OptionSpec] = &[THRESHOLD, MAX_CHARS, OFFLINE, STRICT_CLEAN_AI];
 
 #[cfg(test)]
 mod tests {

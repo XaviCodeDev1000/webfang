@@ -262,7 +262,7 @@ pub fn commit_flushed_pages(
     for (url, content) in pages {
         // Same digest the JSONL exporter stamps into `checksum_sha256`.
         let content_hash = format!("{:x}", Sha256::digest(content.content.as_bytes()));
-        session.commit_item(url, content_hash, output_path.to_path_buf(), &run_id);
+        session.commit_item(url, content_hash, output_path.to_path_buf(), &run_id, None);
     }
     session.final_persist();
 }

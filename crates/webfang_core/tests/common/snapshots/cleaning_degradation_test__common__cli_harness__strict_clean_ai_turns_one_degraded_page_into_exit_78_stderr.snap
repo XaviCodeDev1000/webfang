@@ -1,0 +1,23 @@
+---
+source: crates/webfang_core/tests/common/cli_harness.rs
+expression: redacted
+---
+  <TIMESTAMP>  WARN webfang: The default relevance threshold (0.3) is calibrated for Granite (local ONNX). Without a local model, a remote endpoint retains a different meaning for the same number: choose `--threshold` (or `WEBFANG_THRESHOLD`) based on your model. Reference: ADR-0004, section «Orphaned default threshold»., notice: "orphan_relevance_threshold", threshold_used: 0.3, calibrated_for: "granite", replacement: "--threshold|WEBFANG_THRESHOLD"
+    at <FILE>.rs:<LINE>
+
+  <TIMESTAMP>  WARN webfang: semantic cleaning sends page text to the configured embeddings endpoint: page text leaves this machine. The notice names the host only; pass --offline to refuse every embeddings provider, or drop --clean-ai to keep the raw extracted text., notice: "clean_ai_egress", endpoint_host: 127.0.0.1
+    at <FILE>.rs:<LINE>
+
+  <TIMESTAMP>  WARN webfang: WEBFANG_DISABLE_SSRF_ENTRY_GUARD = 1: only the literal-IP entry rejection is disabled; the validating DNS resolver and the redirect policy stay enforced on every hop. The hatch remains available in release builds — unset it to restore the full guard., notice: "ssrf_entry_hatch_armed", disabled_layer: "literal-IP entry rejection", still_enforced: "validating DNS resolver + redirect policy"
+    at <FILE>.rs:<LINE>
+
+  <TIMESTAMP>  WARN <MODULE>: semantic cleaning degraded this page to the raw content fallback, url: http://127.0.0.1:<PORT>/long, degraded_reason: "ChunkTooLarge", error: Chunk 0 exceeds character limit: 692 > 200
+    at <FILE>.rs:<LINE>
+
+  <TIMESTAMP>  WARN <MODULE>: Semantic cleaning: 1/3 degraded (ChunkTooLarge: 1)
+    at <FILE>.rs:<LINE>
+
+  <TIMESTAMP> ERROR <MODULE>: Export failed, error: ConfigError("--strict-clean-ai: semantic cleaning degraded 1 of 3 pages; the run refuses to export the raw fallback text (drop the flag to export it with its marker instead)")
+    at <FILE>.rs:<LINE>
+
+Error: --strict-clean-ai: semantic cleaning degraded 1 of 3 pages; the run refuses to export the raw fallback text (drop the flag to export it with its marker instead)

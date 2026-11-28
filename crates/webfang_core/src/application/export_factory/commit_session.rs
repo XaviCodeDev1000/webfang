@@ -332,6 +332,7 @@ impl<'a> CommitSession<'a> {
         content_hash: String,
         output_location: PathBuf,
         run_id: &RunId,
+        degraded_reason: Option<&str>,
     ) {
         // Crash-injection point: exporter returned (flush ack received)
         // but EXPORTED checkpoint not yet saved - the critical D3 window.
@@ -384,6 +385,11 @@ impl<'a> CommitSession<'a> {
             payload.attempts += 1;
             payload.last_error = None; // success clears last_error (SC6)
             payload.updated_at = now_millis();
+            // T6 (#3117): the durable record states whether the text it stands
+            // for is the RAW fallback and why. `None` CLEARS a previous
+            // run's marker — a page that cleans successfully is no longer
+            // degraded, and the field always describes the last write.
+            payload.degraded_reason = degraded_reason.map(str::to_string);
         }
         // Step 2–3: EXPORTED checkpoint durable BEFORE the commit point.
         let exported = processed.export_flushed(output_location);

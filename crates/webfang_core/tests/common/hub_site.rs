@@ -30,20 +30,42 @@ pub fn article(title: &str) -> String {
     )
 }
 
+/// The hub body: a title, enough text to clear the content guard, and the
+/// links the caller supplies. Shared so a second hub-shaped site cannot drift
+/// into its own copy of the same nine lines.
+#[must_use]
+pub fn hub_body(links: &str) -> String {
+    format!(
+        "<html><body><article><h1>Hub</h1>\
+         <p>The hub page carries enough substantive text to clear the minimum content guard.</p>\
+         {links}</article></body></html>"
+    )
+}
+
+/// Mount the hub at `/` with `links` as its body.
+pub async fn mount_hub(server: &MockServer, links: &str) {
+    Mock::given(method("GET"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(hub_body(links)))
+        .mount(server)
+        .await;
+}
+
+/// Mount an allow-everything `robots.txt`.
+pub async fn mount_robots(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/robots.txt"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("User-agent: *\nAllow: /"))
+        .mount(server)
+        .await;
+}
+
 /// Mount `/` (hub linking every leaf), `/page-{i}` and `robots.txt`.
 pub async fn mount_hub_site(server: &MockServer) {
     let links: String = (0..LEAVES)
         .map(|i| format!(r#"<a href="/page-{i}">Page {i}</a>"#))
         .collect();
-    Mock::given(method("GET"))
-        .and(path("/"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(format!(
-            "<html><body><article><h1>Hub</h1>\
-             <p>The hub page carries enough substantive text to clear the minimum content guard.</p>\
-             {links}</article></body></html>"
-        )))
-        .mount(server)
-        .await;
+    mount_hub(server, &links).await;
     for i in 0..LEAVES {
         Mock::given(method("GET"))
             .and(path(format!("/page-{i}")))
@@ -51,9 +73,5 @@ pub async fn mount_hub_site(server: &MockServer) {
             .mount(server)
             .await;
     }
-    Mock::given(method("GET"))
-        .and(path("/robots.txt"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("User-agent: *\nAllow: /"))
-        .mount(server)
-        .await;
+    mount_robots(server).await;
 }

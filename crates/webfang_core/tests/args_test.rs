@@ -358,6 +358,7 @@ fn test_ai_config_parity_with_flags() {
             threshold: 0.5,
             max_chars: 1024,
             offline: true,
+            strict_clean_ai: false,
         }
     );
 }
@@ -390,6 +391,7 @@ fn test_ai_config_parity_no_flags() {
             threshold: 0.3,
             max_chars: 98_304,
             offline: false,
+            strict_clean_ai: false,
         }
     );
     assert_eq!(

@@ -115,6 +115,15 @@ pub struct AiArgs {
     /// embeddings provider — loopback included — with exit 78 (#2166).
     pub offline: bool,
 
+    /// Fail with exit 78 when `--clean-ai` degrades ANY page to the raw
+    /// fallback (T6, issue #3117).
+    ///
+    /// The default (`false`) is the compatibility contract: a partial
+    /// degradation exports the raw text WITH its `degraded_reason` marker and
+    /// the run exits 0. Only a run that degrades EVERY page already failed
+    /// before this flag existed (`#543`).
+    pub strict_clean_ai: bool,
+
     /// ADR-0004 step-5 announcements this run owes, decided at parse time.
     ///
     /// NOT a flag and not part of the OptionsSpec parity table — it is the
@@ -189,6 +198,7 @@ impl AiArgs {
             threshold,
             threshold_explicit,
             offline: m.get_flag("offline"),
+            strict_clean_ai: m.get_flag("strict_clean_ai"),
             pending_notices,
         })
     }

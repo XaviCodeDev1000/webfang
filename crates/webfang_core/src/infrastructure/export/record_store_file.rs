@@ -221,6 +221,7 @@ impl RecordStore {
                     last_error: None,
                     output_location: None,
                     updated_at,
+                    degraded_reason: None,
                 },
             );
         }

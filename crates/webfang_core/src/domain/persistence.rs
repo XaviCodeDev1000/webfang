@@ -234,8 +234,12 @@ pub struct LastError {
     pub message: String,
 }
 
-/// The persisted per-URL record — exactly the nine spec fields, no more,
-/// no less (frozen contract; unknown fields are rejected on load).
+/// The persisted per-URL record — the nine frozen spec fields plus the
+/// additive degradation marker (T6, issue #3117). `degraded_reason` is an
+/// `Option` because the marker is ADDITIVE (plan S4): a store written before
+/// it existed loads unchanged (`#[serde(default)]`) and a record that did not
+/// degrade writes no field at all (`skip_serializing_if`), so the pre-T6
+/// shape survives byte-for-byte. Unknown fields are still rejected on load.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawRecord {
@@ -258,6 +262,16 @@ pub struct RawRecord {
     pub output_location: Option<String>,
     /// Unix millis UTC of the last persist.
     pub updated_at: i64,
+    /// Why this page's text is the RAW fallback rather than cleaned text
+    /// (T6, issue #3117 / finding E9), as the `SemanticError` variant name
+    /// (`ChunkTooLarge`, `Tokenize`, `InvalidSpan`).
+    ///
+    /// `None` means "not degraded" — the record makes no claim either way
+    /// about a page this run never cleaned, which is the honest reading for a
+    /// plain (non `--clean-ai`) run. Cleared when a later run cleans the same
+    /// URL successfully, so the field always describes the LAST write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 impl RawRecord {
@@ -300,6 +314,7 @@ impl RawRecord {
             last_error: None,
             output_location: None,
             updated_at,
+            degraded_reason: None,
         })
     }
 }

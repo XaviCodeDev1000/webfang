@@ -33,6 +33,10 @@ pub struct AiConfig {
     /// No local model since 3.0.0: the flag gates the semantic-cleaning
     /// providers only, not the crawler's network (#2166).
     pub offline: bool,
+    /// `--strict-clean-ai` (T6, issue #3117): ANY degraded page fails the run
+    /// with exit 78 instead of exporting the raw fallback. `false` keeps
+    /// today's all-or-nothing behaviour as the compatibility contract.
+    pub strict_clean_ai: bool,
 }
 
 impl Default for AiConfig {
@@ -41,6 +45,7 @@ impl Default for AiConfig {
             threshold: 0.3,
             max_chars: crate::domain::options_spec::ai::DEFAULT_MAX_CHARS,
             offline: false,
+            strict_clean_ai: false,
         }
     }
 }

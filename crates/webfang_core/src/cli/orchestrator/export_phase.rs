@@ -116,6 +116,7 @@ pub(crate) async fn export_phase_with_resume(
         ai_threshold: opts.ai_config.threshold,
         ai_max_chars: opts.ai_config.max_chars,
         ai_offline: opts.ai_config.offline,
+        ai_strict: opts.ai_config.strict_clean_ai,
     };
 
     let export_result = run_export(export_config, ai_cleaner).await;

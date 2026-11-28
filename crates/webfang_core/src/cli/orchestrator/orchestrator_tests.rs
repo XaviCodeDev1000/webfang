@@ -133,6 +133,7 @@ fn export_config_reads_from_ai_config_not_literals() {
             threshold: 0.7,
             max_chars: 2048,
             offline: true,
+            strict_clean_ai: true,
         },
         ..Default::default()
     };

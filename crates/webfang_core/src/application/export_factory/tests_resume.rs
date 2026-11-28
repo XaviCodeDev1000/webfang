@@ -192,6 +192,7 @@ fn p86_failed_record_is_redriven_and_error_cleared_on_success() {
             }),
             output_location: None,
             updated_at: 1_760_000_000_000,
+            degraded_reason: None,
         },
     );
     store.save(&seeded).unwrap();

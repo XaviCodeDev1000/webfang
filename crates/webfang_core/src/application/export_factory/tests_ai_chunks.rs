@@ -1,6 +1,7 @@
 //! AI chunk export tests: resume gate before batch export (BUG F3-A),
 //! #1812 dedup/commit honesty, #2269 drain branch.
 
+use super::ai_plan::AiChunkOutcome;
 use super::tests_common::RecordStore;
 use super::*;
 use crate::domain::entities::ScrapedContent;
@@ -247,7 +248,7 @@ fn ai_export_does_not_commit_a_chunk_it_never_wrote() {
 fn outcome_label(outcome: &AiChunkOutcome) -> &'static str {
     match outcome {
         AiChunkOutcome::NotDriven => "NotDriven",
-        AiChunkOutcome::Exported(_) => "Exported",
+        AiChunkOutcome::Exported { .. } => "Exported",
         AiChunkOutcome::Duplicate => "Duplicate",
         AiChunkOutcome::Invalid(_) => "Invalid",
     }
