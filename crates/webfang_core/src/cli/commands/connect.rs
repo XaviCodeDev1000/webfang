@@ -82,6 +82,10 @@ pub async fn run(base_url: &url::Url, id: &str, model: &str, path: &Path) -> Cli
         extra_body: serde_json::Map::new(),
         query_extra_body: serde_json::Map::new(),
         send_encoding_format: false,
+        // Completion-only wire options (#3092): `connect` registers an
+        // embedding provider, so both stay at their defaults.
+        response_format_mode: Default::default(),
+        max_tokens_parameter: Default::default(),
     };
 
     register(&provider, path).await

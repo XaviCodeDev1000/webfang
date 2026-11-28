@@ -15,7 +15,7 @@
 use crate::domain::auth_source::AuthError;
 use crate::domain::llm_port::LlmPort;
 use crate::domain::proxy_config::ProxyRegistry;
-use crate::infrastructure::llm::client::OpenAiLlmClient;
+use crate::infrastructure::llm::client::{CompletionWireOptions, OpenAiLlmClient};
 use crate::infrastructure::llm::http_client::{build_guarded_http_client, build_llm_client};
 
 /// Declarative provider configuration: `crate::domain::providers::ProviderConfig`
@@ -196,7 +196,11 @@ impl OpenAiCompatibleProvider {
             config.base_url.clone(),
             secret,
             config.extra_body.clone(),
-        );
+        )
+        .with_wire_options(CompletionWireOptions {
+            response_format_mode: config.response_format_mode,
+            max_tokens_parameter: config.max_tokens_parameter,
+        });
         Ok(Self {
             client,
             config,
@@ -271,7 +275,7 @@ fn proxy_407_error(proxy_auth_configured: bool, provider_id: &str) -> crate::err
 mod tests {
     use super::*;
     use crate::domain::auth_source::AuthSource;
-    use crate::domain::llm_port::{ChatMessage, LlmRequest};
+    use crate::domain::llm_port::{ChatMessage, LlmRequest, LlmResponse};
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -308,6 +312,44 @@ mod tests {
         ));
     }
 
+    const WIREUP_VAR: &str = "WEBFANG_TEST_WIREUP_OK_VAR";
+    const WIREUP_KEY: &str = "sk-wireup-test-key";
+
+    /// Resolves a provider against `server` with the credential in the
+    /// environment. The constructor resolves it once, so the guard can drop
+    /// here: clearing the env afterwards has no effect.
+    fn resolve_against(server: &MockServer, cfg: ProviderConfig) -> OpenAiCompatibleProvider {
+        let env = webfang_test_utils::EnvGuard::with(&[(WIREUP_VAR, WIREUP_KEY)]);
+        let cfg = ProviderConfig {
+            base_url: url::Url::parse(&server.uri()).expect("url"),
+            ..cfg
+        };
+        let provider = match OpenAiCompatibleProvider::new(cfg) {
+            Ok(p) => p,
+            Err(e) => panic!("wire-up must resolve: {e}"),
+        };
+        drop(env);
+        provider
+    }
+
+    /// The one completion both wire-up tests send.
+    async fn send_ping(provider: &OpenAiCompatibleProvider) -> LlmResponse {
+        match provider
+            .send_completion(LlmRequest {
+                messages: vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: "ping".to_string(),
+                }],
+                model: "gpt-test".to_string(),
+                max_tokens: 16,
+            })
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => panic!("completions OK: {e}"),
+        }
+    }
+
     /// Full wire-up against wiremock: credential resolved in the constructor,
     /// request signed with the resolved key, via LlmPort.
     #[tokio::test]
@@ -324,38 +366,66 @@ mod tests {
             .mount(&server)
             .await;
 
-        let env = webfang_test_utils::EnvGuard::with(&[(
-            "WEBFANG_TEST_WIREUP_OK_VAR",
-            "sk-wireup-test-key",
-        )]);
-        let cfg = ProviderConfig {
-            base_url: url::Url::parse(&server.uri()).expect("url"),
-            ..config_with(AuthSource::Env {
-                var: "WEBFANG_TEST_WIREUP_OK_VAR".to_string(),
-            })
-        };
-        let provider = match OpenAiCompatibleProvider::new(cfg) {
-            Ok(p) => p,
-            Err(e) => panic!("wire-up must resolve: {e}"),
-        };
-        drop(env); // the ctor already resolved: clearing the env has no effect
+        let provider = resolve_against(
+            &server,
+            config_with(AuthSource::Env {
+                var: WIREUP_VAR.to_string(),
+            }),
+        );
 
-        let response = match provider
-            .send_completion(LlmRequest {
-                messages: vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: "ping".to_string(),
-                }],
-                model: "gpt-test".to_string(),
-                max_tokens: 16,
-            })
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => panic!("completions OK: {e}"),
-        };
+        let response = send_ping(&provider).await;
         assert_eq!(response.content, "pong");
         assert_eq!(provider.id(), "test-provider");
+    }
+
+    #[tokio::test]
+    async fn provider_threads_the_declared_wire_options_into_the_request_body() {
+        // #3092: a config field that never reaches the client is dead
+        // configuration — the silent drift #3074 set out to remove.
+        let server = MockServer::start().await;
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let sink = std::sync::Arc::clone(&captured);
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(move |request: &wiremock::Request| {
+                *sink.lock().unwrap_or_else(|p| p.into_inner()) =
+                    Some(serde_json::from_slice(&request.body).expect("body is JSON"));
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "choices": [{"message": {"content": "pong"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+                }))
+            })
+            .mount(&server)
+            .await;
+
+        let provider = resolve_against(
+            &server,
+            ProviderConfig {
+                response_format_mode: crate::domain::providers::ResponseFormatMode::None,
+                max_tokens_parameter:
+                    crate::domain::providers::MaxTokensParameter::MaxCompletionTokens,
+                ..config_with(AuthSource::Env {
+                    var: WIREUP_VAR.to_string(),
+                })
+            },
+        );
+
+        send_ping(&provider).await;
+
+        let body = captured
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .expect("the mock captured the body");
+        assert!(
+            body.get("response_format").is_none(),
+            "mode none must reach the wire: {body}"
+        );
+        assert_eq!(body["max_completion_tokens"], serde_json::json!(16));
+        assert!(
+            body.get("max_tokens").is_none(),
+            "the two budget keys must never travel together: {body}"
+        );
     }
 
     /// The shared client is built once and serves N providers; the error

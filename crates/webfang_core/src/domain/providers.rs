@@ -140,6 +140,40 @@ pub fn merge_extra_body(base: &ExtraBody, overlay: &ExtraBody) -> ExtraBody {
     merged
 }
 
+/// Wire-level `response_format` policy for an OpenAI-compatible provider.
+///
+/// #3092: this decides **only** what WebFang puts on the wire. With
+/// [`ResponseFormatMode::None`] the extraction prompt still asks for JSON and
+/// the response is still parsed and schema-validated, so it is a compatibility
+/// fallback for providers that reject JSON mode, never a structured-output
+/// guarantee.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseFormatMode {
+    /// Emit `response_format: {"type": "json_object"}` — today's payload.
+    #[default]
+    JsonObject,
+    /// Omit the field entirely.
+    None,
+}
+
+/// Which wire key carries the completion token budget (#3092).
+///
+/// The option renames the key; it never rewrites the numeric budget. Provider
+/// semantics may still differ — OpenAI documents `max_completion_tokens` as
+/// including reasoning tokens, while `max_tokens` is deprecated and
+/// incompatible with o-series models — so a truncated answer stays possible and
+/// is still reported as `finish_reason = "length"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaxTokensParameter {
+    /// Send the budget as `max_tokens` — today's payload.
+    #[default]
+    MaxTokens,
+    /// Send the budget as `max_completion_tokens` instead, never alongside it.
+    MaxCompletionTokens,
+}
+
 /// Declarative configuration of one provider (the wizard writes this into the
 /// config file).
 ///
@@ -220,6 +254,20 @@ pub struct ProviderConfig {
     /// OpenAI already default to float, and Voyage/Gemini reject the field.
     #[serde(default = "default_send_encoding_format")]
     pub send_encoding_format: bool,
+    /// Whether `/chat/completions` carries `response_format` (#3092).
+    ///
+    /// Absent means [`ResponseFormatMode::JsonObject`]: the body stays
+    /// byte-identical to the pre-#3092 payload. An unknown value is a load
+    /// error, never a silent default.
+    #[serde(default)]
+    pub response_format_mode: ResponseFormatMode,
+    /// Which wire key carries the completion token budget (#3092).
+    ///
+    /// Absent means [`MaxTokensParameter::MaxTokens`]: the body stays
+    /// byte-identical to the pre-#3092 payload. An unknown value is a load
+    /// error, never a silent default.
+    #[serde(default)]
+    pub max_tokens_parameter: MaxTokensParameter,
 }
 
 impl ProviderConfig {
@@ -256,6 +304,8 @@ pub(crate) fn test_provider_config() -> ProviderConfig {
         extra_body: serde_json::Map::new(),
         query_extra_body: serde_json::Map::new(),
         send_encoding_format: self::default_send_encoding_format(),
+        response_format_mode: ResponseFormatMode::default(),
+        max_tokens_parameter: MaxTokensParameter::default(),
     }
 }
 

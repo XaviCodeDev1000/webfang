@@ -35,6 +35,8 @@ fn test_provider_config_is_a_valid_minimal_fixture() {
     assert!(cfg.extra_body.is_empty());
     assert!(cfg.query_extra_body.is_empty());
     assert!(!cfg.send_encoding_format);
+    assert_eq!(cfg.response_format_mode, ResponseFormatMode::JsonObject);
+    assert_eq!(cfg.max_tokens_parameter, MaxTokensParameter::MaxTokens);
 }
 
 #[test]
@@ -53,6 +55,62 @@ fn send_encoding_format_defaults_to_false() {
     let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["embedding"]}"#;
     let provider: ProviderConfig = serde_json::from_str(raw).expect("absent flag parses");
     assert!(!provider.send_encoding_format);
+}
+
+#[test]
+fn response_format_mode_defaults_to_json_object() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["completion"]}"#;
+    let provider: ProviderConfig = serde_json::from_str(raw).expect("absent option parses");
+    assert_eq!(
+        provider.response_format_mode,
+        ResponseFormatMode::JsonObject,
+        "the default must keep today's payload (#3092)"
+    );
+}
+
+#[test]
+fn max_tokens_parameter_defaults_to_max_tokens() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["completion"]}"#;
+    let provider: ProviderConfig = serde_json::from_str(raw).expect("absent option parses");
+    assert_eq!(
+        provider.max_tokens_parameter,
+        MaxTokensParameter::MaxTokens,
+        "the default must keep today's payload (#3092)"
+    );
+}
+
+#[test]
+fn response_format_mode_rejects_an_unknown_value() {
+    // `json_schema` is deliberately out of scope: it needs a schema object on
+    // the wire, not one more enum variant (#3092).
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["completion"],"response_format_mode":"json_schema"}"#;
+    let err = serde_json::from_str::<ProviderConfig>(raw)
+        .expect_err("an unknown mode must fail at config load, before any dial");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("json_schema"),
+        "the error must name the rejected value, got: {msg}"
+    );
+    assert!(
+        msg.contains("json_object") && msg.contains("none"),
+        "the error must name the accepted values, got: {msg}"
+    );
+}
+
+#[test]
+fn max_tokens_parameter_rejects_an_unknown_value() {
+    let raw = r#"{"id":"p","display_name":"p","kind":"open_ai_compatible","base_url":"https://api.example.com/v1","auth":{"source":"env","var":"K"},"capabilities":["completion"],"max_tokens_parameter":"max_new_tokens"}"#;
+    let err = serde_json::from_str::<ProviderConfig>(raw)
+        .expect_err("an unknown parameter must fail at config load, before any dial");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("max_new_tokens"),
+        "the error must name the rejected value, got: {msg}"
+    );
+    assert!(
+        msg.contains("max_tokens") && msg.contains("max_completion_tokens"),
+        "the error must name the accepted values, got: {msg}"
+    );
 }
 
 #[test]
