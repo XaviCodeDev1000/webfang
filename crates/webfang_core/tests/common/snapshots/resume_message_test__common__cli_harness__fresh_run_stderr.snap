@@ -1,0 +1,37 @@
+---
+source: crates/webfang_core/tests/common/cli_harness.rs
+expression: redacted
+---
+  <TIMESTAMP>  WARN webfang: WEBFANG_DISABLE_SSRF_ENTRY_GUARD = 1: only the literal-IP entry rejection is disabled; the validating DNS resolver and the redirect policy stay enforced on every hop. The hatch remains available in release builds — unset it to restore the full guard., notice: "ssrf_entry_hatch_armed", disabled_layer: "literal-IP entry rejection", still_enforced: "validating DNS resolver + redirect policy"
+    at <FILE>.rs:<LINE>
+
+webfang: fresh run - no previous state consulted
+Status: http://127.0.0.1:<PORT>/ [Started]
+Status: http://127.0.0.1:<PORT>/ [Fetching]
+Status: http://127.0.0.1:<PORT>/ [Extracting]
+Status: http://127.0.0.1:<PORT>/ [Completed, 119 chars]
+Status: http://127.0.0.1:<PORT>/page-0 [Started]
+Status: http://127.0.0.1:<PORT>/page-0 [Fetching]
+Status: http://127.0.0.1:<PORT>/page-0 [Extracting]
+Status: http://127.0.0.1:<PORT>/page-0 [Completed, 92 chars]
+Status: http://127.0.0.1:<PORT>/page-1 [Started]
+Status: http://127.0.0.1:<PORT>/page-1 [Fetching]
+Status: http://127.0.0.1:<PORT>/page-1 [Extracting]
+Status: http://127.0.0.1:<PORT>/page-1 [Completed, 92 chars]
+Status: http://127.0.0.1:<PORT>/page-2 [Started]
+Status: http://127.0.0.1:<PORT>/page-2 [Fetching]
+Status: http://127.0.0.1:<PORT>/page-2 [Extracting]
+Status: http://127.0.0.1:<PORT>/page-2 [Completed, 92 chars]
+Status: http://127.0.0.1:<PORT>/page-3 [Started]
+Status: http://127.0.0.1:<PORT>/page-3 [Fetching]
+Status: http://127.0.0.1:<PORT>/page-3 [Extracting]
+Status: http://127.0.0.1:<PORT>/page-3 [Completed, 92 chars]
+Status: http://127.0.0.1:<PORT>/page-4 [Started]
+Status: http://127.0.0.1:<PORT>/page-4 [Fetching]
+Status: http://127.0.0.1:<PORT>/page-4 [Extracting]
+Status: http://127.0.0.1:<PORT>/page-4 [Completed, 92 chars]
+Status: http://127.0.0.1:<PORT>/page-5 [Started]
+Status: http://127.0.0.1:<PORT>/page-5 [Fetching]
+Status: http://127.0.0.1:<PORT>/page-5 [Extracting]
+Status: http://127.0.0.1:<PORT>/page-5 [Completed, 92 chars]
+Finished: 7 total, 7 succeeded, 0 failed

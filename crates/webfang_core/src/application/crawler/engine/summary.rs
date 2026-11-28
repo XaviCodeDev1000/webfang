@@ -40,6 +40,16 @@ impl Engine {
         summary.resolution_failures = self
             .resolution_failures
             .load(std::sync::atomic::Ordering::SeqCst);
+        // The resume decision this run took (#3097 / T4): derived from the
+        // checkpoint it LOADED, by the rule the scheduler applied. A run that
+        // loaded nothing reports nothing.
+        if let Some(stats) = self
+            .checkpoint_state
+            .as_ref()
+            .and_then(super::checkpoint::resume_stats)
+        {
+            summary = summary.with_resume(stats);
+        }
         summary
     }
 
