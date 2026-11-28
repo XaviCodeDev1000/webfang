@@ -41,6 +41,7 @@ mod factory;
 pub mod port;
 mod retry;
 mod scoped;
+pub mod session_jars;
 
 pub use crate::domain::http_config::HttpClientConfig;
 pub use crate::domain::http_error::{HttpError, HttpResult};
@@ -48,4 +49,4 @@ pub use crate::domain::http_port::{HttpClientPort, HttpResponse};
 pub use client::{
     create_http_client, create_http_client_with_config, get_random_user_agent_from_pool, HttpClient,
 };
-pub use scoped::ScopedHttpClient;
+pub use scoped::{ScopedHttpClient, SessionCookieBinding};

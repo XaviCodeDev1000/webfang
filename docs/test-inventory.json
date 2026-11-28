@@ -740,6 +740,15 @@
       "tier": "integration_mock"
     },
     {
+      "path": "crates/webfang_core/tests/cookie_jar_session_test.rs",
+      "crate": "webfang_core",
+      "area": "core",
+      "test_count": 5,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "integration_mock"
+    },
+    {
       "path": "crates/webfang_core/tests/correlation_id_fidelity.rs",
       "crate": "webfang_core",
       "area": "core",
@@ -1680,6 +1689,15 @@
       "crate": "webfang_mcp",
       "area": "mcp",
       "test_count": 9,
+      "ignored_count": 0,
+      "snapshot_usage": true,
+      "tier": "mcp_contract"
+    },
+    {
+      "path": "crates/webfang_mcp/tests/mcp_session_cookie_scope_test.rs",
+      "crate": "webfang_mcp",
+      "area": "mcp",
+      "test_count": 3,
       "ignored_count": 0,
       "snapshot_usage": true,
       "tier": "mcp_contract"

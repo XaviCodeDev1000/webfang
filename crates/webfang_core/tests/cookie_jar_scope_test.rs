@@ -37,30 +37,20 @@
 #[path = "common/wreq_invariants.rs"]
 mod wreq_invariants;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use webfang_core::application::http_client::{HttpClient, HttpClientConfig, ScopedHttpClient};
+use webfang_core::application::http_client::ScopedHttpClient;
 use webfang_core::domain::ports::HttpClientPort;
 use webfang_core::domain::JarScope;
 use wreq::cookie::Jar;
-use wreq_invariants::{counting_client, TestServer};
-
-/// The hardened production client, wired as the container wires it.
-fn hardened_client() -> Arc<HttpClient> {
-    Arc::new(HttpClient::new(HttpClientConfig::default()).expect("the hardened client builds"))
-}
+use wreq_invariants::{
+    cookie_pairs, counting_client, hardened_client, pairs, set_cookie_then_echo, target, TestServer,
+};
 
 /// The port facade under test, in the shape `Container::with_cookie_jar_scope`
 /// builds: one hardened client, a scope, and the optional operator seed.
 fn facade(scope: JarScope, seed: Option<Arc<Jar>>) -> ScopedHttpClient {
     ScopedHttpClient::new(hardened_client(), scope, seed)
-}
-
-/// A loopback URL for `path`: the tests dial the fixture directly, so no
-/// resolver — ours or the system's — answers for it.
-fn target(server: &TestServer, path: &str) -> String {
-    format!("http://{}{path}", server.addr())
 }
 
 /// The operator seed jar, built the way `fresh_scrape_cookie_set` seeds it.
@@ -114,21 +104,6 @@ fn assert_single_connection_of_gets(server: &TestServer) {
     );
 }
 
-fn cookie_pairs(server: &TestServer, arrival: usize) -> BTreeSet<String> {
-    server.requests()[arrival]
-        .header("cookie")
-        .unwrap_or_default()
-        .split("; ")
-        .filter(|pair| !pair.is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
-/// The pairs of one cookie, as the assertion below reads them.
-fn pairs(names: &[&str]) -> BTreeSet<String> {
-    names.iter().map(|name| (*name).to_owned()).collect()
-}
-
 /// The default scope reproduces the historical behavior: one jar for the whole
 /// process, so a cookie a response sets is offered to the next request.
 #[tokio::test]
@@ -138,14 +113,7 @@ async fn shared_scope_offers_a_cookie_set_by_a_previous_response() {
     let server = TestServer::start().await;
     let client = facade(JarScope::default(), None);
 
-    client
-        .get(&target(&server, "/set-cookie"))
-        .await
-        .expect("the cookie-setting request succeeds");
-    client
-        .get(&target(&server, "/echo"))
-        .await
-        .expect("the follow-up request succeeds");
+    set_cookie_then_echo(&client, &server).await;
 
     assert_eq!(
         cookie_pairs(&server, 0),

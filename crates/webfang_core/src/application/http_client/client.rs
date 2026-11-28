@@ -21,6 +21,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use tracing::{debug, warn};
 use url::Url;
+use wreq::cookie::Jar;
 use wreq::Client;
 
 pub use super::factory::{
@@ -176,7 +177,7 @@ impl HttpClient {
 
         // Track in-flight requests
 
-        let result = self.get_inner(url).await;
+        let result = self.get_inner(url, None).await;
 
         // Report outcome to session pool
         self.report_outcome(&domain, session_id, &result);
@@ -218,7 +219,15 @@ impl HttpClient {
         }
     }
 
-    async fn get_inner(&self, url: &str) -> HttpResult<String> {
+    /// Run the hardened request path for `url`, carrying the request's jar.
+    ///
+    /// `jar` is the cookie jar this request was issued with; `HttpClient::get`
+    /// passes `None` (the client's own jar, the historical behavior). It is a
+    /// parameter rather than a field so a scoped caller cannot be given a jar
+    /// on the first attempt and lose it on a retry: every attempt below, and
+    /// every status-retry loop it delegates to, re-sends with the same jar
+    /// (`retry_with_backoff`).
+    async fn get_inner(&self, url: &str, jar: Option<&Arc<Jar>>) -> HttpResult<String> {
         let mut ua_index = 0;
 
         loop {
@@ -231,7 +240,9 @@ impl HttpClient {
             // timeouts within the retry budget, matching Stack A's
             // `fetch_inner`. Builder-class and connect errors stay terminal
             // (F-09: single attempt).
-            let response = self.send_with_timeout_retry(url, &ua, ua_index).await?;
+            let response = self
+                .send_with_timeout_retry(url, &ua, ua_index, jar)
+                .await?;
 
             let status = response.status();
 
@@ -245,10 +256,10 @@ impl HttpClient {
                     }
                     return Err(HttpError::Forbidden);
                 },
-                429 => return self.handle_rate_limited(url, response, &ua).await,
+                429 => return self.handle_rate_limited(url, response, &ua, jar).await,
                 500..=599 => {
                     return self
-                        .handle_server_error(url, response, status.as_u16(), &ua)
+                        .handle_server_error(url, response, status.as_u16(), &ua, jar)
                         .await
                 },
                 code if (300..=399).contains(&code) => {
@@ -283,10 +294,11 @@ impl HttpClient {
         url: &str,
         ua: &str,
         ua_index: usize,
+        jar: Option<&Arc<Jar>>,
     ) -> HttpResult<wreq::Response> {
         let mut attempt = 0;
         loop {
-            let request = self.build_request(url, ua, ua_index);
+            let request = self.build_request(url, ua, ua_index, jar);
             let request_started = std::time::Instant::now();
             let url_host = url_host_of(url);
             match request.send().await {
@@ -333,13 +345,25 @@ impl HttpClient {
     /// Build the GET request for `url`, applying the configured headers.
     ///
     /// Uses minimal headers for WAF-bypass attempts (`ua_index >= 4`).
-    fn build_request(&self, url: &str, ua: &str, ua_index: usize) -> wreq::RequestBuilder {
+    fn build_request(
+        &self,
+        url: &str,
+        ua: &str,
+        ua_index: usize,
+        jar: Option<&Arc<Jar>>,
+    ) -> wreq::RequestBuilder {
         let mut request = self
             .client
             .get(url)
             .header("Accept-Language", &self.config.accept_language)
             .header("Accept", &self.config.accept)
             .header("User-Agent", ua);
+
+        // Same request, same jar: the timeout retry above is the same GET sent
+        // again, so it must not drop the caller's cookie scope.
+        if let Some(jar) = jar {
+            request = request.cookie_provider(Arc::clone(jar));
+        }
 
         if ua_index < 4 {
             request = request

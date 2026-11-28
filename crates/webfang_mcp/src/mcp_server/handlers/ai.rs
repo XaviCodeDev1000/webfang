@@ -139,13 +139,7 @@ impl McpHandler {
 
         // REQ-01: fetch the page via the existing HTTP port, then clean it.
         // Operational failures map to honest errors — never a false success.
-        let response = match self
-            .state
-            .container
-            .http_client()
-            .get(params.url.as_str())
-            .await
-        {
+        let response = match self.http_client().get(params.url.as_str()).await {
             Ok(resp) => resp,
             Err(e) => return Ok(honest_error(format!("no se pudo obtener la página: {e}"))),
         };

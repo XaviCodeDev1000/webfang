@@ -7,8 +7,10 @@
 //! and status dispatch.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tracing::{debug, warn};
+use wreq::cookie::Jar;
 use wreq::header::HeaderMap;
 
 use super::HttpClient;
@@ -49,6 +51,7 @@ impl HttpClient {
         url: &str,
         response: wreq::Response,
         ua: &str,
+        jar: Option<&Arc<Jar>>,
     ) -> HttpResult<String> {
         // BUG 6 fix: when Retry-After is absent, fall back to exponential backoff
         // instead of a fixed 1-second delay.
@@ -65,6 +68,7 @@ impl HttpClient {
             url,
             &self.config,
             ua,
+            jar,
             RetryPolicy {
                 // None → compute_backoff_delay falls through to exponential path
                 retry_after_secs: retry_after,
@@ -83,6 +87,7 @@ impl HttpClient {
         response: wreq::Response,
         status: u16,
         ua: &str,
+        jar: Option<&Arc<Jar>>,
     ) -> HttpResult<String> {
         debug!("{} from {}", status, url);
 
@@ -123,6 +128,7 @@ impl HttpClient {
             url,
             &self.config,
             ua,
+            jar,
             RetryPolicy {
                 retry_after_secs: None,
                 retryable: |code: u16| (500..=599).contains(&code),

@@ -46,7 +46,7 @@ use crate::application::crawl_result_repository::CrawlResultRepositoryImpl;
 use crate::application::crawler::ports::TerminationSource;
 use crate::application::deduplicator::UrlDeduplicator;
 use crate::application::elastic_ingestion::ElasticIngestion;
-use crate::application::http_client::{HttpClient, HttpClientConfig};
+use crate::application::http_client::{HttpClient, HttpClientConfig, ScopedHttpClient};
 use crate::application::rate_limiter::{RateLimiterConfig, SharedRateLimiter};
 use crate::domain::clock::SystemClock;
 use crate::domain::config::ScraperConfig;
@@ -61,6 +61,7 @@ use crate::domain::repository::{DynVectorRepository, MultiVectorRepository};
 use crate::domain::semantic_cleaner::SemanticCleaner;
 use crate::domain::session_port::{SessionPoolConfig, SessionPort};
 use crate::domain::text_chunker::TextChunker;
+use crate::domain::JarScope;
 use crate::domain::{repositories::CrawlResultRepository, CrawlerConfig};
 use crate::infrastructure::autotuning::ElasticConfig;
 use crate::infrastructure::bridge::CpuBridge;
@@ -95,14 +96,11 @@ pub struct Container {
     pub scraper_config: ScraperConfig,
 
     // --- Port-trait objects (domain abstractions) ---
-    /// HTTP client behind port trait — application code depends on the trait, not wreq
-    http_client: Arc<dyn HttpClientPort>,
-    /// The hardened client the port facade wraps.
-    ///
-    /// Held so [`Container::with_cookie_jar_scope`] can rebuild the facade
-    /// over the SAME client — connection pool, session health and pacing stay
-    /// exactly as constructed — instead of building a second client.
-    http_client_concrete: Arc<HttpClient>,
+    /// HTTP port facade — application code depends on the trait, not wreq. The
+    /// concrete type is the scope-aware wrapper, which owns the hardened client
+    /// (connection pool, session health, pacing) AND the jar policy, so
+    /// [`Container::with_cookie_jar_scope`] rebuilds a facade over the SAME client.
+    http_client: Arc<ScopedHttpClient>,
 
     // --- Application services (concrete, Arc-shared) ---
     /// Rate limiter for crawl operations
@@ -593,12 +591,12 @@ impl Container {
         );
         // Default jar scope is `shared`: the facade forwards "no request-level
         // jar", so the client's own jar applies exactly as before.
-        let http_client = cookies::scoped_facade(
-            &http_client_concrete,
-            crate::domain::JarScope::default(),
+        let http_client = Arc::new(cookies::facade(
+            http_client_concrete,
+            JarScope::default(),
             None,
-        );
-
+            None,
+        ));
         // 2. Rate limiter (optional — failure is non-fatal)
         let rate_limiter = match SharedRateLimiter::new(&RateLimiterConfig::default()) {
             Ok(rl) => Some(Arc::new(rl)),
@@ -654,7 +652,6 @@ impl Container {
         Ok(Self {
             scraper_config,
             http_client,
-            http_client_concrete,
             rate_limiter,
             deduplicator,
             credential_store,
@@ -681,9 +678,12 @@ impl Container {
     }
 
     /// Get the HTTP client port — application code uses the trait, not wreq.
+    ///
+    /// Returns the shared `Arc` (cheap). [`Container::bind_session_cookies`] is how
+    /// a caller binds a request to its own cookie scope.
     #[must_use]
-    pub fn http_client(&self) -> &Arc<dyn HttpClientPort> {
-        &self.http_client
+    pub fn http_client(&self) -> Arc<dyn HttpClientPort> {
+        self.http_client.clone()
     }
 
     /// Get the rate limiter, if successfully initialized.

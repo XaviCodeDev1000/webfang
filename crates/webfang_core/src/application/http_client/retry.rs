@@ -38,8 +38,10 @@ use crate::domain::error::cause::FetchPhase;
 use crate::domain::error::mapping::{http_failure, url_host_of};
 use crate::domain::http_config::HttpClientConfig;
 use crate::domain::http_error::{HttpError, HttpResult};
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::debug;
+use wreq::cookie::Jar;
 use wreq::Client;
 
 /// The four load-bearing differences between the `429` and `5xx` retry loops.
@@ -71,7 +73,8 @@ pub(super) struct RetryPolicy {
 /// Performs up to `config.max_retries` attempts. Each attempt sleeps for
 /// [`compute_backoff_delay`], re-sends the GET with the same headers the
 /// hardened client uses (Accept-Language, Accept, Referer, Cache-Control and
-/// the pinned `user_agent`), then inspects the outcome:
+/// the pinned `user_agent`) and, when one is supplied, the same cookie jar
+/// (`jar`), then inspects the outcome:
 ///
 /// - a success status returns the body immediately;
 /// - a status satisfying `policy.retryable` continues to the next attempt;
@@ -87,6 +90,10 @@ pub(super) struct RetryPolicy {
 /// [`HttpError::RateLimited`]; the `5xx` caller passes `None` (pure exponential
 /// backoff) and [`HttpError::ServerError`].
 ///
+/// `jar` is the request's cookie jar, the same value the attempt that triggered
+/// the retry carried. `None` keeps the client's own jar, which is what the
+/// historical single-jar behavior means.
+///
 /// # Errors
 ///
 /// Returns the body on success, or the first terminal [`HttpError`] (a client
@@ -101,6 +108,7 @@ pub(super) async fn retry_with_backoff(
     url: &str,
     config: &HttpClientConfig,
     user_agent: &str,
+    jar: Option<&Arc<Jar>>,
     policy: RetryPolicy,
 ) -> HttpResult<String> {
     let mut attempt = 0;
@@ -132,6 +140,14 @@ pub(super) async fn retry_with_backoff(
             .header("Referer", &config.referer)
             .header("Cache-Control", &config.cache_control)
             .header("User-Agent", user_agent);
+
+        // A retry is the SAME request re-sent, so it carries the same cookie
+        // jar. Without this the retry would fall back to the client's own jar
+        // and silently abandon every cookie the scoped caller installed, which
+        // is exactly the escape `ScopedHttpClient` cannot tolerate.
+        if let Some(jar) = jar {
+            request = request.cookie_provider(Arc::clone(jar));
+        }
 
         // Apply custom headers on retries too (Bug #675-4) — without this,
         // Authorization/X-Api-Key etc. would be lost on 429/5xx retries.
@@ -306,6 +322,7 @@ mod tests {
             "http://127.0.0.1:9/",
             &config,
             "webfang-test/1.0",
+            None,
             policy,
         )
         .await
@@ -314,6 +331,86 @@ mod tests {
             crate::domain::error::cause::cause_in_chain(&err),
             Some(crate::domain::error::cause::NetworkCause::ConnectRefused),
             "exhaustion must deliver the last transport failure's cause, got: {err}"
+        );
+    }
+
+    /// The retry re-sends the request WITH its cookie jar.
+    ///
+    /// `retry_with_backoff` is the status-retry half of the hardened client. A
+    /// retry is the same request sent again, so a jar the caller installed on
+    /// the attempt that failed must still be installed on the attempt that
+    /// follows; without it the retry falls back to the client's own jar and the
+    /// `Set-Cookie` of the failed attempt is lost.
+    ///
+    /// The fixture answers `503` + `Set-Cookie: probe=1` once and `200`
+    /// afterwards, so the assertion reads the cookie the FAILED attempt left
+    /// behind on the arrival the retry produced.
+    #[cfg_attr(miri, ignore)] // TLS_method (btls FFI) via wreq Client::builder, unsupported by Miri
+    #[tokio::test]
+    async fn a_retry_carries_the_requests_cookie_jar() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(
+                wiremock::ResponseTemplate::new(503).insert_header("set-cookie", "probe=1; Path=/"),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+
+        let client = Client::builder().build().expect("the client builds");
+        let config = HttpClientConfig {
+            max_retries: 2,
+            backoff_base_ms: 0,
+            backoff_max_ms: 0,
+            ..HttpClientConfig::default()
+        };
+        let jar = Arc::new(Jar::default());
+        let policy = RetryPolicy {
+            retry_after_secs: None,
+            retryable: |status| status >= 500,
+            exhausted: HttpError::ServerError(503),
+            label: "5xx",
+        };
+
+        let body = retry_with_backoff(
+            &client,
+            &format!("{}/flaky", server.uri()),
+            &config,
+            "webfang-test/1.0",
+            Some(&jar),
+            policy,
+        )
+        .await
+        .expect("the second attempt succeeds");
+
+        assert_eq!(body, "ok");
+        let arrivals = server
+            .received_requests()
+            .await
+            .expect("the fixture journals every arrival");
+        assert_eq!(arrivals.len(), 2, "one failed attempt, one retry");
+        let carried = |index: usize| {
+            arrivals[index]
+                .headers
+                .get("cookie")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        assert_eq!(
+            carried(0),
+            "",
+            "the first attempt starts with an empty jar: nothing has been stored yet"
+        );
+        assert!(
+            carried(1).contains("probe=1"),
+            "the retry must re-send with the request's jar, so the cookie the \
+             failed attempt stored is offered again; it carried {:?} instead",
+            carried(1)
         );
     }
 
@@ -346,10 +443,16 @@ mod tests {
                 exhausted,
                 label,
             };
-            let err =
-                retry_with_backoff(&client, &server.uri(), &config, "webfang-test/1.0", policy)
-                    .await
-                    .expect_err("the status-only budget must exhaust");
+            let err = retry_with_backoff(
+                &client,
+                &server.uri(),
+                &config,
+                "webfang-test/1.0",
+                None,
+                policy,
+            )
+            .await
+            .expect_err("the status-only budget must exhaust");
             assert_eq!(
                 crate::domain::error::cause::cause_in_chain(&err),
                 None,
