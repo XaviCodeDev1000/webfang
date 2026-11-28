@@ -203,6 +203,46 @@ while IFS= read -r job; do
 done < "$T/jobs.txt"
 ok "every declared job is gated or on the advisory allowlist"
 
+# --- 3b. every advisory exemption carries a condition that holds TODAY -------
+# A reason in prose is not evidence. `coverage` sat on this allowlist saying
+# "report-only upload, never gates" while it had become a gate producer (#3105),
+# and five jobs are described as advisory here while carrying no
+# `continue-on-error` at all: their red is invisible to the gate, not absorbed
+# by the workflow. So each entry must name a machine-checkable condition that
+# must match its OWN job block, and an entry without one fails — the same
+# contract as scripts/check_intra_crate_direction_allowlist.txt, where an
+# exemption that absorbs zero sites is an error.
+#
+# What this can prove is SYNTACTIC (a text pattern inside the job block). It
+# cannot prove a job is truly advisory; that residual stays declared here
+# rather than implied away.
+STALE_EXEMPTIONS=""
+while IFS= read -r entry; do
+  [[ -n "$entry" ]] || continue
+  job="$(printf '%s\n' "$entry" | cut -d'|' -f1)"
+  cond="$(printf '%s\n' "$entry" | cut -d'|' -f2)"
+  reason="$(printf '%s\n' "$entry" | cut -d'|' -f3)"
+  if [[ -z "$cond" || -z "$reason" || "$cond" == "$reason" ]]; then
+    STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(no-condition)"
+    continue
+  fi
+  block="$(awk -v j="  $job:" '
+    $0 == j { inside = 1; next }
+    inside && /^  [a-z][a-z0-9_-]*:/ { exit }
+    inside { print }
+  ' "$CI_YML_LIVE")"
+  if [[ -z "$block" ]]; then
+    STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(job-not-found)"
+  elif ! grep -qE -- "$cond" <<< "$block"; then
+    STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(condition-false:$cond)"
+  fi
+done <<< "$ALLOWLIST"
+if [[ -z "$STALE_EXEMPTIONS" ]]; then
+  ok "every advisory exemption carries a condition that holds in its job block"
+else
+  bad "advisory exemptions with no condition or a false one:$STALE_EXEMPTIONS"
+fi
+
 # --- 4. no continue-on-error on gate producers -------------------------------
 COE_IN_GATE="$(while IFS= read -r line; do
   j="${line%%: *}"
