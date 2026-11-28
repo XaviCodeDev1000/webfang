@@ -70,6 +70,16 @@ examine_globs = [
   "crates/webfang_core/src/application/extraction.rs",
   "crates/webfang_core/src/application/scraper_service.rs",
   "crates/webfang_core/src/domain/html_extraction/**",
+  # 2026-11 scope (#3105): the SSRF decision surface. domain/ssrf_guard.rs
+  # holds redirect_policy and secure_client; infrastructure/ssrf.rs holds
+  # ValidatingResolver. Neither was reachable from any glob above, so those
+  # mutants were outside the examination set in the nightly run as well — not
+  # merely diff-scoped — and no commit, comment or issue recorded a
+  # deliberate exclusion of either. wreq_downloader.rs applies the guard and
+  # is already covered by infrastructure/downloader/**. Pinned by
+  # scripts/tests/test_mutation_ssrf_scope.sh.
+  "crates/webfang_core/src/domain/ssrf_guard.rs",
+  "crates/webfang_core/src/infrastructure/ssrf.rs",
 ]
 
 # Re-exports and module glue add no mutation signal.
