@@ -202,6 +202,70 @@ fn update_over_corrupt_store_errors_and_preserves_the_bytes() {
     );
 }
 
+/// The `created_at` of the envelope currently on disk at `path`.
+fn created_at_on_disk(path: &Path) -> i64 {
+    let bytes = std::fs::read_to_string(path).expect("state file readable");
+    let value: serde_json::Value = serde_json::from_str(&bytes).expect("valid json");
+    value["created_at"]
+        .as_i64()
+        .expect("created_at is an integer")
+}
+
+/// The envelope's birthday is metadata a write must carry forward, never
+/// re-invent: `update` takes it from the load it already performs (T8 — it no
+/// longer reads the file a second time for it) and `save`, which arrives
+/// without a load, still reads it back from disk. Both write paths are pinned.
+#[test]
+fn created_at_is_preserved_by_update_and_by_save() {
+    const BIRTHDAY_MS: i64 = 1_500_000_000_000;
+    const SEED_URL: &str = "http://example.com/seed/0";
+
+    let dir = TempDir::new().unwrap();
+    let writer = store(dir.path(), "example.com");
+    let state_path = writer.state_path();
+    let seed = RawRecord::new_discovered(SEED_URL, SEED_URL, "seed", 1).expect("seed record");
+    let mut seeded_records = serde_json::Map::new();
+    seeded_records.insert(
+        SEED_URL.to_string(),
+        serde_json::to_value(&seed).expect("record serializes"),
+    );
+    let envelope = serde_json::json!({
+        "version": 2,
+        "domain_key": "example.com",
+        "created_at": BIRTHDAY_MS,
+        "updated_at": BIRTHDAY_MS,
+        "records": serde_json::Value::Object(seeded_records),
+    });
+    std::fs::write(&state_path, envelope.to_string()).expect("seed v2 envelope");
+
+    writer
+        .update(&mut |records| {
+            insert_set(records, "alpha", 2);
+            Ok(())
+        })
+        .expect("update must succeed over the seeded envelope");
+
+    assert_eq!(
+        created_at_on_disk(&state_path),
+        BIRTHDAY_MS,
+        "update must carry the loaded created_at forward instead of inventing one"
+    );
+    assert_eq!(
+        persisted_urls(&writer).len(),
+        3,
+        "the transaction must start from the records the seeded envelope carried"
+    );
+
+    writer
+        .save(&DomainRecords::new())
+        .expect("save must succeed");
+    assert_eq!(
+        created_at_on_disk(&state_path),
+        BIRTHDAY_MS,
+        "save arrives without a load, so it must still preserve created_at"
+    );
+}
+
 /// Many threads committing disjoint sets through one shared handle must all
 /// survive.
 ///

@@ -10,6 +10,10 @@
 # Prerequisites (validated up front — this script does NOT build them):
 #   mdbook build docs                                → docs/src chapters exist
 #   rustdoc-markdown (Dooyo-Labs, v0.91.0) on PATH   → per-crate API renderer
+#                                                      (OPTIONAL: absence and the
+#                                                      MSRV refusal degrade the API
+#                                                      section, they do not abort;
+#                                                      see DEGRADED API RENDERING)
 #
 # API rendering: per-source API files are rendered by
 #   rustdoc-markdown <crate> --manifest crates/<crate>/Cargo.toml [--features "..."] --include-other
@@ -29,6 +33,33 @@
 # publishable. The contract is now: OUT_DIR holds the complete artifact, or
 # nothing — any non-zero exit empties it, so a consumer can never pick up a
 # half-rendered directory.
+#
+# DEGRADED API RENDERING (owner decision S4)
+# ==========================================
+# The per-crate API chapters are the one part of the artifact this script
+# cannot always render. rustdoc-markdown 0.91.0 hardcodes its own toolchain,
+# nightly-2025-11-27 (rustc 1.93.0-nightly), with no CLI/env override, while
+# this workspace declares `rust-version = 1.100`: `cargo rustdoc` rejects the
+# workspace BEFORE rustdoc runs
+# (`error: rustc 1.93.0-nightly is not supported by the following packages`),
+# so no invocation can ever produce an API chapter here. Upstream issue:
+# https://github.com/puddlers/rustdoc-markdown/issues/1
+#
+# Therefore an API render that fails for THAT reason (or a renderer that is
+# simply absent) degrades the API section instead of aborting the artifact:
+# a `::warning::` annotation names the cause, the skipped crates and the
+# issue, and the artifact is published with narrative + CLI reference only.
+#
+# Two invariants keep the degraded artifact honest, which is the whole point:
+#   * ALL-OR-NOTHING — a degraded API section keeps NO API file. A directory
+#     holding 01- but not 04- is exactly the "partial directory that LOOKS
+#     publishable" ATOMIC PUBLICATION above exists to prevent.
+#   * NEVER SILENT — llms.txt and webfang-docs-full.md carry the same blockquote
+#     note (what is missing, why, which chapters, the upstream issue URL) and
+#     no index line points at a file that does not exist.
+# The degrade is CONDITIONAL on the identified MSRV rejection: any other
+# renderer failure is a script/invocation defect, and it still aborts with a
+# non-zero exit and no publishable output.
 #
 # REPRODUCIBLE DATE (audit B30)
 # =============================
@@ -80,20 +111,36 @@ fi
 # documentation consumer calls.
 ALL_CRATES="webfang_core webfang_mcp webfang_test_utils"
 
-# The expected published file set. The swap is gated on it: a directory that
-# does not hold every one of these files is not the artifact.
-EXPECTED_FILES="llms.txt 00-narrative.md 01-webfang_core.md 03-webfang_mcp.md 04-webfang_test_utils.md 06-cli-reference.md webfang-docs-full.md"
+# Upstream issue for the MSRV refusal of the pinned rustdoc-markdown toolchain
+# (see DEGRADED API RENDERING). Cited verbatim in the annotation and in the
+# unavailability note, so a consumer of the artifact can follow the fix.
+RUSTDOC_MARKDOWN_ISSUE="https://github.com/puddlers/rustdoc-markdown/issues/1"
+# The one failure this script degrades on: cargo refusing the workspace on its
+# rust-version check before rustdoc runs. Matched on cargo's own wording.
+MSRV_REJECTION_PATTERN="is not supported by the following packages"
+
+# The base published file set (everything the script renders itself). The swap
+# is gated on the set THIS RUN expects: the base files plus one API file per
+# rendered crate. When the API renderer degrades, the expected set is the base
+# files alone and the presence of ANY API file is a hard error.
+BASE_FILES="llms.txt 00-narrative.md 06-cli-reference.md webfang-docs-full.md"
 
 # --- Fail-closed publication ------------------------------------------------
 # STAGE_DIR holds the rendering in progress; PUBLISHED flips to 1 only after
 # the swap. Until then, any exit (including a preflight failure) empties
 # OUT_DIR: the artifact is published whole or not at all.
 STAGE_DIR=""
+# Captured stderr of the API renderer (classification input, never part of the
+# artifact). The EXIT trap removes it on both paths.
+RENDER_STDERR=""
 PUBLISHED=0
 
 cleanup_unpublished() {
   local rc=$?
   trap - EXIT
+  if [ -n "$RENDER_STDERR" ] && [ -e "$RENDER_STDERR" ]; then
+    rm -f "$RENDER_STDERR"
+  fi
   if [ "$PUBLISHED" -ne 1 ]; then
     if [ -n "$STAGE_DIR" ] && [ -d "$STAGE_DIR" ]; then
       rm -rf "$STAGE_DIR"
@@ -133,16 +180,19 @@ for f in $CHAPTERS cli-reference; do
     exit 1
   fi
 done
+# The API renderer is OPTIONAL (see DEGRADED API RENDERING): its absence
+# degrades the API section with an annotation instead of failing the Docs gate.
+RENDERER_PRESENT=1
 if ! command -v rustdoc-markdown >/dev/null 2>&1; then
-  echo "ERROR: rustdoc-markdown is not on PATH. Prerequisite:" >&2
-  echo "       cargo install rustdoc-markdown --version 0.91.0 --locked" >&2
-  exit 1
+  RENDERER_PRESENT=0
+  echo "::warning::rustdoc-markdown is not on PATH (cargo install rustdoc-markdown --version 0.91.0 --locked): the per-crate API chapters are skipped and the artifact is published with an explicit unavailability note. Upstream issue: $RUSTDOC_MARKDOWN_ISSUE" >&2
 fi
 
 # The staging directory lives in the same parent as OUT_DIR, so the swap is a
 # rename inside one filesystem (an atomic move), never a cross-device copy.
 mkdir -p "$OUT_PARENT"
 STAGE_DIR="$(mktemp -d "$OUT_PARENT/.webfang-docs-llm.stage.XXXXXX")"
+RENDER_STDERR="$(mktemp "$OUT_PARENT/.webfang-docs-llm.stderr.XXXXXX")"
 
 # Metadata lines (Generated + Source commit + blank).
 generated_line() {
@@ -292,7 +342,17 @@ PYEOF
 
 # Render one crate's API to "$2" via rustdoc-markdown (rustdoc JSON backend,
 # pinned nightly auto-installed by the tool on first run — needs rustup +
-# network, both present on ubuntu-latest). The tool's own progress is streamed.
+# network, both present on ubuntu-latest).
+#
+# Exit status is THREE-WAY, so the caller can tell a known upstream limitation
+# from a defect of this script (DEGRADED API RENDERING):
+#   0  rendered, H1 guard passed
+#   1  NOT rendered, and not because of a defect: the caller decided the
+#      renderer is absent, or the renderer refused the workspace on its MSRV.
+#      The caller records the crate as skipped and keeps composing.
+#   2  any other failure (or an H1-guard violation): a real defect. Masking it
+#      would drop a chapter this run could have rendered, so the caller aborts
+#      with no publishable output (ATOMIC PUBLICATION).
 # Output convention: exactly one H1 per file — the "# <crate> API Reference"
 # wrapper — with the tool output (which starts "# <crate> API (<version>)")
 # demoted one level. Feature flags replicate `cargo doc --all-features` per
@@ -304,7 +364,7 @@ PYEOF
 # with it. webfang_test_utils declares no features at all and gets no --features
 # flag.
 render_api() {
-  local crate="$1" out="$2" features
+  local crate="$1" out="$2" features render_rc=0
   case "$crate" in
   webfang_core) features="default persistence console dev-tracing adaptive-selectors mcp chromium" ;;
   webfang_mcp) features="mcp persistence" ;;
@@ -312,8 +372,29 @@ render_api() {
   esac
   local -a cmd=(rustdoc-markdown print "$crate" --manifest "crates/$crate/Cargo.toml" --include-other --output "$out.raw")
   [ -n "$features" ] && cmd+=(--features "$features")
-  "${cmd[@]}"
-  demote_headings 1 "$out.raw" >"$out.tmp"
+  # stderr is CAPTURED, not streamed, because the failure has to be CLASSIFIED
+  # and the MSRV rejection is only visible there. It is echoed back below on
+  # both paths, so the job log keeps the tool's own diagnostics.
+  "${cmd[@]}" 2>"$RENDER_STDERR" || render_rc=$?
+  if [ -s "$RENDER_STDERR" ]; then
+    cat "$RENDER_STDERR" >&2
+  fi
+  if [ "$render_rc" -ne 0 ]; then
+    if grep -q "$MSRV_REJECTION_PATTERN" "$RENDER_STDERR" 2>/dev/null; then
+      echo "::warning::$crate API chapter skipped: the renderer's pinned toolchain is older than this workspace's rust-version, and cargo rejects it before rustdoc runs. Upstream issue: $RUSTDOC_MARKDOWN_ISSUE" >&2
+      return 1
+    fi
+    echo "::error::$crate API rendering failed (rc=$render_rc) and this is NOT the known MSRV rejection; nothing is published so a renderable chapter is never silently dropped. Upstream issue (for comparison): $RUSTDOC_MARKDOWN_ISSUE" >&2
+    return 2
+  fi
+  if [ ! -f "$out.raw" ]; then
+    echo "::error::$crate API rendering reported success but produced no '$out.raw'; nothing is published." >&2
+    return 2
+  fi
+  demote_headings 1 "$out.raw" >"$out.tmp" || {
+    echo "::error::could not demote the headings of the $crate API document; nothing is published." >&2
+    return 2
+  }
   {
     echo "# $crate API Reference"
     generated_line
@@ -328,8 +409,9 @@ render_api() {
   h1_count=$(count_h1 "$out")
   [ "$h1_count" -eq 1 ] || {
     echo "::error::$out does not have exactly one H1 heading (found $h1_count)"
-    return 1
+    return 2
   }
+  return 0
 }
 
 # mdBook chapters demoted LEVELS deep (the whole heading tree, not just the
@@ -354,6 +436,42 @@ per_source_file() {
   esac
 }
 
+# The per-source API files, in publish order. Derived from per_source_file so
+# the file names have ONE source: the expected file set, the degraded-state
+# guard and the summary all read it here.
+api_files() {
+  local crate f
+  for crate in $ALL_CRATES; do
+    f=$(per_source_file "$crate")
+    if [ -n "$f" ]; then echo "$f"; fi
+  done
+}
+
+# The unavailability note. This is the whole point of the degrade path: a
+# directory WITHOUT 01-/03-/04- must never LOOK complete, so the artifact
+# itself states which chapters are missing, why, and where the fix is tracked.
+# Emitted into llms.txt AND webfang-docs-full.md, byte-identical, in English
+# (repository-facing artifact).
+# The Markdown code spans are inside SINGLE quotes on purpose: they must reach
+# the artifact verbatim, so no shell expansion may touch them (SC2016 fires on
+# every backtick; the disable is deliberate, not a blanket suppression).
+# shellcheck disable=SC2016
+api_unavailable_note() {
+  echo '> **Crate API chapters are unavailable in this artifact.**'
+  echo '>'
+  echo '> The per-crate API renderer (`rustdoc-markdown` 0.91.0) pins its own'
+  echo '> toolchain, `nightly-2025-11-27` (rustc 1.93.0-nightly), and exposes no'
+  echo '> override. `cargo rustdoc` therefore rejects this workspace before rustdoc'
+  echo '> runs — `rustc 1.93.0-nightly is not supported by the following packages` —'
+  echo '> because the workspace declares `rust-version = 1.100`.'
+  echo '>'
+  echo "> Skipped this run: ${API_SKIPPED// /, }."
+  echo '> No `01-`/`03-`/`04-` API file is listed here, because none is published:'
+  echo '> the API section degrades whole, never partially.'
+  echo '>'
+  echo '> Upstream issue: '"$RUSTDOC_MARKDOWN_ISSUE"
+}
+
 # One line per crate for the LLM artifact's index.
 #
 # No tool count here on purpose: the MCP tool count has ONE source
@@ -373,11 +491,48 @@ crate_description() {
 # render_api applies the H1 wrapper, one-level demote, and the H1 guard, and
 # replaces the old pandoc/sed/awk noise-stripping pipeline entirely — the
 # rustdoc JSON backend output carries no HTML-layout noise to strip.
+#
+# A renderer that cannot run under this workspace's MSRV degrades the API
+# section instead of aborting the artifact (DEGRADED API RENDERING). The
+# narrative and CLI chapters are the majority of the Docs gate surface and they
+# do not depend on rustdoc, so a dead API renderer must not take them down.
+API_SKIPPED=""
+API_RENDERED=1
 for crate in $ALL_CRATES; do
   out_file=$(per_source_file "$crate")
   [ -n "$out_file" ] || continue
-  render_api "$crate" "$STAGE_DIR/$out_file"
+  render_rc=0
+  if [ "$RENDERER_PRESENT" -eq 0 ]; then
+    render_rc=1
+  else
+    render_api "$crate" "$STAGE_DIR/$out_file" || render_rc=$?
+  fi
+  case "$render_rc" in
+  0) ;;
+  1)
+    API_SKIPPED="$API_SKIPPED $crate"
+    # ALL-OR-NOTHING covers the renderer's scratch files too: the publish step
+    # moves the whole staging directory, so a partially written "$out.raw" or
+    # "$out.tmp" would ship an API chapter the index does not list.
+    rm -f "$STAGE_DIR/$out_file" "$STAGE_DIR/$out_file.raw" "$STAGE_DIR/$out_file.tmp"
+    ;;
+  *)
+    # render_api already reported the defect; nothing is publishable.
+    exit 1
+    ;;
+  esac
 done
+API_SKIPPED="${API_SKIPPED# }"
+if [ -n "$API_SKIPPED" ]; then
+  API_RENDERED=0
+  # ALL-OR-NOTHING: a degraded API section keeps no file at all. A directory
+  # holding 01- but not 04- is precisely the "partial directory that LOOKS
+  # publishable" ATOMIC PUBLICATION forbids.
+  for f in $(api_files); do
+    rm -f "$STAGE_DIR/$f"
+  done
+  echo "::warning::the API chapters are NOT part of this artifact (skipped: $API_SKIPPED). The narrative and CLI chapters are published with an explicit unavailability note in llms.txt and webfang-docs-full.md." >&2
+fi
 
 # Phase 2: narrative + CLI reference files (single H1 each).
 {
@@ -416,17 +571,24 @@ done
   echo
   echo "## API Reference (rustdoc)"
   echo
-  for crate in $ALL_CRATES; do
-    out_file=$(per_source_file "$crate")
-    if [ -n "$out_file" ] && [ -f "$STAGE_DIR/$out_file" ]; then
-      echo "### API: $crate"
-      echo
-      cat "$STAGE_DIR/$out_file"
-      echo
-      echo "---"
-      echo
-    fi
-  done
+  if [ "$API_RENDERED" -eq 0 ]; then
+    # The section stays in place (its structure is stable for readers and
+    # consumers) but it holds the note instead of chapters that do not exist.
+    api_unavailable_note
+    echo
+  else
+    for crate in $ALL_CRATES; do
+      out_file=$(per_source_file "$crate")
+      if [ -n "$out_file" ] && [ -f "$STAGE_DIR/$out_file" ]; then
+        echo "### API: $crate"
+        echo
+        cat "$STAGE_DIR/$out_file"
+        echo
+        echo "---"
+        echo
+      fi
+    done
+  fi
 } >"$STAGE_DIR/webfang-docs-full.md"
 
 # Phase 4: llms.txt (v2 index).
@@ -440,9 +602,19 @@ done
     echo "Source commit: $SOURCE_COMMIT"
   fi
   echo
+  if [ "$API_RENDERED" -eq 0 ]; then
+    api_unavailable_note
+    echo
+  fi
   echo "Complete reference:"
   echo
-  echo "- [webfang-docs-full.md]($PAGES_PREFIX/webfang-docs-full.md): everything on this page, one file — narrative + CLI + all crate APIs (~$(wc -w <"$STAGE_DIR/webfang-docs-full.md") words)"
+  if [ "$API_RENDERED" -eq 0 ]; then
+    # Honest scope: claiming "all crate APIs" here would be the lie the whole
+    # degrade path exists to avoid.
+    echo "- [webfang-docs-full.md]($PAGES_PREFIX/webfang-docs-full.md): everything on this page, one file — narrative + CLI reference, without the crate APIs named above (~$(wc -w <"$STAGE_DIR/webfang-docs-full.md") words)"
+  else
+    echo "- [webfang-docs-full.md]($PAGES_PREFIX/webfang-docs-full.md): everything on this page, one file — narrative + CLI + all crate APIs (~$(wc -w <"$STAGE_DIR/webfang-docs-full.md") words)"
+  fi
   echo
   echo "Focused sources:"
   echo
@@ -463,16 +635,34 @@ done
 } >"$STAGE_DIR/llms.txt"
 
 # --- Validate the staged artifact BEFORE publishing it ----------------------
-# The swap is gated on the whole file set and on the H1 guard of every
-# published source file. The monolith is exempt: it embeds the per-source
-# files, so it holds one H1 per API section by design.
+# The swap is gated on the file set THIS RUN expects and on the H1 guard of
+# every published source file. The expected set is COMPUTED, never assumed: the
+# base files plus one API file per rendered crate, or the base files alone when
+# the API section degraded. The monolith is exempt from the H1 guard: it embeds
+# the per-source files, so it holds one H1 per API section by design.
+EXPECTED_FILES="$BASE_FILES"
+H1_FILES="00-narrative.md 06-cli-reference.md"
+if [ "$API_RENDERED" -eq 1 ]; then
+  for f in $(api_files); do
+    EXPECTED_FILES="$EXPECTED_FILES $f"
+    H1_FILES="$H1_FILES $f"
+  done
+else
+  # A degraded artifact must not carry a single API file (ALL-OR-NOTHING).
+  for f in $(api_files); do
+    if [ -e "$STAGE_DIR/$f" ]; then
+      echo "::error::degraded artifact carries '$f'; refusing to publish a partial API section." >&2
+      exit 1
+    fi
+  done
+fi
 for f in $EXPECTED_FILES; do
   if [ ! -s "$STAGE_DIR/$f" ]; then
     echo "::error::el artefacto LLM está incompleto: '$f' falta o está vacío en el directorio de stage; no se publica nada." >&2
     exit 1
   fi
 done
-for f in 00-narrative.md 01-webfang_core.md 03-webfang_mcp.md 04-webfang_test_utils.md 06-cli-reference.md; do
+for f in $H1_FILES; do
   h1_count=$(count_h1 "$STAGE_DIR/$f")
   if [ "$h1_count" -ne 1 ]; then
     echo "::error::'$f' no tiene exactamente un encabezado H1 (se encontraron $h1_count); no se publica nada." >&2
@@ -505,7 +695,15 @@ fi
 # Summary.
 echo
 echo "Output: $OUT_DIR"
-for f in llms.txt 00-narrative.md 01-webfang_core.md 03-webfang_mcp.md 04-webfang_test_utils.md 06-cli-reference.md webfang-docs-full.md; do
+for f in $BASE_FILES; do
   [ -f "$OUT_DIR/$f" ] || continue
   echo "$f $(wc -w <"$OUT_DIR/$f") words"
 done
+if [ "$API_RENDERED" -eq 1 ]; then
+  for f in $(api_files); do
+    [ -f "$OUT_DIR/$f" ] || continue
+    echo "$f $(wc -w <"$OUT_DIR/$f") words"
+  done
+else
+  echo "API chapters: NOT rendered (skipped: $API_SKIPPED) — see the note in llms.txt"
+fi
