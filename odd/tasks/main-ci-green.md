@@ -150,3 +150,13 @@ L16 — Slice decision (review-workload rule): 724 authored changed lines across
   splitting would need sequential PRs (no stacked PRs here) that leave `main` red until the last
   merge. Follow-ups split out as #3109 (local gate coverage), #3110 (R3-002) and #3111 (push
   verification).
+
+L17 — The `pull_request` rollup is green but does NOT prove S3: `Tests (${{ matrix.os }})`
+  (`.github/workflows/ci.yml:1622`) guards itself with `push || schedule || workflow_dispatch`, so
+  on a PR it reports `SKIPPED`. Proven instead with `gh workflow run ci.yml --ref fix/main-ci-green`
+  on `0e42dc79` (run 46082779307): `macos-latest` **success**, `windows-latest` **success**, plus
+  `Tests (all features)`, `Tests (unit + integration + behavioral)`, `Tests (release provenance L1)`
+  and `CI Gate` **success**. The dispatch run also fires dispatch-only jobs; only `Miri (core)` was
+  still running when this record was written, and Miri is untouched by this diff. Lesson: on this
+  repo, a green PR never proves a cross-platform branch — dispatch the branch first when the change
+  touches platform-gated expectations.
