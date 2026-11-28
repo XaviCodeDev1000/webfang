@@ -42,7 +42,8 @@ impl McpHandler {
             );
             return Ok(provenance::neutralized_error(&err.to_string()));
         }
-        let client = self.state.container.http_client().as_ref();
+        let port = self.http_client();
+        let client = port.as_ref();
         match webfang_core::application::scraper_service::scrape_with_readability(client, url).await
         {
             Ok(results) => {
@@ -105,7 +106,8 @@ impl McpHandler {
         }
 
         let start = Instant::now();
-        let client = self.state.container.http_client().as_ref();
+        let port = self.http_client();
+        let client = port.as_ref();
         let dl = self
             .state
             .downloader
@@ -251,7 +253,8 @@ impl McpHandler {
             },
         };
 
-        let client = self.state.container.http_client().as_ref();
+        let port = self.http_client();
+        let client = port.as_ref();
         let dl = self
             .state
             .downloader

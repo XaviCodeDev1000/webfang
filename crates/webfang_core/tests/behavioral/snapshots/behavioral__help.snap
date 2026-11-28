@@ -332,11 +332,12 @@ Cleanup:
 
 Cookies:
       --cookie-jar-scope <COOKIE_JAR_SCOPE>
-          Cookie jar scope: shared (one jar for the process, current behavior) or operation (one fresh jar per operation)
+          Cookie jar scope: shared (one jar for the process, current behavior), operation (one fresh jar per operation) or session (one jar per MCP session)
 
           Possible values:
           - shared:    One jar for the whole process: cookies survive across operations
           - operation: One fresh jar per operation: cookies never survive past the operation
+          - session:   One jar per caller session: cookies survive across that session's calls
           
           [env: WEBFANG_COOKIE_JAR_SCOPE=]
           [default: shared]

@@ -274,8 +274,8 @@ async fn test_container_clone_shares_services() {
 
     // Both clones share the same Arc'd services
     assert!(Arc::ptr_eq(
-        container.http_client(),
-        container2.http_client()
+        &container.http_client(),
+        &container2.http_client()
     ));
 }
 

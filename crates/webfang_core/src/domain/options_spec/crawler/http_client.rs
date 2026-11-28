@@ -111,10 +111,10 @@ pub const COOKIE_JAR_SCOPE: OptionSpec = OptionSpec {
     aliases: &[],
     env: Some("WEBFANG_COOKIE_JAR_SCOPE"),
     default: Some(DefaultValue::Str("shared")),
-    help: "Cookie jar scope: shared (one jar for the process, current behavior) or operation (one fresh jar per operation)",
+    help: "Cookie jar scope: shared (one jar for the process, current behavior), operation (one fresh jar per operation) or session (one jar per MCP session)",
     heading: Some("Cookies"),
     kind: ValueKind::Enum {
-        variants: &["shared", "operation"],
+        variants: &["shared", "operation", "session"],
     },
     visible_aliases: &[],
     nullable: false,

@@ -3,11 +3,19 @@
 //! Built for the `wreq 0.16.0` client invariants (`wreq_invariants_test`): no
 //! name is ever looked up, no packet leaves the host, and ordering is driven by
 //! awaiting the server's journal instead of sleeping.
+
+// Each integration test binary includes this file with `#[path]`, so a binary
+// that exercises a subset of the harness would otherwise fail `-D dead-code` on
+// the helpers it does not happen to call (`cookie_jar_scope_test` uses the
+// resolver path, `cookie_jar_session_test` only the loopback listener). Same
+// reason `tests/common/mod.rs` carries the allow.
+#![allow(dead_code)]
 //!
 //! The resolver implements `wreq::dns::Resolve`, whose contract assumes the
 //! future is ALWAYS ready and takes `&self` — hence an atomic counter and a
 //! `ready` future, never a lock held across an `.await`.
 
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -290,4 +298,56 @@ fn response(status: u16, reason: &str, headers: &[&str], body: &str) -> Vec<u8> 
     out.push_str("\r\n");
     out.push_str(body);
     out.into_bytes()
+}
+
+// --- cookie assertion helpers ------------------------------------------------
+//
+// Both cookie-scope suites (`cookie_jar_scope_test`, `cookie_jar_session_test`)
+// ask the same two questions of the journal — which URL did the test dial, and
+// which cookies did that arrival carry — so the readers live here once instead
+// of being copied into each suite (the duplication ratchet counts every copy).
+
+/// The hardened production client, wired as the container wires it.
+pub fn hardened_client() -> Arc<webfang_core::application::http_client::HttpClient> {
+    use webfang_core::application::http_client::{HttpClient, HttpClientConfig};
+    Arc::new(HttpClient::new(HttpClientConfig::default()).expect("the hardened client builds"))
+}
+
+/// A loopback URL for `path`: the tests dial the fixture directly, so no
+/// resolver — the client's or the system's — answers for it.
+pub fn target(server: &TestServer, path: &str) -> String {
+    format!("http://{}{path}", server.addr())
+}
+
+/// The cookie pairs of the `Cookie` header an arrival carried, order-independent.
+pub fn cookie_pairs(server: &TestServer, arrival: usize) -> BTreeSet<String> {
+    server.requests()[arrival]
+        .header("cookie")
+        .unwrap_or_default()
+        .split("; ")
+        .filter(|pair| !pair.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Drive the two-arrival scenario both scope suites need: a call that stores a
+/// cookie (`/set-cookie`) and a follow-up call (`/echo`) whose `Cookie` header is
+/// what the assertions read.
+pub async fn set_cookie_then_echo(
+    client: &dyn webfang_core::domain::ports::HttpClientPort,
+    server: &TestServer,
+) {
+    client
+        .get(&target(server, "/set-cookie"))
+        .await
+        .expect("the cookie-setting request succeeds");
+    client
+        .get(&target(server, "/echo"))
+        .await
+        .expect("the follow-up request succeeds");
+}
+
+/// The pairs of these cookie names, as the cookie assertions read them.
+pub fn pairs(names: &[&str]) -> BTreeSet<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
 }

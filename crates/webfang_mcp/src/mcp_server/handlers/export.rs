@@ -414,7 +414,8 @@ impl McpHandler {
                         "error al rastrear {url}: {err}"
                     )));
                 }
-                let client = self.state.container.http_client().as_ref();
+                let port = self.http_client();
+                let client = port.as_ref();
                 match webfang_core::application::scraper_service::scrape_with_readability(
                     client, url,
                 )

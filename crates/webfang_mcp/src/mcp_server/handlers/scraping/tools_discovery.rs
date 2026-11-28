@@ -46,7 +46,7 @@ impl McpHandler {
         {
             return Ok(robots_error);
         }
-        let port = self.state.container.http_client();
+        let port = self.http_client();
         match port.get(url.as_str()).await {
             Ok(resp) => {
                 self.state.record_scrape_identity(
@@ -134,7 +134,7 @@ impl McpHandler {
         {
             return Ok(robots_error);
         }
-        let port = self.state.container.http_client();
+        let port = self.http_client();
         match port.get(url.as_str()).await {
             Ok(resp) => {
                 // A non-2xx response (e.g. 404) is a genuine failure for URL

@@ -35,6 +35,7 @@ pub mod provenance;
 pub(crate) mod path_gate;
 pub mod schema_bridge;
 pub mod server;
+mod session_cookies;
 pub mod ssrf;
 pub mod state;
 // Crate-internal: the env-gated panic probe is a test trigger, not API an
@@ -90,7 +91,13 @@ pub fn mcp_tool_count() -> usize {
 pub async fn build_container(
 ) -> Result<webfang_core::di::Container, Box<dyn std::error::Error + Send + Sync>> {
     let config = webfang_core::config::Config::default();
-    webfang_core::di::Container::from_config(config).await
+    let container = webfang_core::di::Container::from_config(config).await?;
+    // The cookie-jar scope is server-level configuration read from the same
+    // environment variable the CLI flag uses, resolved ONCE here so both
+    // transports serve from an identically scoped client. `shared` (the default)
+    // rebuilds the facade with the scope it already had, so an unconfigured
+    // server behaves exactly as before.
+    Ok(session_cookies::apply_configured_scope(container))
 }
 
 /// Build the shared asset `Downloader` for the long-lived MCP servers (#1120).
@@ -187,6 +194,13 @@ pub struct McpHandler {
     pub state: McpState,
     /// Combined tool router from all 9 categories
     pub tool_router: ToolRouter<Self>,
+    /// The cookie scope of THIS handler's MCP session.
+    ///
+    /// The transport builds one handler per session, so a binding made here
+    /// lives exactly as long as the session does: the first request carrying a
+    /// `Mcp-Session-Id` binds it, and dropping the handler (a closed session, a
+    /// keep-alive-reaped one, a disconnected client) releases the session's jar.
+    session_cookies: session_cookies::SessionCookieScope,
 }
 
 impl McpHandler {
@@ -195,7 +209,21 @@ impl McpHandler {
         Self {
             state,
             tool_router: handlers::build_tool_router(),
+            session_cookies: session_cookies::SessionCookieScope::default(),
         }
+    }
+
+    /// The HTTP client every fetch of this tool call must go through.
+    ///
+    /// A bound session's own port when the scope keeps per-session jars (see
+    /// `session_cookies`); the container's shared facade otherwise, which is
+    /// the documented fallback for a request that carries no
+    /// `Mcp-Session-Id` — the `initialize` call, a stateless transport and every
+    /// stdio run.
+    pub fn http_client(&self) -> Arc<dyn webfang_core::domain::ports::HttpClientPort> {
+        self.session_cookies
+            .port()
+            .unwrap_or_else(|| self.state.container.http_client())
     }
 
     /// Create a new MCP handler from a caller-supplied [`ToolRouter`].
@@ -210,7 +238,11 @@ impl McpHandler {
     /// must be reachable through the real stack to prove the panic becomes a
     /// tool error instead of a dead session.
     pub fn with_tool_router(state: McpState, tool_router: ToolRouter<Self>) -> Self {
-        Self { state, tool_router }
+        Self {
+            state,
+            tool_router,
+            session_cookies: session_cookies::SessionCookieScope::default(),
+        }
     }
 }
 
@@ -309,6 +341,14 @@ impl ServerHandler for McpHandler {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let tool_name = request.name.clone();
+        // Bind this call to the MCP session it arrived on, once per handler.
+        // The transport put the HTTP request's parts in the extensions, which is
+        // the only place the `Mcp-Session-Id` header is visible from a tool. A
+        // call with no session id leaves the scope unbound: `McpHandler::http_client`
+        // then returns the container's shared facade (the documented fallback).
+        self.session_cookies
+            .bind(&context.extensions, &self.state.container)
+            .await;
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         match AssertUnwindSafe(self.tool_router.call(tcc))
             .catch_unwind()
