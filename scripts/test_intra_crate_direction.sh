@@ -93,10 +93,14 @@ EMPTY_ALLOW="$T/empty.txt"
 PREFLIGHT_ROOT="$T/preflight_root"
 mkdir -p "$PREFLIGHT_ROOT"
 preflight_out="$(run_gate_at "$PREFLIGHT_ROOT" "$EMPTY_ALLOW")"
-if printf '%s\n' "$preflight_out" | grep -q "extractor was not found\|INTRA_CRATE_LINT_BIN is set"; then
-  echo "FAIL: the intra-crate lint extractor is not available — the gate cannot run."
-  echo "      build it with: cargo build --manifest-path tools/intra-crate-lint/Cargo.toml --locked"
-  exit 1
+# The guard now reports this through the shared vocabulary
+# (prerequisite-missing: ... — scripts/lib/guard_prerequisites.sh); the legacy
+# strings stay matched so a stale build of the guard cannot slip past.
+if printf '%s\n' "$preflight_out" | grep -qE "prerequisite-missing:|extractor was not found|INTRA_CRATE_LINT_BIN is set"; then
+  # shellcheck source=scripts/lib/guard_prerequisites.sh
+  . "$SCRIPT_DIR/lib/guard_prerequisites.sh"
+  prereq_require "intra-crate lint extractor" \
+    "cargo build --manifest-path tools/intra-crate-lint/Cargo.toml --locked"
 fi
 
 # ---------------------------------------------------------------------------
@@ -302,14 +306,19 @@ for tool in bash env mktemp sed grep rm dirname; do
   fi
 done
 ISOLATED="$T/isolated"
-mkdir -p "$ISOLATED/scripts"
+mkdir -p "$ISOLATED/scripts/lib"
 cp "$GATE" "$ISOLATED/scripts/check_intra_crate_direction.sh"
+# The gate sources the shared vocabulary (scripts/lib/guard_prerequisites.sh),
+# so the isolated copy needs it too: without it the gate dies on a missing
+# source line instead of on the missing extractor, and this case would be
+# asserting the wrong failure.
+cp "$SCRIPT_DIR/lib/guard_prerequisites.sh" "$ISOLATED/scripts/lib/guard_prerequisites.sh"
 # `env -u` so an INTRA_CRATE_LINT_BIN inherited from the environment cannot
 # make this case find a binary: the point is that NO candidate exists.
 OUT="$(cd "$T" && env -u INTRA_CRATE_LINT_BIN PATH="$MINBIN" INTRA_CRATE_ROOT="$T" \
       INTRA_CRATE_ALLOWLIST="$EMPTY_ALLOW" \
       bash "$ISOLATED/scripts/check_intra_crate_direction.sh" 2>&1)" && RC=0 || RC=$?
-if [ "$RC" -ne 0 ] && printf '%s\n' "$OUT" | grep -q "extractor was not found"; then
+if [ "$RC" -ne 0 ] && printf '%s\n' "$OUT" | grep -qE "prerequisite-missing:|extractor was not found"; then
   ok "with no extractor anywhere the gate fails closed and says so (rc=$RC)"
 else
   bad "with no extractor anywhere the gate did not fail closed (rc=$RC): $OUT"

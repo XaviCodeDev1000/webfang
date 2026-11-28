@@ -12,6 +12,10 @@
 #   - a harness that is already red on an intact tree fails it
 #   - a harness that stays green against a broken guard fails it
 #   - a baseline entry that no longer reproduces fails it (the ratchet)
+#   - an exemption DENIED by the tree fails it even while it still reproduces:
+#     `no-harness` is honoured only when no harness of any name runs the guard
+#   - a harness that reports a missing prerequisite is named as such, never as
+#     `broken-harness`, and that vocabulary can never be baselined
 #   - a fully compliant fixture passes
 #
 # Usage: bash scripts/tests/test_guard_coverage.sh
@@ -32,8 +36,11 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL $1"; }
 # so ROOT resolves inside the fixture, never to the real tree.
 new_fixture() { # name
   local dir="$SCRATCH/$1"
-  mkdir -p "$dir/scripts/tests" "$dir/.github/workflows"
+  mkdir -p "$dir/scripts/tests" "$dir/scripts/lib" "$dir/.github/workflows"
   cp "$GUARD" "$dir/scripts/test_guard_coverage.sh"
+  # The guard sources the shared vocabulary; a fixture without it would red for
+  # the wrong reason and hide the behaviour under test.
+  cp "$ROOT/scripts/lib/guard_prerequisites.sh" "$dir/scripts/lib/guard_prerequisites.sh"
   printf '%s\n' "$dir"
 }
 
@@ -63,6 +70,29 @@ trap 'rm -rf "$d"' EXIT
 ( cd "$d" && bash "$G" ) >/dev/null 2>&1 || { echo "clean tree must pass" >&2; exit 1; }
 touch "$d/forbidden"
 if ( cd "$d" && bash "$G" ) >/dev/null 2>&1; then
+  echo "guard must fail when forbidden is present" >&2
+  exit 1
+fi
+echo "ok"
+HARNESS
+}
+
+# A harness whose NAME follows neither of the two discovery conventions
+# (`scripts/test_<name>.sh`, `scripts/tests/test_check_<name>.sh`), but which
+# really does run the guard. This is the scripts/test_release_dispatch_gate.sh
+# shape: the file exists, it exercises the guard, and `find_harness` cannot see
+# it — so a `no-harness` baseline entry for that guard keeps reproducing.
+write_off_convention_harness() { # fixture-dir
+  cat > "$1/scripts/test_foo_gate.sh" <<'HARNESS'
+#!/usr/bin/env bash
+set -uo pipefail
+GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check_foo.sh"
+d="$(mktemp -d)"
+trap 'rm -rf "$d"' EXIT
+# NEGATION: the guard must fail when the forbidden file exists
+( cd "$d" && bash "$GUARD" ) >/dev/null 2>&1 || { echo "clean tree must pass" >&2; exit 1; }
+touch "$d/forbidden"
+if ( cd "$d" && bash "$GUARD" ) >/dev/null 2>&1; then
   echo "guard must fail when forbidden is present" >&2
   exit 1
 fi
@@ -340,6 +370,56 @@ write_guard "$fx"
 write_catching_harness "$fx"
 wire_guard_only_commenting_harness "$fx"
 expect_fail_naming "$fx" "unwired-harness: scripts/test_foo.sh" "a harness named only in a comment is not wired"
+
+# --- case 14: an exemption the tree contradicts, while it still reproduces ---
+# The ratchet only catches entries that STOP reproducing. `no-harness` is
+# consumed the moment `find_harness` misses, so a harness that exists under any
+# other name keeps the entry alive forever: the baseline says "no harness and no
+# ODD task yet" while scripts/test_foo_gate.sh runs the guard on every CI run.
+# A reason that sounds reasonable is exactly why nobody re-checks it.
+fx="$(new_fixture stale-exemption-denied)"
+write_guard "$fx"
+write_off_convention_harness "$fx"
+wire_guard_only "$fx"
+cat >> "$fx/.github/workflows/ci.yml" <<'YML'
+      - name: off-convention harness step
+        run: bash scripts/test_foo_gate.sh
+YML
+printf 'no-harness check_foo.sh no harness and no ODD task yet — needs its own issue\n' \
+  > "$fx/scripts/guard_coverage_baseline.txt"
+expect_fail_naming "$fx" "stale-exemption: 'no-harness check_foo.sh'" \
+  "an exemption denied by an existing harness fails"
+
+# --- case 15: a missing prerequisite is named, never called a broken harness --
+# A harness that fails because the artifact it tests is not built says so. The
+# meta-guard used to run it with `>/dev/null 2>&1` and report `broken-harness`,
+# which is a category it deliberately refuses to baseline — so the operator got
+# an opaque red and no remedy.
+fx="$(new_fixture prerequisite-missing)"
+write_guard "$fx"
+cat > "$fx/scripts/test_foo.sh" <<'HARNESS'
+#!/usr/bin/env bash
+set -uo pipefail
+# NEGATION: a guard that reports a missing prerequisite must not be read as green
+if ! command -v tool-foo >/dev/null 2>&1; then
+  echo "prerequisite-missing: tool-foo — run make tool-foo" >&2
+  exit 1
+fi
+echo ok
+HARNESS
+wire_both "$fx"
+: > "$fx/scripts/guard_coverage_baseline.txt"
+if run_guard "$fx"; then
+  fail "missing prerequisite: expected non-zero exit, got 0"
+elif ! grep -qF "prerequisite-missing: tool-foo" "$fx/out.log"; then
+  fail "missing prerequisite: the remedy was discarded"
+  sed 's/^/       /' "$fx/out.log"
+elif grep -qF "broken-harness:" "$fx/out.log"; then
+  fail "missing prerequisite: reported as broken-harness instead of a prerequisite"
+  sed 's/^/       /' "$fx/out.log"
+else
+  pass "a missing prerequisite is reported with its remedy, not as broken"
+fi
 
 # --- summary ----------------------------------------------------------------
 

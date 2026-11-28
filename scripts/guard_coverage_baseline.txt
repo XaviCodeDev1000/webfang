@@ -20,7 +20,6 @@
 #   - mcp_public_surface has wiring-only coverage. A wiring harness proves the
 #     step exists, not that the guard decides anything.
 
-no-harness check_release_dispatch.sh           no harness and no ODD task yet — needs its own issue
 
 unwired-guard check_orphan_snapshots.sh   only scripts/ci_fast_gate.sh invokes it, and no workflow runs the fast gate
 unwired-guard check_regression_naming.sh  only scripts/ci_fast_gate.sh invokes it — with `|| true`, so even there it cannot fail

@@ -178,18 +178,43 @@ fi
 # Advisory allowlist (path:line-free, by job id). A job lands here ONLY with
 # a written reason; adding a new non-advisory job without gate wiring fails
 # assertion 1 of this harness.
-ALLOWLIST="gate
-test-crossplatform|planner-gated advisory lane (#1608), promoted to required is a follow-up
-tokio-console-smoke|main/nightly advisory smoke
-notify|scheduled-run reporting, not a producer
-feature-matrix|advisory compile matrix
-mcp|planner-gated advisory handshake
-release|push-to-main artifact build
-miri|advisory FFI lane (continue-on-error, reported by notify)
-miri-infra-fast|advisory FFI lane
-miri-infra-slow|advisory FFI lane
-flake-detection|nightly retries-0 flake report, job-level continue-on-error (#2286)
-cfg-windows-lint|planner-gated cfg(windows) cross-lint (#2658 class found by #2732/#2733); deterministic lint, promoted to required after 20 consecutive green runs"
+# Each entry is `job|condition|reason`. The CONDITION is not decoration: it is
+# the syntactic fact that justifies the exemption, checked against the job's own
+# block below. Two shapes:
+#
+#   conditional:<ERE>  the job block must match <ERE>. The exemption is valid
+#                      only while that clause is present, so removing it (a
+#                      planner gate, a continue-on-error, an event pin) turns
+#                      the entry into a `stale-exemption` failure.
+#   visible-red        no structural tolerance exists in the block. The job is
+#                      not a gate producer and nothing absorbs its red: it is
+#                      visible in the run and invisible to the gate. Verified by
+#                      asserting the block carries no `continue-on-error`, and
+#                      re-announced as a warning on every run so it cannot be
+#                      forgotten the way a prose reason is.
+#
+# A reason is prose and rots. `coverage` proved it: this table said
+# "report-only upload, never gates" while the job had become a gate producer
+# (#3105). Five entries below used to say "advisory" while carrying no
+# `continue-on-error` at all, which is not a tolerant guard but a red nobody's
+# gate sees.
+#
+# LIMIT, declared rather than implied away: conditions are syntactic (a text
+# pattern inside the job block). They can prove "carries continue-on-error" or
+# "is planner-gated". They cannot prove a job is *truly* advisory.
+ALLOWLIST="gate|conditional:!\s*cancelled\(\)|the aggregate gate itself: it consumes gate.needs and cannot be one of its own producers
+test-crossplatform|conditional:needs_crossplatform == 'true'|planner-gated cross-platform lane (#1608); promoted to required is a follow-up
+tokio-console-smoke|conditional:event_name == 'schedule'|main and nightly only; never a pull_request lane
+notify|conditional:event_name == 'schedule'|scheduled-run reporting, not a producer
+feature-matrix|visible-red|advisory compile matrix: no if:, no continue-on-error, not a producer — its red reaches the run, not the gate
+mcp|conditional:needs_mcp == 'true'|planner-gated handshake
+release|conditional:refs/heads/main|push-to-main artifact build
+miri|conditional:continue-on-error: true|nightly FFI lane, job-level continue-on-error
+miri-infra-fast|conditional:continue-on-error: true|nightly FFI lane, job-level continue-on-error
+miri-infra-slow|conditional:continue-on-error: true|nightly FFI lane, job-level continue-on-error
+flake-detection|conditional:continue-on-error: true|nightly retries-0 flake report, job-level continue-on-error (#2286)
+cfg-windows-lint|conditional:needs_crossplatform == 'true'|planner-gated cfg(windows) cross-lint (#2658 class found by #2732/#2733). The 'promoted to required after 20 consecutive green runs' promise is NOT counted by anything: it is a headstone until a counter exists"
+
 
 while IFS= read -r job; do
   [[ -n "$job" ]] || continue
@@ -202,6 +227,68 @@ while IFS= read -r job; do
   fi
 done < "$T/jobs.txt"
 ok "every declared job is gated or on the advisory allowlist"
+
+# --- 3b. every advisory exemption carries a condition that holds TODAY -------
+# A reason in prose is not evidence. `coverage` sat on this allowlist saying
+# "report-only upload, never gates" while it had become a gate producer (#3105),
+# and five jobs are described as advisory here while carrying no
+# `continue-on-error` at all: their red is invisible to the gate, not absorbed
+# by the workflow. So each entry must name a machine-checkable condition that
+# must match its OWN job block, and an entry without one fails — the same
+# contract as scripts/check_intra_crate_direction_allowlist.txt, where an
+# exemption that absorbs zero sites is an error.
+#
+# What this can prove is SYNTACTIC (a text pattern inside the job block). It
+# cannot prove a job is truly advisory; that residual stays declared here
+# rather than implied away.
+STALE_EXEMPTIONS=""
+while IFS= read -r entry; do
+  [[ -n "$entry" ]] || continue
+  job="$(printf '%s\n' "$entry" | cut -d'|' -f1)"
+  cond="$(printf '%s\n' "$entry" | cut -d'|' -f2)"
+  reason="$(printf '%s\n' "$entry" | cut -d'|' -f3)"
+  if [[ -z "$cond" || -z "$reason" || "$cond" == "$reason" ]]; then
+    STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(no-condition)"
+    continue
+  fi
+  # Comment-stripped, so a condition can never be satisfied by prose: the same
+  # rule the wiring checks below already apply to a harness named in a comment.
+  # Extracted here rather than reusing CI_YML_LIVE, which is built later.
+  block="$(awk -v j="  $job:" '
+    $0 == j { inside = 1; next }
+    inside && /^  [a-z][a-z0-9_-]*:/ { exit }
+    inside { print }
+  ' "$CI_YML" | sed 's/[[:space:]]*#.*$//')"
+  kind="${cond%%:*}"
+  pattern="${cond#*:}"
+  if [[ -z "$block" ]]; then
+    STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(job-not-found)"
+    continue
+  fi
+  case "$kind" in
+    conditional)
+      if ! grep -qE -- "$pattern" <<< "$block"; then
+        STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(condition-false:$pattern)"
+      fi
+      ;;
+    visible-red)
+      # The entry claims nothing in the block is tolerant. If the job gains a
+      # continue-on-error it is no longer a visible red — the entry has to be
+      # re-decided, not silently kept.
+      if grep -qE 'continue-on-error' <<< "$block"; then
+        STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(visible-red-now-tolerated)"
+      fi
+      ;;
+    *)
+      STALE_EXEMPTIONS="$STALE_EXEMPTIONS $job(unknown-condition-kind:$kind)"
+      ;;
+  esac
+done <<< "$ALLOWLIST"
+if [[ -z "$STALE_EXEMPTIONS" ]]; then
+  ok "every advisory exemption carries a condition that holds in its job block"
+else
+  bad "advisory exemptions with no condition or a false one:$STALE_EXEMPTIONS"
+fi
 
 # --- 4. no continue-on-error on gate producers -------------------------------
 COE_IN_GATE="$(while IFS= read -r line; do

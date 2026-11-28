@@ -29,6 +29,21 @@
 #      and restored from a byte-identical backup verified by checksum, so a
 #      crash cannot leave the tree mutated.
 #
+# Two further shapes, both shipped and both invisible here until they were
+# mapped (T20, #3010):
+#
+#   4. HARNESS THAT COULD NOT RUN. A harness red because its prerequisite is not
+#      built used to be reported as `broken-harness`, with its own message
+#      discarded by a `>/dev/null 2>&1`. The remedy existed and was thrown away.
+#      It is now named through `prerequisite-missing` (scripts/lib/
+#      guard_prerequisites.sh) and can never be baselined: an unfinished
+#      environment is not a tolerated defect.
+#   5. EXEMPTION THE TREE CONTRADICTS. `find_harness` knows two name
+#      conventions, so a harness named any other way leaves its `no-harness`
+#      baseline entry reproducing forever — while the entry says "no harness".
+#      An entry may only survive while nothing under scripts/ actually runs that
+#      guard.
+#
 # The baseline ratchets. Every entry names why it is still open, and an entry
 # that stops reproducing is itself a failure: a baseline that never shrinks is
 # the same fail-open shape one level up.
@@ -42,6 +57,13 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASELINE="$ROOT/scripts/guard_coverage_baseline.txt"
 MUTATION_TIMEOUT="${MUTATION_TIMEOUT:-120}"
+
+# The two vocabularies live in one file. Reading the tokens from it, instead of
+# spelling 'prerequisite-missing' again here, is the whole point: a copy would
+# drift and this guard would stop recognising its own contract.
+# shellcheck source=scripts/lib/guard_prerequisites.sh
+. "$ROOT/scripts/lib/guard_prerequisites.sh"
+PREREQ_TOKEN="$(guard_prereq_token)"
 
 RUN_MUTATION=1
 VERBOSE=0
@@ -147,13 +169,26 @@ expect_baselined() { # category subject message
 find_harness() { # guard basename
   local name="${1#check_}"
   name="${name%.sh}"
-  local c
+  local c runners n
   for c in "scripts/test_${name}.sh" "scripts/tests/test_check_${name}.sh"; do
     if [ -f "$ROOT/$c" ]; then
       printf '%s\n' "$c"
       return 0
     fi
   done
+  # Third shape, and the one that kept a baseline entry alive forever:
+  # scripts/test_release_dispatch_gate.sh runs check_release_dispatch.sh and
+  # follows NEITHER convention. The two lists must agree — discovery here, and
+  # the `no-harness` exemption below — or an entry says "no harness" while a
+  # harness runs the guard on every CI run.
+  runners="$(guard_runners "$1")"
+  n="$(printf '%s\n' "$runners" | grep -c . || true)"
+  if [ "${n:-0}" -eq 1 ]; then
+    printf '%s\n' "$runners"
+    return 0
+  elif [ "${n:-0}" -gt 1 ]; then
+    violation "ambiguous-harness: $1 is run by more than one harness ($(printf '%s' "$runners" | tr '\n' ' ')), so none can be trusted as its semantics harness"
+  fi
   return 1
 }
 
@@ -180,8 +215,40 @@ harness_wired() { # repo-relative harness path
 # first, "it went red" proves nothing — it may have been red all along. So a
 # harness must pass with the guard intact AND fail with the guard stubbed.
 
-harness_passes_intact() { # harness-rel
-  ( cd "$ROOT" && timeout "$MUTATION_TIMEOUT" bash "$1" ) >/dev/null 2>&1
+# Runs the harness and KEEPS its output. The discarded stream was the whole
+# defect: a harness that printed "prerequisite-missing: <what> — run <remedy>"
+# had that remedy thrown away and was then called a broken harness.
+# Returns 0 when the harness passes, 1 when it fails; sets INTACT_OUTPUT.
+INTACT_OUTPUT=""
+harness_intact_failure() { # harness-rel
+  local out
+  out="$(mktemp)" || return 2
+  INTACT_OUTPUT=""
+  if ! ( cd "$ROOT" && timeout "$MUTATION_TIMEOUT" bash "$1" ) >"$out" 2>&1; then
+    INTACT_OUTPUT="$(cat "$out")"
+    rm -f "$out"
+    return 1
+  fi
+  rm -f "$out"
+  return 0
+}
+
+# Files that actually run a guard whose harness `find_harness` cannot see.
+#
+# Full-line comments are stripped, the convention the rest of this file already
+# follows: a guard named in prose (this guard's own header names
+# `scripts/check_foo.sh` as an example) is not a harness running it, and a check
+# that counted prose would red on its own documentation. Inline trailing
+# comments survive, so the residual this accepts is a guard cited mid-line —
+# still a reference by a file that runs guards, and still what the entry denies.
+guard_runners() { # guard-basename
+  local g="$1" f
+  for f in "$ROOT"/scripts/test_*.sh "$ROOT"/scripts/tests/*.sh; do
+    [ -f "$f" ] || continue
+    case "${f##*/}" in lib_*) continue ;; esac
+    grep -v '^[[:space:]]*#' "$f" 2>/dev/null | grep -qF -- "$g" && printf '%s\n' "${f#"$ROOT"/}"
+  done
+  return 0
 }
 
 # Replace the guard with an always-green stub, run its harness, restore. A
@@ -289,9 +356,19 @@ for guard in "${GUARDS[@]}"; do
   CHECKS_RUN=$((CHECKS_RUN + 1))
 
   if ! harness="$(find_harness "$guard")"; then
+    # An exemption that denies a fact the tree contradicts is not an exemption,
+    # it is a permanent blind spot: `find_harness` misses any name outside the
+    # two conventions, and the entry keeps reproducing (scripts/
+    # test_release_dispatch_gate.sh was the live example).
     expect_baselined "no-harness" "$guard" \
       "no-harness: $guard is wired but has no scripts/test_*.sh or scripts/tests/test_check_*.sh" || true
     continue
+  fi
+
+  if baselined "no-harness" "$guard"; then
+    # Recorded as consumed so the ratchet does not report the same entry twice.
+    BASELINE_HIT["no-harness $guard"]=1
+    violation "stale-exemption: 'no-harness $guard' — $harness runs it, so the exemption denies a fact the tree contradicts"
   fi
 
   if ! harness_wired "$harness"; then
@@ -313,9 +390,16 @@ for guard in "${GUARDS[@]}"; do
   fi
 
   if [ "$RUN_MUTATION" -eq 1 ]; then
-    if ! harness_passes_intact "$harness"; then
-      expect_baselined "broken-harness" "$harness" \
-        "broken-harness: $harness fails on an intact tree, so its red proves nothing" || true
+    if ! harness_intact_failure "$harness"; then
+      # A prerequisite the environment does not provide is named with its
+      # remedy, never baselined: the guard decided nothing, so there is nothing
+      # to tolerate.
+      if printf '%s\n' "$INTACT_OUTPUT" | grep -qE "${PREREQ_TOKEN}:"; then
+        violation "$(printf '%s\n' "$INTACT_OUTPUT" | grep -oE "${PREREQ_TOKEN}: .*" | head -1)"
+      else
+        expect_baselined "broken-harness" "$harness" \
+          "broken-harness: $harness fails on an intact tree, so its red proves nothing" || true
+      fi
     elif mutation_caught "scripts/$guard" "$harness"; then
       note "$harness is green intact and red on a broken $guard"
     else
